@@ -10,15 +10,11 @@ import ApfelServerKit
     var input: String = ""
     var output: String = ""
     var isStreaming: Bool = false
-    var isRecording: Bool = false
     var errorMessage: String? = nil
     var settings: QuickSettings
     var updateState: UpdateState = .idle
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
-
-    @ObservationIgnored private var voiceTask: Task<Void, Never>?
-    @ObservationIgnored private var voiceTranscriber: VoiceTranscriber?
 
     // MARK: - Dependencies
 
@@ -147,68 +143,6 @@ import ApfelServerKit
             try? await Task.sleep(for: pollInterval)
         }
         return service
-    }
-
-    // MARK: - Voice (ohr)
-
-    /// Start or stop ohr-backed voice transcription. Toggles `isRecording`.
-    func toggleVoice() async {
-        if isRecording {
-            await stopVoice()
-        } else {
-            await startVoice()
-        }
-    }
-
-    private func startVoice() async {
-        guard !isRecording else { return }
-        let pathOverride = settings.ohrBinaryPathOverride
-        let transcriber = VoiceTranscriber(
-            binaryFinder: {
-                if let pathOverride, !pathOverride.isEmpty { return pathOverride }
-                return AppBundledBinaryFinder.find(name: "ohr")
-            },
-            language: settings.voiceLanguage
-        )
-        do {
-            try await transcriber.start()
-        } catch VoiceTranscriberError.binaryNotFound {
-            errorMessage = "ohr not found. Install: brew install Arthur-Ficial/tap/ohr"
-            return
-        } catch VoiceTranscriberError.microphoneDenied {
-            errorMessage = "Microphone access denied. Enable apfel-quick in System Settings → Privacy & Security → Microphone."
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
-            return
-        } catch VoiceTranscriberError.microphoneRestricted {
-            errorMessage = "Microphone access restricted by system policy."
-            return
-        } catch {
-            errorMessage = "Voice start failed: \(error.localizedDescription)"
-            return
-        }
-        voiceTranscriber = transcriber
-        isRecording = true
-        errorMessage = nil
-        voiceTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let base = self.input
-            var transcribed = ""
-            for await segment in await transcriber.segments {
-                if Task.isCancelled { break }
-                transcribed += segment.text
-                let trimmed = transcribed.trimmingCharacters(in: .whitespaces)
-                self.input = base.isEmpty ? trimmed : base + " " + trimmed
-            }
-            self.isRecording = false
-        }
-    }
-
-    private func stopVoice() async {
-        await voiceTranscriber?.stop()
-        voiceTranscriber = nil
-        voiceTask?.cancel()
-        voiceTask = nil
-        isRecording = false
     }
 
     // MARK: - Cancel

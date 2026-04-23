@@ -40,33 +40,4 @@ struct BundledHelpersTests {
             "sign_bundle must sign Contents/Helpers/apfel before the outer bundle"
         )
     }
-
-    @Test("build-app.sh embeds the ohr helper")
-    func ohrEmbedded() {
-        #expect(
-            Self.buildScript.contains("Contents/Helpers/ohr"),
-            "build-app.sh must copy ohr into Contents/Helpers — voice input needs ohr bundled, not a surprise brew dependency"
-        )
-    }
-
-    @Test("build-app.sh signs ohr with the app's entitlements")
-    func ohrSignedWithEntitlements() {
-        #expect(
-            Self.buildScript.contains("\"$APP_BUNDLE/Contents/Helpers/ohr\" --entitlements"),
-            "sign_bundle must sign ohr with the parent app's entitlements so macOS TCC treats the spawned subprocess as part of the parent app for microphone grants"
-        )
-    }
-
-    @Test("entitlements file declares audio-input (required under Hardened Runtime)")
-    func audioInputEntitlementPresent() {
-        var url = URL(fileURLWithPath: #filePath)
-        url.deleteLastPathComponent() // Tests/
-        url.deleteLastPathComponent() // repo root
-        url.appendPathComponent("apfel-quick.entitlements")
-        let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        #expect(
-            contents.contains("com.apple.security.device.audio-input"),
-            "Under --options runtime (Hardened Runtime), AVCaptureDevice.requestAccess(for: .audio) silently returns denied without this entitlement — TCC never prompts and the app never appears in System Settings → Privacy → Microphone. Seen in production in v1.0.5."
-        )
-    }
 }

@@ -14,9 +14,6 @@ struct SettingsView: View {
             SavedPromptsTab(viewModel: viewModel)
                 .tabItem { Label("Prompts", systemImage: "text.quote") }
 
-            VoiceTab(viewModel: viewModel)
-                .tabItem { Label("Voice", systemImage: "mic") }
-
             MCPTab(viewModel: viewModel)
                 .tabItem { Label("MCP", systemImage: "puzzlepiece.extension") }
 
@@ -102,85 +99,6 @@ private struct SavedPromptsTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 SavedPromptsEditor(viewModel: viewModel)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-// MARK: - Voice
-
-private struct VoiceTab: View {
-    @Bindable var viewModel: QuickViewModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Voice input (ohr)").font(.headline)
-
-                Toggle("Enable voice input", isOn: $viewModel.settings.voiceEnabled)
-                    .onChange(of: viewModel.settings.voiceEnabled) { _, _ in viewModel.settings.save() }
-
-                if viewModel.settings.voiceEnabled {
-                    Divider()
-
-                    HStack(spacing: 8) {
-                        Text("Language")
-                            .frame(width: 90, alignment: .leading)
-                        TextField(
-                            "en-US",
-                            text: $viewModel.settings.voiceLanguage
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 140)
-                        .onChange(of: viewModel.settings.voiceLanguage) { _, _ in viewModel.settings.save() }
-                    }
-
-                    HStack(spacing: 8) {
-                        Text("ohr path")
-                            .frame(width: 90, alignment: .leading)
-                        TextField(
-                            "auto-detect",
-                            text: Binding(
-                                get: { viewModel.settings.ohrBinaryPathOverride ?? "" },
-                                set: { newValue in
-                                    viewModel.settings.ohrBinaryPathOverride =
-                                        newValue.isEmpty ? nil : newValue
-                                    viewModel.settings.save()
-                                }
-                            )
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        Button("Browse...") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseFiles = true
-                            panel.canChooseDirectories = false
-                            panel.allowsMultipleSelection = false
-                            if panel.runModal() == .OK, let url = panel.url {
-                                viewModel.settings.ohrBinaryPathOverride = url.path
-                                viewModel.settings.save()
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Text("How it works")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Tap the mic button in the overlay to start. apfel-quick spawns `ohr --listen -o json --language \(viewModel.settings.voiceLanguage)` and streams decoded segments into the input as you speak. Tap the mic again to stop.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("If you see an 'ohr not found' error, install it with:\n  brew install Arthur-Ficial/tap/ohr")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
