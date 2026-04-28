@@ -52,8 +52,8 @@ private struct AttributedStringWalker: MarkupWalker {
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .backgroundColor: NSColor.secondarySystemFill,
             .foregroundColor: NSColor.labelColor,
+            .backgroundColor: NSColor.secondarySystemFill,
         ]
         output.append(NSAttributedString(string: code, attributes: attrs))
     }
@@ -192,8 +192,8 @@ private struct AttributedStringWalker: MarkupWalker {
 
     private func appendText(_ text: String) {
         // Default to the adaptive system label color so output stays visible
-        // in both light and dark mode (issue #20). Blockquote / link branches
-        // below override this when they need a different color.
+        // in both light and dark mode (issues #20, #23). Blockquote / link
+        // branches below override this when they need a different color.
         var attrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor.labelColor,
         ]
@@ -245,7 +245,8 @@ private struct AttributedStringWalker: MarkupWalker {
     private func appendNewlines(_ count: Int) {
         let nl = String(repeating: "\n", count: count)
         output.append(NSAttributedString(string: nl, attributes: [
-            .font: NSFont.systemFont(ofSize: 14)
+            .font: NSFont.systemFont(ofSize: 14),
+            .foregroundColor: NSColor.labelColor,
         ]))
     }
 }

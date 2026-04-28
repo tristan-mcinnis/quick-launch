@@ -13,11 +13,11 @@ struct MarkdownRendererTests {
         #expect(result.string == "Hello world")
     }
 
-    // MARK: - Dark-mode color correctness (issue #20)
+    // MARK: - Dark-mode color correctness (issues #20, #23)
     // Plain text rendered inside NSTextView defaults to raw black when no
     // `.foregroundColor` is set, which is invisible / near-invisible in dark
-    // mode. The renderer must set `NSColor.labelColor` so the text adapts
-    // to the current system appearance.
+    // mode. The renderer must set `NSColor.labelColor` on every run so the
+    // text adapts to the current system appearance.
 
     @Test func testPlainTextUsesAdaptiveLabelColor() {
         let result = MarkdownRenderer.render("Hello world")
@@ -25,7 +25,7 @@ struct MarkdownRendererTests {
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
         #expect(color == NSColor.labelColor,
-                "Plain text must use NSColor.labelColor so it stays visible in dark mode (issue #20)")
+                "Plain text must use NSColor.labelColor so it stays visible in dark mode")
     }
 
     @Test func testBoldTextUsesAdaptiveLabelColor() {
@@ -34,7 +34,7 @@ struct MarkdownRendererTests {
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
         #expect(color == NSColor.labelColor,
-                "Bold text must use NSColor.labelColor so it stays visible in dark mode (issue #20)")
+                "Bold text must use NSColor.labelColor so it stays visible in dark mode")
     }
 
     @Test func testHeadingUsesAdaptiveLabelColor() {
@@ -43,7 +43,7 @@ struct MarkdownRendererTests {
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
         #expect(color == NSColor.labelColor,
-                "Heading text must use NSColor.labelColor so it stays visible in dark mode (issue #20)")
+                "Heading text must use NSColor.labelColor so it stays visible in dark mode")
     }
 
     @Test func testCodeBlockUsesAdaptiveLabelColor() {
@@ -56,7 +56,7 @@ struct MarkdownRendererTests {
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
         #expect(color == NSColor.labelColor,
-                "Fenced code block text must use NSColor.labelColor so it stays visible in dark mode (issue #20)")
+                "Fenced code block text must use NSColor.labelColor so it stays visible in dark mode")
     }
 
     @Test func testInlineCodeUsesAdaptiveLabelColor() {
@@ -65,7 +65,21 @@ struct MarkdownRendererTests {
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
         #expect(color == NSColor.labelColor,
-                "Inline code must use NSColor.labelColor so it stays visible in dark mode (issue #20)")
+                "Inline code must use NSColor.labelColor so it stays visible in dark mode")
+    }
+
+    @Test func testEveryGlyphCarriesLabelColor() {
+        // Stricter regression test: walks every character of a multi-paragraph
+        // render and asserts each one carries .labelColor. Catches missed
+        // attribute paths (newlines, bullets, list markers, etc.) that single-
+        // range tests above can let through.
+        let result = MarkdownRenderer.render("Hello world\n\nSecond paragraph.")
+        for i in 0..<result.length {
+            let attrs = result.attributes(at: i, effectiveRange: nil)
+            let color = attrs[.foregroundColor] as? NSColor
+            #expect(color == NSColor.labelColor,
+                    "Character at \(i) has \(String(describing: color)) instead of labelColor")
+        }
     }
 
     // MARK: - Bold
