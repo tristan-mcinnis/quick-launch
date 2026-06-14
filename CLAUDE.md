@@ -1,0 +1,5 @@
+# apfel-quick - Project Instructions
+
+## The Golden Goal
+
+apfel-quick is an instant AI overlay for macOS: press a global hotkey, type anything, press Return, and the answer streams in from the on-device Foundation Models and lands on your clipboard. The ONE ultimate purpose is to put a private, offline AI one keystroke away with zero friction - no Dock icon, no browser tab, no account, no cloud, no API keys, no telemetry. It IS a small `LSUIElement` SwiftUI + AppKit panel that streams from the local `apfel --serve` server, with a local recursive-descent math evaluator that short-circuits pure expressions so they never touch the model. It is NOT a chat app with conversation history (that is apfel-chat), NOT the AI engine itself (that is apfel), and NOT a general productivity suite - anything that slows startup, adds a network dependency, or grows the surface area does not belong here. apfel-style: fast, private, local, honest about its limits, TDD-first with a protocol plus mock for every service. Keep it one keystroke, one prompt, one answer.
