@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 5
+    var configurationVersion: Int = 6
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -25,6 +25,14 @@ struct QuickSettings: Codable, Sendable {
     var savedPromptPrefix: String = "/"
     var savedPrompts: [SavedPrompt] = SavedPrompt.defaults
     var launcherItemConfigurations: [LauncherItemConfiguration] = []
+
+    // Clipboard history
+    var clipboardHistoryEnabled: Bool = true
+    var clipboardHistoryLimit: Int = 50
+    var clipboardHistoryHotkey: ActionHotkey = ActionHotkey(
+        keyCode: 9,
+        modifiers: 1_048_576 | 131_072
+    )
 
     // Appearance
     var appearance: AppearancePreference = .system
@@ -54,7 +62,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 5
+        configurationVersion = 6
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -69,6 +77,18 @@ struct QuickSettings: Codable, Sendable {
             [LauncherItemConfiguration].self,
             forKey: .launcherItemConfigurations
         ) ?? []
+        clipboardHistoryEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .clipboardHistoryEnabled
+        ) ?? true
+        clipboardHistoryLimit = try c.decodeIfPresent(
+            Int.self,
+            forKey: .clipboardHistoryLimit
+        ) ?? 50
+        clipboardHistoryHotkey = try c.decodeIfPresent(
+            ActionHotkey.self,
+            forKey: .clipboardHistoryHotkey
+        ) ?? ActionHotkey(keyCode: 9, modifiers: 1_048_576 | 131_072)
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         mcpServers = try c.decodeIfPresent([MCPServerConfig].self, forKey: .mcpServers) ?? []
         providers = try c.decodeIfPresent([InferenceProvider].self, forKey: .providers)
@@ -241,6 +261,9 @@ extension QuickSettings {
         if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) {
             return "This conflicts with a launcher item hotkey."
         }
+        if hotkey == clipboardHistoryHotkey {
+            return "This conflicts with the Clipboard History hotkey."
+        }
         return nil
     }
 
@@ -274,6 +297,29 @@ extension QuickSettings {
             $0.id != configurationID && $0.hotkey == hotkey
         }) {
             return "This conflicts with another launcher item."
+        }
+        if hotkey == clipboardHistoryHotkey {
+            return "This conflicts with the Clipboard History hotkey."
+        }
+        return nil
+    }
+
+    func clipboardHistoryHotkeyConflict() -> String? {
+        let hotkey = clipboardHistoryHotkey
+        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+            return "This conflicts with the main apfel-quick hotkey."
+        }
+        if let conflict = Self.knownSystemHotkeyConflict(
+            keyCode: hotkey.keyCode,
+            modifiers: hotkey.modifiers
+        ) {
+            return conflict
+        }
+        if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
+            return "This conflicts with a quick-action hotkey."
+        }
+        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) {
+            return "This conflicts with a launcher item hotkey."
         }
         return nil
     }

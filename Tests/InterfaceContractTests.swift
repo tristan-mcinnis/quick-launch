@@ -29,6 +29,7 @@ struct InterfaceContractTests {
         #expect(tokens.contains("controlHeight: CGFloat = 44"))
         #expect(overlay.components(separatedBy: "minHeight: AQDesign.controlHeight").count == 4)
         #expect(overlay.contains("keyboardShortcut(\"c\", modifiers: [.command, .shift])"))
-        #expect(overlay.contains("keyboardShortcut(\"v\", modifiers: [.command, .shift])"))
+        #expect(overlay.contains("keyboardShortcut(.return, modifiers: [.command])"))
+        #expect(overlay.contains("viewModel.launcherMatches"))
     }
 }

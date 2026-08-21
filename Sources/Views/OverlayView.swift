@@ -26,7 +26,7 @@ struct OverlayView: View {
             // Input row
             HStack(spacing: AQDesign.Space.standard) {
                 TextField(
-                    viewModel.isFollowUp ? "Ask a follow-up…" : "Ask anything…",
+                    viewModel.inputPlaceholder,
                     text: $viewModel.input,
                     axis: .vertical
                 )
@@ -42,12 +42,12 @@ struct OverlayView: View {
                         return .handled
                     }
                     .onKeyPress(.downArrow) {
-                        guard !viewModel.applicationMatches.isEmpty else { return .ignored }
+                        guard !viewModel.launcherMatches.isEmpty else { return .ignored }
                         viewModel.moveApplicationSelection(1)
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
-                        guard !viewModel.applicationMatches.isEmpty else { return .ignored }
+                        guard !viewModel.launcherMatches.isEmpty else { return .ignored }
                         viewModel.moveApplicationSelection(-1)
                         return .handled
                     }
@@ -79,7 +79,11 @@ struct OverlayView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
 
-            if viewModel.isApplicationActionPanePresented,
+            if viewModel.isCatalogActionPanePresented,
+               let item = viewModel.contextualCatalogItem {
+                Divider()
+                CatalogItemActionPane(viewModel: viewModel, item: item)
+            } else if viewModel.isApplicationActionPanePresented,
                let application = viewModel.contextualApplication {
                 Divider()
                 ApplicationActionPane(
@@ -93,32 +97,21 @@ struct OverlayView: View {
 
             if !viewModel.isActionPalettePresented,
                !viewModel.isApplicationActionPanePresented,
-               !viewModel.applicationMatches.isEmpty {
+               !viewModel.isCatalogActionPanePresented,
+               !viewModel.launcherMatches.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(
-                        Array(viewModel.applicationMatches.enumerated()),
+                        Array(viewModel.launcherMatches.enumerated()),
                         id: \.element.id
-                    ) { index, application in
+                    ) { index, result in
                         Button {
-                            viewModel.launch(application: application)
+                            Task { await viewModel.performLauncherResult(result) }
                         } label: {
-                            HStack(spacing: 10) {
-                                Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 22, height: 22)
-                                Text(application.name)
-                                    .font(AQDesign.TypeToken.body.weight(.medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer()
-                                if index == viewModel.applicationSelectionIndex {
-                                    Text("Open  ↩")
-                                        .font(.system(size: 10, design: .rounded))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+                            LauncherResultRow(
+                                result: result,
+                                isSelected: index == viewModel.applicationSelectionIndex
+                            )
                             .padding(.horizontal, 20)
                             .frame(height: 42)
                             .background(
@@ -129,13 +122,13 @@ struct OverlayView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Open \(application.name)")
                     }
                 }
             }
 
             // Saved-prompt autocomplete
             if !viewModel.isApplicationActionPanePresented,
+               !viewModel.isCatalogActionPanePresented,
                !viewModel.savedPromptMatches.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 0) {
@@ -201,8 +194,8 @@ struct OverlayView: View {
                         .frame(minWidth: 120, minHeight: AQDesign.controlHeight)
                         .contentShape(Rectangle())
                     }
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
-                    .help("Paste result into the previous app (Command-Shift-V)")
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .help("Paste result into the previous app (Command-Return)")
                     Spacer()
                 }
                 .font(AQDesign.TypeToken.label)
@@ -248,8 +241,13 @@ struct OverlayView: View {
         .onKeyPress(.escape) {
             if viewModel.isStreaming {
                 viewModel.cancel()
+            } else if viewModel.isCatalogActionPanePresented {
+                viewModel.closeCatalogActionPane()
+            } else if viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil {
+                viewModel.leaveCatalog()
+            } else {
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
             }
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
             return .handled
         }
     }
@@ -392,6 +390,103 @@ private struct ConversationTranscript: View {
             }
         }
         .accessibilityLabel("Current quick action conversation")
+    }
+}
+
+private struct LauncherResultRow: View {
+    let result: LauncherSearchResult
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            icon.frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(AQDesign.TypeToken.body.weight(.medium))
+                    .lineLimit(1).truncationMode(.middle)
+                Text(detail).font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if isSelected {
+                Text("\(action)  ↩").font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
+        switch result {
+        case .application(let application):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+                .resizable().scaledToFit()
+        case .catalog(let scope, _):
+            Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+        case .item(let item):
+            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+        }
+    }
+
+    private var title: String {
+        switch result {
+        case .application(let app): app.name
+        case .catalog(let scope, _): scope.title
+        case .item(let item): item.title
+        }
+    }
+    private var detail: String {
+        switch result {
+        case .application: "Application"
+        case .catalog(_, let count): "\(count) items"
+        case .item(let item): item.detail
+        }
+    }
+    private var action: String {
+        switch result {
+        case .application: "Open"
+        case .catalog: "Browse"
+        case .item(let item): item.defaultActionTitle
+        }
+    }
+}
+
+private struct CatalogItemActionPane: View {
+    @Bindable var viewModel: QuickViewModel
+    let item: LauncherCatalogItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+            HStack {
+                Label(item.title, systemImage: item.systemImage)
+                    .font(AQDesign.TypeToken.body.weight(.semibold)).lineLimit(1)
+                Spacer()
+                Button(item.defaultActionTitle) {
+                    Task { await viewModel.performLauncherItem(item) }
+                }.buttonStyle(.borderedProminent)
+            }
+            TextField("Search alias", text: Binding(
+                get: { viewModel.launcherItemAlias(for: item) },
+                set: { viewModel.setLauncherItemAlias($0, for: item) }
+            )).textFieldStyle(.roundedBorder)
+            ActionHotkeyRecorderView(
+                hotkey: Binding(
+                    get: { viewModel.launcherItemHotkey(for: item) },
+                    set: { viewModel.setLauncherItemHotkey($0, for: item) }
+                ),
+                label: "Global hotkey",
+                changeNotification: .launcherItemHotkeysChanged
+            )
+            if let conflict = viewModel.launcherItemConfigurationConflict(for: item) {
+                Text(conflict).font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.danger)
+            }
+            HStack {
+                Text("Return runs · Command-K closes actions")
+                Spacer()
+                Button("Done") { viewModel.closeCatalogActionPane() }.buttonStyle(.plain)
+            }.font(AQDesign.TypeToken.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, AQDesign.Space.section)
+        .padding(.vertical, 12)
     }
 }
 
@@ -579,6 +674,7 @@ extension Notification.Name {
     static let hotkeyChanged = Notification.Name("ApfelQuick.hotkeyChanged")
     static let actionHotkeysChanged = Notification.Name("ApfelQuick.actionHotkeysChanged")
     static let launcherItemHotkeysChanged = Notification.Name("ApfelQuick.launcherItemHotkeysChanged")
+    static let clipboardHistorySettingsChanged = Notification.Name("ApfelQuick.clipboardHistorySettingsChanged")
     static let providerChanged = Notification.Name("ApfelQuick.providerChanged")
     static let managedServiceRequested = Notification.Name("ApfelQuick.managedServiceRequested")
 }

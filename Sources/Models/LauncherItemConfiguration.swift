@@ -2,6 +2,9 @@ import Foundation
 
 enum LauncherItemKind: String, Codable, Sendable {
     case application
+    case snippet
+    case quickLink
+    case clipboard
 }
 
 /// User-owned configuration shared by searchable launcher items.

@@ -16,6 +16,9 @@ API, and subscription-backed models. It is based on
 
 - Global, configurable hotkey and small floating panel
 - Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
+- Finder indexing through the macOS CoreServices application catalog
+- Live Tuna Snippets and Quick Links, with aliases and optional per-item global hotkeys
+- Local, bounded, clearable text clipboard history on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
 - Direct SearXNG web search for explicit searches and time-sensitive questions
@@ -93,8 +96,18 @@ disables the fade. Press Escape and
 open it again within 10 seconds to keep the current result or draft. Change
 that interval in **Settings → General**. A small footer under each completed
 reply can copy the result or paste it into the previous app. Both controls have
-44-point targets. Use `Command+Shift+C` to copy and `Command+Shift+V` to paste
+44-point targets. Use `Command+Shift+C` to copy and `Command+Return` to paste
 back. The trailing menu can show the current conversation.
+
+Press `Command+Shift+V` to open Clipboard History directly. Use the arrow keys
+and `Return` to paste the selected item into the previous app. Use `Command+C`
+to copy the selected item. Clipboard History stores text only, is bounded to 50
+items by default, and can be disabled or cleared in **Settings → Catalogs**.
+
+The main launcher also contains Snippets and Quick Links. These catalogs read
+the existing Tuna stores live. Highlight an item and press `Command+K` to give
+it a search alias or global hotkey. apfel-quick does not duplicate snippet or
+link values into its settings.
 
 Select text in another app before opening apfel-quick, then press `Command-K`
 to choose an action. The default Clean Up and Translate actions replace the
@@ -134,6 +147,10 @@ conflict message instead of failing silently.
 Open **Settings → Apps** to give any installed app a search alias and optional
 global hotkey. You can also highlight an app in the overlay and press
 `Command+K` to open its action pane, then edit the same alias and hotkey there.
+Finder is included as an app through `/System/Library/CoreServices`.
+
+Open **Settings → Catalogs** to reload the Tuna Snippets and Quick Links, edit
+their aliases and global hotkeys, and configure or clear Clipboard History.
 
 ## Web search and Pi skills
 
@@ -156,6 +173,10 @@ OpenAI-compatible providers do not yet have a universal tool-calling loop.
 - Apple inference stays local when the Apple provider is available.
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
+- Text clipboard history is local, optional, deduplicated, and bounded. It is
+  stored in `~/Library/Application Support/apfel-quick/clipboard-history.json`.
+- Tuna snippet and Quick Link values are read at runtime and are not logged or
+  copied into apfel-quick settings.
 - Selected-text actions use macOS Accessibility only to read or replace the
   current selection. They do not record the screen.
 - The app has no telemetry.
@@ -165,7 +186,9 @@ OpenAI-compatible providers do not yet have a universal tool-calling loop.
 ```text
 OverlayView
   → QuickViewModel
-      → cached local application catalogue
+      → cached local application catalogue, including Finder
+      → live Tuna snippet and Quick Link catalogues
+      → bounded local text clipboard history
       → bounded SearXNG snippet bundle
       → managed apfel service
       → OpenAI-compatible SSE service
@@ -192,7 +215,8 @@ interpolated into a shell command.
 ## Performance contract
 
 - The app catalogue is read once at launch. Typing never scans the file system.
-- The panel resizes from state changes. There is no idle timer or polling loop.
+- The panel resizes from state changes. Clipboard History uses one lightweight
+  pasteboard change-count check per second when enabled. No other idle poll runs.
 - Provider startup, model discovery, update checks, and web requests run only
   after an explicit action.
 - App discovery and 100 fuzzy filters each have a 250 ms regression gate.
@@ -203,9 +227,9 @@ interpolated into a shell command.
 
 ## Deliberately not in the core build
 
-Finder file actions, document attachments, screen context, voice input, and a
-larger chat workspace are deferred. They need a separate permission and safety
-design.
+Finder file actions, document attachments, screenshot management, the full Tuna
+translation window, screen context, voice input, window management, and a larger
+chat workspace are deferred. They need separate interaction and permission work.
 
 ## License
 

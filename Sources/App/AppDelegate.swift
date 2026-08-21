@@ -10,11 +10,18 @@ final class KeyablePanel: NSPanel {
     override var acceptsFirstResponder: Bool { true }
 
     var commandKHandler: (() -> Void)?
+    var commandCHandler: (() -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
             .subtracting([.function, .numericPad, .capsLock])
+        if event.type == .keyDown,
+           event.charactersIgnoringModifiers?.lowercased() == "c",
+           modifiers == [.command],
+           commandCHandler?() == true {
+            return true
+        }
         if event.type == .keyDown,
            event.charactersIgnoringModifiers?.lowercased() == "k",
            modifiers == [.command] {
@@ -41,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
     private var globalHotKey: GlobalHotKey?
+    private var clipboardHistoryHotKey: GlobalHotKey?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
     private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
     private var localMonitor: Any?
@@ -52,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let serverManager = ServerManager()
     private let selectedTextService = SelectedTextService()
     private let applicationCatalog = ApplicationCatalogService()
+    private let launcherCatalog = TunaCatalogService()
+    private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = SearXNGSearchService()
 
     // MARK: - NSApplicationDelegate
@@ -60,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let vm = QuickViewModel(
             selectedTextService: selectedTextService,
             applicationCatalog: applicationCatalog,
+            launcherCatalog: launcherCatalog,
+            clipboardHistory: clipboardHistory,
             webSearchService: webSearchService,
             currentVersion: Bundle.main.shortVersion
         )
@@ -73,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         overlayClearTask?.cancel()
         globalHotKey?.invalidate()
+        clipboardHistoryHotKey?.invalidate()
+        clipboardHistory.stopMonitoring()
         actionHotKeys.values.forEach { $0.invalidate() }
         actionHotKeys.removeAll()
         launcherItemHotKeys.values.forEach { $0.invalidate() }
@@ -90,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.settings = settings
         viewModel.settings.save()
         viewModel.loadHistory()
+        configureClipboardHistory()
 
         // b. Create NSPanel with OverlayView hosted in NSHostingController
         let panel = makePanel(viewModel: viewModel)
@@ -140,6 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.reregisterLauncherItemHotkeys() }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .clipboardHistorySettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.configureClipboardHistory() }
         }
 
         // Open settings in its own panel (not .sheet — avoids gray corner artifact)
@@ -220,6 +243,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.commandKHandler = { [weak viewModel] in
             viewModel?.handleCommandK()
         }
+        panel.commandCHandler = { [weak viewModel] in
+            guard let viewModel, viewModel.catalogScope != nil else { return false }
+            viewModel.copySelectedLauncherItem()
+            return true
+        }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -288,7 +316,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderOut(nil)
         viewModel?.isActionPalettePresented = false
         viewModel?.isApplicationActionPanePresented = false
+        viewModel?.isCatalogActionPanePresented = false
         viewModel?.contextualApplicationID = nil
+        viewModel?.contextualCatalogItemID = nil
         viewModel?.actionQuery = ""
         viewModel?.rememberSelectionTarget(nil)
 
@@ -366,6 +396,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerGlobalHotkey()
     }
 
+    private func configureClipboardHistory() {
+        guard let vm = viewModel else { return }
+        clipboardHistoryHotKey?.invalidate()
+        clipboardHistoryHotKey = nil
+        if vm.settings.clipboardHistoryEnabled {
+            clipboardHistory.startMonitoring(limit: vm.settings.clipboardHistoryLimit)
+            registerClipboardHistoryHotkey()
+        } else {
+            clipboardHistory.stopMonitoring()
+        }
+    }
+
+    private func registerClipboardHistoryHotkey() {
+        guard let vm = viewModel, vm.settings.clipboardHistoryEnabled else { return }
+        guard vm.settings.clipboardHistoryHotkeyConflict() == nil else {
+            vm.clipboardHistoryHotkeyRegistrationError = vm.settings.clipboardHistoryHotkeyConflict()
+            return
+        }
+        let hotkey = vm.settings.clipboardHistoryHotkey
+        let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+        clipboardHistoryHotKey = GlobalHotKey(
+            keyCode: UInt32(hotkey.keyCode),
+            modifiers: GlobalHotKey.carbonModifiers(from: flags)
+        ) { [weak self] in
+            self?.showClipboardHistory()
+        }
+        vm.clipboardHistoryHotkeyRegistrationError = clipboardHistoryHotKey == nil
+            ? "That shortcut is already used by macOS or another app."
+            : nil
+    }
+
+    private func showClipboardHistory() {
+        guard let vm = viewModel else { return }
+        vm.rememberSelectionTarget(selectedTextService.currentExternalTarget())
+        vm.enterCatalog(.clipboard)
+        showOverlay(captureSelectionTarget: false)
+    }
+
     private func registerActionHotkeys() {
         guard let vm = viewModel else { return }
         for action in vm.settings.savedPrompts {
@@ -402,22 +470,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let vm = viewModel else { return }
         vm.launcherItemHotkeyRegistrationErrors.removeAll()
         for configuration in vm.settings.launcherItemConfigurations {
-            guard configuration.kind == .application,
-                  let hotkey = configuration.hotkey,
+            guard let hotkey = configuration.hotkey,
                   vm.settings.launcherItemHotkeyConflict(
                     for: configuration.id
-                  ) == nil,
-                  let application = applicationCatalog.applications.first(where: {
-                    $0.id == configuration.itemID
-                  })
-            else { continue }
+                  ) == nil else { continue }
 
             let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
             let registered = GlobalHotKey(
                 keyCode: UInt32(hotkey.keyCode),
                 modifiers: GlobalHotKey.carbonModifiers(from: flags)
             ) { [weak self] in
-                _ = self?.applicationCatalog.launch(application)
+                self?.invokeLauncherItemHotkey(configuration)
             }
             if let registered {
                 launcherItemHotKeys[configuration.id] = registered
@@ -425,6 +488,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 vm.launcherItemHotkeyRegistrationErrors[configuration.id] =
                     "This hotkey is already in use by macOS or another application."
             }
+        }
+    }
+
+    private func invokeLauncherItemHotkey(_ configuration: LauncherItemConfiguration) {
+        guard let vm = viewModel else { return }
+        if configuration.kind == .application,
+           let application = applicationCatalog.applications.first(where: {
+               $0.id == configuration.itemID
+           }) {
+            _ = applicationCatalog.launch(application)
+            return
+        }
+        guard let item = vm.catalogItem(
+            kind: configuration.kind,
+            itemID: configuration.itemID
+        ) else { return }
+        vm.rememberSelectionTarget(selectedTextService.currentExternalTarget())
+        if item.kind == .quickLink, item.requiresInput {
+            vm.pendingQuickLinkID = item.id
+            vm.catalogScope = nil
+            vm.input = ""
+            showOverlay(captureSelectionTarget: false)
+        } else {
+            Task { await vm.performLauncherItem(item) }
         }
     }
 
@@ -568,6 +655,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.errorMessage
             _ = viewModel.isActionPalettePresented
             _ = viewModel.isApplicationActionPanePresented
+            _ = viewModel.isCatalogActionPanePresented
+            _ = viewModel.catalogScope
             _ = viewModel.isConversationHistoryPresented
             _ = viewModel.actionQuery
             _ = viewModel.input
@@ -589,12 +678,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
-            actionCount: vm.isApplicationActionPanePresented
+            actionCount: (vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 3
                 : (vm.isActionPalettePresented ? vm.actionMatches.count : 0),
-            suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented)
+            suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 0
-                : max(vm.applicationMatches.count, vm.savedPromptMatches.count),
+                : max(vm.launcherMatches.count, vm.savedPromptMatches.count),
             showsResultActions: !vm.output.isEmpty && !vm.isStreaming
         )
         var frame = panel.frame

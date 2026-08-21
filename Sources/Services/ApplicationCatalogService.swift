@@ -28,6 +28,7 @@ final class ApplicationCatalogService: ApplicationCatalogServicing {
             "/Applications/Utilities",
             "/System/Applications",
             "/System/Applications/Utilities",
+            "/System/Library/CoreServices",
             NSHomeDirectory() + "/Applications",
         ].map(URL.init(fileURLWithPath:))
 

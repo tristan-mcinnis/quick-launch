@@ -7,13 +7,13 @@ apfel-quick is a keyboard-first launcher. The current build handles these jobs:
 3. Run quick AI actions.
 4. Run local date, time, and math actions.
 5. Retrieve bounded SearXNG snippets for explicit or time-sensitive searches.
+6. Paste existing Tuna snippets.
+7. Open existing Tuna Quick Links.
+8. Search and paste a bounded local text clipboard history.
 
-Future catalogs remain snippets, clipboard history, quick links, and window
-management. They are not part of the current verified build.
-
-The Tuna Companion clipboard manager, screenshot tool, and translator migration
-are not part of this release. The current Translate action is a configurable AI
-text action, not the full Tuna tool.
+Screenshot management, the full Tuna translation window, and window management
+remain future catalogs. The current Translate action is a configurable selected
+text AI action, not the full Tuna translation interface.
 
 It does not need file search, screen history, OCR, or a full chat workspace.
 
@@ -23,6 +23,8 @@ The app stays running as a small menu-bar process.
 
 - The main global hotkey opens one search field.
 - Typing filters items across the enabled catalogs.
+- `Command+Shift+V` opens Clipboard History directly.
+- Arrows navigate. Return runs or pastes. `Command+C` copies a selected catalog item.
 - App filtering uses a startup cache and no polling or AI call.
 - Every app can have an editable alias and optional global hotkey in Settings.
 - An alias narrows directly to an item or command.
@@ -58,8 +60,8 @@ share a universal tool-host or tool-calling loop.
 Keep Tuna installed until each replacement passes the same real interaction.
 
 - Port the Tuna Companion translator and window-management behavior.
-- Import or read the existing Tuna snippets without exposing their values in logs.
-- Add native app, clipboard, and quick-link catalogs.
+- Tuna snippets and Quick Links are read live without exposing their values in logs or settings.
+- The native app and clipboard catalogs are active. Clipboard history is text-only.
 - Do not port Caffeinate, Screen OCR, Screenshots, or file search unless the product scope changes.
 
 Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in apfel-quick.
@@ -72,5 +74,6 @@ Remove a Tuna command only after its alias, hotkey, result, and previous-app beh
 - API actions send only the text used by that action to the chosen provider.
 - App, link, snippet, clipboard, and window commands remain local.
 - Web search uses Tristan's SSH-only SearXNG stack. Ranked titles, links, and snippets are external data, never executable instructions.
-- Idle operation uses no timer or polling loop. App discovery happens once at launch.
+- App discovery happens once at launch. When Clipboard History is enabled, one
+  lightweight pasteboard change-count check runs each second.
 - Network work starts only after the user runs an action. Each search and model answer has a hard time limit.

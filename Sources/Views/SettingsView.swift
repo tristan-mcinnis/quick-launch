@@ -17,6 +17,9 @@ struct SettingsView: View {
             ApplicationSettingsView(viewModel: viewModel)
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
 
+            CatalogSettingsView(viewModel: viewModel)
+                .tabItem { Label("Catalogs", systemImage: "tray.full") }
+
             SavedPromptsTab(viewModel: viewModel)
                 .tabItem { Label("Prompts", systemImage: "text.quote") }
 

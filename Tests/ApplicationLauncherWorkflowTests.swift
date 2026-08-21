@@ -136,6 +136,7 @@ struct ApplicationLauncherWorkflowTests {
         let filterTime = filterStart.duration(to: clock.now)
 
         #expect(!catalog.applications.isEmpty)
+        #expect(catalog.applications.contains { $0.name == "Finder" })
         #expect(scanTime < .milliseconds(250))
         #expect(filterTime < .milliseconds(250))
     }

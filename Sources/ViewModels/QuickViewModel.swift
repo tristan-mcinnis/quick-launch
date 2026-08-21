@@ -16,10 +16,15 @@ import Observation
     var currentConversation: QuickConversation?
     var modelRefreshMessage: String?
     var hotkeyRegistrationError: String?
+    var clipboardHistoryHotkeyRegistrationError: String?
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
     var isActionPalettePresented: Bool = false
     var isApplicationActionPanePresented: Bool = false
     var contextualApplicationID: String?
+    var isCatalogActionPanePresented: Bool = false
+    var contextualCatalogItemID: String?
+    var catalogScope: LauncherCatalogScope?
+    var pendingQuickLinkID: String?
     var isConversationHistoryPresented: Bool = false
     var actionQuery: String = ""
     var applicationSelectionIndex: Int = 0
@@ -32,6 +37,8 @@ import Observation
     var service: (any QuickService)?
     var selectedTextService: (any SelectedTextServicing)?
     var applicationCatalog: (any ApplicationCatalogServicing)?
+    var launcherCatalog: (any LauncherCatalogServicing)?
+    var clipboardHistory: (any ClipboardHistoryServicing)?
     var webSearchService: (any WebSearchServicing)?
 
     // How long submit() waits for `service` to be injected before giving up.
@@ -57,6 +64,8 @@ import Observation
         service: (any QuickService)? = nil,
         selectedTextService: (any SelectedTextServicing)? = nil,
         applicationCatalog: (any ApplicationCatalogServicing)? = nil,
+        launcherCatalog: (any LauncherCatalogServicing)? = nil,
+        clipboardHistory: (any ClipboardHistoryServicing)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
         currentVersion: String = "1.0.0"
     ) {
@@ -64,6 +73,8 @@ import Observation
         self.service = service
         self.selectedTextService = selectedTextService
         self.applicationCatalog = applicationCatalog
+        self.launcherCatalog = launcherCatalog
+        self.clipboardHistory = clipboardHistory
         self.webSearchService = webSearchService
         self.currentVersion = currentVersion
     }
@@ -73,7 +84,8 @@ import Observation
     /// Saved-prompt aliases matching the current `input`, sorted alphabetically.
     /// Empty whenever the input is not a prefix-based command.
     var savedPromptMatches: [SavedPrompt] {
-        SavedPromptResolver.matches(
+        guard catalogScope == nil, pendingQuickLinkID == nil else { return [] }
+        return SavedPromptResolver.matches(
             input: input,
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
@@ -95,6 +107,7 @@ import Observation
 
     var applicationMatches: [LaunchableApplication] {
         guard let applicationCatalog else { return [] }
+        guard catalogScope == nil, pendingQuickLinkID == nil else { return [] }
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.count >= 1,
               query.count <= 64,
@@ -145,6 +158,79 @@ import Observation
         .map(\.0))
     }
 
+    var snippets: [LauncherCatalogItem] { launcherCatalog?.snippets ?? [] }
+    var quickLinks: [LauncherCatalogItem] { launcherCatalog?.quickLinks ?? [] }
+    var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
+    var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
+
+    var catalogItems: [LauncherCatalogItem] {
+        guard let catalogScope else { return [] }
+        switch catalogScope {
+        case .snippets: return snippets
+        case .quickLinks: return quickLinks
+        case .clipboard: return clipboardEntries
+        }
+    }
+
+    var catalogMatches: [LauncherCatalogItem] {
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let items = catalogItems
+        guard !query.isEmpty else { return Array(items.prefix(6)) }
+        return Array(items.compactMap { item -> (LauncherCatalogItem, Int)? in
+            let alias = launcherItemAlias(for: item)
+            let score = [
+                FuzzyMatcher.score(query: query, candidate: item.title),
+                alias.isEmpty ? nil : FuzzyMatcher.score(query: query, candidate: alias),
+            ].compactMap { $0 }.max()
+            guard var score else { return nil }
+            if item.title.localizedCaseInsensitiveCompare(query) == .orderedSame { score += 10_000 }
+            if alias.localizedCaseInsensitiveCompare(query) == .orderedSame { score += 12_000 }
+            return (item, score)
+        }
+        .sorted { lhs, rhs in
+            lhs.1 == rhs.1
+                ? lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+                : lhs.1 > rhs.1
+        }
+        .prefix(6)
+        .map(\.0))
+    }
+
+    var launcherMatches: [LauncherSearchResult] {
+        if catalogScope != nil {
+            return catalogMatches.map(LauncherSearchResult.item)
+        }
+        guard pendingQuickLinkID == nil else { return [] }
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let roots = LauncherCatalogScope.allCases.compactMap { scope -> LauncherSearchResult? in
+            let count = catalogCount(scope)
+            guard query.isEmpty || scope.aliases.contains(where: {
+                FuzzyMatcher.score(query: query, candidate: $0) != nil
+            }) else { return nil }
+            return .catalog(scope, count: count)
+        }
+        let apps = applicationMatches.map(LauncherSearchResult.application)
+        return Array((roots + apps).prefix(6))
+    }
+
+    var contextualCatalogItem: LauncherCatalogItem? {
+        guard let contextualCatalogItemID else { return nil }
+        return (configurableCatalogItems + clipboardEntries).first {
+            $0.id == contextualCatalogItemID
+        }
+    }
+
+    var pendingQuickLink: LauncherCatalogItem? {
+        guard let pendingQuickLinkID else { return nil }
+        return quickLinks.first { $0.id == pendingQuickLinkID }
+    }
+
+    var inputPlaceholder: String {
+        if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
+        if let catalogScope { return "Search \(catalogScope.title.lowercased())…" }
+        return isFollowUp ? "Ask a follow-up…" : "Search apps, snippets, links, or ask anything…"
+    }
+
     var activeProvider: InferenceProvider? { settings.selectedProvider }
     var activeModelDisplay: String {
         guard let provider = activeProvider else { return "No model" }
@@ -179,7 +265,11 @@ import Observation
     }
 
     func submitResolvingFuzzyAlias() async {
-        if launchSelectedApplicationIfAvailable() { return }
+        if let pendingQuickLink {
+            openQuickLink(pendingQuickLink, input: input)
+            return
+        }
+        if await performSelectedLauncherResultIfAvailable() { return }
         let exact = SavedPromptResolver.resolveAction(
             input: input,
             prefix: settings.savedPromptPrefix,
@@ -198,7 +288,7 @@ import Observation
     }
 
     func moveApplicationSelection(_ delta: Int) {
-        let matches = applicationMatches
+        let matches = launcherMatches
         guard !matches.isEmpty else { return }
         applicationSelectionIndex = (
             applicationSelectionIndex + delta + matches.count
@@ -213,18 +303,136 @@ import Observation
             requestInputFocus()
             return false
         }
-        input = ""
+        self.input = ""
         errorMessage = nil
         NotificationCenter.default.post(name: .dismissOverlay, object: nil)
         return true
     }
 
-    private func launchSelectedApplicationIfAvailable() -> Bool {
-        let matches = applicationMatches
+    private func performSelectedLauncherResultIfAvailable() async -> Bool {
+        let matches = launcherMatches
         guard !matches.isEmpty else { return false }
         let index = min(applicationSelectionIndex, matches.count - 1)
-        _ = launch(application: matches[index])
+        switch matches[index] {
+        case .application(let application):
+            _ = launch(application: application)
+        case .catalog(let scope, _):
+            enterCatalog(scope)
+        case .item(let item):
+            await performLauncherItem(item)
+        }
         return true
+    }
+
+    func performLauncherResult(_ result: LauncherSearchResult) async {
+        switch result {
+        case .application(let application):
+            _ = launch(application: application)
+        case .catalog(let scope, _):
+            enterCatalog(scope)
+        case .item(let item):
+            await performLauncherItem(item)
+        }
+    }
+
+    func enterCatalog(_ scope: LauncherCatalogScope) {
+        catalogScope = scope
+        pendingQuickLinkID = nil
+        self.input = ""
+        applicationSelectionIndex = 0
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    func leaveCatalog() {
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        input = ""
+        applicationSelectionIndex = 0
+        requestInputFocus()
+    }
+
+    func catalogCount(_ scope: LauncherCatalogScope) -> Int {
+        switch scope {
+        case .snippets: snippets.count
+        case .quickLinks: quickLinks.count
+        case .clipboard: clipboardEntries.count
+        }
+    }
+
+    func reloadTunaCatalogs() {
+        launcherCatalog?.reload()
+        applicationSelectionIndex = 0
+    }
+
+    func clearClipboardHistory() {
+        clipboardHistory?.clear()
+        applicationSelectionIndex = 0
+    }
+
+    func copySelectedLauncherItem() {
+        let matches = launcherMatches
+        guard !matches.isEmpty else { return }
+        let index = min(applicationSelectionIndex, matches.count - 1)
+        guard case .item(let item) = matches[index] else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.value, forType: .string)
+        markJustCopied()
+    }
+
+    func performLauncherItem(_ item: LauncherCatalogItem) async {
+        switch item.kind {
+        case .quickLink:
+            if item.requiresInput {
+                pendingQuickLinkID = item.id
+                catalogScope = nil
+                input = ""
+                requestInputFocus()
+            } else {
+                openQuickLink(item, input: "")
+            }
+        case .snippet, .clipboard:
+            guard let target = selectionTarget else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(item.value, forType: .string)
+                errorMessage = "No previous app was available. The item was copied instead."
+                markJustCopied()
+                return
+            }
+            guard let selectedTextService,
+                  await selectedTextService.paste(item.value, to: target) else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(item.value, forType: .string)
+                errorMessage = "Could not paste into \(target.applicationName). The item was copied instead."
+                markJustCopied()
+                return
+            }
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        case .application:
+            return
+        }
+    }
+
+    private func openQuickLink(_ item: LauncherCatalogItem, input: String) {
+        let allowed = CharacterSet.urlQueryAllowed.subtracting(
+            CharacterSet(charactersIn: "&=+#?")
+        )
+        let encodedInput = input.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        let clipboard = NSPasteboard.general.string(forType: .string) ?? ""
+        let encodedClipboard = clipboard.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        let rendered = item.value
+            .replacingOccurrences(of: "{{input}}", with: encodedInput)
+            .replacingOccurrences(of: "{{clipboard}}", with: encodedClipboard)
+        guard let url = URL(string: rendered),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+            errorMessage = "This Quick Link does not contain a valid web address."
+            requestInputFocus()
+            return
+        }
+        NSWorkspace.shared.open(url)
+        self.input = ""
+        pendingQuickLinkID = nil
+        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
     }
 
     private var isBareAliasQuery: Bool {
@@ -247,20 +455,37 @@ import Observation
     func toggleActionPalette() {
         isApplicationActionPanePresented = false
         contextualApplicationID = nil
+        isCatalogActionPanePresented = false
+        contextualCatalogItemID = nil
         isActionPalettePresented.toggle()
         actionQuery = ""
         if !isActionPalettePresented { requestInputFocus() }
     }
 
     func handleCommandK() {
-        let matches = applicationMatches
+        let matches = launcherMatches
         if !matches.isEmpty {
             let index = min(applicationSelectionIndex, matches.count - 1)
-            contextualApplicationID = matches[index].id
-            isApplicationActionPanePresented.toggle()
-            isActionPalettePresented = false
-            actionQuery = ""
-            return
+            switch matches[index] {
+            case .application(let application):
+                contextualApplicationID = application.id
+                isApplicationActionPanePresented.toggle()
+                isCatalogActionPanePresented = false
+                contextualCatalogItemID = nil
+                isActionPalettePresented = false
+                actionQuery = ""
+                return
+            case .item(let item) where item.kind != .clipboard:
+                contextualCatalogItemID = item.id
+                isCatalogActionPanePresented.toggle()
+                isApplicationActionPanePresented = false
+                contextualApplicationID = nil
+                isActionPalettePresented = false
+                actionQuery = ""
+                return
+            default:
+                break
+            }
         }
         toggleActionPalette()
     }
@@ -269,6 +494,74 @@ import Observation
         isApplicationActionPanePresented = false
         contextualApplicationID = nil
         requestInputFocus()
+    }
+
+    func closeCatalogActionPane() {
+        isCatalogActionPanePresented = false
+        contextualCatalogItemID = nil
+        requestInputFocus()
+    }
+
+    func launcherItemAlias(for item: LauncherCatalogItem) -> String {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.alias ?? ""
+    }
+
+    func launcherItemHotkey(for item: LauncherCatalogItem) -> ActionHotkey? {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.hotkey
+    }
+
+    func setLauncherItemAlias(_ alias: String, for item: LauncherCatalogItem) {
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.alias = alias }
+    }
+
+    func setLauncherItemHotkey(_ hotkey: ActionHotkey?, for item: LauncherCatalogItem) {
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.hotkey = hotkey }
+        NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
+    }
+
+    func launcherItemConfigurationConflict(for item: LauncherCatalogItem) -> String? {
+        let id = LauncherItemConfiguration(kind: item.kind, itemID: item.itemID).id
+        let alias = launcherItemAlias(for: item).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !alias.isEmpty, settings.launcherItemConfigurations.contains(where: {
+            $0.id != id
+                && $0.alias.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(alias) == .orderedSame
+        }) {
+            return "This alias is already used by another launcher item."
+        }
+        return settings.launcherItemHotkeyConflict(for: id)
+            ?? launcherItemHotkeyRegistrationErrors[id]
+    }
+
+    func catalogItem(kind: LauncherItemKind, itemID: String) -> LauncherCatalogItem? {
+        (configurableCatalogItems + clipboardEntries).first {
+            $0.kind == kind && $0.itemID == itemID
+        }
+    }
+
+    private func updateLauncherItemConfiguration(
+        kind: LauncherItemKind,
+        itemID: String,
+        mutation: (inout LauncherItemConfiguration) -> Void
+    ) {
+        if let index = settings.launcherItemConfigurations.firstIndex(where: {
+            $0.kind == kind && $0.itemID == itemID
+        }) {
+            mutation(&settings.launcherItemConfigurations[index])
+            let configuration = settings.launcherItemConfigurations[index]
+            if configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               configuration.hotkey == nil {
+                settings.launcherItemConfigurations.remove(at: index)
+            }
+        } else {
+            var configuration = LauncherItemConfiguration(kind: kind, itemID: itemID)
+            mutation(&configuration)
+            if !configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || configuration.hotkey != nil {
+                settings.launcherItemConfigurations.append(configuration)
+            }
+        }
+        settings.save()
     }
 
     func applicationAlias(for application: LaunchableApplication) -> String {
@@ -304,12 +597,11 @@ import Observation
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !alias.isEmpty,
            settings.launcherItemConfigurations.contains(where: {
-               $0.kind == .application
-                   && $0.itemID != application.id
+               $0.id != LauncherItemConfiguration(kind: .application, itemID: application.id).id
                    && $0.alias.trimmingCharacters(in: .whitespacesAndNewlines)
                        .localizedCaseInsensitiveCompare(alias) == .orderedSame
            }) {
-            return "This alias is already used by another application."
+            return "This alias is already used by another launcher item."
         }
         let id = LauncherItemConfiguration(
             kind: .application,
@@ -914,7 +1206,11 @@ import Observation
         clearOutput()
         isActionPalettePresented = false
         isApplicationActionPanePresented = false
+        isCatalogActionPanePresented = false
         contextualApplicationID = nil
+        contextualCatalogItemID = nil
+        catalogScope = nil
+        pendingQuickLinkID = nil
         isConversationHistoryPresented = false
         actionQuery = ""
     }
