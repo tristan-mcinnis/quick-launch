@@ -141,6 +141,27 @@ struct QuickActionWorkflowTests {
         #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
     }
 
+    @Test func blockedSnippetPasteReportsAccessibilityAndRestoresOverlay() async {
+        let selection = FakeSelectedTextService(text: nil, trusted: false)
+        selection.pasteSucceeds = false
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        var recovered = false
+        vm.prepareForExternalAction = { selection.externalActionPrepared = true }
+        vm.recoverFromExternalActionFailure = { recovered = true }
+        let item = LauncherCatalogItem(
+            kind: .snippet,
+            itemID: "blocked",
+            title: "Blocked",
+            detail: "Test",
+            value: "Private value"
+        )
+
+        #expect(!(await vm.pasteLauncherItem(item)))
+        #expect(recovered)
+        #expect(vm.errorMessage?.contains("Accessibility") == true)
+    }
+
     @Test func windowCommandTargetsPreviousWindowAfterDismissingOverlay() {
         let windows = FakeWindowManager()
         let vm = QuickViewModel(windowManager: windows)
@@ -207,6 +228,7 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     var pastedTarget: SelectionTarget?
     var externalActionPrepared = false
     var wasPreparedWhenPasted = false
+    var pasteSucceeds = true
     var openedSettings = false
 
     init(text: String?, trusted: Bool = true) {
@@ -234,7 +256,7 @@ private final class FakeSelectedTextService: SelectedTextServicing {
         wasPreparedWhenPasted = externalActionPrepared
         pastedText = text
         pastedTarget = target
-        return true
+        return pasteSucceeds
     }
 
     func openAccessibilitySettings() { openedSettings = true }

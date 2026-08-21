@@ -46,6 +46,7 @@ import Observation
     var windowManager: (any WindowManaging)?
     var caffeinateManager: (any CaffeinateManaging)?
     @ObservationIgnored var prepareForExternalAction: (() -> Void)?
+    @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
 
     // How long submit() waits for `service` to be injected before giving up.
@@ -449,7 +450,10 @@ import Observation
         await Task.yield()
         guard await selectedTextService.paste(item.value, to: target) else {
             copyLauncherItem(item)
-            errorMessage = "Could not paste into \(target.applicationName). The item was copied instead."
+            errorMessage = selectedTextService.isAccessibilityTrusted
+                ? "Could not paste into \(target.applicationName). The item was copied instead."
+                : "Allow Quick Launch in Privacy & Security → Accessibility, then try again. The item was copied."
+            recoverFromExternalActionFailure?()
             requestInputFocus()
             return false
         }

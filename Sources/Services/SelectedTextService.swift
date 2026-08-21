@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import OSLog
 
 struct SelectionTarget: Sendable, Equatable {
     let processIdentifier: pid_t
@@ -24,6 +25,10 @@ protocol SelectedTextServicing: AnyObject {
 
 @MainActor
 final class SelectedTextService: SelectedTextServicing {
+    private let logger = Logger(
+        subsystem: "com.tristanmcinnis.quick-launch",
+        category: "ExternalAction"
+    )
     var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
     private var lastTarget: SelectionTarget?
     private var activationObserver: NSObjectProtocol?
@@ -159,19 +164,60 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     func paste(_ text: String, to target: SelectionTarget) async -> Bool {
-        guard let app = NSRunningApplication(processIdentifier: target.processIdentifier) else {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
+            logger.error("Paste blocked: Accessibility permission is not granted")
             return false
         }
+        guard let app = NSRunningApplication(processIdentifier: target.processIdentifier) else {
+            logger.error("Paste target is no longer running: \(target.applicationName, privacy: .public)")
+            return false
+        }
+        logger.info("Paste requested for \(target.applicationName, privacy: .public)")
+        app.activate(from: .current, options: [.activateAllWindows])
+        var becameFrontmost = false
+        for _ in 0..<20 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == target.processIdentifier {
+                becameFrontmost = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard becameFrontmost else {
+            let actual = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
+            logger.error(
+                "Paste target did not become frontmost; frontmost is \(actual, privacy: .public)"
+            )
+            return false
+        }
+
+        // Accessibility insertion is more reliable for web/Electron composers
+        // than synthesising Command-V. Setting selected text inserts at the
+        // caret when there is no selection and replaces an active selection.
+        let application = AXUIElementCreateApplication(target.processIdentifier)
+        if let focused = focusedElement(in: application) {
+            var settable = DarwinBoolean(false)
+            if AXUIElementIsAttributeSettable(
+                focused,
+                kAXSelectedTextAttribute as CFString,
+                &settable
+            ) == .success,
+            settable.boolValue,
+            AXUIElementSetAttributeValue(
+                focused,
+                kAXSelectedTextAttribute as CFString,
+                text as CFString
+            ) == .success {
+                logger.info("Paste completed by Accessibility insertion")
+                return true
+            }
+        }
+
         let pasteboard = NSPasteboard.general
         let previousText = pasteboard.string(forType: .string)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        app.activate(from: .current, options: [.activateAllWindows])
-        for _ in 0..<20 {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier
-                == target.processIdentifier { break }
-            try? await Task.sleep(for: .milliseconds(25))
-        }
 
         for _ in 0..<40 {
             let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
@@ -193,6 +239,7 @@ final class SelectedTextService: SelectedTextServicing {
         up.flags = .maskCommand
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
+        logger.info("Paste fallback posted Command-V")
 
         try? await Task.sleep(for: .milliseconds(450))
         if pasteboard.string(forType: .string) == text {

@@ -118,6 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.prepareForExternalAction = { [weak self] in
             self?.hideOverlay()
         }
+        viewModel.recoverFromExternalActionFailure = { [weak self] in
+            self?.showOverlay(captureSelectionTarget: false)
+        }
 
         // c. Register global hotkey (Option+Space by default)
         registerGlobalHotkey()
