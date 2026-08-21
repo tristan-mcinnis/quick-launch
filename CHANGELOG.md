@@ -8,6 +8,7 @@
 - Fixed snippet Return pasting by dismissing the overlay before target-app activation and waiting for the previous app to become frontmost.
 - Added previous-window layouts for left/right/top/bottom halves, all thirds, and all fourths, searchable by name with editable aliases and global hotkeys.
 - Added a persistent native Caffeinate toggle in Commands and the menu-bar context menu; it is enabled by default for this migration.
+- Kept local builds on one stable designated requirement so Accessibility approval survives rebuilds, and prevented generated build bundles from appearing as duplicate apps in Spotlight.
 
 ## v1.1.0 — 2026-08-21
 

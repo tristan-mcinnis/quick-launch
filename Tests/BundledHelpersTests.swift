@@ -15,6 +15,13 @@ struct BundledHelpersTests {
         url.appendPathComponent("scripts/build-app.sh")
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }()
+    private static let makefile: String = {
+        var url = URL(fileURLWithPath: #filePath)
+        url.deleteLastPathComponent()
+        url.deleteLastPathComponent()
+        url.appendPathComponent("Makefile")
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }()
 
     @Test("build-app.sh embeds the apfel helper")
     func apfelEmbedded() {
@@ -48,5 +55,17 @@ struct BundledHelpersTests {
             ),
             "Local rebuilds need a stable identity so macOS Accessibility approval can persist"
         )
+    }
+
+    @Test("generated app bundles are hidden from Spotlight")
+    func buildDirectoryIsNotIndexed() {
+        #expect(Self.buildScript.contains("build/.metadata_never_index"))
+    }
+
+    @Test("install replaces the canonical bundle and removes its build copy")
+    func installLeavesOneApp() {
+        #expect(Self.makefile.contains("rm -rf \"/Applications/Quick Launch.app\""))
+        #expect(Self.makefile.contains("rm -rf \"build/Quick Launch.app\""))
+        #expect(Self.makefile.contains("codesign --verify --deep --strict"))
     }
 }

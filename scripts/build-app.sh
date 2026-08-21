@@ -8,8 +8,8 @@ SWIFT_TARGET="QuickLaunch"
 APP_BUNDLE="$ROOT_DIR/build/${APP_DISPLAY_NAME}.app"
 VERSION="$(tr -d '\n' < "$ROOT_DIR/.version")"
 ICON_SOURCE="$ROOT_DIR/Sources/Resources/AppIcon.icns"
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/quick-launch.entitlements}"
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
 resolve_helper() {
     if [[ -n "${APFEL_HELPER_PATH:-}" && -x "${APFEL_HELPER_PATH}" ]]; then
@@ -57,6 +57,8 @@ swift build -c release --package-path "$ROOT_DIR"
 BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR")"
 BIN_PATH="${BIN_DIR}/${SWIFT_TARGET}"
 
+mkdir -p "$ROOT_DIR/build"
+touch "$ROOT_DIR/build/.metadata_never_index"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Helpers"
 

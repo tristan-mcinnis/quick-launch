@@ -78,6 +78,11 @@ make install
 `make install` builds, signs, and copies the menu-bar app to
 `/Applications/Quick Launch.app`. Run `make run` to open the installed app.
 
+Local builds use the stable designated requirement
+`com.tristanmcinnis.quick-launch`, allowing macOS Accessibility approval to
+survive code changes. The generated `build` directory is excluded from
+Spotlight so it does not appear as a second Quick Launch installation.
+
 The build script bundles `apfel` when it is available. A local app can still be
 built without it. Source builds that need the Apple provider require `apfel`
 on `PATH`:
