@@ -68,4 +68,25 @@ struct PanelSizingTests {
         #expect(three == threeExpected)
         #expect(many == manyExpected)
     }
+
+    @Test func testLauncherSuggestionsAddBoundedHeight() {
+        let three = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 3
+        )
+        let many = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 20
+        )
+        #expect(three == 186)
+        #expect(many == 312)
+    }
+
+    @Test func testCompletedResultActionsAddCompactFooter() {
+        let height = PanelSizing.panelHeight(
+            output: "Answer",
+            isStreaming: false,
+            errorMessage: nil,
+            showsResultActions: true
+        )
+        #expect(height == 167)
+    }
 }

@@ -4,6 +4,7 @@ import Combine
 struct OverlayView: View {
     @Bindable var viewModel: QuickViewModel
     @FocusState private var inputFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The send button icon and color change based on state:
     ///  - idle: arrow.up.circle.fill (purple)
     ///  - streaming: stop.fill (purple)
@@ -16,21 +17,21 @@ struct OverlayView: View {
 
     private var sendColor: Color {
         viewModel.justCopied
-            ? Color(red: 0.18, green: 0.72, blue: 0.36)
-            : Color(red: 0.55, green: 0.36, blue: 0.96)
+            ? AQDesign.ColorToken.success
+            : AQDesign.ColorToken.accent
     }
 
     var body: some View {
         VStack(spacing: 0) {
             // Input row
-            HStack(spacing: 8) {
+            HStack(spacing: AQDesign.Space.standard) {
                 TextField(
                     viewModel.isFollowUp ? "Ask a follow-up…" : "Ask anything…",
                     text: $viewModel.input,
                     axis: .vertical
                 )
                     .textFieldStyle(.plain)
-                    .font(.system(size: 17))
+                    .font(AQDesign.TypeToken.input)
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .submitLabel(.send)
@@ -39,6 +40,19 @@ struct OverlayView: View {
                         guard !viewModel.savedPromptMatches.isEmpty else { return .ignored }
                         viewModel.completeFirstFuzzyAlias()
                         return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        guard !viewModel.applicationMatches.isEmpty else { return .ignored }
+                        viewModel.moveApplicationSelection(1)
+                        return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        guard !viewModel.applicationMatches.isEmpty else { return .ignored }
+                        viewModel.moveApplicationSelection(-1)
+                        return .handled
+                    }
+                    .onChange(of: viewModel.input) { _, _ in
+                        viewModel.resetApplicationSelection()
                     }
                     .disabled(viewModel.isStreaming)
 
@@ -60,41 +74,69 @@ struct OverlayView: View {
                 .disabled(viewModel.input.isEmpty && !viewModel.isStreaming)
                 .help(viewModel.justCopied ? "Copied to clipboard" : "Send (or press Return)")
 
-                modelMenu
-
-                Button {
-                    viewModel.toggleActionPalette()
-                } label: {
-                    Image(systemName: "wand.and.stars")
-                        .foregroundStyle(viewModel.isActionPalettePresented ? sendColor : .secondary)
-                        .font(.system(size: 14))
-                }
-                .buttonStyle(.plain)
-                .help("Quick actions (Command-K)")
-
-                historyMenu
-
-                Button {
-                    NotificationCenter.default.post(
-                        name: .openSettings, object: nil)
-                } label: {
-                    Image(systemName: "gear")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 15))
-                }
-                .buttonStyle(.plain)
-                .help("Settings")
+                moreMenu
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
 
-            if viewModel.isActionPalettePresented {
+            if viewModel.isApplicationActionPanePresented,
+               let application = viewModel.contextualApplication {
+                Divider()
+                ApplicationActionPane(
+                    viewModel: viewModel,
+                    application: application
+                )
+            } else if viewModel.isActionPalettePresented {
                 Divider()
                 QuickActionPalette(viewModel: viewModel)
             }
 
+            if !viewModel.isActionPalettePresented,
+               !viewModel.isApplicationActionPanePresented,
+               !viewModel.applicationMatches.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(
+                        Array(viewModel.applicationMatches.enumerated()),
+                        id: \.element.id
+                    ) { index, application in
+                        Button {
+                            viewModel.launch(application: application)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 22, height: 22)
+                                Text(application.name)
+                                    .font(AQDesign.TypeToken.body.weight(.medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                if index == viewModel.applicationSelectionIndex {
+                                    Text("Open  ↩")
+                                        .font(.system(size: 10, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .frame(height: 42)
+                            .background(
+                                index == viewModel.applicationSelectionIndex
+                                    ? AQDesign.ColorToken.selectionFill
+                                    : .clear
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(application.name)")
+                    }
+                }
+            }
+
             // Saved-prompt autocomplete
-            if !viewModel.savedPromptMatches.isEmpty {
+            if !viewModel.isApplicationActionPanePresented,
+               !viewModel.savedPromptMatches.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.savedPromptMatches) { match in
@@ -104,7 +146,7 @@ struct OverlayView: View {
                             HStack(spacing: 10) {
                                 Text(viewModel.settings.savedPromptPrefix + match.alias)
                                     .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(Color(red: 0.55, green: 0.36, blue: 0.96))
+                                    .foregroundStyle(AQDesign.ColorToken.accent)
                                 Text(match.prompt)
                                     .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
@@ -120,8 +162,11 @@ struct OverlayView: View {
                 }
             }
 
-            // Divider + result (only shown when there's output or streaming)
-            if !viewModel.output.isEmpty || viewModel.isStreaming {
+            if viewModel.isConversationHistoryPresented {
+                Divider()
+                ConversationTranscript(messages: viewModel.conversationMessages)
+                    .transition(.opacity)
+            } else if !viewModel.output.isEmpty || viewModel.isStreaming {
                 Divider()
                 MarkdownTextView(
                     attributedString: MarkdownRenderer.render(viewModel.output),
@@ -129,21 +174,75 @@ struct OverlayView: View {
                 )
                 .frame(maxHeight: 380)
                 .padding(20)
+                .transition(.opacity)
+            }
+
+            if !viewModel.output.isEmpty && !viewModel.isStreaming {
+                Divider()
+                HStack(spacing: AQDesign.Space.standard) {
+                    Button {
+                        viewModel.copyOutputAndMark()
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .frame(minWidth: 92, minHeight: AQDesign.controlHeight)
+                            .contentShape(Rectangle())
+                    }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .help("Copy result (Command-Shift-C)")
+                    Button {
+                        Task { await viewModel.pasteOutputToPreviousApp() }
+                    } label: {
+                        Label(
+                            viewModel.pasteTargetName.map { "Paste to \($0)" } ?? "Paste Back",
+                            systemImage: "arrow.turn.down.right"
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(minWidth: 120, minHeight: AQDesign.controlHeight)
+                        .contentShape(Rectangle())
+                    }
+                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                    .help("Paste result into the previous app (Command-Shift-V)")
+                    Spacer()
+                }
+                .font(AQDesign.TypeToken.label)
+                .buttonStyle(.borderless)
+                .tint(AQDesign.ColorToken.accent)
+                .padding(.horizontal, 20)
+                .frame(height: AQDesign.controlHeight)
             }
 
             // Error message
             if let error = viewModel.errorMessage {
                 Divider()
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
+                HStack(spacing: AQDesign.Space.standard) {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AQDesign.ColorToken.danger)
+                    Spacer()
+                    if viewModel.needsAccessibilityPermission {
+                        Button("Open System Settings") {
+                            viewModel.openAccessibilitySettings()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
             }
         }
         .background(Color(NSColor.windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: AQDesign.cornerRadius))
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: AQDesign.motionDuration),
+            value: viewModel.output.isEmpty
+        )
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: AQDesign.motionDuration),
+            value: viewModel.isConversationHistoryPresented
+        )
         .onAppear { focusInput() }
         .onChange(of: viewModel.inputFocusRequest) { _, _ in focusInput() }
         .onKeyPress(.escape) {
@@ -162,7 +261,49 @@ struct OverlayView: View {
         }
     }
 
-    private var modelMenu: some View {
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                viewModel.toggleActionPalette()
+            } label: {
+                Label("Quick Actions…", systemImage: "wand.and.stars")
+            }
+
+            Divider()
+            modelSubmenu
+            historySubmenu
+
+            if !viewModel.conversationMessages.isEmpty {
+                Divider()
+                Button {
+                    viewModel.toggleConversationHistory()
+                } label: {
+                    Label(
+                        viewModel.isConversationHistoryPresented
+                            ? "Show Latest Result"
+                            : "Show Conversation",
+                        systemImage: "text.bubble"
+                    )
+                }
+            }
+
+            Divider()
+            Button {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            } label: {
+                Label("Settings…", systemImage: "gear")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 16))
+                .foregroundStyle(viewModel.isActionPalettePresented ? sendColor : .secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Actions, model, history, and settings")
+    }
+
+    private var modelSubmenu: some View {
         Menu {
             Text("Using \(viewModel.activeModelDisplay)")
             Divider()
@@ -197,16 +338,13 @@ struct OverlayView: View {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
             }
         } label: {
-            Image(systemName: "cpu")
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
+            Label("Model: \(viewModel.activeModelDisplay)", systemImage: "cpu")
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Model: \(viewModel.activeModelDisplay)")
     }
 
-    private var historyMenu: some View {
+    private var historySubmenu: some View {
         Menu {
             Button("New quick action") { viewModel.startNewConversation() }
             if !viewModel.history.isEmpty {
@@ -218,13 +356,106 @@ struct OverlayView: View {
                 }
             }
         } label: {
-            Image(systemName: "clock.arrow.circlepath")
-                .foregroundStyle(.secondary)
-                .font(.system(size: 14))
+            Label("Recent Quick Actions", systemImage: "clock.arrow.circlepath")
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Recent quick actions")
+    }
+}
+
+private struct ConversationTranscript: View {
+    let messages: [QuickMessage]
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(messages) { message in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(message.role == .user ? "You" : "Answer")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(
+                                    message.role == .user ? AQDesign.ColorToken.accent : .secondary
+                                )
+                            Text(String(message.content.prefix(8_000)))
+                                .font(.system(size: 13))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(message.id)
+                    }
+                }
+                .padding(20)
+            }
+            .frame(maxHeight: 380)
+            .onAppear {
+                guard let lastID = messages.last?.id else { return }
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        }
+        .accessibilityLabel("Current quick action conversation")
+    }
+}
+
+private struct ApplicationActionPane: View {
+    @Bindable var viewModel: QuickViewModel
+    let application: LaunchableApplication
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+            HStack(spacing: AQDesign.Space.standard) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
+                    Text(application.name)
+                        .font(AQDesign.TypeToken.body.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("Application actions")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open") {
+                    _ = viewModel.launch(application: application)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AQDesign.ColorToken.accent)
+                .frame(minHeight: AQDesign.controlHeight)
+            }
+
+            TextField("Search alias", text: Binding(
+                get: { viewModel.applicationAlias(for: application) },
+                set: { viewModel.setApplicationAlias($0, for: application) }
+            ))
+            .textFieldStyle(.roundedBorder)
+
+            ActionHotkeyRecorderView(
+                hotkey: Binding(
+                    get: { viewModel.applicationHotkey(for: application) },
+                    set: { viewModel.setApplicationHotkey($0, for: application) }
+                ),
+                label: "Global hotkey",
+                changeNotification: .launcherItemHotkeysChanged
+            )
+
+            if let conflict = viewModel.applicationConfigurationConflict(for: application) {
+                Text(conflict)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.danger)
+            }
+
+            HStack {
+                Text("Return opens · Command-K closes actions")
+                Spacer()
+                Button("Done") { viewModel.closeApplicationActionPane() }
+                    .buttonStyle(.plain)
+            }
+            .font(AQDesign.TypeToken.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, AQDesign.Space.section)
+        .padding(.vertical, 12)
     }
 }
 
@@ -263,7 +494,11 @@ private struct QuickActionPalette: View {
                                 Image(systemName: action.outputBehavior == .replaceSelection
                                       ? "text.cursor" : "sparkles")
                                     .frame(width: 18)
-                                    .foregroundStyle(index == selectedIndex ? Color.accentColor : .secondary)
+                                    .foregroundStyle(
+                                        index == selectedIndex
+                                            ? AQDesign.ColorToken.accent
+                                            : .secondary
+                                    )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(action.name)
                                         .font(.system(size: 13, weight: .medium))
@@ -281,8 +516,8 @@ private struct QuickActionPalette: View {
                             .padding(.horizontal, 20)
                             .frame(height: 42)
                             .background(
-                                index == selectedIndex ? Color.accentColor.opacity(0.12) : .clear,
-                                in: RoundedRectangle(cornerRadius: 7)
+                                index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear,
+                                in: RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
                             )
                             .contentShape(Rectangle())
                         }
@@ -343,5 +578,7 @@ extension Notification.Name {
     static let openSettings = Notification.Name("ApfelQuick.openSettings")
     static let hotkeyChanged = Notification.Name("ApfelQuick.hotkeyChanged")
     static let actionHotkeysChanged = Notification.Name("ApfelQuick.actionHotkeysChanged")
+    static let launcherItemHotkeysChanged = Notification.Name("ApfelQuick.launcherItemHotkeysChanged")
     static let providerChanged = Notification.Name("ApfelQuick.providerChanged")
+    static let managedServiceRequested = Notification.Name("ApfelQuick.managedServiceRequested")
 }

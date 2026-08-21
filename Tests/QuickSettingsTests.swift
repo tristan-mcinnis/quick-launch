@@ -22,11 +22,30 @@ struct QuickSettingsTests {
         #expect(settings.autoCopy == true)
         #expect(settings.launchAtLogin == true)
         #expect(settings.showMenuBar == true)
-        #expect(settings.checkForUpdatesOnLaunch == true)
+        #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 3)
+        #expect(settings.configurationVersion == 5)
+        #expect(settings.reopenRetentionSeconds == 10)
         #expect(settings.selectedProviderID == InferenceProvider.managedApfelID)
         #expect(!settings.systemPrompt.isEmpty)
+    }
+
+    @Test func testLauncherItemConfigurationRoundTrips() {
+        let defaults = freshDefaults()
+        var settings = QuickSettings()
+        settings.launcherItemConfigurations = [
+            LauncherItemConfiguration(
+                kind: .application,
+                itemID: "com.tinyspeck.slackmacgap",
+                alias: "work chat",
+                hotkey: ActionHotkey(keyCode: 1, modifiers: 524_288)
+            )
+        ]
+
+        settings.save(to: defaults)
+        let loaded = QuickSettings.load(from: defaults)
+
+        #expect(loaded.launcherItemConfigurations == settings.launcherItemConfigurations)
     }
 
     @Test func testLegacySettingsGainPiSearchActionOnce() throws {
@@ -81,6 +100,7 @@ struct QuickSettingsTests {
         settings.hotkeyModifiers = 786432  // Command + Option
         settings.select(providerID: InferenceProvider.deepSeekID, model: "deepseek-v4-pro")
         settings.systemPrompt = "Return only corrected text."
+        settings.reopenRetentionSeconds = 30
 
         settings.save(to: defaults)
 
@@ -95,6 +115,7 @@ struct QuickSettingsTests {
         #expect(loaded.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(loaded.selectedModel == "deepseek-v4-pro")
         #expect(loaded.systemPrompt == "Return only corrected text.")
+        #expect(loaded.reopenRetentionSeconds == 30)
     }
 
     // MARK: - 4. Load from empty UserDefaults returns defaults
@@ -106,7 +127,7 @@ struct QuickSettingsTests {
         #expect(loaded.autoCopy == true)
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.showMenuBar == true)
-        #expect(loaded.checkForUpdatesOnLaunch == true)
+        #expect(loaded.checkForUpdatesOnLaunch == false)
         #expect(loaded.hasSeenWelcome == false)
         #expect(loaded.hotkeyKeyCode == 49)
         #expect(loaded.hotkeyModifiers == 524288)

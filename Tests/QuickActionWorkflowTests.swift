@@ -98,6 +98,22 @@ struct QuickActionWorkflowTests {
 
         #expect(vm.inputFocusRequest > before)
     }
+
+    @Test func resultCanPasteBackToPreviousApp() async {
+        let selection = FakeSelectedTextService(text: nil)
+        let vm = QuickViewModel(
+            service: MockQuickService(),
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.output = "Paste this result"
+
+        let pasted = await vm.pasteOutputToPreviousApp()
+
+        #expect(pasted)
+        #expect(selection.pastedText == "Paste this result")
+        #expect(selection.pastedTarget == target)
+    }
 }
 
 @MainActor
@@ -106,6 +122,8 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     var selectedText: String?
     var replacedText: String?
     var replacedContext: SelectedTextContext?
+    var pastedText: String?
+    var pastedTarget: SelectionTarget?
     var openedSettings = false
 
     init(text: String?, trusted: Bool = true) {
@@ -126,6 +144,12 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     func replace(_ text: String, in context: SelectedTextContext) async -> Bool {
         replacedText = text
         replacedContext = context
+        return true
+    }
+
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+        pastedText = text
+        pastedTarget = target
         return true
     }
 

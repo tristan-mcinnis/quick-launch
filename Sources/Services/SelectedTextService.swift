@@ -18,6 +18,7 @@ protocol SelectedTextServicing: AnyObject {
     func currentExternalTarget() -> SelectionTarget?
     func capture(from target: SelectionTarget, promptForPermission: Bool) -> SelectedTextContext?
     func replace(_ text: String, in context: SelectedTextContext) async -> Bool
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool
     func openAccessibilitySettings()
 }
 
@@ -125,7 +126,7 @@ final class SelectedTextService: SelectedTextServicing {
             .activate(from: .current, options: [.activateAllWindows])
     }
 
-    private func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool {
         guard let app = NSRunningApplication(processIdentifier: target.processIdentifier) else {
             return false
         }
@@ -158,9 +159,11 @@ final class SelectedTextService: SelectedTextServicing {
         up.post(tap: .cghidEventTap)
 
         try? await Task.sleep(for: .milliseconds(450))
-        if pasteboard.string(forType: .string) == text, let previousText {
+        if pasteboard.string(forType: .string) == text {
             pasteboard.clearContents()
-            pasteboard.setString(previousText, forType: .string)
+            if let previousText {
+                pasteboard.setString(previousText, forType: .string)
+            }
         }
         return true
     }

@@ -14,6 +14,9 @@ struct SettingsView: View {
             GeneralTab(viewModel: viewModel)
                 .tabItem { Label("General", systemImage: "gear") }
 
+            ApplicationSettingsView(viewModel: viewModel)
+                .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
+
             SavedPromptsTab(viewModel: viewModel)
                 .tabItem { Label("Prompts", systemImage: "text.quote") }
 
@@ -45,6 +48,11 @@ private struct GeneralTab: View {
                 )
                 .onChange(of: viewModel.settings.hotkeyKeyCode) { _, _ in viewModel.settings.save() }
                 .onChange(of: viewModel.settings.hotkeyModifiers) { _, _ in viewModel.settings.save() }
+                if let error = viewModel.hotkeyRegistrationError {
+                    Text(error)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.danger)
+                }
 
                 Divider()
 
@@ -60,9 +68,6 @@ private struct GeneralTab: View {
                 Toggle("Show menu bar icon", isOn: $viewModel.settings.showMenuBar)
                     .onChange(of: viewModel.settings.showMenuBar) { _, _ in viewModel.settings.save() }
 
-                Toggle("Check for updates on launch", isOn: $viewModel.settings.checkForUpdatesOnLaunch)
-                    .onChange(of: viewModel.settings.checkForUpdatesOnLaunch) { _, _ in viewModel.settings.save() }
-
                 Toggle("Keep quick-action history", isOn: $viewModel.settings.historyEnabled)
                     .onChange(of: viewModel.settings.historyEnabled) { _, enabled in
                         viewModel.settings.save()
@@ -74,7 +79,7 @@ private struct GeneralTab: View {
                     }
 
                 HStack {
-                    Text("Saved quick actions")
+                    Text("Saved history")
                     Spacer()
                     Button("Clear history", role: .destructive) {
                         viewModel.clearHistory()
@@ -93,6 +98,22 @@ private struct GeneralTab: View {
                     .labelsHidden()
                     .frame(width: 140)
                     .onChange(of: viewModel.settings.newConversationAfterMinutes) { _, _ in
+                        viewModel.settings.save()
+                    }
+                }
+
+                HStack {
+                    Text("Keep the last result after closing")
+                    Spacer()
+                    Picker("", selection: $viewModel.settings.reopenRetentionSeconds) {
+                        Text("Do not keep").tag(0)
+                        Text("10 seconds").tag(10)
+                        Text("30 seconds").tag(30)
+                        Text("1 minute").tag(60)
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                    .onChange(of: viewModel.settings.reopenRetentionSeconds) { _, _ in
                         viewModel.settings.save()
                     }
                 }
@@ -205,18 +226,18 @@ private struct AboutTab: View {
         case .checking:
             Text("Checking…").font(.system(size: 12)).foregroundStyle(.secondary)
         case .upToDate:
-            Text("Up to date").font(.system(size: 12)).foregroundStyle(.green)
+            Text("Up to date").font(.system(size: 12)).foregroundStyle(AQDesign.ColorToken.success)
         case .updateAvailable(let v):
             Button("Update to \(v)") { [weak viewModel] in viewModel?.installUpdate() }
                 .font(.system(size: 12))
-                .foregroundStyle(.blue)
+                .foregroundStyle(AQDesign.ColorToken.accent)
                 .buttonStyle(.plain)
         case .installing(let v):
             Text("Installing \(v)…").font(.system(size: 12)).foregroundStyle(.secondary)
         case .installed(let v):
-            Text("Installed \(v)").font(.system(size: 12)).foregroundStyle(.green)
+            Text("Installed \(v)").font(.system(size: 12)).foregroundStyle(AQDesign.ColorToken.success)
         case .error(let msg):
-            Text(msg).font(.system(size: 12)).foregroundStyle(.red)
+            Text(msg).font(.system(size: 12)).foregroundStyle(AQDesign.ColorToken.danger)
         case .idle:
             EmptyView()
         }

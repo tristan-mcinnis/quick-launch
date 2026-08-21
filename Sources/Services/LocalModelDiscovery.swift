@@ -1,50 +1,16 @@
 import Foundation
 
 enum LocalModelDiscovery {
-    /// Find models already stored in LM Studio without starting its daemon.
-    /// The API refresh path replaces these identifiers with LM Studio's own
-    /// catalogue when the local server is running.
+    /// Find models already stored in LM Studio without starting its app or daemon.
     static func lmStudioModels(
         root: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lmstudio/models", isDirectory: true)
     ) -> [String] {
-        let cliModels = lmStudioCLIModels()
-        if !cliModels.isEmpty { return cliModels }
-
         return scannedLMStudioModels(root: root)
     }
 
-    /// `lms ls --json` exposes LM Studio's actual model keys and does not need
-    /// the inference server to be running. Folder names are only a fallback.
-    static func lmStudioCLIModels() -> [String] {
-        guard let executable = ExecutableResolver.resolve("lms") else { return [] }
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["ls", "--json"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return [] }
-            return parseLMStudioModels(output.fileHandleForReading.readDataToEndOfFile())
-        } catch {
-            return []
-        }
-    }
-
-    static func parseLMStudioModels(_ data: Data) -> [String] {
-        guard let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return []
-        }
-        return Array(Set(entries.compactMap { entry -> String? in
-            guard entry["type"] as? String == "llm" else { return nil }
-            return entry["modelKey"] as? String
-        })).sorted()
-    }
-
     private static func scannedLMStudioModels(root: URL) -> [String] {
+        let normalizedRoot = root.resolvingSymlinksInPath().standardizedFileURL.path
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -58,7 +24,10 @@ enum LocalModelDiscovery {
             let isMLXConfig = name == "config.json"
             guard isModelFile || isMLXConfig else { continue }
 
-            let relative = fileURL.path.replacingOccurrences(of: root.path + "/", with: "")
+            let normalizedFile = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+            let prefix = normalizedRoot + "/"
+            guard normalizedFile.hasPrefix(prefix) else { continue }
+            let relative = String(normalizedFile.dropFirst(prefix.count))
             let components = relative.split(separator: "/").map(String.init)
             guard components.count >= 3 else { continue }
             identifiers.insert(components[0] + "/" + components[1])

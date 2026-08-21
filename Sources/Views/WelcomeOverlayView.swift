@@ -36,18 +36,6 @@ struct WelcomeOverlayView: View {
                 }
                 .padding(.top, 4)
 
-                Divider().padding(.top, 6)
-
-                Toggle(isOn: $viewModel.settings.checkForUpdatesOnLaunch) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Check for updates on launch")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("We'll quietly check GitHub for new releases.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
             }
             .padding(32)
 
@@ -72,7 +60,7 @@ struct WelcomeOverlayView: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color(red: 0.55, green: 0.36, blue: 0.96))
+                .foregroundStyle(AQDesign.ColorToken.accent)
                 .frame(width: 20)
             Text(text)
                 .font(.system(size: 13))

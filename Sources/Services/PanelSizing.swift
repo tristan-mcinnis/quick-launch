@@ -13,11 +13,16 @@ enum PanelSizing {
         output: String,
         isStreaming: Bool,
         errorMessage: String?,
-        actionCount: Int = 0
+        actionCount: Int = 0,
+        suggestionCount: Int = 0,
+        showsResultActions: Bool = false
     ) -> CGFloat {
         var total = inputHeight
         if actionCount > 0 {
             total += 76 + min(CGFloat(actionCount), 6) * 42
+        }
+        if actionCount == 0, suggestionCount > 0 {
+            total += min(CGFloat(suggestionCount), 6) * 42
         }
         if !output.isEmpty || isStreaming {
             let approxLines = max(1, output.count / 60 + 1)
@@ -26,6 +31,9 @@ enum PanelSizing {
         }
         if errorMessage != nil {
             total += errorBannerHeight
+        }
+        if showsResultActions {
+            total += AQDesign.controlHeight + 1
         }
         return total
     }

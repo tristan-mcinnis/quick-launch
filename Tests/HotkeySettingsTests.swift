@@ -69,4 +69,39 @@ struct HotkeySettingsTests {
                 == UInt32(cmdKey | optionKey | shiftKey | controlKey)
         )
     }
+
+    @Test func testCommandSpaceReportsSpotlightConflict() {
+        let message = QuickSettings.knownSystemHotkeyConflict(
+            keyCode: 49,
+            modifiers: NSEvent.ModifierFlags.command.rawValue
+        )
+        #expect(message == "Command+Space is reserved by Spotlight. Choose another shortcut.")
+    }
+
+    @Test func testOptionSpaceHasNoKnownSystemConflict() {
+        #expect(
+            QuickSettings.knownSystemHotkeyConflict(
+                keyCode: 49,
+                modifiers: NSEvent.ModifierFlags.option.rawValue
+            ) == nil
+        )
+    }
+
+    @Test func testLauncherItemHotkeyConflictsWithMainHotkey() {
+        var settings = QuickSettings()
+        let configuration = LauncherItemConfiguration(
+            kind: .application,
+            itemID: "com.spotify.client",
+            hotkey: ActionHotkey(
+                keyCode: settings.hotkeyKeyCode,
+                modifiers: settings.hotkeyModifiers
+            )
+        )
+        settings.launcherItemConfigurations = [configuration]
+
+        #expect(
+            settings.launcherItemHotkeyConflict(for: configuration.id)?
+                .contains("main") == true
+        )
+    }
 }

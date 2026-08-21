@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v1.0.13 — 2026-08-21
+
+- Routed `Command+,`, the menu-bar item, and the overlay action to the real settings interface.
+- Added a small semantic design-token layer for color, type, spacing, radii, control height, and motion.
+- Made Copy and Paste Back visible 44-point controls with `Command+Shift+C` and `Command+Shift+V` shortcuts.
+- Added an in-context button for opening Accessibility settings. Local ad-hoc builds now use a stable designated requirement so one fresh approval can persist across rebuilds.
+- Removed automatic provider startup, model refresh, and update checks. Network and model work now begins only after an explicit action.
+- Renamed the history clear-row label and tightened long-name, dark-mode, focus, and Reduced Motion handling.
+- Added per-app aliases and global hotkeys. `Command+K` on a highlighted app opens its action pane, and Settings has one Apps editor for the same configuration.
+- Fixed menu-bar clicks on a secondary display being dismissed as outside clicks.
+
+- Kept the last result or draft for an adjustable 10-second quick-reopen window. Added an on-demand conversation transcript plus visible Copy and Paste Back actions under each completed reply.
+- Added a 90 ms reduce-motion-aware open fade and placed the panel on the display containing the mouse pointer.
+- Stopped automatic model discovery from running `lms`, which could launch a roughly 500 MB LM Studio service. Discovery now scans the model folder directly.
+- Main launcher hotkey conflicts now show a settings error instead of failing silently.
+- Added a cached fuzzy application launcher. Typing narrows visible app rows; arrow keys move selection and Return opens the selected app without an AI call.
+- Added direct SearXNG retrieval for `/search` and common time-sensitive questions. The selected model receives five bounded, explicitly untrusted result snippets and writes the cited answer.
+- Added performance gates for cached app matching. Quick search no longer fetches full pages, and slow search answers fall back to linked results.
+- Reduced the input toolbar to Send and one menu for Quick Actions, model choice, history, and settings.
 - Answer common date, time, day, and time-zone questions locally without an AI provider.
 
 - Fixed the global hot key silently doing nothing without Input Monitoring permission. The app now registers its configurable shortcut through the native Carbon hot-key API, so the default `Option+Space` works without keyboard-monitoring access.

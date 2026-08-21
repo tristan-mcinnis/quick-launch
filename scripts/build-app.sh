@@ -39,9 +39,12 @@ sign_bundle() {
     fi
 
     if [[ -n "$ENTITLEMENTS" && -f "$ENTITLEMENTS" ]]; then
-        codesign_path "$APP_BUNDLE" --entitlements "$ENTITLEMENTS"
+        codesign_path "$APP_BUNDLE" \
+            --requirements '=designated => identifier "com.arthurficial.apfel-quick"' \
+            --entitlements "$ENTITLEMENTS"
     else
-        codesign_path "$APP_BUNDLE"
+        codesign_path "$APP_BUNDLE" \
+            --requirements '=designated => identifier "com.arthurficial.apfel-quick"'
     fi
 
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"

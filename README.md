@@ -15,18 +15,24 @@ API, and subscription-backed models. It is based on
 ## Core features
 
 - Global, configurable hotkey and small floating panel
-- Provider and model switcher inside the overlay
+- Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
+- Opens on the display that contains the mouse pointer
+- Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
+- Direct SearXNG web search for explicit searches and time-sensitive questions
+- Provider and model switcher inside the compact overlay menu
 - Apple on-device model through the bundled `apfel` engine, when available
 - Any OpenAI-compatible endpoint through a custom base URL
 - Built-in setup for LM Studio, DeepSeek, Moonshot/Kimi, and OpenAI
-- Local LM Studio model detection through `lms`, without starting its server
+- Local LM Studio model detection by scanning `~/.lmstudio/models`, without running `lms` or starting its server
 - One-shot Claude Code subscription provider through the installed `claude` CLI
 - Pi provider that uses Pi's configured models, extensions, skills, and custom tools
-- `/search` quick action pinned to Pi by default
+- `/search` retrieval through the existing SSH connection to SearXNG
 - Selected-text actions that can show a result or replace the original text
 - Command-K fuzzy action picker and fuzzy slash aliases such as `/eml`
 - Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
 - Short follow-up threads and a local, bounded recent-history menu
+- On-demand conversation transcript plus Copy Result and Paste Back actions
+- Adjustable 10-second quick-reopen window for the last result or draft
 - API keys stored in the macOS Keychain and not synced through iCloud
 - Deterministic local math shortcut and optional automatic clipboard copy
 - No telemetry
@@ -44,10 +50,11 @@ Optional integrations must already be installed and signed in:
 
 | Provider | Requirement |
 |---|---|
-| LM Studio | LM Studio plus its `lms` command. Start the local server before inference. |
+| LM Studio | LM Studio. Start its local server before inference. Model discovery scans its model folder without opening the app. |
 | Claude Code | `claude` on `PATH` and an active Claude Code sign-in. |
 | Pi | `pi` on `PATH` with the desired providers, models, skills, and extensions configured. |
 | API providers | A compatible endpoint and, when required, an API key. |
+| Web search | SSH access to the existing `vault-vps` SearXNG service. |
 
 Superwhisper's private S1 Mini file is not called directly. Superwhisper does
 not expose that model as a general inference endpoint. A GGUF model can be
@@ -76,10 +83,18 @@ brew install Arthur-Ficial/tap/apfel
 ## Use
 
 1. Press `Option+Space`.
-2. Choose a model from the CPU menu, or keep the current choice.
-3. Type a prompt. Use actions such as `/grammar`, `/tldr`, or `/search`.
-4. Press `Return`. Press the stop button to cancel.
+2. Type an app name or configured alias such as `spot`. The app list narrows with each key. Use the arrow keys and press `Return` to open the selected app.
+3. Type a prompt or an action such as `/grammar`, `/tldr`, or `/search`.
+4. Press `Return`. Press the stop button to cancel. Use the trailing menu for actions, models, history, and settings.
 5. Type another prompt for a follow-up. The input regains focus when output finishes.
+
+The panel opens with a 90 ms fade and closes immediately. Reduced Motion
+disables the fade. Press Escape and
+open it again within 10 seconds to keep the current result or draft. Change
+that interval in **Settings → General**. A small footer under each completed
+reply can copy the result or paste it into the previous app. Both controls have
+44-point targets. Use `Command+Shift+C` to copy and `Command+Shift+V` to paste
+back. The trailing menu can show the current conversation.
 
 Select text in another app before opening apfel-quick, then press `Command-K`
 to choose an action. The default Clean Up and Translate actions replace the
@@ -110,13 +125,30 @@ prompt, output behavior, optional global hotkey, and optional provider and
 model. An unpinned action uses the overlay's current model. Use `{selection}`
 inside the prompt to control where selected or typed text is inserted.
 
-## Pi search and skills
+`Command+,`, the menu-bar Settings item, and the overlay Settings action all
+open the same settings interface. The main launcher shortcut is editable in
+**Settings → General**. A shortcut
+already owned by macOS, such as the default Spotlight `Command+Space`, shows a
+conflict message instead of failing silently.
 
-The Pi provider runs a fresh one-shot `pi` process. It keeps Pi extensions,
-skills, prompt templates, and custom tools. It disables Pi's built-in raw file
-tools for the quick overlay. The `/search` action uses this route, so it can use
-the search tools already configured in Pi without turning apfel-quick into an
-agent workspace.
+Open **Settings → Apps** to give any installed app a search alias and optional
+global hotkey. You can also highlight an app in the overlay and press
+`Command+K` to open its action pane, then edit the same alias and hotkey there.
+
+## Web search and Pi skills
+
+The `/search` action and time-sensitive questions use the existing SearXNG
+service over its warm SSH connection. Quick search sends only five ranked
+titles, links, and short snippets to the selected model. It does not fetch full
+pages. The source bundle is bounded and marked as untrusted external data.
+
+The Pi provider still runs a fresh one-shot `pi` process for prompts that need
+Pi extensions, skills, prompt templates, or custom tools. It disables Pi's
+built-in raw file tools for the quick overlay.
+
+MCP configuration in apfel-quick applies only to the managed `apfel` route.
+Pi can use the tools and skills in its own configuration. General
+OpenAI-compatible providers do not yet have a universal tool-calling loop.
 
 ## Privacy boundary
 
@@ -133,12 +165,15 @@ agent workspace.
 ```text
 OverlayView
   → QuickViewModel
+      → cached local application catalogue
+      → bounded SearXNG snippet bundle
       → managed apfel service
       → OpenAI-compatible SSE service
       → one-shot CLI service (Claude Code or Pi)
 
 QuickSettings
   → provider and model catalogue
+  → shared launcher-item aliases and hotkeys
   → saved action routes, aliases, output behavior, and hotkeys
   → bounded follow-up settings
 
@@ -153,6 +188,18 @@ Keychain
 The implementation uses SwiftUI, AppKit, `URLSession`, `Process`, and the macOS
 Security framework. CLI prompts are sent over standard input. They are never
 interpolated into a shell command.
+
+## Performance contract
+
+- The app catalogue is read once at launch. Typing never scans the file system.
+- The panel resizes from state changes. There is no idle timer or polling loop.
+- Provider startup, model discovery, update checks, and web requests run only
+  after an explicit action.
+- App discovery and 100 fuzzy filters each have a 250 ms regression gate.
+- Quick web search uses snippets rather than full-page extraction and has an
+  eight-second retrieval ceiling.
+- A silent web-answer model is stopped after 15 seconds. Linked results appear
+  instead of an endless spinner.
 
 ## Deliberately not in the core build
 

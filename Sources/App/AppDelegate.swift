@@ -36,24 +36,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Properties
 
-    private var viewModel: QuickViewModel?
+    private(set) var viewModel: QuickViewModel?
     private var panel: NSPanel?
     private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
     private var globalHotKey: GlobalHotKey?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
+    private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
     private var localMonitor: Any?
     private var mouseMonitor: Any?
     private var statusItem: NSStatusItem?
+    private var overlayClearTask: Task<Void, Never>?
+    private var overlayRetentionID: UUID?
 
     private let serverManager = ServerManager()
     private let selectedTextService = SelectedTextService()
+    private let applicationCatalog = ApplicationCatalogService()
+    private let webSearchService = SearXNGSearchService()
 
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let vm = QuickViewModel(
             selectedTextService: selectedTextService,
+            applicationCatalog: applicationCatalog,
+            webSearchService: webSearchService,
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
@@ -64,9 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        overlayClearTask?.cancel()
         globalHotKey?.invalidate()
         actionHotKeys.values.forEach { $0.invalidate() }
         actionHotKeys.removeAll()
+        launcherItemHotKeys.values.forEach { $0.invalidate() }
+        launcherItemHotKeys.removeAll()
         if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         serverManager.stop()
@@ -88,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // c. Register global hotkey (Option+Space by default)
         registerGlobalHotkey()
         registerActionHotkeys()
+        registerLauncherItemHotkeys()
 
         // d. Register local mouse monitor for click-outside dismissal
         registerMouseDismissMonitor()
@@ -123,6 +134,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.reregisterActionHotkeys() }
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .launcherItemHotkeysChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.reregisterLauncherItemHotkeys() }
+        }
+
         // Open settings in its own panel (not .sheet — avoids gray corner artifact)
         NotificationCenter.default.addObserver(
             forName: .openSettings,
@@ -145,6 +164,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .managedServiceRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self, weak viewModel] _ in
+            Task { @MainActor [weak self, weak viewModel] in
+                guard let self, let viewModel else { return }
+                self.startManagedService(for: viewModel)
+            }
+        }
+
         // Panel auto-resize: observe viewModel state and grow/shrink the panel
         // to fit the current overlay content.
         startPanelSizeObserver(viewModel: viewModel)
@@ -159,18 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             promptForLaunchAtLogin(viewModel: viewModel)
         }
 
-        // g. Start ServerManager in parallel — do NOT await here so the UI
-        //    stays responsive. When the server is ready we inject the service.
-        if settings.selectedProvider?.kind == .managedApfel {
-            startManagedService(for: viewModel)
-        }
-
-        Task { [weak viewModel] in await viewModel?.refreshDetectedModels() }
-
-        // h. Check for update silently if enabled
-        if settings.checkForUpdatesOnLaunch {
-            Task { await viewModel.checkForUpdateSilently() }
-        }
+        // Provider and network work remain dormant until the user runs an
+        // action or explicitly refreshes/checks from Settings.
     }
 
     private func startManagedService(for viewModel: QuickViewModel) {
@@ -198,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         panel.commandKHandler = { [weak viewModel] in
-            viewModel?.toggleActionPalette()
+            viewModel?.handleCommandK()
         }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
@@ -217,8 +237,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 60)
         panel.contentViewController = hostingController
 
-        // Center on active screen, upper third, after sizing
-        if let screen = NSScreen.main {
+        // Center on the display that contains the pointer.
+        if let screen = screenContainingMouse() {
             let width: CGFloat = 620
             let x = screen.frame.midX - width / 2
             let y = screen.frame.maxY - screen.frame.height * 0.35
@@ -232,29 +252,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOverlay(captureSelectionTarget: Bool = true) {
         guard let panel else { return }
+        overlayClearTask?.cancel()
+        overlayClearTask = nil
+        overlayRetentionID = nil
         if captureSelectionTarget {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
         }
-        // Re-center on the screen that currently has the mouse cursor
-        if let screen = NSScreen.main {
+        // Re-center on the screen that currently has the mouse cursor.
+        if let screen = screenContainingMouse() {
             let width: CGFloat = 620
             let x = screen.frame.midX - width / 2
             let y = screen.frame.maxY - screen.frame.height * 0.35
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
+        let shouldAnimate = !panel.isVisible
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if shouldAnimate { panel.alphaValue = 0.88 }
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKey()
+        viewModel?.requestInputFocus()
+        if shouldAnimate {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.09
+                context.allowsImplicitAnimation = true
+                panel.animator().alphaValue = 1
+            }
+        } else {
+            panel.alphaValue = 1
+        }
     }
 
     func hideOverlay() {
         guard let panel else { return }
         panel.orderOut(nil)
-        viewModel?.input = ""
-        viewModel?.clearOutput()
         viewModel?.isActionPalettePresented = false
+        viewModel?.isApplicationActionPanePresented = false
+        viewModel?.contextualApplicationID = nil
         viewModel?.actionQuery = ""
         viewModel?.rememberSelectionTarget(nil)
+
+        overlayClearTask?.cancel()
+        guard let viewModel else { return }
+        let seconds = max(0, viewModel.settings.reopenRetentionSeconds)
+        guard seconds > 0 else {
+            viewModel.clearTransientDisplay()
+            return
+        }
+        let retentionID = UUID()
+        overlayRetentionID = retentionID
+        overlayClearTask = Task { @MainActor [weak self, weak viewModel] in
+            do {
+                try await Task.sleep(for: .seconds(seconds))
+            } catch {
+                return
+            }
+            guard let self,
+                  let viewModel,
+                  self.overlayRetentionID == retentionID else { return }
+            viewModel.clearTransientDisplay()
+            self.overlayClearTask = nil
+            self.overlayRetentionID = nil
+        }
     }
 
     func toggleOverlay() {
@@ -266,6 +325,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func screenContainingMouse() -> NSScreen? {
+        let screens = NSScreen.screens
+        guard let index = ScreenPlacement.screenIndex(
+            containing: NSEvent.mouseLocation,
+            frames: screens.map(\.frame)
+        ) else { return nil }
+        return screens[index]
+    }
+
     // MARK: - Global hotkey (configurable, default Option+Space)
 
     private func registerGlobalHotkey() {
@@ -273,12 +341,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = vm.settings.hotkeyKeyCode
         let modifierFlags = NSEvent.ModifierFlags(rawValue: vm.settings.hotkeyModifiers)
 
+        if let conflict = QuickSettings.knownSystemHotkeyConflict(
+            keyCode: keyCode,
+            modifiers: vm.settings.hotkeyModifiers
+        ) {
+            vm.hotkeyRegistrationError = conflict
+            return
+        }
+
         globalHotKey = GlobalHotKey(
             keyCode: UInt32(keyCode),
             modifiers: GlobalHotKey.carbonModifiers(from: modifierFlags)
         ) { [weak self] in
             self?.toggleOverlay()
         }
+        vm.hotkeyRegistrationError = globalHotKey == nil
+            ? "That shortcut is already used by macOS or another app."
+            : nil
     }
 
     func reregisterGlobalHotkey() {
@@ -319,6 +398,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await vm.perform(action: action) }
     }
 
+    private func registerLauncherItemHotkeys() {
+        guard let vm = viewModel else { return }
+        vm.launcherItemHotkeyRegistrationErrors.removeAll()
+        for configuration in vm.settings.launcherItemConfigurations {
+            guard configuration.kind == .application,
+                  let hotkey = configuration.hotkey,
+                  vm.settings.launcherItemHotkeyConflict(
+                    for: configuration.id
+                  ) == nil,
+                  let application = applicationCatalog.applications.first(where: {
+                    $0.id == configuration.itemID
+                  })
+            else { continue }
+
+            let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+            let registered = GlobalHotKey(
+                keyCode: UInt32(hotkey.keyCode),
+                modifiers: GlobalHotKey.carbonModifiers(from: flags)
+            ) { [weak self] in
+                _ = self?.applicationCatalog.launch(application)
+            }
+            if let registered {
+                launcherItemHotKeys[configuration.id] = registered
+            } else {
+                vm.launcherItemHotkeyRegistrationErrors[configuration.id] =
+                    "This hotkey is already in use by macOS or another application."
+            }
+        }
+    }
+
+    private func reregisterLauncherItemHotkeys() {
+        launcherItemHotKeys.values.forEach { $0.invalidate() }
+        launcherItemHotKeys.removeAll()
+        registerLauncherItemHotkeys()
+    }
+
     // MARK: - Click-outside dismissal
 
     private func registerMouseDismissMonitor() {
@@ -334,12 +449,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 // Ignore clicks in the menu bar region (status item clicks are
                 // handled separately by handleStatusItemClick)
-                if let screen = NSScreen.main {
-                    let menuBarHeight: CGFloat = 30
-                    let menuBarTop = screen.frame.maxY
-                    if screenPoint.y >= menuBarTop - menuBarHeight {
-                        return
-                    }
+                if ScreenPlacement.isInMenuBarRegion(
+                    screenPoint,
+                    frames: NSScreen.screens.map(\.frame)
+                ) {
+                    return
                 }
                 if !panel.frame.contains(screenPoint) {
                     self.hideOverlay()
@@ -453,7 +567,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.isStreaming
             _ = viewModel.errorMessage
             _ = viewModel.isActionPalettePresented
+            _ = viewModel.isApplicationActionPanePresented
+            _ = viewModel.isConversationHistoryPresented
             _ = viewModel.actionQuery
+            _ = viewModel.input
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
                 guard let self, let viewModel else { return }
@@ -465,11 +582,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resizePanelForContent() {
         guard let panel, let vm = viewModel else { return }
+        let visibleBody = vm.isConversationHistoryPresented
+            ? vm.conversationTranscriptText
+            : vm.output
         let total = PanelSizing.panelHeight(
-            output: vm.output,
+            output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
-            actionCount: vm.isActionPalettePresented ? vm.actionMatches.count : 0
+            actionCount: vm.isApplicationActionPanePresented
+                ? 3
+                : (vm.isActionPalettePresented ? vm.actionMatches.count : 0),
+            suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented)
+                ? 0
+                : max(vm.applicationMatches.count, vm.savedPromptMatches.count),
+            showsResultActions: !vm.output.isEmpty && !vm.isStreaming
         )
         var frame = panel.frame
         if abs(frame.height - total) > 1 {

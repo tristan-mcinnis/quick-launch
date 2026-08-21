@@ -39,4 +39,14 @@ struct BundledHelpersTests {
             "sign_bundle must sign Contents/Helpers/apfel before the outer bundle"
         )
     }
+
+    @Test("ad-hoc builds keep a stable designated requirement")
+    func stableLocalSigningRequirement() {
+        #expect(
+            Self.buildScript.contains(
+                "designated => identifier \"com.arthurficial.apfel-quick\""
+            ),
+            "Local rebuilds need a stable identity so macOS Accessibility approval can persist"
+        )
+    }
 }

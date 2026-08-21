@@ -98,7 +98,7 @@ struct SavedPromptsEditor: View {
                 if let conflict = viewModel.settings.actionHotkeyConflict(for: prompt.id) {
                     Text(conflict)
                         .font(.system(size: 10))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AQDesign.ColorToken.danger)
                 }
             }
 

@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 3
+    var configurationVersion: Int = 5
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -15,7 +15,7 @@ struct QuickSettings: Codable, Sendable {
     var showMenuBar: Bool = true         // Show status bar icon
 
     // Updates
-    var checkForUpdatesOnLaunch: Bool = true
+    var checkForUpdatesOnLaunch: Bool = false
 
     // First run
     var hasSeenWelcome: Bool = false
@@ -24,6 +24,7 @@ struct QuickSettings: Codable, Sendable {
     // Saved prompts (aliases)
     var savedPromptPrefix: String = "/"
     var savedPrompts: [SavedPrompt] = SavedPrompt.defaults
+    var launcherItemConfigurations: [LauncherItemConfiguration] = []
 
     // Appearance
     var appearance: AppearancePreference = .system
@@ -40,6 +41,7 @@ struct QuickSettings: Codable, Sendable {
     var historyEnabled: Bool = true
     var historyLimit: Int = 20
     var newConversationAfterMinutes: Int = 15
+    var reopenRetentionSeconds: Int = 10
 
     // Persistence key
     static let defaultsKey = "QuickSettings"
@@ -52,17 +54,21 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 3
+        configurationVersion = 5
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? true
         showMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showMenuBar) ?? true
-        checkForUpdatesOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdatesOnLaunch) ?? true
+        checkForUpdatesOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdatesOnLaunch) ?? false
         hasSeenWelcome = try c.decodeIfPresent(Bool.self, forKey: .hasSeenWelcome) ?? false
         launchAtLoginPromptShown = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginPromptShown) ?? false
         savedPromptPrefix = try c.decodeIfPresent(String.self, forKey: .savedPromptPrefix) ?? "/"
         savedPrompts = try c.decodeIfPresent([SavedPrompt].self, forKey: .savedPrompts) ?? SavedPrompt.defaults
+        launcherItemConfigurations = try c.decodeIfPresent(
+            [LauncherItemConfiguration].self,
+            forKey: .launcherItemConfigurations
+        ) ?? []
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         mcpServers = try c.decodeIfPresent([MCPServerConfig].self, forKey: .mcpServers) ?? []
         providers = try c.decodeIfPresent([InferenceProvider].self, forKey: .providers)
@@ -74,6 +80,10 @@ struct QuickSettings: Codable, Sendable {
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
         historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 20
         newConversationAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .newConversationAfterMinutes) ?? 15
+        reopenRetentionSeconds = try c.decodeIfPresent(
+            Int.self,
+            forKey: .reopenRetentionSeconds
+        ) ?? 10
         if decodedConfigurationVersion < 1,
            !savedPrompts.contains(where: { $0.alias == "search" }),
            let search = SavedPrompt.defaults.first(where: { $0.alias == "search" }) {
@@ -180,6 +190,19 @@ extension QuickSettings {
             || flags.contains(.command)
     }
 
+    static func knownSystemHotkeyConflict(
+        keyCode: UInt16,
+        modifiers: UInt
+    ) -> String? {
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.function, .numericPad, .capsLock])
+        if keyCode == 49, flags == [.command] {
+            return "Command+Space is reserved by Spotlight. Choose another shortcut."
+        }
+        return nil
+    }
+
     /// Map key codes to display names.
     static func keyName(for keyCode: UInt16) -> String {
         switch keyCode {
@@ -214,6 +237,43 @@ extension QuickSettings {
             $0.id != actionID && $0.hotkey == hotkey
         }) {
             return "This conflicts with \(other.name)."
+        }
+        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) {
+            return "This conflicts with a launcher item hotkey."
+        }
+        return nil
+    }
+
+    func launcherItemConfiguration(
+        kind: LauncherItemKind,
+        itemID: String
+    ) -> LauncherItemConfiguration? {
+        launcherItemConfigurations.first {
+            $0.kind == kind && $0.itemID == itemID
+        }
+    }
+
+    func launcherItemHotkeyConflict(for configurationID: String) -> String? {
+        guard let configuration = launcherItemConfigurations.first(where: {
+            $0.id == configurationID
+        }), let hotkey = configuration.hotkey else { return nil }
+
+        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+            return "This conflicts with the main apfel-quick hotkey."
+        }
+        if let conflict = Self.knownSystemHotkeyConflict(
+            keyCode: hotkey.keyCode,
+            modifiers: hotkey.modifiers
+        ) {
+            return conflict
+        }
+        if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
+            return "This conflicts with a quick-action hotkey."
+        }
+        if launcherItemConfigurations.contains(where: {
+            $0.id != configurationID && $0.hotkey == hotkey
+        }) {
+            return "This conflicts with another launcher item."
         }
         return nil
     }

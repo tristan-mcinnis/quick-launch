@@ -52,7 +52,7 @@ struct HotkeyRecorderView: View {
             if let error = validationError {
                 Text(error)
                     .font(.system(size: 11))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AQDesign.ColorToken.danger)
             }
         }
     }
@@ -69,11 +69,13 @@ struct ActionHotkeyRecorderView: View {
     @Binding var hotkey: ActionHotkey?
     @State private var isRecording = false
     @State private var validationError: String?
+    var label: String = "Global hotkey"
+    var changeNotification: Notification.Name = .actionHotkeysChanged
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Global hotkey")
+                Text(label)
                     .font(.system(size: 13))
                 Spacer()
                 if isRecording {
@@ -114,7 +116,7 @@ struct ActionHotkeyRecorderView: View {
             if let validationError {
                 Text(validationError)
                     .font(.system(size: 11))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AQDesign.ColorToken.danger)
             }
         }
     }
@@ -127,7 +129,7 @@ struct ActionHotkeyRecorderView: View {
     }
 
     private func notifyChanged() {
-        NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
+        NotificationCenter.default.post(name: changeNotification, object: nil)
     }
 }
 
