@@ -1,4 +1,4 @@
-.PHONY: build test install clean
+.PHONY: build build-app test install clean run
 
 build:
 	swift build -c release
@@ -6,11 +6,15 @@ build:
 test:
 	swift test
 
-install: build
-	cp -r .build/release/apfel-quick /usr/local/bin/apfel-quick
+build-app:
+	./scripts/build-app.sh
+
+install: build-app
+	/usr/bin/ditto build/apfel-quick.app /Applications/apfel-quick.app
+	codesign --verify --deep --strict --verbose=2 /Applications/apfel-quick.app
 
 clean:
 	swift package clean
 
 run:
-	swift run apfel-quick
+	open /Applications/apfel-quick.app

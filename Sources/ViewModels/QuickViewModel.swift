@@ -229,6 +229,18 @@ import Observation
             return
         }
 
+        // Trusted system facts should stay fast and work without a provider.
+        if let result = SystemFactsResolver.answer(effectivePrompt) {
+            errorMessage = nil
+            output = result
+            if settings.autoCopy {
+                copyOutput()
+                markJustCopied()
+            }
+            requestInputFocus()
+            return
+        }
+
         guard let provider = provider(for: action?.providerID),
               let model = resolvedModel(for: provider, override: action?.model)
         else {

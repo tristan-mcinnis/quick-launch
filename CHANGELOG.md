@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Answer common date, time, day, and time-zone questions locally without an AI provider.
+
 - Fixed the global hot key silently doing nothing without Input Monitoring permission. The app now registers its configurable shortcut through the native Carbon hot-key API, so the default `Option+Space` works without keyboard-monitoring access.
 - Added selected-text quick actions through macOS Accessibility. Actions can show their result in the overlay or replace the selected text, with a copy fallback when replacement is unavailable.
 - Added a keyboard-first `Command-K` action picker, fuzzy action search, and fuzzy slash aliases. `/eml` can find `/email`; Tab completes and Return runs the best match.

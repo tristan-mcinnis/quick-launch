@@ -62,6 +62,9 @@ swift test
 make install
 ```
 
+`make install` builds, signs, and copies the menu-bar app to
+`/Applications/apfel-quick.app`. Run `make run` to open the installed app.
+
 The build script bundles `apfel` when it is available. A local app can still be
 built without it. Source builds that need the Apple provider require `apfel`
 on `PATH`:
@@ -87,7 +90,7 @@ selected-text action needs it.
 Slash aliases are fuzzy. `/eml` finds `/email`. Press `Tab` to complete the
 alias or `Return` to run the best match.
 
-Pure math such as `sqrt(2)^2` bypasses every model and runs locally.
+Pure math such as `sqrt(2)^2` bypasses every model and runs locally. Common date, time, day, and time-zone questions also use trusted macOS data instead of a model.
 
 ## Configure models
 

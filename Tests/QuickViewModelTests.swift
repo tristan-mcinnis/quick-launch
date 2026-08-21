@@ -458,6 +458,22 @@ struct QuickViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
+    // MARK: - 24. Local system facts do not require an AI provider
+
+    @Test func testCurrentDateAndTimeIsAnsweredLocally() async throws {
+        let service = MockQuickService()
+        await service.setShouldThrow(true)
+        let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
+        vm.input = "what's the current date and time?"
+
+        await vm.submit()
+
+        #expect(vm.output.contains(String(Calendar.current.component(.year, from: Date()))))
+        #expect(vm.errorMessage == nil)
+        #expect(await service.sendCallCount == 0)
+    }
+
     @Test func testMathDivisionByZeroSetsError() async throws {
         let vm = QuickViewModel(service: nil)
         vm.settings.autoCopy = false
