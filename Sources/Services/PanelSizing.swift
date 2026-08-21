@@ -8,6 +8,7 @@ enum PanelSizing {
     static let inputHeight: CGFloat = 60
     static let maxBodyHeight: CGFloat = 380
     static let errorBannerHeight: CGFloat = 40
+    static let attachmentHeight: CGFloat = 58
 
     static func panelHeight(
         output: String,
@@ -15,9 +16,11 @@ enum PanelSizing {
         errorMessage: String?,
         actionCount: Int = 0,
         suggestionCount: Int = 0,
-        showsResultActions: Bool = false
+        showsResultActions: Bool = false,
+        hasAttachment: Bool = false
     ) -> CGFloat {
         var total = inputHeight
+        if hasAttachment { total += attachmentHeight }
         if actionCount > 0 {
             total += 76 + min(CGFloat(actionCount), 6) * 42
         }

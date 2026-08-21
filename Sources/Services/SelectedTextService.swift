@@ -43,8 +43,40 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     func currentExternalTarget() -> SelectionTarget? {
+        if let stacked = closestExternalWindowTarget() {
+            lastTarget = stacked
+            return stacked
+        }
         rememberIfExternal(NSWorkspace.shared.frontmostApplication)
         return lastTarget
+    }
+
+    /// Resolve the first normal application window beneath Quick Launch in the
+    /// WindowServer stack. This is more reliable than activation notifications,
+    /// which can be displaced by menu extras and helper applications.
+    private func closestExternalWindowTarget() -> SelectionTarget? {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        for window in windows {
+            guard let pidNumber = window[kCGWindowOwnerPID as String] as? NSNumber,
+                  pidNumber.int32Value != ownPID,
+                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  (bounds["Width"] as? NSNumber)?.doubleValue ?? 0 > 80,
+                  (bounds["Height"] as? NSNumber)?.doubleValue ?? 0 > 40,
+                  let app = NSRunningApplication(processIdentifier: pidNumber.int32Value),
+                  !app.isTerminated,
+                  app.activationPolicy == .regular
+            else { continue }
+            return SelectionTarget(
+                processIdentifier: app.processIdentifier,
+                applicationName: app.localizedName ?? app.bundleIdentifier ?? "Previous app"
+            )
+        }
+        return nil
     }
 
     private func rememberIfExternal(_ app: NSRunningApplication?) {

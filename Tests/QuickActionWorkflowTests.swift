@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import QuickLaunch
 
@@ -113,6 +114,29 @@ struct QuickActionWorkflowTests {
         #expect(pasted)
         #expect(selection.pastedText == "Paste this result")
         #expect(selection.pastedTarget == target)
+    }
+
+    @Test func snippetCanCopyPasteOrDoBoth() async {
+        let selection = FakeSelectedTextService(text: nil)
+        let vm = QuickViewModel(
+            service: MockQuickService(),
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        let item = LauncherCatalogItem(
+            kind: .snippet,
+            itemID: "greeting",
+            title: "Greeting",
+            detail: "Test",
+            value: "Hello there"
+        )
+
+        vm.copyLauncherItem(item)
+        #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
+        #expect(await vm.pasteLauncherItem(item))
+        #expect(selection.pastedText == "Hello there")
+        #expect(await vm.copyAndPasteLauncherItem(item))
+        #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
     }
 }
 

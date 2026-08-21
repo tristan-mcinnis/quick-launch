@@ -9,6 +9,10 @@ struct InferenceProviderTests {
 
         #expect(providers.contains { $0.kind == .managedApfel })
         #expect(providers.contains { $0.kind == .openAICompatible && $0.baseURL == "http://127.0.0.1:1234/v1" })
+        #expect(providers.contains {
+            $0.id == InferenceProvider.mlxVisionID
+                && $0.baseURL == "http://127.0.0.1:8080"
+        })
     }
 
     @Test func providerSelectionHasStableFallback() {

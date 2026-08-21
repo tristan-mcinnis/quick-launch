@@ -209,6 +209,32 @@ struct QuickViewModelTests {
         #expect(callCount == 0)
     }
 
+    @Test func screenshotRoutesToLocalVisionWithDefaultPrompt() async throws {
+        let vision = MockQuickService()
+        await vision.setResponses([
+            StreamDelta(text: "A settings window", finishReason: "stop")
+        ])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, imageService: vision)
+        let attachment = QuickImageAttachment(
+            data: Data([1, 2, 3]),
+            mimeType: "image/png",
+            pixelWidth: 10,
+            pixelHeight: 20
+        )
+        vm.pendingImage = attachment
+
+        await vm.submitResolvingFuzzyAlias()
+
+        #expect(vm.output == "A settings window")
+        #expect(await vision.lastImage == attachment)
+        #expect(await vision.lastPrompt?.contains("Describe this screenshot") == true)
+        #expect(vm.currentConversation?.providerID == InferenceProvider.mlxVisionID)
+        #expect(vm.pendingImage == nil)
+    }
+
     // MARK: - 13. clearOutput() resets output and errorMessage
 
     @Test func testClearOutputResetsState() async throws {

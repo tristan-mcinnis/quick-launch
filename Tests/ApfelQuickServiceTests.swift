@@ -167,6 +167,37 @@ struct ApfelQuickServiceTests {
         #expect(request.httpMethod == "POST")
     }
 
+    @Test func testBuildRequestAddsImageToLastUserMessage() throws {
+        let service = ApfelQuickService(
+            baseURL: URL(string: "http://127.0.0.1:8080")!,
+            modelName: "vision-model",
+            ensureV1: false
+        )
+        let image = QuickImageAttachment(
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            mimeType: "image/png",
+            pixelWidth: 1,
+            pixelHeight: 1
+        )
+
+        let request = try service.buildRequest(
+            messages: [QuickMessage(role: .user, content: "What is shown?")],
+            image: image
+        )
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(json["messages"] as? [[String: Any]])
+        let user = try #require(messages.last)
+        let content = try #require(user["content"] as? [[String: Any]])
+
+        #expect(content.first?["type"] as? String == "text")
+        #expect(content.first?["text"] as? String == "What is shown?")
+        #expect(content.last?["type"] as? String == "image_url")
+        let imageURL = try #require(content.last?["image_url"] as? [String: Any])
+        #expect((imageURL["url"] as? String)?.hasPrefix("data:image/png;base64,") == true)
+        #expect(request.url?.absoluteString == "http://127.0.0.1:8080/chat/completions")
+    }
+
     // MARK: - 10. Initialised with port 11451 → URL contains "11451"
 
     @Test func testBuildRequestDifferentPort() throws {

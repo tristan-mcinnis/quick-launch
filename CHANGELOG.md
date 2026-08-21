@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added ephemeral clipboard screenshot attachments, automatically routed to the local MLX vision server without persisting image data in settings or history.
+- Improved snippet pasting by targeting the topmost external window directly behind Quick Launch.
+- Added a fully keyboard-navigable `Command+K` snippet action pane with Paste, Copy, and Copy & Paste.
+
 ## v1.1.0 — 2026-08-21
 
 - Added keyboard-first Snippets and Quick Links that read the existing Tuna stores live without copying private values into Quick Launch settings.

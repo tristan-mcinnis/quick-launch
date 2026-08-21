@@ -18,6 +18,7 @@ API, and subscription-backed models. It was forked from the original
 - Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
 - Finder indexing through the macOS CoreServices application catalog
 - Live Tuna Snippets and Quick Links, with aliases and optional per-item global hotkeys
+- Screenshot attachments from the clipboard, routed automatically to a local MLX vision model
 - Local, bounded, clearable text clipboard history on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
@@ -31,7 +32,7 @@ API, and subscription-backed models. It was forked from the original
 - Pi provider that uses Pi's configured models, extensions, skills, and custom tools
 - `/search` retrieval through the existing SSH connection to SearXNG
 - Selected-text actions that can show a result or replace the original text
-- Command-K fuzzy action picker and fuzzy slash aliases such as `/eml`
+- Command-K keyboard action picker with Paste, Copy, and Copy & Paste, plus fuzzy slash aliases such as `/eml`
 - Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
 - Short follow-up threads and a local, bounded recent-history menu
 - On-demand conversation transcript plus Copy Result and Paste Back actions
@@ -106,8 +107,16 @@ items by default, and can be disabled or cleared in **Settings → Catalogs**.
 
 The main launcher also contains Snippets and Quick Links. These catalogs read
 the existing Tuna stores live. Highlight an item and press `Command+K` to give
-it a search alias or global hotkey. Quick Launch does not duplicate snippet or
-link values into its settings.
+it a search alias or global hotkey, or use the keyboard action pane to Paste,
+Copy, or Copy & Paste. Paste targets the topmost external window directly
+behind Quick Launch. Quick Launch does not duplicate snippet or link values
+into its settings.
+
+Copy a screenshot before opening Quick Launch and it appears as a removable
+attachment. Submitting it routes the prompt and image to the local MLX vision
+server at `127.0.0.1:8080`; an empty prompt asks for a useful description.
+Screenshot bytes are kept only for the current request and are not written to
+history or settings.
 
 Select text in another app before opening Quick Launch, then press `Command-K`
 to choose an action. The default Clean Up and Translate actions replace the
@@ -170,6 +179,8 @@ OpenAI-compatible providers do not yet have a universal tool-calling loop.
 ## Privacy boundary
 
 - Math and LM Studio stay local.
+- Clipboard screenshots are sent only to the configured local MLX vision server
+  at `127.0.0.1:8080` and are not persisted by Quick Launch.
 - Apple inference stays local when the Apple provider is available.
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
@@ -227,9 +238,10 @@ interpolated into a shell command.
 
 ## Deliberately not in the core build
 
-Finder file actions, document attachments, screenshot management, the full Tuna
-translation window, screen context, voice input, window management, and a larger
-chat workspace are deferred. They need separate interaction and permission work.
+Finder file actions, document attachments, ambient screen capture, screenshot
+library management, the full Tuna translation window, voice input, window
+management, and a larger chat workspace are deferred. Explicit clipboard image
+attachments are supported; Quick Launch does not observe or record the screen.
 
 ## License
 

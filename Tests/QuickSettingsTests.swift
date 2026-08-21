@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 6)
+        #expect(settings.configurationVersion == 7)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)
         #expect(settings.clipboardHistoryHotkey.keyCode == 9)
@@ -63,6 +63,7 @@ struct QuickSettingsTests {
         #expect(decoded.savedPrompts.filter { $0.alias == "search" }.count == 1)
         #expect(decoded.savedPrompts.first(where: { $0.alias == "grammar" })?.outputBehavior == .replaceSelection)
         #expect(decoded.savedPrompts.first(where: { $0.alias == "grammar" })?.name == "Clean Up")
+        #expect(decoded.providers.contains { $0.id == InferenceProvider.mlxVisionID })
     }
 
     @Test func testActionHotkeyConflictsAreDetected() {

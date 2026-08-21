@@ -70,14 +70,52 @@ struct OverlayView: View {
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: [])
-                .disabled(viewModel.input.isEmpty && !viewModel.isStreaming)
+                .disabled(
+                    viewModel.input.isEmpty
+                        && viewModel.pendingImage == nil
+                        && !viewModel.isStreaming
+                )
                 .help(viewModel.justCopied ? "Copied to clipboard" : "Send (or press Return)")
 
                 moreMenu
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
+
+            if let image = viewModel.pendingImage {
+                Divider()
+                HStack(spacing: AQDesign.Space.standard) {
+                    if let preview = NSImage(data: image.data) {
+                        Image(nsImage: preview)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .accessibilityLabel(
+                                "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
+                            )
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Screenshot attached")
+                            .font(AQDesign.TypeToken.body.weight(.semibold))
+                        Text("Sent only to Local MLX Vision")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        viewModel.removePendingImage()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove attached screenshot")
+                    .help("Remove screenshot")
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            }
 
             if viewModel.isCatalogActionPanePresented,
                let item = viewModel.contextualCatalogItem {
@@ -452,6 +490,13 @@ private struct LauncherResultRow: View {
 private struct CatalogItemActionPane: View {
     @Bindable var viewModel: QuickViewModel
     let item: LauncherCatalogItem
+    @FocusState private var focusedAction: CatalogAction?
+
+    private enum CatalogAction: Int, CaseIterable, Hashable {
+        case paste
+        case copy
+        case copyAndPaste
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
@@ -459,9 +504,27 @@ private struct CatalogItemActionPane: View {
                 Label(item.title, systemImage: item.systemImage)
                     .font(AQDesign.TypeToken.body.weight(.semibold)).lineLimit(1)
                 Spacer()
-                Button(item.defaultActionTitle) {
-                    Task { await viewModel.performLauncherItem(item) }
-                }.buttonStyle(.borderedProminent)
+                if item.kind == .quickLink {
+                    Button(item.defaultActionTitle) {
+                        Task { await viewModel.performLauncherItem(item) }
+                    }.buttonStyle(.borderedProminent)
+                }
+            }
+            if item.kind != .quickLink {
+                HStack(spacing: AQDesign.Space.standard) {
+                    Button("Paste") {
+                        Task { await viewModel.pasteLauncherItem(item) }
+                    }
+                    .focused($focusedAction, equals: .paste)
+                    Button("Copy") { viewModel.copyLauncherItem(item) }
+                        .focused($focusedAction, equals: .copy)
+                    Button("Copy & Paste") {
+                        Task { await viewModel.copyAndPasteLauncherItem(item) }
+                    }
+                    .focused($focusedAction, equals: .copyAndPaste)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
             }
             TextField("Search alias", text: Binding(
                 get: { viewModel.launcherItemAlias(for: item) },
@@ -480,13 +543,31 @@ private struct CatalogItemActionPane: View {
                     .foregroundStyle(AQDesign.ColorToken.danger)
             }
             HStack {
-                Text("Return runs · Command-K closes actions")
+                Text("←→ Navigate · Return runs · Command-K closes")
                 Spacer()
                 Button("Done") { viewModel.closeCatalogActionPane() }.buttonStyle(.plain)
             }.font(AQDesign.TypeToken.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, AQDesign.Space.section)
         .padding(.vertical, 12)
+        .onAppear {
+            if item.kind != .quickLink { focusedAction = .paste }
+        }
+        .onKeyPress(.leftArrow) {
+            moveFocus(-1)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            moveFocus(1)
+            return .handled
+        }
+    }
+
+    private func moveFocus(_ delta: Int) {
+        guard item.kind != .quickLink else { return }
+        let actions = CatalogAction.allCases
+        let current = focusedAction?.rawValue ?? 0
+        focusedAction = actions[(current + delta + actions.count) % actions.count]
     }
 }
 

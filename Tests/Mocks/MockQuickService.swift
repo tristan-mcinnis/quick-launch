@@ -8,15 +8,23 @@ actor MockQuickService: QuickService {
     var sendCallCount: Int = 0
     var lastPrompt: String?
     var lastMessages: [QuickMessage] = []
+    var lastImage: QuickImageAttachment?
 
     nonisolated func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        send(messages: messages, image: nil)
+    }
+
+    nonisolated func send(
+        messages: [QuickMessage],
+        image: QuickImageAttachment?
+    ) -> AsyncThrowingStream<StreamDelta, Error> {
         // Capture needed state before entering actor context
         AsyncThrowingStream { continuation in
             Task {
                 let responses = await self.responses
                 let shouldThrow = await self.shouldThrow
                 let delay = await self.delay
-                await self.recordCall(messages: messages)
+                await self.recordCall(messages: messages, image: image)
                 if shouldThrow {
                     continuation.finish(throwing: MockError.intentional)
                     return
@@ -32,10 +40,11 @@ actor MockQuickService: QuickService {
         }
     }
 
-    private func recordCall(messages: [QuickMessage]) {
+    private func recordCall(messages: [QuickMessage], image: QuickImageAttachment?) {
         sendCallCount += 1
         lastMessages = messages
         lastPrompt = messages.last(where: { $0.role == .user })?.content
+        lastImage = image
     }
 
     nonisolated func healthCheck() async throws -> Bool { true }

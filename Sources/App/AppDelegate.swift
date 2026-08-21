@@ -285,6 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayRetentionID = nil
         if captureSelectionTarget {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
+            viewModel?.captureImageFromClipboard()
         }
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
@@ -660,6 +661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.isConversationHistoryPresented
             _ = viewModel.actionQuery
             _ = viewModel.input
+            _ = viewModel.pendingImage
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
                 guard let self, let viewModel else { return }
@@ -684,7 +686,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 0
                 : max(vm.launcherMatches.count, vm.savedPromptMatches.count),
-            showsResultActions: !vm.output.isEmpty && !vm.isStreaming
+            showsResultActions: !vm.output.isEmpty && !vm.isStreaming,
+            hasAttachment: vm.pendingImage != nil
         )
         var frame = panel.frame
         if abs(frame.height - total) > 1 {

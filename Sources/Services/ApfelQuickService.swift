@@ -48,6 +48,13 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
     }
 
     func buildRequest(messages: [QuickMessage]) throws -> URLRequest {
+        try buildRequest(messages: messages, image: nil)
+    }
+
+    func buildRequest(
+        messages: [QuickMessage],
+        image: QuickImageAttachment?
+    ) throws -> URLRequest {
         let url = baseURL.appendingPathComponent("chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -57,12 +64,29 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        var wireMessages: [[String: String]] = [
+        var wireMessages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt]
         ]
-        wireMessages.append(contentsOf: messages.map {
-            ["role": $0.role.rawValue, "content": $0.content]
-        })
+        for (index, message) in messages.enumerated() {
+            let isLastUserMessage = index == messages.indices.last && message.role == .user
+            if isLastUserMessage, let image {
+                wireMessages.append([
+                    "role": message.role.rawValue,
+                    "content": [
+                        ["type": "text", "text": message.content],
+                        [
+                            "type": "image_url",
+                            "image_url": ["url": image.dataURL],
+                        ],
+                    ],
+                ])
+            } else {
+                wireMessages.append([
+                    "role": message.role.rawValue,
+                    "content": message.content,
+                ])
+            }
+        }
         let body: [String: Any] = [
             "model": modelName,
             "stream": true,
@@ -73,10 +97,17 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
     }
 
     func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        send(messages: messages, image: nil)
+    }
+
+    func send(
+        messages: [QuickMessage],
+        image: QuickImageAttachment?
+    ) -> AsyncThrowingStream<StreamDelta, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try buildRequest(messages: messages)
+                    let request = try buildRequest(messages: messages, image: image)
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         throw QuickServiceError.connectionFailed("Invalid HTTP response")

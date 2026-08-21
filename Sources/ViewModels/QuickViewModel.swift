@@ -31,6 +31,7 @@ import Observation
     var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
+    var pendingImage: QuickImageAttachment?
 
     // MARK: - Dependencies
 
@@ -40,6 +41,7 @@ import Observation
     var launcherCatalog: (any LauncherCatalogServicing)?
     var clipboardHistory: (any ClipboardHistoryServicing)?
     var webSearchService: (any WebSearchServicing)?
+    var imageService: (any QuickService)?
 
     // How long submit() waits for `service` to be injected before giving up.
     // Exposed so tests can lower this to keep them fast.
@@ -67,6 +69,7 @@ import Observation
         launcherCatalog: (any LauncherCatalogServicing)? = nil,
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
+        imageService: (any QuickService)? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.settings = settings
@@ -76,6 +79,7 @@ import Observation
         self.launcherCatalog = launcherCatalog
         self.clipboardHistory = clipboardHistory
         self.webSearchService = webSearchService
+        self.imageService = imageService
         self.currentVersion = currentVersion
     }
 
@@ -84,7 +88,7 @@ import Observation
     /// Saved-prompt aliases matching the current `input`, sorted alphabetically.
     /// Empty whenever the input is not a prefix-based command.
     var savedPromptMatches: [SavedPrompt] {
-        guard catalogScope == nil, pendingQuickLinkID == nil else { return [] }
+        guard pendingImage == nil, catalogScope == nil, pendingQuickLinkID == nil else { return [] }
         return SavedPromptResolver.matches(
             input: input,
             prefix: settings.savedPromptPrefix,
@@ -197,6 +201,7 @@ import Observation
     }
 
     var launcherMatches: [LauncherSearchResult] {
+        guard pendingImage == nil else { return [] }
         if catalogScope != nil {
             return catalogMatches.map(LauncherSearchResult.item)
         }
@@ -233,6 +238,7 @@ import Observation
 
     var activeProvider: InferenceProvider? { settings.selectedProvider }
     var activeModelDisplay: String {
+        if pendingImage != nil { return "Local MLX Vision" }
         guard let provider = activeProvider else { return "No model" }
         return provider.selectedModel.isEmpty ? provider.name : provider.selectedModel
     }
@@ -265,6 +271,10 @@ import Observation
     }
 
     func submitResolvingFuzzyAlias() async {
+        if pendingImage != nil {
+            await submit()
+            return
+        }
         if let pendingQuickLink {
             openQuickLink(pendingQuickLink, input: input)
             return
@@ -380,6 +390,37 @@ import Observation
         markJustCopied()
     }
 
+    func copyLauncherItem(_ item: LauncherCatalogItem) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.value, forType: .string)
+        markJustCopied()
+    }
+
+    @discardableResult
+    func pasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
+        guard let target = selectionTarget, let selectedTextService else {
+            copyLauncherItem(item)
+            errorMessage = "No text field was available behind Quick Launch. The item was copied instead."
+            requestInputFocus()
+            return false
+        }
+        guard await selectedTextService.paste(item.value, to: target) else {
+            copyLauncherItem(item)
+            errorMessage = "Could not paste into \(target.applicationName). The item was copied instead."
+            requestInputFocus()
+            return false
+        }
+        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        return true
+    }
+
+    @discardableResult
+    func copyAndPasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
+        let pasted = await pasteLauncherItem(item)
+        copyLauncherItem(item)
+        return pasted
+    }
+
     func performLauncherItem(_ item: LauncherCatalogItem) async {
         switch item.kind {
         case .quickLink:
@@ -392,22 +433,7 @@ import Observation
                 openQuickLink(item, input: "")
             }
         case .snippet, .clipboard:
-            guard let target = selectionTarget else {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(item.value, forType: .string)
-                errorMessage = "No previous app was available. The item was copied instead."
-                markJustCopied()
-                return
-            }
-            guard let selectedTextService,
-                  await selectedTextService.paste(item.value, to: target) else {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(item.value, forType: .string)
-                errorMessage = "Could not paste into \(target.applicationName). The item was copied instead."
-                markJustCopied()
-                return
-            }
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            _ = await pasteLauncherItem(item)
         case .application:
             return
         }
@@ -687,9 +713,10 @@ import Observation
     }
 
     func submit() async {
-        guard !input.isEmpty else { return }
+        guard !input.isEmpty || pendingImage != nil else { return }
         isConversationHistoryPresented = false
         let submittedInput = input
+        let submittedImage = pendingImage
 
         // Expand saved-prompt aliases before anything else. Non-matches
         // (including inputs that look like `/foo` but reference an unknown
@@ -700,6 +727,10 @@ import Observation
             savedPrompts: settings.savedPrompts
         )
         var effectivePrompt = action?.prompt ?? input
+        if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           submittedImage != nil {
+            effectivePrompt = "Describe this screenshot and answer the most likely useful question about it."
+        }
         if action != nil, effectivePrompt.contains("{selection}") {
             guard let selected = captureSelectedText(promptForPermission: true) else {
                 errorMessage = selectedTextService?.isAccessibilityTrusted == false
@@ -779,7 +810,10 @@ import Observation
             }
         }
 
-        guard let provider = provider(for: usedWebSearch ? nil : action?.providerID),
+        guard let provider = provider(
+            for: usedWebSearch ? nil : action?.providerID,
+            image: submittedImage
+        ),
               let model = resolvedModel(for: provider, override: action?.model)
         else {
             errorMessage = "Choose a provider and model in Settings."
@@ -815,6 +849,7 @@ import Observation
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
         input = ""
+        pendingImage = nil
 
         errorMessage = nil
         output = ""
@@ -826,7 +861,7 @@ import Observation
         )
         guard let service = waitingService else {
             isStreaming = false
-            rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput)
+            rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
             errorMessage = provider.kind == .managedApfel
                 ? "Still starting on-device AI — please try again in a moment."
                 : "\(provider.name) is not available. Check its model, endpoint, or installed command."
@@ -834,7 +869,7 @@ import Observation
             return
         }
 
-        let stream = service.send(messages: requestMessages)
+        let stream = service.send(messages: requestMessages, image: submittedImage)
 
         streamTask = Task {
             do {
@@ -872,12 +907,12 @@ import Observation
                 // Cancelled — do not set errorMessage
                 isStreaming = false
                 output = ""
-                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput)
+                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             } catch {
                 errorMessage = error.localizedDescription
                 isStreaming = false
-                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput)
+                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             }
         }
@@ -1087,7 +1122,16 @@ import Observation
         for id in ids { await refreshModels(providerID: id) }
     }
 
-    private func provider(for overrideID: UUID?) -> InferenceProvider? {
+    private func provider(
+        for overrideID: UUID?,
+        image: QuickImageAttachment? = nil
+    ) -> InferenceProvider? {
+        if image != nil,
+           let vision = settings.providers.first(where: {
+               $0.id == InferenceProvider.mlxVisionID
+           }) {
+            return vision
+        }
         if let overrideID,
            let provider = settings.providers.first(where: { $0.id == overrideID }) {
             return provider
@@ -1108,6 +1152,9 @@ import Observation
         case .managedApfel:
             return service
         case .openAICompatible:
+            if provider.id == InferenceProvider.mlxVisionID, let imageService {
+                return imageService
+            }
             guard let url = URL(string: provider.baseURL) else { return nil }
             return ApfelQuickService(
                 baseURL: url,
@@ -1213,6 +1260,22 @@ import Observation
         pendingQuickLinkID = nil
         isConversationHistoryPresented = false
         actionQuery = ""
+        pendingImage = nil
+    }
+
+    func captureImageFromClipboard() {
+        pendingImage = ClipboardImageReader.attachment()
+        if pendingImage != nil {
+            errorMessage = nil
+            catalogScope = nil
+            pendingQuickLinkID = nil
+            applicationSelectionIndex = 0
+        }
+    }
+
+    func removePendingImage() {
+        pendingImage = nil
+        requestInputFocus()
     }
 
     // MARK: - Lightweight follow-up history
@@ -1272,10 +1335,15 @@ import Observation
         QuickHistoryStore.save(history, limit: settings.historyLimit)
     }
 
-    private func rollbackSubmission(messageID: UUID, restoring submittedInput: String) {
+    private func rollbackSubmission(
+        messageID: UUID,
+        restoring submittedInput: String,
+        image: QuickImageAttachment? = nil
+    ) {
         currentConversation?.messages.removeAll { $0.id == messageID }
         currentConversation?.updatedAt = Date()
         input = submittedInput
+        pendingImage = image
     }
 
     // MARK: - Launch at login

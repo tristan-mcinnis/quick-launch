@@ -89,4 +89,14 @@ struct PanelSizingTests {
         )
         #expect(height == 167)
     }
+
+    @Test func testScreenshotAttachmentAddsCompactPreviewRow() {
+        let height = PanelSizing.panelHeight(
+            output: "",
+            isStreaming: false,
+            errorMessage: nil,
+            hasAttachment: true
+        )
+        #expect(height == 118)
+    }
 }

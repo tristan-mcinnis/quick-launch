@@ -79,6 +79,7 @@ extension InferenceProvider {
     static let openAIID = UUID(uuidString: "343A1F1C-C113-493F-92B8-F93D0636603F")!
     static let claudeCodeID = UUID(uuidString: "DD72A9CC-D388-471A-A081-A8C5DD55BC3E")!
     static let piID = UUID(uuidString: "288A36B5-DA8E-4916-8A33-6CD5777762BB")!
+    static let mlxVisionID = UUID(uuidString: "9D12D3E7-3E4F-4C37-93BB-59CE9D61C66B")!
 
     static var defaults: [InferenceProvider] {
         return [
@@ -98,6 +99,20 @@ extension InferenceProvider {
                 location: .local,
                 baseURL: "http://127.0.0.1:1234/v1",
                 discovery: .lmStudio,
+                isBuiltIn: true
+            ),
+            InferenceProvider(
+                id: mlxVisionID,
+                name: "Local MLX Vision",
+                kind: .openAICompatible,
+                location: .local,
+                baseURL: "http://127.0.0.1:8080",
+                models: [
+                    "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                    "mlx-community/Qwen3-VL-2B-Instruct-4bit",
+                ],
+                selectedModel: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                discovery: .openAI,
                 isBuiltIn: true
             ),
             InferenceProvider(
