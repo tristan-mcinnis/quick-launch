@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import SwiftUI
-@testable import apfel_quick
+@testable import QuickLaunch
 
 /// TDD (RED) for dark mode (issue #10).
 ///

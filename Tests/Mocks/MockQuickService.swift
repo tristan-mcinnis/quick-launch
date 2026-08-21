@@ -1,5 +1,5 @@
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 actor MockQuickService: QuickService {
     var responses: [StreamDelta] = []

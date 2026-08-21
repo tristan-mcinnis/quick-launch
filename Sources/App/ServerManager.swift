@@ -2,7 +2,7 @@ import Foundation
 import os
 import ApfelServerKit
 
-/// Manages the apfel HTTP server process for apfel-quick.
+/// Manages the apfel HTTP server process for Quick Launch.
 ///
 /// Implementation delegates to `ApfelServerKit.ApfelServer`; this class exists
 /// to preserve the existing `@MainActor` call-site semantics for AppDelegate
@@ -55,9 +55,9 @@ final class ServerManager {
             let port = try await backing.start()
             let isManaged = await backing.isManaged
             if isManaged {
-                printToStderr("apfel-quick: server ready on port \(port)")
+                printToStderr("Quick Launch: server ready on port \(port)")
             } else {
-                printToStderr("apfel-quick: connected to existing server on port \(port)")
+                printToStderr("Quick Launch: connected to existing server on port \(port)")
             }
             state = .running(port: port, process: nil)
             return port
@@ -66,9 +66,9 @@ final class ServerManager {
             switch error {
             case .binaryNotFound:
                 message = "apfel not found. Install: brew install Arthur-Ficial/tap/apfel"
-                printToStderr("apfel-quick: error: apfel not found in PATH")
+                printToStderr("Quick Launch: error: apfel not found in PATH")
             case .noPortAvailable:
-                message = "No free port in the apfel-quick range (11450-11459)."
+                message = "No free port in the Quick Launch range (11450-11459)."
             case .spawnFailed(let underlying):
                 message = "Failed to start apfel: \(underlying)"
             case .healthCheckTimeout:
@@ -85,13 +85,13 @@ final class ServerManager {
     func stop() {
         Task { await backing.stop() }
         state = .idle
-        printToStderr("apfel-quick: server terminated")
+        printToStderr("Quick Launch: server terminated")
     }
 }
 
 // MARK: - Logging helpers (unchanged from pre-migration)
 
-private let appLogger = Logger(subsystem: "com.fullstackoptimization.apfel-quick", category: "general")
+private let appLogger = Logger(subsystem: "com.tristanmcinnis.quick-launch", category: "general")
 
 func printToStderr(_ message: String) {
     if isRunningAsAppBundle() {

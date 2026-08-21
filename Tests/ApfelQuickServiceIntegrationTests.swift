@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import Network
-@testable import apfel_quick
+@testable import QuickLaunch
 
 // Real-HTTP integration tests for ApfelQuickService.
 // These spin up an in-process HTTP server on a random local port,

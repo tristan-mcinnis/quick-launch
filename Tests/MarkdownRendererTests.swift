@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import AppKit
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("MarkdownRenderer")
 struct MarkdownRendererTests {

@@ -251,7 +251,7 @@ extension QuickSettings {
               let hotkey = action.hotkey else { return nil }
         if hotkey.keyCode == hotkeyKeyCode,
            hotkey.modifiers == hotkeyModifiers {
-            return "This conflicts with the main apfel-quick hotkey."
+            return "This conflicts with the main Quick Launch hotkey."
         }
         if let other = savedPrompts.first(where: {
             $0.id != actionID && $0.hotkey == hotkey
@@ -282,7 +282,7 @@ extension QuickSettings {
         }), let hotkey = configuration.hotkey else { return nil }
 
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
-            return "This conflicts with the main apfel-quick hotkey."
+            return "This conflicts with the main Quick Launch hotkey."
         }
         if let conflict = Self.knownSystemHotkeyConflict(
             keyCode: hotkey.keyCode,
@@ -307,7 +307,7 @@ extension QuickSettings {
     func clipboardHistoryHotkeyConflict() -> String? {
         let hotkey = clipboardHistoryHotkey
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
-            return "This conflicts with the main apfel-quick hotkey."
+            return "This conflicts with the main Quick Launch hotkey."
         }
         if let conflict = Self.knownSystemHotkeyConflict(
             keyCode: hotkey.keyCode,

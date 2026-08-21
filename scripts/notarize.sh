@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_PATH="${1:-$ROOT_DIR/build/apfel-quick.app}"
-ZIP_PATH="$ROOT_DIR/dist/apfel-quick-notarize.zip"
+APP_PATH="${1:-$ROOT_DIR/build/Quick Launch.app}"
+ZIP_PATH="$ROOT_DIR/dist/quick-launch-notarize.zip"
 KEYCHAIN_PROFILE="${KEYCHAIN_PROFILE:?set KEYCHAIN_PROFILE for xcrun notarytool}"
 
 if [[ ! -d "$APP_PATH" ]]; then

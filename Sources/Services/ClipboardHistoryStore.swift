@@ -102,7 +102,7 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
 
     private static func defaultFileURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/apfel-quick")
+            .appendingPathComponent("Library/Application Support/Quick Launch")
             .appendingPathComponent("clipboard-history.json")
     }
 }

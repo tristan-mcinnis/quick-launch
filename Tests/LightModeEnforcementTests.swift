@@ -10,8 +10,8 @@
 // color scheme through `settings.appearance.swiftUIColorScheme` so the
 // user stays in control AND the background is adaptive.
 //
-// https://github.com/Arthur-Ficial/apfel-quick/issues/1
-// https://github.com/Arthur-Ficial/apfel-quick/issues/10
+// upstream issue
+// upstream issue
 
 import Foundation
 import Testing

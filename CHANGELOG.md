@@ -4,7 +4,7 @@
 
 ## v1.1.0 — 2026-08-21
 
-- Added keyboard-first Snippets and Quick Links that read the existing Tuna stores live without copying private values into apfel-quick settings.
+- Added keyboard-first Snippets and Quick Links that read the existing Tuna stores live without copying private values into Quick Launch settings.
 - Added optional, local, deduplicated, bounded text Clipboard History. `Command+Shift+V` opens it globally, arrows navigate, Return pastes to the previous app, and `Command+C` copies the selected item.
 - Added a Catalogs settings tab for Tuna reload, item aliases, item hotkeys, clipboard retention, shortcut configuration, and clearing history.
 - Added `/System/Library/CoreServices` to app discovery so Finder appears in search and can have an alias or global hotkey.

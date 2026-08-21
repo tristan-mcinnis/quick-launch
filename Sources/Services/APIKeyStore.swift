@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum APIKeyStore {
-    private static let service = "com.fullstackoptimization.apfel-quick.provider-api-keys"
+    private static let service = "com.tristanmcinnis.quick-launch.provider-api-keys"
 
     static func load(providerID: UUID) -> String? {
         let query: [String: Any] = [

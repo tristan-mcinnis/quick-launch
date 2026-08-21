@@ -1,4 +1,4 @@
-# apfel-quick
+# Quick Launch
 
 **A lightweight, Spotlight-style AI action overlay for macOS.**
 
@@ -8,9 +8,9 @@ Press `Option+Space`, type a prompt or saved action, choose a model when you
 want, and press `Return`. The reply streams into the overlay and is copied to
 the clipboard. It remains an action tool, not a full chat workspace.
 
-This version keeps the original Apple on-device path and adds swappable local,
-API, and subscription-backed models. It is based on
-[Arthur-Ficial/apfel-quick](https://github.com/Arthur-Ficial/apfel-quick).
+Quick Launch keeps the original Apple on-device path and adds swappable local,
+API, and subscription-backed models. It was forked from the original
+`apfel-quick` project.
 
 ## Core features
 
@@ -66,14 +66,14 @@ used after it is imported into a compatible server such as LM Studio.
 ## Build and run
 
 ```bash
-git clone https://github.com/tristan-mcinnis/apfel-quick.git
-cd apfel-quick
+git clone https://github.com/tristan-mcinnis/quick-launch.git
+cd quick-launch
 swift test
 make install
 ```
 
 `make install` builds, signs, and copies the menu-bar app to
-`/Applications/apfel-quick.app`. Run `make run` to open the installed app.
+`/Applications/Quick Launch.app`. Run `make run` to open the installed app.
 
 The build script bundles `apfel` when it is available. A local app can still be
 built without it. Source builds that need the Apple provider require `apfel`
@@ -106,10 +106,10 @@ items by default, and can be disabled or cleared in **Settings → Catalogs**.
 
 The main launcher also contains Snippets and Quick Links. These catalogs read
 the existing Tuna stores live. Highlight an item and press `Command+K` to give
-it a search alias or global hotkey. apfel-quick does not duplicate snippet or
+it a search alias or global hotkey. Quick Launch does not duplicate snippet or
 link values into its settings.
 
-Select text in another app before opening apfel-quick, then press `Command-K`
+Select text in another app before opening Quick Launch, then press `Command-K`
 to choose an action. The default Clean Up and Translate actions replace the
 selection. Summarize opens the result for follow-up. `Control+Option+S` runs
 Summarize directly. macOS asks for Accessibility access the first time a
@@ -163,7 +163,7 @@ The Pi provider still runs a fresh one-shot `pi` process for prompts that need
 Pi extensions, skills, prompt templates, or custom tools. It disables Pi's
 built-in raw file tools for the quick overlay.
 
-MCP configuration in apfel-quick applies only to the managed `apfel` route.
+MCP configuration in Quick Launch applies only to the managed `apfel` route.
 Pi can use the tools and skills in its own configuration. General
 OpenAI-compatible providers do not yet have a universal tool-calling loop.
 
@@ -174,9 +174,9 @@ OpenAI-compatible providers do not yet have a universal tool-calling loop.
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
 - Text clipboard history is local, optional, deduplicated, and bounded. It is
-  stored in `~/Library/Application Support/apfel-quick/clipboard-history.json`.
+  stored in `~/Library/Application Support/Quick Launch/clipboard-history.json`.
 - Tuna snippet and Quick Link values are read at runtime and are not logged or
-  copied into apfel-quick settings.
+  copied into Quick Launch settings.
 - Selected-text actions use macOS Accessibility only to read or replace the
   current selection. They do not record the screen.
 - The app has no telemetry.

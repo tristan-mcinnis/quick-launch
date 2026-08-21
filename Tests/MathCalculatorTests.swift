@@ -1,5 +1,5 @@
 import Testing
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("MathCalculator")
 struct MathCalculatorTests {

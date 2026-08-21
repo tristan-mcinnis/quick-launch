@@ -1,8 +1,8 @@
-# apfel-quick - Project Instructions
+# Quick Launch - Project Instructions
 
 ## The Golden Goal
 
-apfel-quick is an instant AI action overlay for macOS. Press a global hotkey,
+Quick Launch is an instant AI action overlay for macOS. Press a global hotkey,
 type a prompt or saved action, choose a model when needed, press Return, and
 copy the streamed result. Keep the overlay small and fast. Apple on-device AI
 is one optional provider, not a requirement. Local OpenAI-compatible servers,

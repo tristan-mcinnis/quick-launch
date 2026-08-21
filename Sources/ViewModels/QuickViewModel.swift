@@ -1169,7 +1169,7 @@ import Observation
     func pasteOutputToPreviousApp() async -> Bool {
         guard !output.isEmpty else { return false }
         guard let selectionTarget, let selectedTextService else {
-            errorMessage = "Open apfel-quick from the app where you want to paste."
+            errorMessage = "Open Quick Launch from the app where you want to paste."
             requestInputFocus()
             return false
         }
@@ -1290,10 +1290,10 @@ import Observation
     func installUpdate() {
         guard case .updateAvailable(let version) = updateState else { return }
         updateState = .installing(newVersion: version)
-        let isHB = FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom/apfel-quick")
+        let isHB = FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom/quick-launch")
         guard isHB else {
             NSWorkspace.shared.open(
-                URL(string: "https://github.com/Arthur-Ficial/apfel-quick/releases/latest")!
+                URL(string: "https://github.com/tristan-mcinnis/quick-launch/releases/latest")!
             )
             updateState = .idle
             return
@@ -1303,7 +1303,7 @@ import Observation
             let installError = await Task.detached(priority: .utility) { () -> String? in
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = ["-c", "brew upgrade apfel-quick"]
+                process.arguments = ["-c", "brew upgrade quick-launch"]
                 do {
                     try process.run()
                     process.waitUntilExit()
@@ -1328,7 +1328,7 @@ import Observation
     func checkForUpdateManual() async {
         updateState = .checking
         do {
-            let url = URL(string: "https://api.github.com/repos/Arthur-Ficial/apfel-quick/releases/latest")!
+            let url = URL(string: "https://api.github.com/repos/tristan-mcinnis/quick-launch/releases/latest")!
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tagName = json["tag_name"] as? String else {

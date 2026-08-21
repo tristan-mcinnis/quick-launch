@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>apfel-quick</string>
+    <string>Quick Launch</string>
     <key>CFBundleDisplayName</key>
-    <string>apfel-quick</string>
+    <string>Quick Launch</string>
     <key>CFBundleIdentifier</key>
-    <string>com.arthurficial.apfel-quick</string>
+    <string>com.tristanmcinnis.quick-launch</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleExecutable</key>
-    <string>apfel-quick</string>
+    <string>quick-launch</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -29,6 +29,6 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Arthur Ficial. MIT License.</string>
+    <string>Copyright © 2026 Tristan McInnis. MIT License.</string>
 </dict>
 </plist>

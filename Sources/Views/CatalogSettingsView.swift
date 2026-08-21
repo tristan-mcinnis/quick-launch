@@ -18,7 +18,7 @@ struct CatalogSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Catalogs").font(.headline)
-            Text("Tuna snippets and Quick Links stay in Tuna. apfel-quick reads them live and never copies their values into settings.")
+            Text("Tuna snippets and Quick Links stay in Tuna. Quick Launch reads them live and never copies their values into settings.")
                 .font(AQDesign.TypeToken.label).foregroundStyle(.secondary)
 
             HStack {

@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import AppKit
-@testable import apfel_quick
+@testable import QuickLaunch
 
 // These tests are written in the RED phase — QuickViewModel does not yet exist.
 // They define the intended API and will compile once QuickViewModel is implemented.

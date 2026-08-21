@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct ApfelQuickApp: App {
+struct QuickLaunchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
@@ -14,7 +14,7 @@ struct ApfelQuickApp: App {
             if let viewModel = appDelegate.viewModel {
                 SettingsView(viewModel: viewModel)
             } else {
-                ProgressView("Starting apfel-quick…")
+                ProgressView("Starting Quick Launch…")
                     .frame(width: 600, height: 560)
             }
         }

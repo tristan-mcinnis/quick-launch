@@ -1,5 +1,5 @@
 import Testing
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("Web search intent detector")
 struct WebSearchIntentDetectorTests {

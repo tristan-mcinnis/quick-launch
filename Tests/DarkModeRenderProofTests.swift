@@ -3,7 +3,7 @@
 //
 // Runs the REAL MarkdownRenderer against a realistic response, draws the
 // resulting NSAttributedString into an NSImage under both .darkAqua and
-// .aqua appearances, and writes PNGs to /tmp/apfel-quick-render-proof/
+// .aqua appearances, and writes PNGs to /tmp/quick-launch-render-proof/
 // plus asserts text pixels are visible against the background.
 //
 // CLI-driven: `swift test --filter DarkModeRenderProof` produces the PNGs.
@@ -13,12 +13,12 @@
 import Testing
 import Foundation
 import AppKit
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("DarkModeRenderProof")
 struct DarkModeRenderProofTests {
 
-    private static let outputDir = URL(fileURLWithPath: "/tmp/apfel-quick-render-proof")
+    private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")
     private static let sampleMarkdown = """
     # Dark mode render proof
 

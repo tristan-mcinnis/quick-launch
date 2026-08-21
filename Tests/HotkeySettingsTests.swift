@@ -1,7 +1,7 @@
 import Testing
 import AppKit
 import Carbon.HIToolbox
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("HotkeySettings")
 struct HotkeySettingsTests {

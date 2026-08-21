@@ -669,12 +669,12 @@ private struct QuickActionPalette: View {
 }
 
 extension Notification.Name {
-    static let dismissOverlay = Notification.Name("ApfelQuick.dismissOverlay")
-    static let openSettings = Notification.Name("ApfelQuick.openSettings")
-    static let hotkeyChanged = Notification.Name("ApfelQuick.hotkeyChanged")
-    static let actionHotkeysChanged = Notification.Name("ApfelQuick.actionHotkeysChanged")
-    static let launcherItemHotkeysChanged = Notification.Name("ApfelQuick.launcherItemHotkeysChanged")
-    static let clipboardHistorySettingsChanged = Notification.Name("ApfelQuick.clipboardHistorySettingsChanged")
-    static let providerChanged = Notification.Name("ApfelQuick.providerChanged")
-    static let managedServiceRequested = Notification.Name("ApfelQuick.managedServiceRequested")
+    static let dismissOverlay = Notification.Name("QuickLaunch.dismissOverlay")
+    static let openSettings = Notification.Name("QuickLaunch.openSettings")
+    static let hotkeyChanged = Notification.Name("QuickLaunch.hotkeyChanged")
+    static let actionHotkeysChanged = Notification.Name("QuickLaunch.actionHotkeysChanged")
+    static let launcherItemHotkeysChanged = Notification.Name("QuickLaunch.launcherItemHotkeysChanged")
+    static let clipboardHistorySettingsChanged = Notification.Name("QuickLaunch.clipboardHistorySettingsChanged")
+    static let providerChanged = Notification.Name("QuickLaunch.providerChanged")
+    static let managedServiceRequested = Notification.Name("QuickLaunch.managedServiceRequested")
 }

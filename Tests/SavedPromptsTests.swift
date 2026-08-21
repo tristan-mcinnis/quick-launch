@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 /// TDD (RED) for saved prompts / slash commands (issue #11).
 ///

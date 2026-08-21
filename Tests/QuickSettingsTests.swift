@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 // Tests for QuickSettings persistence.
 // Uses an isolated UserDefaults suite per test to avoid cross-test contamination.
@@ -10,7 +10,7 @@ struct QuickSettingsTests {
 
     // Isolated UserDefaults suite name — unique per test run
     private func freshDefaults() -> UserDefaults {
-        let suiteName = "com.apfelquick.tests.\(UUID().uuidString)"
+        let suiteName = "com.quicklaunch.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         return defaults
     }

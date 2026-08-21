@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 // TDD (RED phase) — ServerManager does not yet exist.
 // Tests define the intended API for buildArguments(port:).

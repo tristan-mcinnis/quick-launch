@@ -1,6 +1,6 @@
 import CoreFoundation
 
-/// Pure layout calculation for the apfel-quick overlay panel height.
+/// Pure layout calculation for the Quick Launch overlay panel height.
 /// Extracted from AppDelegate so it can be unit-tested without AppKit
 /// and reused by the observation-driven resize path.
 enum PanelSizing {

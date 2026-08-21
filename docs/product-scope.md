@@ -1,6 +1,6 @@
 # Product scope
 
-apfel-quick is a keyboard-first launcher. The current build handles these jobs:
+Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 
 1. Launch apps.
 2. Translate or transform selected and typed text.
@@ -64,7 +64,7 @@ Keep Tuna installed until each replacement passes the same real interaction.
 - The native app and clipboard catalogs are active. Clipboard history is text-only.
 - Do not port Caffeinate, Screen OCR, Screenshots, or file search unless the product scope changes.
 
-Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in apfel-quick.
+Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in Quick Launch.
 
 ## Privacy
 

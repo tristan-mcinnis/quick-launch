@@ -20,7 +20,7 @@ struct WelcomeOverlayView: View {
                 }
                 .frame(width: 64, height: 64)
 
-                Text("Welcome to apfel-quick")
+                Text("Welcome to Quick Launch")
                     .font(.system(size: 22, weight: .bold))
 
                 Text("Press Option+Space anywhere, choose a model, and run a quick action. The result streams in and copies to your clipboard automatically.")

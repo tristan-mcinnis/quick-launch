@@ -6,7 +6,7 @@ enum ActionOutputBehavior: String, Codable, Sendable, CaseIterable, Hashable {
 
     var displayName: String {
         switch self {
-        case .showInOverlay: "Show in apfel-quick"
+        case .showInOverlay: "Show in Quick Launch"
         case .replaceSelection: "Replace selected text"
         }
     }

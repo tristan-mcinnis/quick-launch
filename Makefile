@@ -10,11 +10,11 @@ build-app:
 	./scripts/build-app.sh
 
 install: build-app
-	/usr/bin/ditto build/apfel-quick.app /Applications/apfel-quick.app
-	codesign --verify --deep --strict --verbose=2 /Applications/apfel-quick.app
+	/usr/bin/ditto "build/Quick Launch.app" "/Applications/Quick Launch.app"
+	codesign --verify --deep --strict --verbose=2 "/Applications/Quick Launch.app"
 
 clean:
 	swift package clean
 
 run:
-	open /Applications/apfel-quick.app
+	open "/Applications/Quick Launch.app"

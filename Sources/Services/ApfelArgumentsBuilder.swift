@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pure builder for the argument list passed to `apfel --serve`. Always
-/// emits `--cors --permissive` (apfel-quick's required defaults) and
+/// emits `--cors --permissive` (Quick Launch's required defaults) and
 /// appends `--mcp <path>` for each enabled MCP server with a non-empty
 /// path.
 enum ApfelArgumentsBuilder {

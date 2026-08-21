@@ -1,11 +1,11 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("Quick history store")
 struct QuickHistoryStoreTests {
     private func freshDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "com.apfelquick.history-tests.\(UUID().uuidString)")!
+        UserDefaults(suiteName: "com.quicklaunch.history-tests.\(UUID().uuidString)")!
     }
 
     @Test func upsertKeepsNewestConversationAndBoundsHistory() {

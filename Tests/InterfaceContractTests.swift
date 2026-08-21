@@ -15,7 +15,7 @@ struct InterfaceContractTests {
 
     @Test("Command-comma routes to the real settings interface")
     func settingsRoute() throws {
-        let source = try Self.source("Sources/App/ApfelQuickApp.swift")
+        let source = try Self.source("Sources/App/QuickLaunchApp.swift")
         #expect(source.contains("SettingsView(viewModel: viewModel)"))
         #expect(source.contains("CommandGroup(replacing: .appSettings)"))
         #expect(source.contains("keyboardShortcut(\",\", modifiers: .command)"))

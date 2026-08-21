@@ -194,7 +194,7 @@ private struct AboutTab: View {
                 Text("About").font(.headline)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("apfel-quick")
+                    Text("Quick Launch")
                         .font(.system(size: 15, weight: .semibold))
                     Text("Version \(viewModel.currentVersion)")
                         .font(.system(size: 12))
@@ -214,7 +214,7 @@ private struct AboutTab: View {
 
                 Link(
                     "Source on GitHub",
-                    destination: URL(string: "https://github.com/tristan-mcinnis/apfel-quick")!
+                    destination: URL(string: "https://github.com/tristan-mcinnis/quick-launch")!
                 )
                 .font(.system(size: 12))
             }

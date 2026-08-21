@@ -2,12 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="apfel-quick"
-APP_BUNDLE="$ROOT_DIR/build/${APP_NAME}.app"
+APP_NAME="quick-launch"
+APP_DISPLAY_NAME="Quick Launch"
+SWIFT_TARGET="QuickLaunch"
+APP_BUNDLE="$ROOT_DIR/build/${APP_DISPLAY_NAME}.app"
 VERSION="$(tr -d '\n' < "$ROOT_DIR/.version")"
 ICON_SOURCE="$ROOT_DIR/Sources/Resources/AppIcon.icns"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/apfel-quick.entitlements}"
+ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/quick-launch.entitlements}"
 
 resolve_helper() {
     if [[ -n "${APFEL_HELPER_PATH:-}" && -x "${APFEL_HELPER_PATH}" ]]; then
@@ -40,11 +42,11 @@ sign_bundle() {
 
     if [[ -n "$ENTITLEMENTS" && -f "$ENTITLEMENTS" ]]; then
         codesign_path "$APP_BUNDLE" \
-            --requirements '=designated => identifier "com.arthurficial.apfel-quick"' \
+            --requirements '=designated => identifier "com.tristanmcinnis.quick-launch"' \
             --entitlements "$ENTITLEMENTS"
     else
         codesign_path "$APP_BUNDLE" \
-            --requirements '=designated => identifier "com.arthurficial.apfel-quick"'
+            --requirements '=designated => identifier "com.tristanmcinnis.quick-launch"'
     fi
 
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
@@ -53,7 +55,7 @@ sign_bundle() {
 print "==> Building ${APP_NAME} ${VERSION}"
 swift build -c release --package-path "$ROOT_DIR"
 BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR")"
-BIN_PATH="${BIN_DIR}/${APP_NAME}"
+BIN_PATH="${BIN_DIR}/${SWIFT_TARGET}"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Helpers"

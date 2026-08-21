@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 /// End-to-end: QuickViewModel.submit must expand a saved-prompt input
 /// before handing it to the service, and never send the raw `/alias`

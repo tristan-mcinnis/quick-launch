@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("SearXNG search service")
 struct SearXNGSearchServiceTests {

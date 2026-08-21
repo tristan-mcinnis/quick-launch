@@ -556,7 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem?.button {
             button.image = NSImage(
                 systemSymbolName: "bolt.fill",
-                accessibilityDescription: "apfel-quick"
+                accessibilityDescription: "Quick Launch"
             )
             button.imagePosition = .imageOnly
             button.action = #selector(handleStatusItemClick(_:))
@@ -582,7 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         let show = NSMenuItem(
-            title: "Open apfel-quick",
+            title: "Open Quick Launch",
             action: #selector(showOverlayFromMenu),
             keyEquivalent: " "
         )
@@ -609,7 +609,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         let version = NSMenuItem(
-            title: "apfel-quick v\(Bundle.main.shortVersion)",
+            title: "Quick Launch v\(Bundle.main.shortVersion)",
             action: nil,
             keyEquivalent: ""
         )
@@ -617,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(version)
 
         let website = NSMenuItem(
-            title: "Visit apfel-quick.franzai.com",
+            title: "View Quick Launch on GitHub",
             action: #selector(openWebsite),
             keyEquivalent: ""
         )
@@ -627,7 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
-            title: "Quit apfel-quick",
+            title: "Quit Quick Launch",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -710,7 +710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openWebsite() {
-        if let url = URL(string: "https://apfel-quick.franzai.com") {
+        if let url = URL(string: "https://github.com/tristan-mcinnis/quick-launch") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -786,8 +786,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func promptForLaunchAtLogin(viewModel: QuickViewModel) {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Start apfel-quick at login?"
-        alert.informativeText = "Keep apfel-quick ready in your menu bar every time you sign in. You can change this later in Settings."
+        alert.messageText = "Start Quick Launch at login?"
+        alert.informativeText = "Keep Quick Launch ready in your menu bar every time you sign in. You can change this later in Settings."
         alert.addButton(withTitle: "Enable at Login")
         alert.addButton(withTitle: "Not Now")
         let enable = alert.runModal() == .alertFirstButtonReturn
@@ -807,7 +807,7 @@ extension QuickViewModel {
     /// Fetches latest release tag from GitHub and calls handleUpdateCheck.
     /// Never surfaces errors to the user.
     func checkForUpdateSilently() async {
-        guard let url = URL(string: "https://api.github.com/repos/Arthur-Ficial/apfel-quick/releases/latest") else { return }
+        guard let url = URL(string: "https://api.github.com/repos/tristan-mcinnis/quick-launch/releases/latest") else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

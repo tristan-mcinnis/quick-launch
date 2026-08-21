@@ -6,16 +6,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="apfel-quick"
+APP_NAME="quick-launch"
 VERSION="$(tr -d '\n' < "$ROOT_DIR/.version")"
 TAG="v${VERSION}"
 ARCH="$(uname -m)"
 DIST_DIR="$ROOT_DIR/dist"
 
 # ── Signing defaults ────────────────────────────────────────────────────────
-SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Franz Enzenhofer (7D2YX5DQ6M)}"
+SIGN_IDENTITY="${SIGN_IDENTITY:?Set SIGN_IDENTITY to your Developer ID Application certificate}"
 KEYCHAIN_PROFILE="${KEYCHAIN_PROFILE:-notarytool}"
-ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/apfel-quick.entitlements}"
+ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/quick-launch.entitlements}"
 
 # ── Pre-flight ──────────────────────────────────────────────────────────────
 print "==> Release $TAG"
@@ -63,7 +63,7 @@ print "==> Notarisation ticket verified."
 # ── Update landing page: softwareVersion, downloadUrl, and download button ───
 print ""
 print "==> Updating site/index.html for $VERSION..."
-VERSIONED_ZIP_URL="https://github.com/Arthur-Ficial/apfel-quick/releases/download/${TAG}/${APP_NAME}-${TAG}-macos-${ARCH}.zip"
+VERSIONED_ZIP_URL="https://github.com/tristan-mcinnis/quick-launch/releases/download/${TAG}/${APP_NAME}-${TAG}-macos-${ARCH}.zip"
 
 if [[ -f "$ROOT_DIR/site/index.html" ]]; then
     sed -i '' "s|\"softwareVersion\": \"[^\"]*\"|\"softwareVersion\": \"$VERSION\"|" "$ROOT_DIR/site/index.html"
@@ -92,7 +92,7 @@ SHA_FILE="$DIST_DIR/SHA256SUMS"
 HOMEBREW_CASK="$DIST_DIR/homebrew/${APP_NAME}.rb"
 
 gh release create "$TAG" \
-    --repo Arthur-Ficial/apfel-quick \
+    --repo tristan-mcinnis/quick-launch \
     --title "${APP_NAME} ${TAG}" \
     --generate-notes \
     "$APP_ZIP" \
@@ -102,20 +102,20 @@ gh release create "$TAG" \
 
 # ── Push cask to homebrew-tap ────────────────────────────────────────────────
 print ""
-print "==> Pushing cask to Arthur-Ficial/homebrew-tap..."
+print "==> Pushing cask to tristan-mcinnis/homebrew-tap..."
 CASK_B64="$(base64 < "$HOMEBREW_CASK")"
-EXISTING_SHA="$(gh api repos/Arthur-Ficial/homebrew-tap/contents/Casks/apfel-quick.rb --jq '.sha' 2>/dev/null || true)"
+EXISTING_SHA="$(gh api repos/tristan-mcinnis/homebrew-tap/contents/Casks/quick-launch.rb --jq '.sha' 2>/dev/null || true)"
 if [[ -n "$EXISTING_SHA" ]]; then
-    gh api repos/Arthur-Ficial/homebrew-tap/contents/Casks/apfel-quick.rb \
+    gh api repos/tristan-mcinnis/homebrew-tap/contents/Casks/quick-launch.rb \
         -X PUT \
-        -f message="cask: update apfel-quick to ${TAG}" \
+        -f message="cask: update quick-launch to ${TAG}" \
         -f content="$CASK_B64" \
         -f sha="$EXISTING_SHA" \
         --jq '.commit.sha' > /dev/null
 else
-    gh api repos/Arthur-Ficial/homebrew-tap/contents/Casks/apfel-quick.rb \
+    gh api repos/tristan-mcinnis/homebrew-tap/contents/Casks/quick-launch.rb \
         -X PUT \
-        -f message="cask: add apfel-quick ${TAG}" \
+        -f message="cask: add quick-launch ${TAG}" \
         -f content="$CASK_B64" \
         --jq '.commit.sha' > /dev/null
 fi
@@ -125,39 +125,39 @@ print "    Cask updated in tap."
 print ""
 print "==> Deploying website to Cloudflare Pages..."
 source ~/.env 2>/dev/null || true
-npx wrangler pages deploy "$ROOT_DIR/site" --project-name apfel-quick
+npx wrangler pages deploy "$ROOT_DIR/site" --project-name quick-launch
 
 # ── Ensure custom domain is wired up (idempotent) ───────────────────────────
 print ""
-print "==> Ensuring apfel-quick.franzai.com is configured..."
+print "==> Ensuring quick-launch.pages.dev is configured..."
 EXISTING_DOMAINS="$(curl -s \
-    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/apfel-quick/domains" \
+    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/quick-launch/domains" \
     -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
     | python3 -c "import json,sys; [print(d['name']) for d in json.load(sys.stdin).get('result',[])]" 2>/dev/null)"
 
-if ! echo "$EXISTING_DOMAINS" | grep -q "apfel-quick.franzai.com"; then
+if ! echo "$EXISTING_DOMAINS" | grep -q "quick-launch.pages.dev"; then
     print "    Adding custom domain to Cloudflare Pages..."
     curl -s -X POST \
-        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/apfel-quick/domains" \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/quick-launch/domains" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" \
-        -d '{"name":"apfel-quick.franzai.com"}' > /dev/null
+        -d '{"name":"quick-launch.pages.dev"}' > /dev/null
 else
     print "    Custom domain already registered."
 fi
 
 EXISTING_DNS="$(curl -s \
-    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?name=apfel-quick.franzai.com" \
+    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?name=quick-launch.pages.dev" \
     -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
     | python3 -c "import json,sys; r=json.load(sys.stdin).get('result',[]); print(r[0]['type'] if r else '')" 2>/dev/null)"
 
 if [[ -z "$EXISTING_DNS" ]]; then
-    print "    Creating CNAME apfel-quick.franzai.com → apfel-quick.pages.dev..."
+    print "    Creating CNAME quick-launch.pages.dev → quick-launch.pages.dev..."
     curl -s -X POST \
         "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" \
-        -d '{"type":"CNAME","name":"apfel-quick","content":"apfel-quick.pages.dev","ttl":1,"proxied":true}' > /dev/null
+        -d '{"type":"CNAME","name":"quick-launch","content":"quick-launch.pages.dev","ttl":1,"proxied":true}' > /dev/null
 else
     print "    DNS CNAME already exists."
 fi
@@ -172,7 +172,7 @@ fail() { print "    [FAIL] $1" >&2; FAIL=1; }
 
 # 1. GitHub release exists and has all expected assets
 RELEASE_TMPFILE="$(mktemp)"
-gh release view "$TAG" --repo Arthur-Ficial/apfel-quick --json assets,isDraft,tagName > "$RELEASE_TMPFILE" 2>/dev/null
+gh release view "$TAG" --repo tristan-mcinnis/quick-launch --json assets,isDraft,tagName > "$RELEASE_TMPFILE" 2>/dev/null
 [[ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['isDraft'])" "$RELEASE_TMPFILE")" == "False" ]] \
     && pass "GitHub release $TAG is published" || fail "GitHub release $TAG is draft or missing"
 
@@ -189,7 +189,7 @@ DOWNLOAD_DIR="$(mktemp -d)"
 DOWNLOADED_ZIP="$DOWNLOAD_DIR/${APP_NAME}-${TAG}-macos-${ARCH}.zip"
 print "    Downloading versioned ZIP from GitHub..."
 if curl -fsSL -o "$DOWNLOADED_ZIP" \
-    "https://github.com/Arthur-Ficial/apfel-quick/releases/download/${TAG}/${APP_NAME}-${TAG}-macos-${ARCH}.zip" 2>/dev/null; then
+    "https://github.com/tristan-mcinnis/quick-launch/releases/download/${TAG}/${APP_NAME}-${TAG}-macos-${ARCH}.zip" 2>/dev/null; then
     EXPECTED_SHA="$(grep "${APP_NAME}-${TAG}-macos-${ARCH}.zip" "$SHA_FILE" | awk '{print $1}')"
     ACTUAL_SHA="$(shasum -a 256 "$DOWNLOADED_ZIP" | awk '{print $1}')"
     [[ "$EXPECTED_SHA" == "$ACTUAL_SHA" ]] \
@@ -219,8 +219,8 @@ if curl -fsSL -o "$DOWNLOADED_ZIP" \
 
     # Code signature identity
     SIGNER="$(codesign -dvvv "$EXTRACTED_APP" 2>&1 | grep "^Authority=" | head -1)"
-    [[ "$SIGNER" == *"Franz Enzenhofer"* ]] \
-        && pass "Signed by Franz Enzenhofer (7D2YX5DQ6M)" || fail "Unexpected signer: $SIGNER"
+    [[ "$SIGNER" == *"Developer ID Application:"* ]] \
+        && pass "Signed with a Developer ID Application certificate" || fail "Unexpected signer: $SIGNER"
 
     rm -rf "$EXTRACT_DIR"
 else
@@ -229,26 +229,26 @@ fi
 rm -rf "$DOWNLOAD_DIR"
 
 # 4. Landing page is live on both Pages URL and custom domain
-SITE_STATUS="$(curl -so /dev/null -w "%{http_code}" https://apfel-quick.pages.dev)"
+SITE_STATUS="$(curl -so /dev/null -w "%{http_code}" https://quick-launch.pages.dev)"
 [[ "$SITE_STATUS" == "200" ]] \
-    && pass "Pages URL (apfel-quick.pages.dev) HTTP $SITE_STATUS" || fail "Pages URL HTTP $SITE_STATUS"
+    && pass "Pages URL (quick-launch.pages.dev) HTTP $SITE_STATUS" || fail "Pages URL HTTP $SITE_STATUS"
 
-CUSTOM_STATUS="$(curl -so /dev/null -w "%{http_code}" https://apfel-quick.franzai.com)"
+CUSTOM_STATUS="$(curl -so /dev/null -w "%{http_code}" https://quick-launch.pages.dev)"
 [[ "$CUSTOM_STATUS" == "200" ]] \
-    && pass "Custom domain (apfel-quick.franzai.com) HTTP $CUSTOM_STATUS" || fail "Custom domain HTTP $CUSTOM_STATUS (DNS or Pages custom domain not configured)"
+    && pass "Custom domain (quick-launch.pages.dev) HTTP $CUSTOM_STATUS" || fail "Custom domain HTTP $CUSTOM_STATUS (DNS or Pages custom domain not configured)"
 
 # 5. GitHub API returns this tag (download button will show correct version)
-API_TAG="$(curl -s https://api.github.com/repos/Arthur-Ficial/apfel-quick/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)"
+API_TAG="$(curl -s https://api.github.com/repos/tristan-mcinnis/quick-launch/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)"
 [[ "$API_TAG" == "$TAG" ]] \
     && pass "GitHub API latest = $TAG (download button correct)" || fail "GitHub API latest = '$API_TAG', expected '$TAG'"
 
 # 6. Stable download URL redirects to this tag's ZIP
-REDIRECT_LOCATION="$(curl -sI "https://github.com/Arthur-Ficial/apfel-quick/releases/latest/download/${APP_NAME}-macos-${ARCH}.zip" | grep -i "^location:" | tr -d '\r')"
+REDIRECT_LOCATION="$(curl -sI "https://github.com/tristan-mcinnis/quick-launch/releases/latest/download/${APP_NAME}-macos-${ARCH}.zip" | grep -i "^location:" | tr -d '\r')"
 [[ "$REDIRECT_LOCATION" == *"$TAG"* ]] \
     && pass "Stable URL redirects to $TAG" || fail "Stable URL redirects to wrong version: $REDIRECT_LOCATION"
 
 # 7. Homebrew tap has correct version
-TAP_VERSION="$(gh api repos/Arthur-Ficial/homebrew-tap/contents/Casks/apfel-quick.rb --jq '.content' 2>/dev/null | base64 -d | grep '^  version ' | tr -d ' "' | sed 's/version//')"
+TAP_VERSION="$(gh api repos/tristan-mcinnis/homebrew-tap/contents/Casks/quick-launch.rb --jq '.content' 2>/dev/null | base64 -d | grep '^  version ' | tr -d ' "' | sed 's/version//')"
 [[ "$TAP_VERSION" == "$VERSION" ]] \
     && pass "homebrew-tap cask version = $VERSION" || fail "homebrew-tap cask version = '$TAP_VERSION', expected '$VERSION'"
 
@@ -263,5 +263,5 @@ fi
 # ── Done ────────────────────────────────────────────────────────────────────
 print ""
 print "==> Done! $TAG is live."
-print "    Release: https://github.com/Arthur-Ficial/apfel-quick/releases/tag/$TAG"
-print "    Site:    https://apfel-quick.franzai.com"
+print "    Release: https://github.com/tristan-mcinnis/quick-launch/releases/tag/$TAG"
+print "    Site:    https://quick-launch.pages.dev"

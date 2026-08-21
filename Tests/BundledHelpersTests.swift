@@ -44,7 +44,7 @@ struct BundledHelpersTests {
     func stableLocalSigningRequirement() {
         #expect(
             Self.buildScript.contains(
-                "designated => identifier \"com.arthurficial.apfel-quick\""
+                "designated => identifier \"com.tristanmcinnis.quick-launch\""
             ),
             "Local rebuilds need a stable identity so macOS Accessibility approval can persist"
         )

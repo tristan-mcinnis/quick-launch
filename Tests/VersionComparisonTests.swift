@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import apfel_quick
+@testable import QuickLaunch
 
 // Tests for semantic version comparison logic.
 // QuickViewModel.isVersionNewer(_:than:) is a static helper used by

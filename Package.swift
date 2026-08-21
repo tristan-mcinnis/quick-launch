@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "apfel-quick",
+    name: "QuickLaunch",
     platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-testing.git", from: "0.12.0"),
@@ -11,7 +11,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "apfel-quick",
+            name: "QuickLaunch",
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "ApfelServerKit", package: "apfel-server-kit"),
@@ -31,9 +31,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "ApfelQuickTests",
+            name: "QuickLaunchTests",
             dependencies: [
-                "apfel-quick",
+                "QuickLaunch",
                 .product(name: "Testing", package: "swift-testing"),
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "ApfelServerKit", package: "apfel-server-kit"),

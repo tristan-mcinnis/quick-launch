@@ -2,7 +2,7 @@
 
 Status: **removed in April 2026 after ~3 attempts. Never worked end-to-end.**
 
-This document exists so the next person who thinks "let's bolt voice transcription onto apfel-quick by shelling out to `ohr`" understands what was tried, why it was *architecturally* appealing, and why it never actually transcribed a single word of user speech on an installed, signed, notarized apfel-quick.app.
+This document exists so the next person who thinks "let's bolt voice transcription onto Quick Launch by shelling out to `ohr`" understands what was tried, why it was *architecturally* appealing, and why it never actually transcribed a single word of user speech on an installed, signed, notarized Quick Launch.app.
 
 If you're about to rebuild voice input: **don't start with a subprocess.** Skip to the "What to do instead" section at the bottom.
 
@@ -16,7 +16,7 @@ If you're about to rebuild voice input: **don't start with a subprocess.** Skip 
 
 ```
 ┌────────────────────────┐     spawn     ┌──────────────────────────┐
-│ apfel-quick (GUI .app) │ ────────────► │ ohr --listen -o json     │
+│ Quick Launch (GUI .app) │ ────────────► │ ohr --listen -o json     │
 │  - NSPanel overlay     │   stdout/JSON │   --language en-US       │
 │  - QuickViewModel      │ ◄──────────── │   --quiet                │
 │  - VoiceTranscriber    │               │ (on-device Speech fwk)   │
@@ -40,9 +40,9 @@ In rough order of discovery:
 
 First build spawned `ohr --listen`. macOS TCC silently refused the child. No prompt, no entry under System Settings → Privacy → Microphone, no error — `ohr` just exited immediately.
 
-**Root cause:** apfel-quick itself had never touched an audio API, so it had no TCC record. macOS assigns the "responsible" process for child mic requests to the parent; a parent with no mic history is treated as "denied, notDetermined" depending on OS version, and the child never gets to prompt.
+**Root cause:** Quick Launch itself had never touched an audio API, so it had no TCC record. macOS assigns the "responsible" process for child mic requests to the parent; a parent with no mic history is treated as "denied, notDetermined" depending on OS version, and the child never gets to prompt.
 
-**Fix attempted:** call `AVCaptureDevice.requestAccess(for: .audio)` in `VoiceTranscriber.start()` before spawning `ohr`. This was supposed to trigger the TCC prompt against apfel-quick's bundle ID using `NSMicrophoneUsageDescription`.
+**Fix attempted:** call `AVCaptureDevice.requestAccess(for: .audio)` in `VoiceTranscriber.start()` before spawning `ohr`. This was supposed to trigger the TCC prompt against Quick Launch's bundle ID using `NSMicrophoneUsageDescription`.
 
 ### 2. Hardened Runtime blocked AVCaptureDevice (v1.0.5 → v1.0.6)
 
@@ -87,7 +87,7 @@ No combination of in-process permission requests, bundled helper signing, entitl
 
 If voice input is still wanted:
 
-- **Use Apple's `Speech` framework in-process**, not a subprocess. `SFSpeechRecognizer` + `SFSpeechAudioBufferRecognitionRequest` runs inside apfel-quick's own sandbox, owns its own mic grant, has one (1) entitlement to worry about, and there is no child-process TCC inheritance puzzle to solve. It's also what apfel-chat does.
+- **Use Apple's `Speech` framework in-process**, not a subprocess. `SFSpeechRecognizer` + `SFSpeechAudioBufferRecognitionRequest` runs inside Quick Launch's own sandbox, owns its own mic grant, has one (1) entitlement to worry about, and there is no child-process TCC inheritance puzzle to solve.
 
 - **If you really need an external engine** (e.g. Whisper via whisper.cpp for offline privacy beyond Apple's), embed it as a **library** (static lib or XPC service inside the bundle), not as a CLI binary. An XPC service gets its own signed identity and its own TCC grant that you can reason about.
 
@@ -104,7 +104,7 @@ The following were deleted when this doc was written. `git log` will show them:
 - `Tests/Fixtures/hello.m4a`
 - Voice fields in `QuickSettings`, voice methods in `QuickViewModel`, mic button in `OverlayView`, Voice tab in `SettingsView`
 - `NSMicrophoneUsageDescription` in `Info.plist`
-- `com.apple.security.device.audio-input` in `apfel-quick.entitlements`
+- `com.apple.security.device.audio-input` in `Quick Launch.entitlements`
 - `ohr` embedding + signing in `scripts/build-app.sh`
 - ohr/entitlement cases in `Tests/BundledHelpersTests.swift`
 

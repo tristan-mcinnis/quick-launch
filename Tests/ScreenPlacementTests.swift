@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("Screen placement")
 struct ScreenPlacementTests {

@@ -3,11 +3,11 @@
 // The user-visible version must come from the bundle's CFBundleShortVersionString,
 // not the hardcoded "1.0.0" default parameter on QuickViewModel.init.
 //
-// https://github.com/Arthur-Ficial/apfel-quick/issues/3
+// upstream issue
 
 import Foundation
 import Testing
-@testable import apfel_quick
+@testable import QuickLaunch
 
 @Suite("BundleVersion")
 struct BundleVersionTests {
