@@ -55,4 +55,17 @@ struct PanelSizingTests {
         let b = PanelSizing.panelHeight(output: "abc", isStreaming: true, errorMessage: nil)
         #expect(a == b)
     }
+
+    @Test func testActionPickerAddsBoundedHeight() {
+        let three = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, actionCount: 3
+        )
+        let many = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, actionCount: 20
+        )
+        let threeExpected: CGFloat = 262
+        let manyExpected: CGFloat = 388
+        #expect(three == threeExpected)
+        #expect(many == manyExpected)
+    }
 }

@@ -15,12 +15,16 @@ import Observation
     var history: [QuickConversation] = []
     var currentConversation: QuickConversation?
     var modelRefreshMessage: String?
+    var isActionPalettePresented: Bool = false
+    var actionQuery: String = ""
+    var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
 
     // MARK: - Dependencies
 
     var service: (any QuickService)?
+    var selectedTextService: (any SelectedTextServicing)?
 
     // How long submit() waits for `service` to be injected before giving up.
     // Exposed so tests can lower this to keep them fast.
@@ -34,16 +38,20 @@ import Observation
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
     @ObservationIgnored let currentVersion: String
+    @ObservationIgnored private(set) var selectionTarget: SelectionTarget?
+    @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
 
     // MARK: - Init
 
     init(
         settings: QuickSettings = QuickSettings(),
         service: (any QuickService)? = nil,
+        selectedTextService: (any SelectedTextServicing)? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.settings = settings
         self.service = service
+        self.selectedTextService = selectedTextService
         self.currentVersion = currentVersion
     }
 
@@ -59,6 +67,19 @@ import Observation
         )
     }
 
+    var actionMatches: [SavedPrompt] {
+        settings.savedPrompts.enumerated().compactMap { ordinal, action -> (SavedPrompt, Int, Int)? in
+            let score = [
+                FuzzyMatcher.score(query: actionQuery, candidate: action.name),
+                FuzzyMatcher.score(query: actionQuery, candidate: action.alias),
+            ].compactMap { $0 }.max()
+            guard let score else { return nil }
+            return (action, score, ordinal)
+        }
+        .sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.2 < rhs.2 : lhs.1 > rhs.1 }
+        .map(\.0)
+    }
+
     var activeProvider: InferenceProvider? { settings.selectedProvider }
     var activeModelDisplay: String {
         guard let provider = activeProvider else { return "No model" }
@@ -71,6 +92,97 @@ import Observation
     /// context after committing to a saved prompt.
     func complete(savedPrompt: SavedPrompt) {
         input = settings.savedPromptPrefix + savedPrompt.alias + " "
+        requestInputFocus()
+    }
+
+    func completeFirstFuzzyAlias() {
+        guard let first = savedPromptMatches.first else { return }
+        complete(savedPrompt: first)
+    }
+
+    func submitResolvingFuzzyAlias() async {
+        let exact = SavedPromptResolver.resolveAction(
+            input: input,
+            prefix: settings.savedPromptPrefix,
+            savedPrompts: settings.savedPrompts
+        )
+        if exact == nil,
+           isBareAliasQuery,
+           let first = savedPromptMatches.first {
+            input = settings.savedPromptPrefix + first.alias
+        }
+        await submit()
+    }
+
+    private var isBareAliasQuery: Bool {
+        guard !settings.savedPromptPrefix.isEmpty,
+              input.hasPrefix(settings.savedPromptPrefix) else { return false }
+        let rest = input.dropFirst(settings.savedPromptPrefix.count)
+        return !rest.isEmpty && !rest.contains(where: { $0.isWhitespace })
+    }
+
+    func rememberSelectionTarget(_ target: SelectionTarget?) {
+        selectionTarget = target
+        selectedTextContext = nil
+        guard let target, let selectedTextService else { return }
+        selectedTextContext = selectedTextService.capture(
+            from: target,
+            promptForPermission: false
+        )
+    }
+
+    func toggleActionPalette() {
+        isActionPalettePresented.toggle()
+        actionQuery = ""
+        if !isActionPalettePresented { requestInputFocus() }
+    }
+
+    func closeActionPalette() {
+        isActionPalettePresented = false
+        actionQuery = ""
+        requestInputFocus()
+    }
+
+    func perform(action: SavedPrompt) async {
+        let source: String
+        if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = input
+        } else if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = output
+        } else if let selected = captureSelectedText(promptForPermission: true) {
+            source = selected.text
+        } else {
+            closeActionPalette()
+            errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                ? "Allow Accessibility in System Settings, then select text and try again."
+                : "Select some text, or type text in the input field, then run this action."
+            requestInputFocus()
+            return
+        }
+
+        isActionPalettePresented = false
+        actionQuery = ""
+        input = settings.savedPromptPrefix + action.alias + " " + source
+        await submit()
+    }
+
+    func requestInputFocus() {
+        inputFocusRequest &+= 1
+    }
+
+    func openAccessibilitySettings() {
+        selectedTextService?.openAccessibilitySettings()
+    }
+
+    private func captureSelectedText(promptForPermission: Bool) -> SelectedTextContext? {
+        if let selectedTextContext { return selectedTextContext }
+        guard let selectionTarget, let selectedTextService else { return nil }
+        let captured = selectedTextService.capture(
+            from: selectionTarget,
+            promptForPermission: promptForPermission
+        )
+        selectedTextContext = captured
+        return captured
     }
 
     func submit() async {
@@ -85,7 +197,20 @@ import Observation
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
-        let effectivePrompt = action?.prompt ?? input
+        var effectivePrompt = action?.prompt ?? input
+        if action != nil, effectivePrompt.contains("{selection}") {
+            guard let selected = captureSelectedText(promptForPermission: true) else {
+                errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                    ? "Allow Accessibility in System Settings, then select text and try again."
+                    : "This action needs selected text."
+                requestInputFocus()
+                return
+            }
+            effectivePrompt = effectivePrompt.replacingOccurrences(
+                of: "{selection}",
+                with: selected.text
+            )
+        }
 
         // Math shortcut — evaluate locally without the AI
         if MathExpressionDetector.isMathExpression(effectivePrompt) {
@@ -100,6 +225,7 @@ import Observation
             } catch {
                 errorMessage = "Math error: \(error)"
             }
+            requestInputFocus()
             return
         }
 
@@ -107,6 +233,7 @@ import Observation
               let model = resolvedModel(for: provider, override: action?.model)
         else {
             errorMessage = "Choose a provider and model in Settings."
+            requestInputFocus()
             return
         }
 
@@ -143,6 +270,7 @@ import Observation
             errorMessage = provider.kind == .managedApfel
                 ? "Still starting on-device AI — please try again in a moment."
                 : "\(provider.name) is not available. Check its model, endpoint, or installed command."
+            requestInputFocus()
             return
         }
 
@@ -165,19 +293,32 @@ import Observation
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
                 }
-                if settings.autoCopy && !output.isEmpty {
+                if action?.outputBehavior == .replaceSelection, !output.isEmpty {
+                    if let context = selectedTextContext,
+                       let selectedTextService,
+                       await selectedTextService.replace(output, in: context) {
+                        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                    } else {
+                        copyOutput()
+                        markJustCopied()
+                        errorMessage = "Could not replace the selection. The result was copied instead."
+                    }
+                } else if settings.autoCopy && !output.isEmpty {
                     copyOutput()
                     markJustCopied()
                 }
+                requestInputFocus()
             } catch is CancellationError {
                 // Cancelled — do not set errorMessage
                 isStreaming = false
                 output = ""
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput)
+                requestInputFocus()
             } catch {
                 errorMessage = error.localizedDescription
                 isStreaming = false
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput)
+                requestInputFocus()
             }
         }
 
@@ -376,6 +517,7 @@ import Observation
         output = ""
         errorMessage = nil
         input = ""
+        requestInputFocus()
     }
 
     func clearHistory() {

@@ -3,6 +3,12 @@
 ## Unreleased
 
 - Fixed the global hot key silently doing nothing without Input Monitoring permission. The app now registers its configurable shortcut through the native Carbon hot-key API, so the default `Option+Space` works without keyboard-monitoring access.
+- Added selected-text quick actions through macOS Accessibility. Actions can show their result in the overlay or replace the selected text, with a copy fallback when replacement is unavailable.
+- Added a keyboard-first `Command-K` action picker, fuzzy action search, and fuzzy slash aliases. `/eml` can find `/email`; Tab completes and Return runs the best match.
+- Each action now has an editable name, prompt, alias, output behavior, provider, model, and optional global hotkey. Duplicate shortcuts are reported and not registered.
+- Added `Control+Option+S` as the default Summarize shortcut.
+- The follow-up input regains focus as soon as a response finishes.
+- Made the overlay model control icon-only. The active model remains visible inside the menu and in its hover label.
 
 ## v1.0.8 — 2026-04-28
 

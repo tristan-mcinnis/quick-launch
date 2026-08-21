@@ -5,9 +5,11 @@ import Foundation
 enum SavedPromptResolver {
 
     struct Resolution: Sendable, Equatable {
+        var actionID: UUID
         var prompt: String
         var providerID: UUID?
         var model: String?
+        var outputBehavior: ActionOutputBehavior
     }
 
     /// Expand an input to its saved-prompt equivalent, or return `nil` when
@@ -44,20 +46,32 @@ enum SavedPromptResolver {
         }
         if context.isEmpty {
             return Resolution(
+                actionID: match.id,
                 prompt: match.prompt,
                 providerID: match.providerID,
-                model: match.model
+                model: match.model,
+                outputBehavior: match.outputBehavior
             )
         }
         return Resolution(
-            prompt: "\(match.prompt)\n\n\(context)",
+            actionID: match.id,
+            prompt: prompt(for: match, source: context),
             providerID: match.providerID,
-            model: match.model
+            model: match.model,
+            outputBehavior: match.outputBehavior
         )
     }
 
-    /// Return saved prompts whose aliases start with the fragment the user
-    /// has typed after the prefix. Returns `[]` once the user has typed
+    static func prompt(for action: SavedPrompt, source: String) -> String {
+        if action.prompt.contains("{selection}") {
+            return action.prompt.replacingOccurrences(of: "{selection}", with: source)
+        }
+        guard !source.isEmpty else { return action.prompt }
+        return "\(action.prompt)\n\n\(source)"
+    }
+
+    /// Return saved prompts whose aliases or names fuzzy-match the fragment
+    /// typed after the prefix. Returns `[]` once the user has typed
     /// a full alias followed by a space (they have committed to sending).
     static func matches(
         input: String,
@@ -74,10 +88,22 @@ enum SavedPromptResolver {
             return []
         }
 
-        let matched = savedPrompts
-            .filter { $0.alias.hasPrefix(rest) }
-            .sorted { $0.alias < $1.alias }
-        return matched
+        if rest.isEmpty {
+            return savedPrompts.sorted { $0.alias < $1.alias }
+        }
+
+        return savedPrompts.enumerated().compactMap { ordinal, action -> (SavedPrompt, Int, Int)? in
+            let score = [
+                FuzzyMatcher.score(query: rest, candidate: action.alias),
+                FuzzyMatcher.score(query: rest, candidate: action.name),
+            ].compactMap { $0 }.max()
+            guard let score else { return nil }
+            return (action, score, ordinal)
+        }
+        .sorted { lhs, rhs in
+            lhs.1 == rhs.1 ? lhs.2 < rhs.2 : lhs.1 > rhs.1
+        }
+        .map(\.0)
     }
 
     // MARK: - Helpers

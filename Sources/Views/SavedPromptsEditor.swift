@@ -8,7 +8,7 @@ struct SavedPromptsEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Saved Prompts")
+                Text("Quick Actions")
                     .font(.headline)
                 Spacer()
             }
@@ -25,12 +25,20 @@ struct SavedPromptsEditor: View {
                         }
                         viewModel.settings.save()
                     }
-                Text("Type this + an alias to expand, e.g. \(viewModel.settings.savedPromptPrefix)translate")
+                Text("Aliases use fuzzy matching. Type /eml, then Tab or Return, to run /email.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
             Table(viewModel.settings.savedPrompts, selection: $selection) {
+                TableColumn("Name") { prompt in
+                    TextField(
+                        "Action name",
+                        text: bindingForName(prompt.id)
+                    )
+                    .textFieldStyle(.plain)
+                }
+                .width(min: 100, max: 170)
                 TableColumn("Alias") { prompt in
                     TextField(
                         "alias",
@@ -39,19 +47,25 @@ struct SavedPromptsEditor: View {
                     .textFieldStyle(.plain)
                 }
                 .width(min: 80, max: 140)
-                TableColumn("Prompt") { prompt in
-                    TextField(
-                        "Full prompt sent to the selected model",
-                        text: bindingForPrompt(prompt.id)
-                    )
-                    .textFieldStyle(.plain)
-                }
             }
-            .frame(minHeight: 200)
+            .frame(minHeight: 180)
 
             if let selection,
                let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
                 Divider()
+                Text("Prompt")
+                    .font(.system(size: 12, weight: .medium))
+                TextEditor(text: bindingForPrompt(prompt.id))
+                    .font(.system(size: 12))
+                    .frame(minHeight: 76, maxHeight: 100)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.25))
+                    )
+                Text("Use {selection} where the selected or typed text should appear. If omitted, the text is appended.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
                 HStack(spacing: 12) {
                     Picker("Provider", selection: bindingForProvider(prompt.id)) {
                         Text("Current provider").tag(nil as UUID?)
@@ -73,6 +87,19 @@ struct SavedPromptsEditor: View {
                 Text("Pin this action to a provider and model, or let it use the current choice.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+
+                Picker("After running", selection: bindingForOutputBehavior(prompt.id)) {
+                    ForEach(ActionOutputBehavior.allCases, id: \.self) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+
+                ActionHotkeyRecorderView(hotkey: bindingForHotkey(prompt.id))
+                if let conflict = viewModel.settings.actionHotkeyConflict(for: prompt.id) {
+                    Text(conflict)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.red)
+                }
             }
 
             HStack {
@@ -91,12 +118,22 @@ struct SavedPromptsEditor: View {
                 Button("Restore defaults") {
                     viewModel.settings.savedPrompts = SavedPrompt.defaults
                     viewModel.settings.save()
+                    NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .font(.system(size: 11))
             }
         }
+    }
+
+    private func bindingForName(_ id: SavedPrompt.ID) -> Binding<String> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.name ?? "" },
+            set: { newValue in
+                update(id) { $0.name = newValue }
+            }
+        )
     }
 
     private func bindingForAlias(_ id: SavedPrompt.ID) -> Binding<String> {
@@ -121,6 +158,35 @@ struct SavedPromptsEditor: View {
                 }
             }
         )
+    }
+
+    private func bindingForOutputBehavior(_ id: SavedPrompt.ID) -> Binding<ActionOutputBehavior> {
+        Binding(
+            get: {
+                viewModel.settings.savedPrompts.first(where: { $0.id == id })?.outputBehavior
+                    ?? .showInOverlay
+            },
+            set: { newValue in
+                update(id) { $0.outputBehavior = newValue }
+            }
+        )
+    }
+
+    private func bindingForHotkey(_ id: SavedPrompt.ID) -> Binding<ActionHotkey?> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.hotkey },
+            set: { newValue in
+                update(id) { $0.hotkey = newValue }
+            }
+        )
+    }
+
+    private func update(_ id: SavedPrompt.ID, mutation: (inout SavedPrompt) -> Void) {
+        guard let index = viewModel.settings.savedPrompts.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        mutation(&viewModel.settings.savedPrompts[index])
+        viewModel.settings.save()
     }
 
     private func bindingForProvider(_ id: SavedPrompt.ID) -> Binding<UUID?> {
@@ -164,6 +230,7 @@ struct SavedPromptsEditor: View {
         guard let selection else { return }
         viewModel.settings.savedPrompts.removeAll { $0.id == selection }
         viewModel.settings.save()
+        NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
         self.selection = nil
     }
 }

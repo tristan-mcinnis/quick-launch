@@ -34,7 +34,12 @@ struct OverlayView: View {
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .submitLabel(.send)
-                    .onSubmit { Task { await viewModel.submit() } }
+                    .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
+                    .onKeyPress(.tab) {
+                        guard !viewModel.savedPromptMatches.isEmpty else { return .ignored }
+                        viewModel.completeFirstFuzzyAlias()
+                        return .handled
+                    }
                     .disabled(viewModel.isStreaming)
 
                 // Send / stop / copied indicator — same slot, different icon
@@ -42,7 +47,7 @@ struct OverlayView: View {
                     if viewModel.isStreaming {
                         viewModel.cancel()
                     } else {
-                        Task { await viewModel.submit() }
+                        Task { await viewModel.submitResolvingFuzzyAlias() }
                     }
                 } label: {
                     Image(systemName: sendIcon)
@@ -56,6 +61,16 @@ struct OverlayView: View {
                 .help(viewModel.justCopied ? "Copied to clipboard" : "Send (or press Return)")
 
                 modelMenu
+
+                Button {
+                    viewModel.toggleActionPalette()
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                        .foregroundStyle(viewModel.isActionPalettePresented ? sendColor : .secondary)
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+                .help("Quick actions (Command-K)")
 
                 historyMenu
 
@@ -72,6 +87,11 @@ struct OverlayView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
+
+            if viewModel.isActionPalettePresented {
+                Divider()
+                QuickActionPalette(viewModel: viewModel)
+            }
 
             // Saved-prompt autocomplete
             if !viewModel.savedPromptMatches.isEmpty {
@@ -124,7 +144,8 @@ struct OverlayView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
-        .onAppear { inputFocused = true }
+        .onAppear { focusInput() }
+        .onChange(of: viewModel.inputFocusRequest) { _, _ in focusInput() }
         .onKeyPress(.escape) {
             if viewModel.isStreaming {
                 viewModel.cancel()
@@ -134,8 +155,17 @@ struct OverlayView: View {
         }
     }
 
+    private func focusInput() {
+        Task { @MainActor in
+            await Task.yield()
+            inputFocused = true
+        }
+    }
+
     private var modelMenu: some View {
         Menu {
+            Text("Using \(viewModel.activeModelDisplay)")
+            Divider()
             ForEach(viewModel.settings.providers) { provider in
                 Menu(provider.name) {
                     if provider.models.isEmpty {
@@ -167,19 +197,13 @@ struct OverlayView: View {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                Text(viewModel.activeModelDisplay)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .font(.system(size: 11))
+            Image(systemName: "cpu")
+            .font(.system(size: 13))
             .foregroundStyle(.secondary)
-            .frame(maxWidth: 140)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Switch provider or model")
+        .help("Model: \(viewModel.activeModelDisplay)")
     }
 
     private var historyMenu: some View {
@@ -204,9 +228,120 @@ struct OverlayView: View {
     }
 }
 
+private struct QuickActionPalette: View {
+    @Bindable var viewModel: QuickViewModel
+    @State private var selectedIndex = 0
+    @FocusState private var searchFocused: Bool
+
+    private var actions: [SavedPrompt] { viewModel.actionMatches }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                TextField("Search actions", text: $viewModel.actionQuery)
+                    .textFieldStyle(.plain)
+                    .focused($searchFocused)
+                    .onSubmit { runSelected() }
+                    .onKeyPress(.downArrow) { move(1); return .handled }
+                    .onKeyPress(.upArrow) { move(-1); return .handled }
+                    .onKeyPress(.escape) {
+                        viewModel.closeActionPalette()
+                        return .handled
+                    }
+                Text("⌘K")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                        Button { run(action) } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: action.outputBehavior == .replaceSelection
+                                      ? "text.cursor" : "sparkles")
+                                    .frame(width: 18)
+                                    .foregroundStyle(index == selectedIndex ? Color.accentColor : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(action.name)
+                                        .font(.system(size: 13, weight: .medium))
+                                    Text("\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if let hotkey = action.hotkey {
+                                    Text(hotkeyDisplayName(hotkey))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .frame(height: 42)
+                            .background(
+                                index == selectedIndex ? Color.accentColor.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 7)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+            .frame(maxHeight: 252)
+
+            HStack(spacing: 12) {
+                Text("↑↓ Navigate")
+                Text("↩ Run")
+                Text("Tab completes aliases")
+                Spacer()
+                Text("Esc Close")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+        }
+        .onAppear { focusSearch() }
+        .onChange(of: viewModel.actionQuery) { _, _ in selectedIndex = 0 }
+    }
+
+    private func focusSearch() {
+        Task { @MainActor in
+            await Task.yield()
+            searchFocused = true
+        }
+    }
+
+    private func move(_ delta: Int) {
+        guard !actions.isEmpty else { return }
+        selectedIndex = (selectedIndex + delta + actions.count) % actions.count
+    }
+
+    private func runSelected() {
+        guard actions.indices.contains(selectedIndex) else { return }
+        run(actions[selectedIndex])
+    }
+
+    private func run(_ action: SavedPrompt) {
+        Task { await viewModel.perform(action: action) }
+    }
+
+    private func hotkeyDisplayName(_ hotkey: ActionHotkey) -> String {
+        var settings = QuickSettings()
+        settings.hotkeyKeyCode = hotkey.keyCode
+        settings.hotkeyModifiers = hotkey.modifiers
+        return settings.hotkeyDisplayName
+    }
+}
+
 extension Notification.Name {
     static let dismissOverlay = Notification.Name("ApfelQuick.dismissOverlay")
     static let openSettings = Notification.Name("ApfelQuick.openSettings")
     static let hotkeyChanged = Notification.Name("ApfelQuick.hotkeyChanged")
+    static let actionHotkeysChanged = Notification.Name("ApfelQuick.actionHotkeysChanged")
     static let providerChanged = Notification.Name("ApfelQuick.providerChanged")
 }

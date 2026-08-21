@@ -21,12 +21,21 @@ struct SavedPromptTests {
     }
 
     @Test func testCodableRoundTrip() throws {
-        let p = SavedPrompt(alias: "grammar", prompt: "Fix grammar, return only the fix:")
+        let p = SavedPrompt(
+            name: "Clean Up",
+            alias: "grammar",
+            prompt: "Fix grammar, return only the fix:",
+            outputBehavior: .replaceSelection,
+            hotkey: ActionHotkey(keyCode: 1, modifiers: 786_432)
+        )
         let data = try JSONEncoder().encode(p)
         let back = try JSONDecoder().decode(SavedPrompt.self, from: data)
         #expect(back.alias == p.alias)
         #expect(back.prompt == p.prompt)
         #expect(back.id == p.id)
+        #expect(back.name == "Clean Up")
+        #expect(back.outputBehavior == .replaceSelection)
+        #expect(back.hotkey == p.hotkey)
     }
 
     @Test func testEquatableById() {
@@ -44,6 +53,15 @@ struct SavedPromptTests {
         #expect(aliases.contains("translate"))
         #expect(aliases.contains("grammar"))
         #expect(aliases.contains("tldr"))
+        #expect(defaults.first(where: { $0.alias == "tldr" })?.hotkey != nil)
+    }
+
+    @Test func testLegacySavedPromptGetsSafeActionDefaults() throws {
+        let legacy = #"{"id":"3D43B22A-EC62-4A78-92AE-99C30191A404","alias":"old","prompt":"Do this"}"#
+        let decoded = try JSONDecoder().decode(SavedPrompt.self, from: Data(legacy.utf8))
+        #expect(decoded.name == "Old")
+        #expect(decoded.outputBehavior == .showInOverlay)
+        #expect(decoded.hotkey == nil)
     }
 
     @Test func testDefaultsAreUnique() {
@@ -87,6 +105,12 @@ struct SavedPromptResolverTests {
             savedPrompts: prompts
         )
         #expect(result == "Translate to English:\n\nhello world")
+    }
+
+    @Test func testSelectionPlaceholderIsReplaced() {
+        let action = SavedPrompt(alias: "clean", prompt: "Clean this:\n\n{selection}")
+        let result = SavedPromptResolver.prompt(for: action, source: "rough words")
+        #expect(result == "Clean this:\n\nrough words")
     }
 
     @Test func testResolveReturnsNilForNonAlias() {
@@ -187,6 +211,15 @@ struct SavedPromptResolverTests {
         #expect(aliases.contains("translate"))
         #expect(aliases.contains("tldr"))
         #expect(!aliases.contains("grammar"))
+    }
+
+    @Test func testMatchesFuzzyAliasWithoutTypingEveryLetter() {
+        let matches = SavedPromptResolver.matches(
+            input: "/eml",
+            prefix: "/",
+            savedPrompts: [SavedPrompt(alias: "email", prompt: "Rewrite")]
+        )
+        #expect(matches.map(\.alias) == ["email"])
     }
 
     @Test func testMatchesReturnsAllWhenInputIsJustPrefix() {

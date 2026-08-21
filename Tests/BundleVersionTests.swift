@@ -25,7 +25,7 @@ struct BundleVersionTests {
         // version through. A bare `QuickViewModel()` silently regresses users
         // to "1.0.0" forever (issue #3).
         #expect(
-            source.contains("QuickViewModel(currentVersion: Bundle.main.shortVersion)"),
+            source.contains("currentVersion: Bundle.main.shortVersion"),
             "AppDelegate must construct QuickViewModel with Bundle.main.shortVersion — a bare QuickViewModel() falls back to the 1.0.0 default"
         )
         #expect(

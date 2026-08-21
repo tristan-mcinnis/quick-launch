@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == true)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 1)
+        #expect(settings.configurationVersion == 3)
         #expect(settings.selectedProviderID == InferenceProvider.managedApfelID)
         #expect(!settings.systemPrompt.isEmpty)
     }
@@ -39,6 +39,22 @@ struct QuickSettingsTests {
         )
 
         #expect(decoded.savedPrompts.filter { $0.alias == "search" }.count == 1)
+        #expect(decoded.savedPrompts.first(where: { $0.alias == "grammar" })?.outputBehavior == .replaceSelection)
+        #expect(decoded.savedPrompts.first(where: { $0.alias == "grammar" })?.name == "Clean Up")
+    }
+
+    @Test func testActionHotkeyConflictsAreDetected() {
+        var settings = QuickSettings()
+        let firstID = settings.savedPrompts[0].id
+        settings.savedPrompts[0].hotkey = ActionHotkey(
+            keyCode: settings.hotkeyKeyCode,
+            modifiers: settings.hotkeyModifiers
+        )
+        #expect(settings.actionHotkeyConflict(for: firstID)?.contains("main") == true)
+
+        settings.savedPrompts[0].hotkey = ActionHotkey(keyCode: 3, modifiers: 786_432)
+        settings.savedPrompts[1].hotkey = settings.savedPrompts[0].hotkey
+        #expect(settings.actionHotkeyConflict(for: firstID)?.contains(settings.savedPrompts[1].name) == true)
     }
 
     // MARK: - 2. Hotkey defaults

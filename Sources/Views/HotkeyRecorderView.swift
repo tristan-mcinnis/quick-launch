@@ -7,11 +7,13 @@ struct HotkeyRecorderView: View {
     @Binding var modifiers: UInt
     @State private var isRecording = false
     @State private var validationError: String?
+    var label: String = "Hotkey"
+    var changeNotification: Notification.Name = .hotkeyChanged
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Hotkey")
+                Text(label)
                     .font(.system(size: 13))
                 Spacer()
                 if isRecording {
@@ -30,7 +32,7 @@ struct HotkeyRecorderView: View {
                         validationError = nil
                         isRecording = false
                         NotificationCenter.default.post(
-                            name: .hotkeyChanged, object: nil)
+                            name: changeNotification, object: nil)
                     } onCancel: {
                         isRecording = false
                     }
@@ -60,6 +62,72 @@ struct HotkeyRecorderView: View {
         s.hotkeyKeyCode = keyCode
         s.hotkeyModifiers = modifiers
         return s.hotkeyDisplayName
+    }
+}
+
+struct ActionHotkeyRecorderView: View {
+    @Binding var hotkey: ActionHotkey?
+    @State private var isRecording = false
+    @State private var validationError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Global hotkey")
+                    .font(.system(size: 13))
+                Spacer()
+                if isRecording {
+                    HotkeyCapture { event in
+                        let modifiers = event.modifierFlags
+                            .intersection(.deviceIndependentFlagsMask).rawValue
+                        guard QuickSettings.isValidHotkey(
+                            keyCode: event.keyCode,
+                            modifiers: modifiers
+                        ) else {
+                            validationError = "Must include Ctrl, Option, or Cmd"
+                            isRecording = false
+                            return
+                        }
+                        hotkey = ActionHotkey(keyCode: event.keyCode, modifiers: modifiers)
+                        validationError = nil
+                        isRecording = false
+                        notifyChanged()
+                    } onCancel: {
+                        isRecording = false
+                    }
+                    .frame(width: 180, height: 28)
+                } else if let hotkey {
+                    Button(displayName(hotkey)) { isRecording = true }
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .buttonStyle(.bordered)
+                    Button("Clear") {
+                        self.hotkey = nil
+                        notifyChanged()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Button("Set hotkey…") { isRecording = true }
+                        .buttonStyle(.bordered)
+                }
+            }
+            if let validationError {
+                Text(validationError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func displayName(_ hotkey: ActionHotkey) -> String {
+        var settings = QuickSettings()
+        settings.hotkeyKeyCode = hotkey.keyCode
+        settings.hotkeyModifiers = hotkey.modifiers
+        return settings.hotkeyDisplayName
+    }
+
+    private func notifyChanged() {
+        NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
     }
 }
 

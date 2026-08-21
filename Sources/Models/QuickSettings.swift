@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 1
+    var configurationVersion: Int = 3
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -52,7 +52,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 1
+        configurationVersion = 3
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -78,6 +78,36 @@ struct QuickSettings: Codable, Sendable {
            !savedPrompts.contains(where: { $0.alias == "search" }),
            let search = SavedPrompt.defaults.first(where: { $0.alias == "search" }) {
             savedPrompts.append(search)
+        }
+        if decodedConfigurationVersion < 2 {
+            if let index = savedPrompts.firstIndex(where: { $0.alias == "translate" }) {
+                savedPrompts[index].outputBehavior = .replaceSelection
+            }
+            if let index = savedPrompts.firstIndex(where: { $0.alias == "grammar" }) {
+                savedPrompts[index].outputBehavior = .replaceSelection
+            }
+            if let index = savedPrompts.firstIndex(where: { $0.alias == "tldr" }),
+               savedPrompts[index].hotkey == nil {
+                savedPrompts[index].hotkey = ActionHotkey(
+                    keyCode: 1,
+                    modifiers: 262_144 | 524_288
+                )
+            }
+        }
+        if decodedConfigurationVersion < 3 {
+            let preferredNames = [
+                "translate": (old: "Translate", new: "Translate to English"),
+                "grammar": (old: "Grammar", new: "Clean Up"),
+                "tldr": (old: "Tldr", new: "Summarize"),
+                "email": (old: "Email", new: "Rewrite as Email"),
+            ]
+            for (alias, names) in preferredNames {
+                if let index = savedPrompts.firstIndex(where: {
+                    $0.alias == alias && $0.name == names.old
+                }) {
+                    savedPrompts[index].name = names.new
+                }
+            }
         }
     }
 
@@ -171,5 +201,20 @@ extension QuickSettings {
             ]
             return letterMap[keyCode] ?? "Key\(keyCode)"
         }
+    }
+
+    func actionHotkeyConflict(for actionID: UUID) -> String? {
+        guard let action = savedPrompts.first(where: { $0.id == actionID }),
+              let hotkey = action.hotkey else { return nil }
+        if hotkey.keyCode == hotkeyKeyCode,
+           hotkey.modifiers == hotkeyModifiers {
+            return "This conflicts with the main apfel-quick hotkey."
+        }
+        if let other = savedPrompts.first(where: {
+            $0.id != actionID && $0.hotkey == hotkey
+        }) {
+            return "This conflicts with \(other.name)."
+        }
+        return nil
     }
 }

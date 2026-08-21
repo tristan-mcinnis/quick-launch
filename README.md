@@ -2,11 +2,13 @@
 
 **A lightweight, Spotlight-style AI action overlay for macOS.**
 
+The focused launcher scope is documented in [docs/product-scope.md](docs/product-scope.md).
+
 Press `Option+Space`, type a prompt or saved action, choose a model when you
 want, and press `Return`. The reply streams into the overlay and is copied to
 the clipboard. It remains an action tool, not a full chat workspace.
 
-This fork keeps the original Apple on-device path and adds swappable local,
+This version keeps the original Apple on-device path and adds swappable local,
 API, and subscription-backed models. It is based on
 [Arthur-Ficial/apfel-quick](https://github.com/Arthur-Ficial/apfel-quick).
 
@@ -21,7 +23,9 @@ API, and subscription-backed models. It is based on
 - One-shot Claude Code subscription provider through the installed `claude` CLI
 - Pi provider that uses Pi's configured models, extensions, skills, and custom tools
 - `/search` quick action pinned to Pi by default
-- Editable saved actions, with optional per-action provider and model routing
+- Selected-text actions that can show a result or replace the original text
+- Command-K fuzzy action picker and fuzzy slash aliases such as `/eml`
+- Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
 - Short follow-up threads and a local, bounded recent-history menu
 - API keys stored in the macOS Keychain and not synced through iCloud
 - Deterministic local math shortcut and optional automatic clipboard copy
@@ -33,7 +37,7 @@ API, and subscription-backed models. It is based on
 - Apple Silicon
 - Xcode command-line tools for source builds
 
-The Apple Foundation Model is optional in this fork. Select LM Studio, Pi,
+The Apple Foundation Model is optional in this version. Select LM Studio, Pi,
 Claude Code, or an API provider if Apple Intelligence is unavailable.
 
 Optional integrations must already be installed and signed in:
@@ -72,7 +76,16 @@ brew install Arthur-Ficial/tap/apfel
 2. Choose a model from the CPU menu, or keep the current choice.
 3. Type a prompt. Use actions such as `/grammar`, `/tldr`, or `/search`.
 4. Press `Return`. Press the stop button to cancel.
-5. Type another prompt for a follow-up, or use the history menu to start fresh.
+5. Type another prompt for a follow-up. The input regains focus when output finishes.
+
+Select text in another app before opening apfel-quick, then press `Command-K`
+to choose an action. The default Clean Up and Translate actions replace the
+selection. Summarize opens the result for follow-up. `Control+Option+S` runs
+Summarize directly. macOS asks for Accessibility access the first time a
+selected-text action needs it.
+
+Slash aliases are fuzzy. `/eml` finds `/email`. Press `Tab` to complete the
+alias or `Return` to run the best match.
 
 Pure math such as `sqrt(2)^2` bypasses every model and runs locally.
 
@@ -89,8 +102,10 @@ Open **Settings → Models**.
 API keys go to a non-synchronizing Keychain item. Provider settings, model
 choices, actions, and bounded history contents use local `UserDefaults`.
 
-For a saved action, open **Settings → Prompts** and optionally pin the action
-to one provider and model. An unpinned action uses the overlay's current model.
+For a saved action, open **Settings → Prompts**. Set its name, fuzzy alias,
+prompt, output behavior, optional global hotkey, and optional provider and
+model. An unpinned action uses the overlay's current model. Use `{selection}`
+inside the prompt to control where selected or typed text is inserted.
 
 ## Pi search and skills
 
@@ -106,6 +121,8 @@ agent workspace.
 - Apple inference stays local when the Apple provider is available.
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
+- Selected-text actions use macOS Accessibility only to read or replace the
+  current selection. They do not record the screen.
 - The app has no telemetry.
 
 ## Architecture
@@ -119,8 +136,12 @@ OverlayView
 
 QuickSettings
   → provider and model catalogue
-  → saved action routes
+  → saved action routes, aliases, output behavior, and hotkeys
   → bounded follow-up settings
+
+SelectedTextService
+  → focused selection through macOS Accessibility
+  → direct replacement with a paste fallback
 
 Keychain
   → provider API keys
@@ -132,9 +153,9 @@ interpolated into a shell command.
 
 ## Deliberately not in the core build
 
-Finder file actions, document attachments, selection replacement, screen
-context, voice input, and a larger chat workspace are deferred. They need a
-separate permission and safety design.
+Finder file actions, document attachments, screen context, voice input, and a
+larger chat workspace are deferred. They need a separate permission and safety
+design.
 
 ## License
 
