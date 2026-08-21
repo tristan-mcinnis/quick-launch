@@ -1,8 +1,7 @@
-// BundledHelpersTests — every GUI release must ship its dependencies bundled.
+// BundledHelpersTests — package the optional Apple helper when it is present.
 //
-// apfel-quick shells out to `apfel` for LLM inference. The .app bundle must
-// include apfel in Contents/Helpers so users don't need a separate brew
-// install. Failing to bundle is a release-blocking regression.
+// The multi-provider build must also remain runnable when Apple Foundation
+// Models and the apfel helper are unavailable.
 
 import Foundation
 import Testing
@@ -25,11 +24,11 @@ struct BundledHelpersTests {
         )
     }
 
-    @Test("build-app.sh fails the build when apfel is missing on the host")
-    func missingHelperFailsBuild() {
+    @Test("build-app.sh permits a bundle without the optional Apple helper")
+    func missingHelperKeepsOtherProvidersAvailable() {
         #expect(
-            Self.buildScript.contains("exit 1"),
-            "build-app.sh must abort if the apfel helper can't be found — never ship a hollow bundle"
+            Self.buildScript.contains("Building without the optional Apple provider helper"),
+            "A missing Apple helper must not block LM Studio, API, Claude Code, or Pi providers"
         )
     }
 

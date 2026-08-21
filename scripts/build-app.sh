@@ -70,9 +70,8 @@ if HELPER_PATH="$(resolve_helper 2>/dev/null)"; then
     cp "$HELPER_PATH" "$APP_BUNDLE/Contents/Helpers/apfel"
     chmod +x "$APP_BUNDLE/Contents/Helpers/apfel"
 else
-    print "==> ERROR: apfel not found on this build host." >&2
-    print "==> Every GUI release must ship with all dependencies bundled. Install apfel (brew install apfel) or set APFEL_HELPER_PATH and rerun." >&2
-    exit 1
+    print "==> NOTE: apfel was not found. Building without the optional Apple provider helper." >&2
+    print "==> LM Studio, API, Claude Code, and Pi providers remain available." >&2
 fi
 
 print "==> Signing bundle (${SIGN_IDENTITY})"

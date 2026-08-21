@@ -58,8 +58,9 @@ swift test
 make install
 ```
 
-The upstream packaged build still bundles `apfel`. Source builds that use the
-Apple provider also need `apfel` on `PATH`:
+The build script bundles `apfel` when it is available. A local app can still be
+built without it. Source builds that need the Apple provider require `apfel`
+on `PATH`:
 
 ```bash
 brew install Arthur-Ficial/tap/apfel
