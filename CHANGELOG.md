@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed the global hot key silently doing nothing without Input Monitoring permission. The app now registers its configurable shortcut through the native Carbon hot-key API, so the default `Option+Space` works without keyboard-monitoring access.
+
 ## v1.0.8 — 2026-04-28
 
 Fix: response text was unreadable in dark mode (issues #20, #23).

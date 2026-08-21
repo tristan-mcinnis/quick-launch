@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NSPanel?
     private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
-    private var globalMonitor: Any?
+    private var globalHotKey: GlobalHotKey?
     private var localMonitor: Any?
     private var mouseMonitor: Any?
     private var statusItem: NSStatusItem?
@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
+        globalHotKey?.invalidate()
         if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         serverManager.stop()
@@ -62,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = makePanel(viewModel: viewModel)
         self.panel = panel
 
-        // c. Register global hotkey (Ctrl+Space)
+        // c. Register global hotkey (Option+Space by default)
         registerGlobalHotkey()
 
         // d. Register local mouse monitor for click-outside dismissal
@@ -232,18 +232,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = vm.settings.hotkeyKeyCode
         let modifierFlags = NSEvent.ModifierFlags(rawValue: vm.settings.hotkeyModifiers)
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == modifierFlags,
-                  event.keyCode == keyCode else { return }
-            Task { @MainActor [weak self] in self?.toggleOverlay() }
+        globalHotKey = GlobalHotKey(
+            keyCode: UInt32(keyCode),
+            modifiers: GlobalHotKey.carbonModifiers(from: modifierFlags)
+        ) { [weak self] in
+            self?.toggleOverlay()
         }
     }
 
     func reregisterGlobalHotkey() {
-        if let monitor = globalMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMonitor = nil
-        }
+        globalHotKey?.invalidate()
+        globalHotKey = nil
         registerGlobalHotkey()
     }
 

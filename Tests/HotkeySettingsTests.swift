@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import Carbon.HIToolbox
 @testable import apfel_quick
 
 @Suite("HotkeySettings")
@@ -59,5 +60,13 @@ struct HotkeySettingsTests {
         // Shift alone is not a valid modifier for hotkeys
         let shiftRaw = NSEvent.ModifierFlags.shift.rawValue
         #expect(QuickSettings.isValidHotkey(keyCode: 49, modifiers: shiftRaw) == false)
+    }
+
+    @Test func testNativeHotkeyModifierConversion() {
+        let flags: NSEvent.ModifierFlags = [.command, .option, .shift, .control]
+        #expect(
+            GlobalHotKey.carbonModifiers(from: flags)
+                == UInt32(cmdKey | optionKey | shiftKey | controlKey)
+        )
     }
 }
