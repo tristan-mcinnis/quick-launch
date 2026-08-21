@@ -24,7 +24,11 @@ struct OverlayView: View {
         VStack(spacing: 0) {
             // Input row
             HStack(spacing: 8) {
-                TextField("Ask anything…", text: $viewModel.input, axis: .vertical)
+                TextField(
+                    viewModel.isFollowUp ? "Ask a follow-up…" : "Ask anything…",
+                    text: $viewModel.input,
+                    axis: .vertical
+                )
                     .textFieldStyle(.plain)
                     .font(.system(size: 17))
                     .lineLimit(1...4)
@@ -35,7 +39,11 @@ struct OverlayView: View {
 
                 // Send / stop / copied indicator — same slot, different icon
                 Button {
-                    Task { await viewModel.submit() }
+                    if viewModel.isStreaming {
+                        viewModel.cancel()
+                    } else {
+                        Task { await viewModel.submit() }
+                    }
                 } label: {
                     Image(systemName: sendIcon)
                         .foregroundStyle(sendColor)
@@ -46,6 +54,10 @@ struct OverlayView: View {
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(viewModel.input.isEmpty && !viewModel.isStreaming)
                 .help(viewModel.justCopied ? "Copied to clipboard" : "Send (or press Return)")
+
+                modelMenu
+
+                historyMenu
 
                 Button {
                     NotificationCenter.default.post(
@@ -121,10 +133,80 @@ struct OverlayView: View {
             return .handled
         }
     }
+
+    private var modelMenu: some View {
+        Menu {
+            ForEach(viewModel.settings.providers) { provider in
+                Menu(provider.name) {
+                    if provider.models.isEmpty {
+                        Button("Refresh models") {
+                            Task { await viewModel.refreshModels(providerID: provider.id) }
+                        }
+                    } else {
+                        ForEach(provider.models, id: \.self) { model in
+                            Button {
+                                viewModel.selectModel(providerID: provider.id, model: model)
+                            } label: {
+                                if provider.id == viewModel.settings.selectedProviderID,
+                                   model == provider.selectedModel {
+                                    Label(model, systemImage: "checkmark")
+                                } else {
+                                    Text(model)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            Button("Refresh detected models") {
+                Task { await viewModel.refreshDetectedModels() }
+            }
+            Button("Model settings…") {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                Text(viewModel.activeModelDisplay)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: 140)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Switch provider or model")
+    }
+
+    private var historyMenu: some View {
+        Menu {
+            Button("New quick action") { viewModel.startNewConversation() }
+            if !viewModel.history.isEmpty {
+                Divider()
+                ForEach(viewModel.history.prefix(10)) { conversation in
+                    Button(conversation.title) {
+                        viewModel.loadConversation(id: conversation.id)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(.secondary)
+                .font(.system(size: 14))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Recent quick actions")
+    }
 }
 
 extension Notification.Name {
     static let dismissOverlay = Notification.Name("ApfelQuick.dismissOverlay")
     static let openSettings = Notification.Name("ApfelQuick.openSettings")
     static let hotkeyChanged = Notification.Name("ApfelQuick.hotkeyChanged")
+    static let providerChanged = Notification.Name("ApfelQuick.providerChanged")
 }

@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a. Load settings from UserDefaults
         let settings = QuickSettings.load()
         viewModel.settings = settings
+        viewModel.loadHistory()
 
         // b. Create NSPanel with OverlayView hosted in NSHostingController
         let panel = makePanel(viewModel: viewModel)
@@ -99,6 +100,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.showSettingsPanel() }
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .providerChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self, weak viewModel] _ in
+            Task { @MainActor [weak self, weak viewModel] in
+                guard let self, let viewModel else { return }
+                if viewModel.settings.selectedProvider?.kind == .managedApfel {
+                    self.startManagedService(for: viewModel)
+                }
+            }
+        }
+
         // Panel auto-resize: observe viewModel state and grow/shrink the panel
         // to fit the current overlay content.
         startPanelSizeObserver(viewModel: viewModel)
@@ -115,18 +129,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // g. Start ServerManager in parallel — do NOT await here so the UI
         //    stays responsive. When the server is ready we inject the service.
-        Task { [weak self, weak viewModel] in
-            guard let self, let viewModel else { return }
-            if let port = await self.serverManager.start() {
-                await MainActor.run {
-                    viewModel.service = ApfelQuickService(port: port)
-                }
-            }
+        if settings.selectedProvider?.kind == .managedApfel {
+            startManagedService(for: viewModel)
         }
+
+        Task { [weak viewModel] in await viewModel?.refreshDetectedModels() }
 
         // h. Check for update silently if enabled
         if settings.checkForUpdatesOnLaunch {
             Task { await viewModel.checkForUpdateSilently() }
+        }
+    }
+
+    private func startManagedService(for viewModel: QuickViewModel) {
+        guard viewModel.service == nil else { return }
+        Task { [weak self, weak viewModel] in
+            guard let self, let viewModel else { return }
+            if let port = await self.serverManager.start() {
+                await MainActor.run {
+                    viewModel.service = ApfelQuickService(
+                        port: port,
+                        systemPrompt: viewModel.settings.systemPrompt
+                    )
+                }
+            }
         }
     }
 

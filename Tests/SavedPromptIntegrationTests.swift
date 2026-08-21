@@ -89,8 +89,9 @@ struct SavedPromptIntegrationTests {
 actor CapturingService: QuickService {
     private var _lastPrompt: String?
 
-    nonisolated func send(prompt: String) -> AsyncThrowingStream<StreamDelta, Error> {
-        AsyncThrowingStream { continuation in
+    nonisolated func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        let prompt = messages.last(where: { $0.role == .user })?.content ?? ""
+        return AsyncThrowingStream { continuation in
             Task { await self.record(prompt) }
             continuation.yield(StreamDelta(text: "ok", finishReason: nil))
             continuation.finish()

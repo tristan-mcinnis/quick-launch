@@ -24,6 +24,21 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == true)
         #expect(settings.hasSeenWelcome == false)
+        #expect(settings.configurationVersion == 1)
+        #expect(settings.selectedProviderID == InferenceProvider.managedApfelID)
+        #expect(!settings.systemPrompt.isEmpty)
+    }
+
+    @Test func testLegacySettingsGainPiSearchActionOnce() throws {
+        struct LegacySettings: Encodable {
+            var savedPrompts = [SavedPrompt(alias: "grammar", prompt: "Fix this")]
+        }
+        let decoded = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: JSONEncoder().encode(LegacySettings())
+        )
+
+        #expect(decoded.savedPrompts.filter { $0.alias == "search" }.count == 1)
     }
 
     // MARK: - 2. Hotkey defaults
@@ -48,6 +63,8 @@ struct QuickSettingsTests {
         settings.hasSeenWelcome = true
         settings.hotkeyKeyCode = 36   // Return key
         settings.hotkeyModifiers = 786432  // Command + Option
+        settings.select(providerID: InferenceProvider.deepSeekID, model: "deepseek-v4-pro")
+        settings.systemPrompt = "Return only corrected text."
 
         settings.save(to: defaults)
 
@@ -59,6 +76,9 @@ struct QuickSettingsTests {
         #expect(loaded.hasSeenWelcome == true)
         #expect(loaded.hotkeyKeyCode == 36)
         #expect(loaded.hotkeyModifiers == 786432)
+        #expect(loaded.selectedProviderID == InferenceProvider.deepSeekID)
+        #expect(loaded.selectedModel == "deepseek-v4-pro")
+        #expect(loaded.systemPrompt == "Return only corrected text.")
     }
 
     // MARK: - 4. Load from empty UserDefaults returns defaults

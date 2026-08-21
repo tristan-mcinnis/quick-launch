@@ -41,13 +41,39 @@ struct SavedPromptsEditor: View {
                 .width(min: 80, max: 140)
                 TableColumn("Prompt") { prompt in
                     TextField(
-                        "Full prompt sent to apfel",
+                        "Full prompt sent to the selected model",
                         text: bindingForPrompt(prompt.id)
                     )
                     .textFieldStyle(.plain)
                 }
             }
             .frame(minHeight: 200)
+
+            if let selection,
+               let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
+                Divider()
+                HStack(spacing: 12) {
+                    Picker("Provider", selection: bindingForProvider(prompt.id)) {
+                        Text("Current provider").tag(nil as UUID?)
+                        ForEach(viewModel.settings.providers) { provider in
+                            Text(provider.name).tag(provider.id as UUID?)
+                        }
+                    }
+                    .frame(maxWidth: 260)
+
+                    Picker("Model", selection: bindingForModel(prompt.id)) {
+                        Text("Provider default").tag(nil as String?)
+                        ForEach(modelsForPrompt(prompt), id: \.self) { model in
+                            Text(model).tag(model as String?)
+                        }
+                    }
+                    .frame(maxWidth: 260)
+                    .disabled(prompt.providerID == nil)
+                }
+                Text("Pin this action to a provider and model, or let it use the current choice.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 Button {
@@ -95,6 +121,36 @@ struct SavedPromptsEditor: View {
                 }
             }
         )
+    }
+
+    private func bindingForProvider(_ id: SavedPrompt.ID) -> Binding<UUID?> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.providerID },
+            set: { newValue in
+                if let index = viewModel.settings.savedPrompts.firstIndex(where: { $0.id == id }) {
+                    viewModel.settings.savedPrompts[index].providerID = newValue
+                    viewModel.settings.savedPrompts[index].model = nil
+                    viewModel.settings.save()
+                }
+            }
+        )
+    }
+
+    private func bindingForModel(_ id: SavedPrompt.ID) -> Binding<String?> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.model },
+            set: { newValue in
+                if let index = viewModel.settings.savedPrompts.firstIndex(where: { $0.id == id }) {
+                    viewModel.settings.savedPrompts[index].model = newValue
+                    viewModel.settings.save()
+                }
+            }
+        )
+    }
+
+    private func modelsForPrompt(_ prompt: SavedPrompt) -> [String] {
+        guard let providerID = prompt.providerID else { return [] }
+        return viewModel.settings.providers.first(where: { $0.id == providerID })?.models ?? []
     }
 
     private func addRow() {

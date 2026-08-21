@@ -4,6 +4,12 @@ import Foundation
 /// autocomplete matches while the user is still typing an alias.
 enum SavedPromptResolver {
 
+    struct Resolution: Sendable, Equatable {
+        var prompt: String
+        var providerID: UUID?
+        var model: String?
+    }
+
     /// Expand an input to its saved-prompt equivalent, or return `nil` when
     /// the input is not an alias invocation.
     ///
@@ -18,6 +24,14 @@ enum SavedPromptResolver {
         prefix: String,
         savedPrompts: [SavedPrompt]
     ) -> String? {
+        resolveAction(input: input, prefix: prefix, savedPrompts: savedPrompts)?.prompt
+    }
+
+    static func resolveAction(
+        input: String,
+        prefix: String,
+        savedPrompts: [SavedPrompt]
+    ) -> Resolution? {
         guard !prefix.isEmpty else { return nil }
         guard input.hasPrefix(prefix) else { return nil }
         let rest = String(input.dropFirst(prefix.count))
@@ -29,9 +43,17 @@ enum SavedPromptResolver {
             return nil
         }
         if context.isEmpty {
-            return match.prompt
+            return Resolution(
+                prompt: match.prompt,
+                providerID: match.providerID,
+                model: match.model
+            )
         }
-        return "\(match.prompt)\n\n\(context)"
+        return Resolution(
+            prompt: "\(match.prompt)\n\n\(context)",
+            providerID: match.providerID,
+            model: match.model
+        )
     }
 
     /// Return saved prompts whose aliases start with the fragment the user

@@ -8,6 +8,9 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            ProviderSettingsView(viewModel: viewModel)
+                .tabItem { Label("Models", systemImage: "cpu") }
+
             GeneralTab(viewModel: viewModel)
                 .tabItem { Label("General", systemImage: "gear") }
 
@@ -59,6 +62,40 @@ private struct GeneralTab: View {
 
                 Toggle("Check for updates on launch", isOn: $viewModel.settings.checkForUpdatesOnLaunch)
                     .onChange(of: viewModel.settings.checkForUpdatesOnLaunch) { _, _ in viewModel.settings.save() }
+
+                Toggle("Keep quick-action history", isOn: $viewModel.settings.historyEnabled)
+                    .onChange(of: viewModel.settings.historyEnabled) { _, enabled in
+                        viewModel.settings.save()
+                        if enabled {
+                            viewModel.loadHistory()
+                        } else {
+                            viewModel.history = []
+                        }
+                    }
+
+                HStack {
+                    Text("Saved quick actions")
+                    Spacer()
+                    Button("Clear history", role: .destructive) {
+                        viewModel.clearHistory()
+                    }
+                }
+
+                HStack {
+                    Text("Start a new thread after")
+                    Spacer()
+                    Picker("", selection: $viewModel.settings.newConversationAfterMinutes) {
+                        Text("5 minutes").tag(5)
+                        Text("15 minutes").tag(15)
+                        Text("30 minutes").tag(30)
+                        Text("1 hour").tag(60)
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                    .onChange(of: viewModel.settings.newConversationAfterMinutes) { _, _ in
+                        viewModel.settings.save()
+                    }
+                }
 
                 Toggle("Show welcome screen on next launch", isOn: Binding(
                     get: { !viewModel.settings.hasSeenWelcome },
@@ -153,7 +190,7 @@ private struct AboutTab: View {
 
                 Link(
                     "Source on GitHub",
-                    destination: URL(string: "https://github.com/Arthur-Ficial/apfel-quick")!
+                    destination: URL(string: "https://github.com/tristan-mcinnis/apfel-quick")!
                 )
                 .font(.system(size: 12))
             }

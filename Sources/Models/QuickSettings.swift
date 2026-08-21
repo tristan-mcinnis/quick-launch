@@ -2,6 +2,9 @@ import Foundation
 import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
+    // Increment when a one-time settings migration is required.
+    var configurationVersion: Int = 1
+
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
     var hotkeyModifiers: UInt = 524288   // Option key (NSEvent.ModifierFlags.option.rawValue)
@@ -28,6 +31,16 @@ struct QuickSettings: Codable, Sendable {
     // MCP servers (attached to apfel --serve at launch)
     var mcpServers: [MCPServerConfig] = []
 
+    // Inference providers and the current model
+    var providers: [InferenceProvider] = InferenceProvider.defaults
+    var selectedProviderID: UUID = InferenceProvider.managedApfelID
+    var systemPrompt: String = QuickSettings.defaultSystemPrompt
+
+    // Lightweight follow-up history
+    var historyEnabled: Bool = true
+    var historyLimit: Int = 20
+    var newConversationAfterMinutes: Int = 15
+
     // Persistence key
     static let defaultsKey = "QuickSettings"
 
@@ -35,6 +48,11 @@ struct QuickSettings: Codable, Sendable {
     // still load cleanly, falling back to each field's default.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedConfigurationVersion = try c.decodeIfPresent(
+            Int.self,
+            forKey: .configurationVersion
+        ) ?? 0
+        configurationVersion = 1
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -47,12 +65,52 @@ struct QuickSettings: Codable, Sendable {
         savedPrompts = try c.decodeIfPresent([SavedPrompt].self, forKey: .savedPrompts) ?? SavedPrompt.defaults
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         mcpServers = try c.decodeIfPresent([MCPServerConfig].self, forKey: .mcpServers) ?? []
+        providers = try c.decodeIfPresent([InferenceProvider].self, forKey: .providers)
+            ?? InferenceProvider.defaults
+        selectedProviderID = try c.decodeIfPresent(UUID.self, forKey: .selectedProviderID)
+            ?? InferenceProvider.managedApfelID
+        systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+            ?? Self.defaultSystemPrompt
+        historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
+        historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 20
+        newConversationAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .newConversationAfterMinutes) ?? 15
+        if decodedConfigurationVersion < 1,
+           !savedPrompts.contains(where: { $0.alias == "search" }),
+           let search = SavedPrompt.defaults.first(where: { $0.alias == "search" }) {
+            savedPrompts.append(search)
+        }
     }
 
     init() {}
 }
 
 extension QuickSettings {
+    static let defaultSystemPrompt: String = """
+    You are a fast, direct assistant in a Spotlight-style action overlay. \
+    Return only the result the user asked for. No preamble, no postamble, \
+    no apologies, no disclaimers, and no invitation to continue. Be concise.
+    """
+
+    var selectedProvider: InferenceProvider? {
+        providers.first(where: { $0.id == selectedProviderID }) ?? providers.first
+    }
+
+    var selectedModel: String {
+        selectedProvider?.selectedModel ?? ""
+    }
+
+    mutating func select(providerID: UUID, model: String? = nil) {
+        guard let index = providers.firstIndex(where: { $0.id == providerID }) else { return }
+        selectedProviderID = providerID
+        if let model, !model.isEmpty {
+            providers[index].selectedModel = model
+            if !providers[index].models.contains(model) {
+                providers[index].models.append(model)
+                providers[index].models.sort()
+            }
+        }
+    }
+
     static func load(from defaults: UserDefaults = .standard) -> QuickSettings {
         guard let data = defaults.data(forKey: defaultsKey),
               let settings = try? JSONDecoder().decode(QuickSettings.self, from: data)

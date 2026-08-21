@@ -1,98 +1,112 @@
 import Foundation
-import ApfelServerKit
 
+/// OpenAI Chat Completions client retained under the original type name so the
+/// managed apfel path and existing tests keep their stable API.
 struct ApfelQuickService: QuickService, @unchecked Sendable {
     let baseURL: URL
     let modelName: String
+    let apiKey: String?
+    let systemPrompt: String
+    private let session: URLSession
 
-    /// System prompt that keeps answers tight: no preamble, no postamble,
-    /// no "as an AI" disclaimers, no apologies. Just the answer the user wants.
-    static let systemPrompt: String = """
-    You are a fast, direct assistant in a Spotlight-style overlay. \
-    Answer only what is asked. No preamble, no postamble, no apologies, \
-    no "as an AI" disclaimers, no safety moralizing, no invitations to ask \
-    follow-ups. If the user asks a factual question, state the fact. If \
-    they ask for code, give code. If they ask for a translation, give only \
-    the translation. Be concise and direct.
-    """
+    static let systemPrompt = QuickSettings.defaultSystemPrompt
 
-    init(baseURL: URL, modelName: String = "apple-foundationmodel") {
-        self.baseURL = baseURL
+    init(
+        baseURL: URL,
+        modelName: String = "apple-foundationmodel",
+        apiKey: String? = nil,
+        systemPrompt: String = QuickSettings.defaultSystemPrompt,
+        ensureV1: Bool = true,
+        session: URLSession = .shared
+    ) {
+        if ensureV1 && (baseURL.path.isEmpty || baseURL.path == "/") {
+            self.baseURL = baseURL.appendingPathComponent("v1")
+        } else {
+            self.baseURL = baseURL
+        }
         self.modelName = modelName
+        self.apiKey = apiKey
+        self.systemPrompt = systemPrompt
+        self.session = session
     }
 
-    init(port: Int, modelName: String = "apple-foundationmodel") {
-        self.baseURL = URL(string: "http://127.0.0.1:\(port)")!
-        self.modelName = modelName
+    init(
+        port: Int,
+        modelName: String = "apple-foundationmodel",
+        systemPrompt: String = QuickSettings.defaultSystemPrompt
+    ) {
+        self.init(
+            baseURL: URL(string: "http://127.0.0.1:\(port)")!,
+            modelName: modelName,
+            systemPrompt: systemPrompt,
+            ensureV1: true
+        )
     }
 
-    /// Build the wire-format URLRequest that streams a chat completion.
-    /// Preserved as a public helper so wire-format tests can inspect it;
-    /// the actual streaming uses `ApfelClient.chatCompletions(_:)` below.
     func buildRequest(prompt: String) throws -> URLRequest {
-        let url = URL(string: "/v1/chat/completions", relativeTo: baseURL)!
+        try buildRequest(messages: [QuickMessage(role: .user, content: prompt)])
+    }
+
+    func buildRequest(messages: [QuickMessage]) throws -> URLRequest {
+        let url = baseURL.appendingPathComponent("chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
 
+        var wireMessages: [[String: String]] = [
+            ["role": "system", "content": systemPrompt]
+        ]
+        wireMessages.append(contentsOf: messages.map {
+            ["role": $0.role.rawValue, "content": $0.content]
+        })
         let body: [String: Any] = [
             "model": modelName,
             "stream": true,
-            "messages": [
-                ["role": "system", "content": Self.systemPrompt],
-                ["role": "user", "content": prompt],
-            ]
+            "messages": wireMessages,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }
 
-    func send(prompt: String) -> AsyncThrowingStream<StreamDelta, Error> {
-        let port = baseURL.port ?? 11450
-        let host = baseURL.host ?? "127.0.0.1"
-        let client = ApfelClient(port: port, host: host)
-        let request = ChatRequest(
-            model: modelName,
-            messages: [
-                ChatMessage(role: "system", content: Self.systemPrompt),
-                ChatMessage(role: "user", content: prompt),
-            ],
-            stream: true
-        )
-        return AsyncThrowingStream { continuation in
+    func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    for try await delta in client.chatCompletions(request) {
-                        continuation.yield(
-                            StreamDelta(text: delta.text, finishReason: delta.finishReason)
-                        )
+                    let request = try buildRequest(messages: messages)
+                    let (bytes, response) = try await session.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw QuickServiceError.connectionFailed("Invalid HTTP response")
+                    }
+                    guard (200..<300).contains(http.statusCode) else {
+                        throw QuickServiceError.serverError("HTTP \(http.statusCode)")
+                    }
+
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        guard line.hasPrefix("data:") else { continue }
+                        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                        if payload == "[DONE]" { break }
+                        guard let data = payload.data(using: .utf8),
+                              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let choices = object["choices"] as? [[String: Any]],
+                              let choice = choices.first
+                        else { continue }
+                        let delta = choice["delta"] as? [String: Any]
+                        let text = delta?["content"] as? String
+                        let finishReason = choice["finish_reason"] as? String
+                        if text != nil || finishReason != nil {
+                            continuation.yield(StreamDelta(text: text, finishReason: finishReason))
+                        }
                     }
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish()
-                } catch let error as ApfelClientError {
-                    switch error {
-                    case .httpStatus(let code):
-                        continuation.finish(
-                            throwing: QuickServiceError.serverError("HTTP \(code)")
-                        )
-                    case .stream(let message):
-                        continuation.finish(
-                            throwing: QuickServiceError.streamError(message)
-                        )
-                    case .invalidURL:
-                        continuation.finish(
-                            throwing: QuickServiceError.connectionFailed(
-                                "Could not build request URL from host/port"
-                            )
-                        )
-                    }
                 } catch {
-                    continuation.finish(
-                        throwing: QuickServiceError.connectionFailed(
-                            "Connection failed: \(error.localizedDescription)"
-                        )
-                    )
+                    continuation.finish(throwing: error)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -100,18 +114,27 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
     }
 
     func healthCheck() async throws -> Bool {
-        let url = URL(string: "/health", relativeTo: baseURL)!
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            return false
+        var request = URLRequest(url: baseURL.appendingPathComponent("models"))
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (json?["modelAvailable"] as? Bool) == true
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
     }
 }
 
-enum QuickServiceError: Error {
+enum QuickServiceError: LocalizedError {
     case serverError(String)
     case streamError(String)
     case connectionFailed(String)
+    case commandFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .serverError(let message), .streamError(let message),
+             .connectionFailed(let message), .commandFailed(let message):
+            return message
+        }
+    }
 }

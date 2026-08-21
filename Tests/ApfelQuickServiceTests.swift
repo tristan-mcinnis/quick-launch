@@ -48,6 +48,48 @@ struct ApfelQuickServiceTests {
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
     }
 
+    @Test func testBuildRequestAddsBearerAPIKey() throws {
+        let service = ApfelQuickService(
+            baseURL: URL(string: "https://example.com/v1")!,
+            modelName: "test-model",
+            apiKey: "secret-key",
+            systemPrompt: "Return only the result.",
+            ensureV1: false
+        )
+
+        let request = try service.buildRequest(prompt: "hello")
+
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret-key")
+    }
+
+    @Test func testBuildRequestUsesEditableSystemPrompt() throws {
+        let service = ApfelQuickService(
+            baseURL: URL(string: "https://example.com/v1")!,
+            modelName: "test-model",
+            systemPrompt: "My custom action rules",
+            ensureV1: false
+        )
+
+        let request = try service.buildRequest(prompt: "hello")
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(json["messages"] as? [[String: Any]])
+
+        #expect(messages.first?["content"] as? String == "My custom action rules")
+    }
+
+    @Test func testVersionedBaseURLIsNotDuplicated() throws {
+        let service = ApfelQuickService(
+            baseURL: URL(string: "http://127.0.0.1:1234/v1")!,
+            modelName: "local-model",
+            ensureV1: false
+        )
+
+        let request = try service.buildRequest(prompt: "hello")
+
+        #expect(request.url?.absoluteString == "http://127.0.0.1:1234/v1/chat/completions")
+    }
+
     // MARK: - 4. Body JSON contains the user prompt somewhere in messages
 
     @Test func testBuildRequestBodyContainsPrompt() throws {

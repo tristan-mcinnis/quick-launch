@@ -194,6 +194,8 @@ struct QuickViewModelTests {
         let msg = vm.errorMessage ?? ""
         #expect(msg.lowercased().contains("start") || msg.lowercased().contains("wait"))
         #expect(vm.isStreaming == false)
+        #expect(vm.input == "hello")
+        #expect(vm.currentConversation?.messages.isEmpty == true)
     }
 
     // MARK: - 12. Empty input does not call service
@@ -475,6 +477,67 @@ struct QuickViewModelTests {
         vm.input = "what is 6 times 7"   // natural language → AI
         await vm.submit()
         #expect(vm.output == "42")
+    }
+
+    @Test func testFollowUpIncludesShortConversationContext() async throws {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "First answer", finishReason: "stop")])
+        let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
+        vm.settings.historyEnabled = false
+        vm.input = "First question"
+        await vm.submit()
+
+        await service.setResponses([StreamDelta(text: "Second answer", finishReason: "stop")])
+        vm.input = "What about the other one?"
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.map(\.role) == [.user, .assistant, .user])
+        #expect(messages.map(\.content) == [
+            "First question",
+            "First answer",
+            "What about the other one?",
+        ])
+    }
+
+    @Test func testSelectingModelChangesProviderImmediately() {
+        let vm = QuickViewModel(service: MockQuickService())
+
+        vm.selectModel(
+            providerID: InferenceProvider.deepSeekID,
+            model: "deepseek-v4-pro"
+        )
+
+        #expect(vm.settings.selectedProviderID == InferenceProvider.deepSeekID)
+        #expect(vm.settings.selectedModel == "deepseek-v4-pro")
+        #expect(vm.activeModelDisplay == "deepseek-v4-pro")
+    }
+
+    @Test func testSavedActionStartsFreshThread() async throws {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "answer", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        settings.savedPrompts = [
+            SavedPrompt(
+                alias: "clean",
+                prompt: "Clean this up.",
+                providerID: InferenceProvider.managedApfelID,
+                model: "apple-foundationmodel"
+            )
+        ]
+        let vm = QuickViewModel(settings: settings, service: service)
+        vm.input = "First question"
+        await vm.submit()
+
+        vm.input = "/clean rough text"
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.count == 1)
+        #expect(messages.first?.content == "Clean this up.\n\nrough text")
     }
 
     // MARK: - Legacy: original test kept for compatibility

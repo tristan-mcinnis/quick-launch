@@ -23,16 +23,16 @@ struct WelcomeOverlayView: View {
                 Text("Welcome to apfel-quick")
                     .font(.system(size: 22, weight: .bold))
 
-                Text("Press Option+Space anywhere to ask anything. The answer streams in and copies to your clipboard automatically. Everything runs on your Mac - no internet needed.")
+                Text("Press Option+Space anywhere, choose a model, and run a quick action. The result streams in and copies to your clipboard automatically.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    featureBullet("airplane", "Works completely offline")
-                    featureBullet("lock.shield", "Nothing leaves your Mac")
-                    featureBullet("bolt", "Instant — no sign-up, no account")
+                    featureBullet("arrow.triangle.2.circlepath", "Switch local, API, and CLI models")
+                    featureBullet("bolt", "Saved actions and short follow-ups")
+                    featureBullet("lock.shield", "API keys stay in macOS Keychain")
                 }
                 .padding(.top, 4)
 
