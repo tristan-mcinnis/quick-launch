@@ -5,6 +5,7 @@ enum LauncherItemKind: String, Codable, Sendable {
     case snippet
     case quickLink
     case clipboard
+    case command
 }
 
 /// User-owned configuration shared by searchable launcher items.

@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 7
+    var configurationVersion: Int = 8
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -13,6 +13,7 @@ struct QuickSettings: Codable, Sendable {
     var autoCopy: Bool = true            // Auto-copy result to clipboard when streaming completes
     var launchAtLogin: Bool = true       // Start at login
     var showMenuBar: Bool = true         // Show status bar icon
+    var caffeinateEnabled: Bool = true    // Keep this Mac awake while Quick Launch runs
 
     // Updates
     var checkForUpdatesOnLaunch: Bool = false
@@ -62,12 +63,13 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 7
+        configurationVersion = 8
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? true
         showMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showMenuBar) ?? true
+        caffeinateEnabled = try c.decodeIfPresent(Bool.self, forKey: .caffeinateEnabled) ?? true
         checkForUpdatesOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdatesOnLaunch) ?? false
         hasSeenWelcome = try c.decodeIfPresent(Bool.self, forKey: .hasSeenWelcome) ?? false
         launchAtLoginPromptShown = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginPromptShown) ?? false

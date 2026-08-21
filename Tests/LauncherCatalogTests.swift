@@ -59,7 +59,8 @@ struct LauncherCatalogTests {
     @Test func emptyLauncherShowsCatalogsAndScopeFiltersItems() {
         let service = FakeLauncherCatalog()
         let vm = QuickViewModel(launcherCatalog: service)
-        #expect(vm.launcherMatches.count == 3)
+        #expect(vm.launcherMatches.count == 4)
+        #expect(vm.launcherMatches.contains(.catalog(.commands, count: 12)))
         vm.enterCatalog(.snippets)
         vm.input = "greet"
         #expect(vm.catalogMatches.map(\.title) == ["Greeting"])

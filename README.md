@@ -21,6 +21,8 @@ API, and subscription-backed models. It was forked from the original
 - Screenshot attachments from the clipboard, routed automatically to a local MLX vision model
 - Local, bounded, clearable text clipboard history on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
+- Previous-window management for left/right/top/bottom halves, thirds, and fourths
+- Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
 - Direct SearXNG web search for explicit searches and time-sensitive questions
 - Provider and model switcher inside the compact overlay menu
@@ -117,6 +119,13 @@ attachment. Submitting it routes the prompt and image to the local MLX vision
 server at `127.0.0.1:8080`; an empty prompt asks for a useful description.
 Screenshot bytes are kept only for the current request and are not written to
 history or settings.
+
+Type a layout name such as `left half`, `center third`, or `third fourth` and
+press Return to resize the window that was active immediately before Quick
+Launch. Open the highlighted command with `Command+K` to assign a shorter alias
+or global hotkey. The Commands catalog contains all halves, thirds, fourths,
+and the Caffeinate toggle. Caffeinate can also be toggled by right-clicking the
+Quick Launch menu-bar icon.
 
 Select text in another app before opening Quick Launch, then press `Command-K`
 to choose an action. The default Clean Up and Translate actions replace the
@@ -239,8 +248,8 @@ interpolated into a shell command.
 ## Deliberately not in the core build
 
 Finder file actions, document attachments, ambient screen capture, screenshot
-library management, the full Tuna translation window, voice input, window
-management, and a larger chat workspace are deferred. Explicit clipboard image
+library management, the full Tuna translation window, voice input, and a larger
+chat workspace are deferred. Explicit clipboard image
 attachments are supported; Quick Launch does not observe or record the screen.
 
 ## License

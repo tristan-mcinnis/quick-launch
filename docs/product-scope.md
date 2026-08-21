@@ -10,10 +10,12 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 6. Paste existing Tuna snippets.
 7. Open existing Tuna Quick Links.
 8. Search and paste a bounded local text clipboard history.
+9. Resize the previous window into deterministic halves, thirds, and fourths.
+10. Keep the Mac awake with a native Caffeinate toggle.
 
-Screenshot management, the full Tuna translation window, and window management
-remain future catalogs. The current Translate action is a configurable selected
-text AI action, not the full Tuna translation interface.
+Screenshot-library management and the full Tuna translation window remain
+future catalogs. The current Translate action is a configurable selected-text
+AI action, not the full Tuna translation interface.
 
 It does not need file search, screen history, OCR, or a full chat workspace.
 
@@ -59,7 +61,7 @@ share a universal tool-host or tool-calling loop.
 
 Keep Tuna installed until each replacement passes the same real interaction.
 
-- Port the Tuna Companion translator and window-management behavior.
+- Port the Tuna Companion translator behavior.
 - Tuna snippets and Quick Links are read live without exposing their values in logs or settings.
 - The native app and clipboard catalogs are active. Clipboard history is text-only.
 - Do not port Caffeinate, Screen OCR, Screenshots, or file search unless the product scope changes.

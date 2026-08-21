@@ -123,6 +123,7 @@ struct QuickActionWorkflowTests {
             selectedTextService: selection
         )
         vm.rememberSelectionTarget(target)
+        vm.prepareForExternalAction = { selection.externalActionPrepared = true }
         let item = LauncherCatalogItem(
             kind: .snippet,
             itemID: "greeting",
@@ -135,8 +136,64 @@ struct QuickActionWorkflowTests {
         #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
         #expect(await vm.pasteLauncherItem(item))
         #expect(selection.pastedText == "Hello there")
+        #expect(selection.wasPreparedWhenPasted)
         #expect(await vm.copyAndPasteLauncherItem(item))
         #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
+    }
+
+    @Test func windowCommandTargetsPreviousWindowAfterDismissingOverlay() {
+        let windows = FakeWindowManager()
+        let vm = QuickViewModel(windowManager: windows)
+        vm.rememberSelectionTarget(target)
+        vm.prepareForExternalAction = { windows.externalActionPrepared = true }
+        let item = vm.systemCommands.first { $0.itemID == "window.centerThird" }!
+
+        vm.performSystemCommand(item)
+
+        #expect(windows.appliedLayout == .centerThird)
+        #expect(windows.appliedTarget == target)
+        #expect(windows.wasPreparedWhenApplied)
+    }
+
+    @Test func caffeinateCommandTogglesAndPersistsIntent() {
+        let caffeine = FakeCaffeinateManager()
+        let vm = QuickViewModel(caffeinateManager: caffeine)
+        vm.persistSettings = { _ in }
+        let item = vm.systemCommands.first { $0.itemID == "caffeinate.toggle" }!
+
+        vm.performSystemCommand(item)
+        #expect(vm.isCaffeinating)
+        #expect(vm.settings.caffeinateEnabled)
+        #expect(caffeine.isEnabled)
+
+        vm.performSystemCommand(vm.systemCommands.first { $0.itemID == "caffeinate.toggle" }!)
+        #expect(!vm.isCaffeinating)
+        #expect(!vm.settings.caffeinateEnabled)
+    }
+}
+
+@MainActor
+private final class FakeWindowManager: WindowManaging {
+    var isAccessibilityTrusted = true
+    var externalActionPrepared = false
+    var wasPreparedWhenApplied = false
+    var appliedLayout: WindowLayout?
+    var appliedTarget: SelectionTarget?
+
+    func apply(_ layout: WindowLayout, to target: SelectionTarget) -> Bool {
+        wasPreparedWhenApplied = externalActionPrepared
+        appliedLayout = layout
+        appliedTarget = target
+        return true
+    }
+}
+
+@MainActor
+private final class FakeCaffeinateManager: CaffeinateManaging {
+    var isEnabled = false
+    func setEnabled(_ enabled: Bool) -> Bool {
+        isEnabled = enabled
+        return true
     }
 }
 
@@ -148,6 +205,8 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     var replacedContext: SelectedTextContext?
     var pastedText: String?
     var pastedTarget: SelectionTarget?
+    var externalActionPrepared = false
+    var wasPreparedWhenPasted = false
     var openedSettings = false
 
     init(text: String?, trusted: Bool = true) {
@@ -172,6 +231,7 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     }
 
     func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+        wasPreparedWhenPasted = externalActionPrepared
         pastedText = text
         pastedTarget = target
         return true

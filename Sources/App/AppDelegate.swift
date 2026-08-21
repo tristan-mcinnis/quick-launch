@@ -63,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launcherCatalog = TunaCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = SearXNGSearchService()
+    private let windowManager = WindowManager()
+    private let caffeinateManager = CaffeinateManager()
 
     // MARK: - NSApplicationDelegate
 
@@ -73,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
             webSearchService: webSearchService,
+            windowManager: windowManager,
+            caffeinateManager: caffeinateManager,
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
@@ -94,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         serverManager.stop()
+        caffeinateManager.setEnabled(false)
     }
 
     // MARK: - Bootstrap
@@ -102,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a. Load settings from UserDefaults
         let settings = QuickSettings.load()
         viewModel.settings = settings
+        viewModel.isCaffeinating = caffeinateManager.setEnabled(settings.caffeinateEnabled)
         viewModel.settings.save()
         viewModel.loadHistory()
         configureClipboardHistory()
@@ -109,6 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // b. Create NSPanel with OverlayView hosted in NSHostingController
         let panel = makePanel(viewModel: viewModel)
         self.panel = panel
+        viewModel.prepareForExternalAction = { [weak self] in
+            self?.hideOverlay()
+        }
 
         // c. Register global hotkey (Option+Space by default)
         registerGlobalHotkey()
@@ -599,6 +608,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         menu.addItem(settings)
 
+        let caffeinate = NSMenuItem(
+            title: viewModel?.isCaffeinating == true ? "Turn Caffeinate Off" : "Turn Caffeinate On",
+            action: #selector(toggleCaffeinateFromMenu),
+            keyEquivalent: ""
+        )
+        caffeinate.state = viewModel?.isCaffeinating == true ? .on : .off
+        caffeinate.target = self
+        menu.addItem(caffeinate)
+
         let welcome = NSMenuItem(
             title: "Show Welcome Again",
             action: #selector(showWelcomeFromMenu),
@@ -710,6 +728,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         welcomePanel?.orderOut(nil)
         welcomePanel = nil
         showWelcomePanel()
+    }
+
+    @objc private func toggleCaffeinateFromMenu() {
+        guard let viewModel,
+              let item = viewModel.systemCommands.first(where: {
+                  $0.itemID == "caffeinate.toggle"
+              }) else { return }
+        viewModel.performSystemCommand(item)
     }
 
     @objc private func openWebsite() {

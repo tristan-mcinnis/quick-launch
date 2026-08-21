@@ -32,6 +32,7 @@ import Observation
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
     var pendingImage: QuickImageAttachment?
+    var isCaffeinating: Bool = false
 
     // MARK: - Dependencies
 
@@ -42,6 +43,10 @@ import Observation
     var clipboardHistory: (any ClipboardHistoryServicing)?
     var webSearchService: (any WebSearchServicing)?
     var imageService: (any QuickService)?
+    var windowManager: (any WindowManaging)?
+    var caffeinateManager: (any CaffeinateManaging)?
+    @ObservationIgnored var prepareForExternalAction: (() -> Void)?
+    @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
 
     // How long submit() waits for `service` to be injected before giving up.
     // Exposed so tests can lower this to keep them fast.
@@ -70,6 +75,8 @@ import Observation
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
         imageService: (any QuickService)? = nil,
+        windowManager: (any WindowManaging)? = nil,
+        caffeinateManager: (any CaffeinateManaging)? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.settings = settings
@@ -80,6 +87,8 @@ import Observation
         self.clipboardHistory = clipboardHistory
         self.webSearchService = webSearchService
         self.imageService = imageService
+        self.windowManager = windowManager
+        self.caffeinateManager = caffeinateManager
         self.currentVersion = currentVersion
     }
 
@@ -167,12 +176,33 @@ import Observation
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
+    var systemCommands: [LauncherCatalogItem] {
+        let layouts = WindowLayout.allCases.map { layout in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "window.\(layout.rawValue)",
+                title: layout.title,
+                detail: "Move the previous window",
+                value: "window.\(layout.rawValue)"
+            )
+        }
+        let caffeine = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.toggle",
+            title: isCaffeinating ? "Turn Caffeinate Off" : "Turn Caffeinate On",
+            detail: isCaffeinating ? "This Mac will stay awake" : "Prevent this Mac from sleeping",
+            value: "caffeinate.toggle"
+        )
+        return layouts + [caffeine]
+    }
+
     var catalogItems: [LauncherCatalogItem] {
         guard let catalogScope else { return [] }
         switch catalogScope {
         case .snippets: return snippets
         case .quickLinks: return quickLinks
         case .clipboard: return clipboardEntries
+        case .commands: return systemCommands
         }
     }
 
@@ -215,12 +245,19 @@ import Observation
             return .catalog(scope, count: count)
         }
         let apps = applicationMatches.map(LauncherSearchResult.application)
-        return Array((roots + apps).prefix(6))
+        let commands: [LauncherSearchResult] = query.isEmpty ? [] : systemCommands.compactMap { item in
+            let alias = launcherItemAlias(for: item)
+            guard FuzzyMatcher.score(query: query, candidate: item.title) != nil
+                || (!alias.isEmpty && FuzzyMatcher.score(query: query, candidate: alias) != nil)
+            else { return nil }
+            return .item(item)
+        }
+        return Array((commands + roots + apps).prefix(6))
     }
 
     var contextualCatalogItem: LauncherCatalogItem? {
         guard let contextualCatalogItemID else { return nil }
-        return (configurableCatalogItems + clipboardEntries).first {
+        return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
         }
     }
@@ -367,6 +404,7 @@ import Observation
         case .snippets: snippets.count
         case .quickLinks: quickLinks.count
         case .clipboard: clipboardEntries.count
+        case .commands: systemCommands.count
         }
     }
 
@@ -404,13 +442,17 @@ import Observation
             requestInputFocus()
             return false
         }
+        // The overlay must stop being the key window before the target app is
+        // activated and receives Command-V. Keeping the floating panel visible
+        // until after paste lets it retain/retake keyboard focus.
+        prepareForExternalAction?()
+        await Task.yield()
         guard await selectedTextService.paste(item.value, to: target) else {
             copyLauncherItem(item)
             errorMessage = "Could not paste into \(target.applicationName). The item was copied instead."
             requestInputFocus()
             return false
         }
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
         return true
     }
 
@@ -436,7 +478,45 @@ import Observation
             _ = await pasteLauncherItem(item)
         case .application:
             return
+        case .command:
+            performSystemCommand(item)
         }
+    }
+
+    func performSystemCommand(_ item: LauncherCatalogItem) {
+        if item.value == "caffeinate.toggle" {
+            let desired = !isCaffeinating
+            guard caffeinateManager?.setEnabled(desired) == true else {
+                errorMessage = "Could not change Caffeinate."
+                requestInputFocus()
+                return
+            }
+            isCaffeinating = desired
+            settings.caffeinateEnabled = desired
+            persistSettings(settings)
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            return
+        }
+
+        guard item.value.hasPrefix("window."),
+              let layout = WindowLayout(rawValue: String(item.value.dropFirst("window.".count))),
+              let target = selectionTarget,
+              let windowManager
+        else {
+            errorMessage = "No manageable window was available behind Quick Launch."
+            requestInputFocus()
+            return
+        }
+        prepareForExternalAction?()
+        guard windowManager.apply(layout, to: target) else {
+            errorMessage = windowManager.isAccessibilityTrusted
+                ? "Could not resize \(target.applicationName)."
+                : "Accessibility access is required for window management."
+            requestInputFocus()
+            return
+        }
+        input = ""
     }
 
     private func openQuickLink(_ item: LauncherCatalogItem, input: String) {
@@ -560,7 +640,7 @@ import Observation
     }
 
     func catalogItem(kind: LauncherItemKind, itemID: String) -> LauncherCatalogItem? {
-        (configurableCatalogItems + clipboardEntries).first {
+        (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.kind == kind && $0.itemID == itemID
         }
     }

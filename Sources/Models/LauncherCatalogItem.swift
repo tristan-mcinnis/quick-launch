@@ -15,6 +15,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .application: "Open"
         case .snippet, .clipboard: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
+        case .command: "Run"
         }
     }
 
@@ -24,6 +25,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .snippet: "text.quote"
         case .quickLink: "link"
         case .clipboard: "clipboard"
+        case .command: "rectangle.3.group"
         }
     }
 }
@@ -32,6 +34,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case snippets
     case quickLinks
     case clipboard
+    case commands
 
     var id: String { rawValue }
     var title: String {
@@ -39,6 +42,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "Snippets"
         case .quickLinks: "Quick Links"
         case .clipboard: "Clipboard History"
+        case .commands: "Commands"
         }
     }
     var aliases: [String] {
@@ -46,6 +50,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: ["snippets", "snippet", "sni"]
         case .quickLinks: ["quick links", "links", "link"]
         case .clipboard: ["clipboard history", "clipboard", "clip"]
+        case .commands: ["commands", "window management", "windows", "caffeinate"]
         }
     }
     var systemImage: String {
@@ -53,6 +58,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "text.quote"
         case .quickLinks: "link"
         case .clipboard: "clipboard"
+        case .commands: "command"
         }
     }
 }

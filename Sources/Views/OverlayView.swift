@@ -504,13 +504,13 @@ private struct CatalogItemActionPane: View {
                 Label(item.title, systemImage: item.systemImage)
                     .font(AQDesign.TypeToken.body.weight(.semibold)).lineLimit(1)
                 Spacer()
-                if item.kind == .quickLink {
+                if item.kind == .quickLink || item.kind == .command {
                     Button(item.defaultActionTitle) {
                         Task { await viewModel.performLauncherItem(item) }
                     }.buttonStyle(.borderedProminent)
                 }
             }
-            if item.kind != .quickLink {
+            if item.kind == .snippet || item.kind == .clipboard {
                 HStack(spacing: AQDesign.Space.standard) {
                     Button("Paste") {
                         Task { await viewModel.pasteLauncherItem(item) }
@@ -551,7 +551,7 @@ private struct CatalogItemActionPane: View {
         .padding(.horizontal, AQDesign.Space.section)
         .padding(.vertical, 12)
         .onAppear {
-            if item.kind != .quickLink { focusedAction = .paste }
+            if item.kind == .snippet || item.kind == .clipboard { focusedAction = .paste }
         }
         .onKeyPress(.leftArrow) {
             moveFocus(-1)
@@ -564,7 +564,7 @@ private struct CatalogItemActionPane: View {
     }
 
     private func moveFocus(_ delta: Int) {
-        guard item.kind != .quickLink else { return }
+        guard item.kind == .snippet || item.kind == .clipboard else { return }
         let actions = CatalogAction.allCases
         let current = focusedAction?.rawValue ?? 0
         focusedAction = actions[(current + delta + actions.count) % actions.count]

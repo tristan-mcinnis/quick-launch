@@ -5,6 +5,9 @@
 - Added ephemeral clipboard screenshot attachments, automatically routed to the local MLX vision server without persisting image data in settings or history.
 - Improved snippet pasting by targeting the topmost external window directly behind Quick Launch.
 - Added a fully keyboard-navigable `Command+K` snippet action pane with Paste, Copy, and Copy & Paste.
+- Fixed snippet Return pasting by dismissing the overlay before target-app activation and waiting for the previous app to become frontmost.
+- Added previous-window layouts for left/right/top/bottom halves, all thirds, and all fourths, searchable by name with editable aliases and global hotkeys.
+- Added a persistent native Caffeinate toggle in Commands and the menu-bar context menu; it is enabled by default for this migration.
 
 ## v1.1.0 — 2026-08-21
 

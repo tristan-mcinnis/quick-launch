@@ -50,7 +50,8 @@ Preserve:
 - short follow-ups and bounded local history;
 - Keychain-backed secrets and no telemetry;
 - direct process execution without shell interpolation;
-- protocol-backed services with regression tests.
+- protocol-backed services with regression tests;
+- deterministic previous-window layouts and native Caffeinate lifecycle control.
 
 Finder automation, document workflows, ambient screen capture, and autonomous
 file changes remain outside the core until they have explicit interaction,

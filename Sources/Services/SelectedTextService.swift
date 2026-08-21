@@ -167,7 +167,11 @@ final class SelectedTextService: SelectedTextServicing {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         app.activate(from: .current, options: [.activateAllWindows])
-        try? await Task.sleep(for: .milliseconds(220))
+        for _ in 0..<20 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == target.processIdentifier { break }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
 
         for _ in 0..<40 {
             let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])

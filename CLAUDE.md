@@ -17,7 +17,8 @@ core until they have a separate permission and safety design. Explicit
 clipboard-image attachments may be routed to the local vision server, but must
 not be persisted. Preserve the local
 math shortcut, no telemetry, Keychain secrets, direct process execution with
-no shell interpolation, and protocol-backed services with tests.
+no shell interpolation, protocol-backed services with tests, deterministic
+previous-window layouts, and native Caffeinate lifecycle control.
 
 ## Repository and Privacy
 
