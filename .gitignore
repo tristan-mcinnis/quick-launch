@@ -7,3 +7,19 @@ DerivedData/
 build/
 dist/
 .wrangler/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.mobileprovision
+
+# Personal launcher data must stay outside the repository
+snippets/
+private-snippets/
+local-data/
