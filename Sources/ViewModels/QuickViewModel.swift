@@ -56,7 +56,9 @@ import Observation
     // How long the "just copied" flag stays true after auto-copy.
     @ObservationIgnored var justCopiedTimeout: Duration = .seconds(2)
     @ObservationIgnored var webAnswerTimeout: Duration = .seconds(15)
+    @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
+    @ObservationIgnored private var catalogIdleResetTask: Task<Void, Never>?
 
     // MARK: - Private
 
@@ -341,6 +343,7 @@ import Observation
         applicationSelectionIndex = (
             applicationSelectionIndex + delta + matches.count
         ) % matches.count
+        noteInteraction()
     }
 
     @discardableResult
@@ -390,9 +393,43 @@ import Observation
         applicationSelectionIndex = 0
         errorMessage = nil
         requestInputFocus()
+        noteInteraction()
     }
 
     func leaveCatalog() {
+        catalogIdleResetTask?.cancel()
+        isCatalogActionPanePresented = false
+        isApplicationActionPanePresented = false
+        contextualCatalogItemID = nil
+        contextualApplicationID = nil
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        input = ""
+        applicationSelectionIndex = 0
+        requestInputFocus()
+    }
+
+    func noteInteraction() {
+        guard catalogScope != nil || pendingQuickLinkID != nil
+                || isCatalogActionPanePresented || isApplicationActionPanePresented else {
+            catalogIdleResetTask?.cancel()
+            return
+        }
+        catalogIdleResetTask?.cancel()
+        let delay = catalogIdleResetDelay
+        catalogIdleResetTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.returnToRootAfterIdle()
+        }
+    }
+
+    private func returnToRootAfterIdle() {
+        guard !isStreaming else { return }
+        isCatalogActionPanePresented = false
+        isApplicationActionPanePresented = false
+        contextualCatalogItemID = nil
+        contextualApplicationID = nil
         catalogScope = nil
         pendingQuickLinkID = nil
         input = ""
@@ -584,6 +621,7 @@ import Observation
                 contextualCatalogItemID = nil
                 isActionPalettePresented = false
                 actionQuery = ""
+                noteInteraction()
                 return
             case .item(let item) where item.kind != .clipboard:
                 contextualCatalogItemID = item.id
@@ -592,6 +630,7 @@ import Observation
                 contextualApplicationID = nil
                 isActionPalettePresented = false
                 actionQuery = ""
+                noteInteraction()
                 return
             default:
                 break
@@ -610,6 +649,38 @@ import Observation
         isCatalogActionPanePresented = false
         contextualCatalogItemID = nil
         requestInputFocus()
+        noteInteraction()
+    }
+
+    func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) -> Bool {
+        do {
+            try launcherCatalog?.updateSnippet(item, title: title, value: value)
+            errorMessage = nil
+            contextualCatalogItemID = launcherCatalog?.snippets.first {
+                $0.itemID == item.itemID
+            }?.id
+            noteInteraction()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
+    }
+
+    func deleteSnippet(_ item: LauncherCatalogItem) -> Bool {
+        do {
+            try launcherCatalog?.deleteSnippet(item)
+            closeCatalogActionPane()
+            applicationSelectionIndex = 0
+            errorMessage = nil
+            noteInteraction()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
     }
 
     func launcherItemAlias(for item: LauncherCatalogItem) -> String {

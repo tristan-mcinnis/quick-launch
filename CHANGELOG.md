@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added snippet Edit and guarded Delete commands to the keyboard-navigable `Command+K` pane; changes update Tuna's existing Custom Items store with a safety backup.
+- Added empty-Backspace navigation from catalogues to the launcher root and a 15-second inactive catalogue reset.
 - Added ephemeral clipboard screenshot attachments, automatically routed to the local MLX vision server without persisting image data in settings or history.
 - Improved snippet pasting by targeting the topmost external window directly behind Quick Launch.
 - Added a fully keyboard-navigable `Command+K` snippet action pane with Paste, Copy, and Copy & Paste.

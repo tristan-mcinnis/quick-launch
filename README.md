@@ -34,7 +34,8 @@ API, and subscription-backed models. It was forked from the original
 - Pi provider that uses Pi's configured models, extensions, skills, and custom tools
 - `/search` retrieval through the existing SSH connection to SearXNG
 - Selected-text actions that can show a result or replace the original text
-- Command-K keyboard action picker with Paste, Copy, and Copy & Paste, plus fuzzy slash aliases such as `/eml`
+- Command-K keyboard action picker with Paste, Copy, Copy & Paste, Edit, and guarded Delete for snippets, plus fuzzy slash aliases such as `/eml`
+- Empty Backspace leaves a nested catalogue, and inactive catalogue views return to the launcher root after 15 seconds
 - Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
 - Short follow-up threads and a local, bounded recent-history menu
 - On-demand conversation transcript plus Copy Result and Paste Back actions

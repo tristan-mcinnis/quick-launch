@@ -51,8 +51,16 @@ struct OverlayView: View {
                         viewModel.moveApplicationSelection(-1)
                         return .handled
                     }
+                    .onKeyPress(.delete) {
+                        guard viewModel.input.isEmpty,
+                              viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil
+                        else { return .ignored }
+                        viewModel.leaveCatalog()
+                        return .handled
+                    }
                     .onChange(of: viewModel.input) { _, _ in
                         viewModel.resetApplicationSelection()
+                        viewModel.noteInteraction()
                     }
                     .disabled(viewModel.isStreaming)
 
@@ -491,11 +499,24 @@ private struct CatalogItemActionPane: View {
     @Bindable var viewModel: QuickViewModel
     let item: LauncherCatalogItem
     @FocusState private var focusedAction: CatalogAction?
+    @State private var isEditing = false
+    @State private var editedTitle: String
+    @State private var editedValue: String
+    @State private var deleteIsArmed = false
 
     private enum CatalogAction: Int, CaseIterable, Hashable {
         case paste
         case copy
         case copyAndPaste
+        case edit
+        case delete
+    }
+
+    init(viewModel: QuickViewModel, item: LauncherCatalogItem) {
+        self.viewModel = viewModel
+        self.item = item
+        _editedTitle = State(initialValue: item.title)
+        _editedValue = State(initialValue: item.value)
     }
 
     var body: some View {
@@ -510,7 +531,29 @@ private struct CatalogItemActionPane: View {
                     }.buttonStyle(.borderedProminent)
                 }
             }
-            if item.kind == .snippet || item.kind == .clipboard {
+            if isEditing {
+                TextField("Snippet name", text: $editedTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: editedTitle) { _, _ in viewModel.noteInteraction() }
+                TextEditor(text: $editedValue)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 72, maxHeight: 130)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
+                HStack {
+                    Button("Save") {
+                        if viewModel.updateSnippet(item, title: editedTitle, value: editedValue) {
+                            isEditing = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Cancel") {
+                        editedTitle = item.title
+                        editedValue = item.value
+                        isEditing = false
+                    }
+                }
+            } else if item.kind == .snippet || item.kind == .clipboard {
                 HStack(spacing: AQDesign.Space.standard) {
                     Button("Paste") {
                         Task { await viewModel.pasteLauncherItem(item) }
@@ -525,22 +568,41 @@ private struct CatalogItemActionPane: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
+                if item.kind == .snippet {
+                    HStack(spacing: AQDesign.Space.standard) {
+                        Button("Edit") { isEditing = true; deleteIsArmed = false }
+                            .focused($focusedAction, equals: .edit)
+                        Button(deleteIsArmed ? "Confirm Delete" : "Delete") {
+                            if deleteIsArmed {
+                                _ = viewModel.deleteSnippet(item)
+                            } else {
+                                deleteIsArmed = true
+                            }
+                        }
+                        .tint(AQDesign.ColorToken.danger)
+                        .focused($focusedAction, equals: .delete)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                }
             }
-            TextField("Search alias", text: Binding(
-                get: { viewModel.launcherItemAlias(for: item) },
-                set: { viewModel.setLauncherItemAlias($0, for: item) }
-            )).textFieldStyle(.roundedBorder)
-            ActionHotkeyRecorderView(
-                hotkey: Binding(
-                    get: { viewModel.launcherItemHotkey(for: item) },
-                    set: { viewModel.setLauncherItemHotkey($0, for: item) }
-                ),
-                label: "Global hotkey",
-                changeNotification: .launcherItemHotkeysChanged
-            )
-            if let conflict = viewModel.launcherItemConfigurationConflict(for: item) {
-                Text(conflict).font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(AQDesign.ColorToken.danger)
+            if !isEditing {
+                TextField("Search alias", text: Binding(
+                    get: { viewModel.launcherItemAlias(for: item) },
+                    set: { viewModel.setLauncherItemAlias($0, for: item) }
+                )).textFieldStyle(.roundedBorder)
+                ActionHotkeyRecorderView(
+                    hotkey: Binding(
+                        get: { viewModel.launcherItemHotkey(for: item) },
+                        set: { viewModel.setLauncherItemHotkey($0, for: item) }
+                    ),
+                    label: "Global hotkey",
+                    changeNotification: .launcherItemHotkeysChanged
+                )
+                if let conflict = viewModel.launcherItemConfigurationConflict(for: item) {
+                    Text(conflict).font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.danger)
+                }
             }
             HStack {
                 Text("←→ Navigate · Return runs · Command-K closes")
@@ -565,7 +627,9 @@ private struct CatalogItemActionPane: View {
 
     private func moveFocus(_ delta: Int) {
         guard item.kind == .snippet || item.kind == .clipboard else { return }
-        let actions = CatalogAction.allCases
+        let actions = item.kind == .snippet
+            ? CatalogAction.allCases
+            : [.paste, .copy, .copyAndPaste]
         let current = focusedAction?.rawValue ?? 0
         focusedAction = actions[(current + delta + actions.count) % actions.count]
     }

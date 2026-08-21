@@ -701,9 +701,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
-            actionCount: (vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
-                ? 3
-                : (vm.isActionPalettePresented ? vm.actionMatches.count : 0),
+            actionCount: vm.isCatalogActionPanePresented
+                ? 5
+                : (vm.isApplicationActionPanePresented
+                    ? 3
+                    : (vm.isActionPalettePresented ? vm.actionMatches.count : 0)),
             suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 0
                 : max(vm.launcherMatches.count, vm.savedPromptMatches.count),

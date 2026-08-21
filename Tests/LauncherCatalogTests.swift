@@ -67,6 +67,48 @@ struct LauncherCatalogTests {
         vm.handleCommandK()
         #expect(vm.isCatalogActionPanePresented)
     }
+
+    @Test func snippetCanBeEditedAndDeletedThroughCatalogService() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-mutation-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let preferences = folder.appendingPathComponent("Tuna.plist")
+        let config = folder.appendingPathComponent("config.toml")
+        let records: [[String: Any]] = [
+            ["kind": "text", "id": "one", "label": "Before", "value": "Original"],
+            ["kind": "url", "id": "two", "label": "Keep", "value": "https://example.com"],
+        ]
+        let nested = try PropertyListSerialization.data(
+            fromPropertyList: records, format: .binary, options: 0
+        )
+        let root = try PropertyListSerialization.data(
+            fromPropertyList: ["CustomItemsCatalogItems": nested], format: .binary, options: 0
+        )
+        try root.write(to: preferences)
+        let service = TunaCatalogService(preferencesURL: preferences, configURL: config)
+        let snippet = try #require(service.snippets.first)
+        try service.updateSnippet(snippet, title: "After", value: "Updated")
+        #expect(service.snippets.first?.title == "After")
+        #expect(service.quickLinks.count == 1)
+        try service.deleteSnippet(try #require(service.snippets.first))
+        #expect(service.snippets.isEmpty)
+        #expect(service.quickLinks.count == 1)
+        #expect((try FileManager.default.contentsOfDirectory(atPath: folder.path)).contains {
+            $0.contains("quick-launch-backup")
+        })
+    }
+
+    @Test func catalogReturnsToRootAfterIdle() async {
+        let vm = QuickViewModel(launcherCatalog: FakeLauncherCatalog())
+        vm.catalogIdleResetDelay = .milliseconds(20)
+        vm.enterCatalog(.snippets)
+        vm.input = "greet"
+        vm.noteInteraction()
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(vm.catalogScope == nil)
+        #expect(vm.input.isEmpty)
+    }
 }
 
 @MainActor
@@ -79,4 +121,13 @@ private final class FakeLauncherCatalog: LauncherCatalogServicing {
         value: "https://example.com"
     )]
     func reload() {}
+    func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {
+        guard let index = snippets.firstIndex(where: { $0.id == item.id }) else { return }
+        snippets[index] = LauncherCatalogItem(
+            kind: .snippet, itemID: item.itemID, title: title, detail: item.detail, value: value
+        )
+    }
+    func deleteSnippet(_ item: LauncherCatalogItem) throws {
+        snippets.removeAll { $0.id == item.id }
+    }
 }

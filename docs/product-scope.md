@@ -31,7 +31,8 @@ The app stays running as a small menu-bar process.
 - Every app can have an editable alias and optional global hotkey in Settings.
 - An alias narrows directly to an item or command.
 - Return runs the default action.
-- Command-K shows other actions for the selected item.
+- Command-K shows keyboard-accessible actions for the selected item, including editing and guarded deletion of Tuna snippets.
+- Backspace on an empty catalogue search returns to root; inactive nested catalogue state clears after 15 seconds.
 - Any item or command can have its own global hotkey.
 - A direct global hotkey runs without opening the search panel when no choice or result is required.
 - A result that needs review opens in the panel. The input regains focus when the result finishes.

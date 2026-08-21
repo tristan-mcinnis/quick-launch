@@ -2,6 +2,17 @@ import Foundation
 
 @MainActor
 final class TunaCatalogService: LauncherCatalogServicing {
+    enum MutationError: LocalizedError {
+        case invalidSnippet, unreadableStore, snippetNotFound
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidSnippet: "The snippet title and text cannot be empty."
+            case .unreadableStore: "Quick Launch could not safely read Tuna's snippet store."
+            case .snippetNotFound: "That snippet no longer exists in Tuna."
+            }
+        }
+    }
     private(set) var snippets: [LauncherCatalogItem] = []
     private(set) var quickLinks: [LauncherCatalogItem] = []
 
@@ -28,6 +39,64 @@ final class TunaCatalogService: LauncherCatalogServicing {
         quickLinks = (fixedLinks + smartLinks)
             .uniqued(by: \.id)
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard item.kind == .snippet, !cleanTitle.isEmpty, !value.isEmpty else {
+            throw MutationError.invalidSnippet
+        }
+        try mutateSnippet(item) { record in
+            record["label"] = cleanTitle
+            record["value"] = value
+            return true
+        }
+    }
+
+    func deleteSnippet(_ item: LauncherCatalogItem) throws {
+        guard item.kind == .snippet else { throw MutationError.invalidSnippet }
+        try mutateSnippet(item) { _ in false }
+    }
+
+    private func mutateSnippet(
+        _ item: LauncherCatalogItem,
+        transform: (inout [String: Any]) -> Bool
+    ) throws {
+        guard let data = try? Data(contentsOf: preferencesURL),
+              var root = try? PropertyListSerialization.propertyList(
+                from: data, format: nil
+              ) as? [String: Any],
+              let nested = root["CustomItemsCatalogItems"] as? Data,
+              var records = try? PropertyListSerialization.propertyList(
+                from: nested, format: nil
+              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+
+        let storedID = item.itemID.replacingOccurrences(of: "tuna-custom-", with: "")
+        guard let index = records.firstIndex(where: {
+            ($0["kind"] as? String) == "text"
+                && ($0["id"] as? String)?.lowercased() == storedID.lowercased()
+        }) else { throw MutationError.snippetNotFound }
+
+        var record = records[index]
+        if transform(&record) {
+            records[index] = record
+        } else {
+            records.remove(at: index)
+        }
+
+        let backup = preferencesURL.deletingLastPathComponent().appendingPathComponent(
+            "\(preferencesURL.lastPathComponent).quick-launch-backup-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)"
+        )
+        try FileManager.default.copyItem(at: preferencesURL, to: backup)
+        let updatedNested = try PropertyListSerialization.data(
+            fromPropertyList: records, format: .binary, options: 0
+        )
+        root["CustomItemsCatalogItems"] = updatedNested
+        let updatedRoot = try PropertyListSerialization.data(
+            fromPropertyList: root, format: .binary, options: 0
+        )
+        try updatedRoot.write(to: preferencesURL, options: .atomic)
+        reload()
     }
 
     static func loadCustomItems(from url: URL) -> [LauncherCatalogItem] {
