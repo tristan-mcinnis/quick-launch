@@ -37,10 +37,6 @@ struct OverlayView: View {
                     .submitLabel(.send)
                     .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
                     .onKeyPress(.tab) {
-                        if viewModel.inputMode == .translate {
-                            viewModel.flipTranslationDirection()
-                            return .handled
-                        }
                         guard !viewModel.savedPromptMatches.isEmpty else { return .ignored }
                         viewModel.completeFirstFuzzyAlias()
                         return .handled
@@ -510,6 +506,12 @@ private struct LauncherResultRow: View {
                     .foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
+            if case .item(let item) = result, item.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Pinned")
+            }
             if let hotkey {
                 KeyCapGroup(keys: hotkey.keyCaps)
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
@@ -1103,6 +1105,8 @@ extension Notification.Name {
     static let dismissOverlay = Notification.Name("QuickLaunch.dismissOverlay")
     static let presentOverlay = Notification.Name("QuickLaunch.presentOverlay")
     static let screenAwarenessSettingsChanged = Notification.Name("QuickLaunch.screenAwarenessSettingsChanged")
+    static let openTranslator = Notification.Name("QuickLaunch.openTranslator")
+    static let translatorSettingsChanged = Notification.Name("QuickLaunch.translatorSettingsChanged")
     static let openSettings = Notification.Name("QuickLaunch.openSettings")
     static let hotkeyChanged = Notification.Name("QuickLaunch.hotkeyChanged")
     static let actionHotkeysChanged = Notification.Name("QuickLaunch.actionHotkeysChanged")

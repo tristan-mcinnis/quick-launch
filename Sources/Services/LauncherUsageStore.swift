@@ -276,6 +276,9 @@ enum LauncherRanker {
     static let exactMnemonicBase = 20_000
     static let relatedMnemonicBase = 2_500
     static let frecencyCap = 1_200
+    /// A pinned item that matches the query outranks plain use counts but
+    /// not a learned abbreviation.
+    static let pinnedBoost = 1_500
 
     static func boost(for signal: LauncherRankSignal?) -> Int {
         guard let signal else { return 0 }

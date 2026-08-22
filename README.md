@@ -21,11 +21,11 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Raycast-style footer with the keys that work right now, and Sol-style hotkey badges on rows that have a global hotkey
 - Escape closes the launcher from anywhere; Backspace on an empty field returns to the root; reopening starts at the root
 - Finder indexing through the macOS CoreServices application catalog
-- Live Tuna Snippets and Quick Links, with aliases and optional per-item global hotkeys
+- Live Tuna Snippets and Quick Links, with aliases, optional per-item global hotkeys, and pin to top (`⌘⇧P`)
 - Emoji & Symbols catalog as a grid: Frequently Used first, 1 500+ emoji, flags, arrows, math, currency, punctuation, and key symbols, searched by name or plain words (`fire`, `thumbs up`, `command`), pasted with Return or copied with `⌘↩`
-- Translate: a mode (type `tr`) that arrives with the selected text, `⇥` flips the direction, Return translates; `⇧↩` translates whatever is typed anywhere; `/zh` and `/translate` act on selected text
+- Translator window (`⇧⌘T`, or the Translate item): source above, translation below, retranslates as you type, arrives with the selected text, auto-detects the direction (CJK → English, else your last target), `⌘P` target language, `⌘S` swap, `⌘↩` copy, `⇧⌘↩` paste back, `⇧⌘V` use the clipboard, pinyin under Chinese; committed translations are kept locally (500). `⇧↩` in the launcher still translates one-shot; `/zh` and `/translate` act on selected text
 - Caffeinate catalog: toggle, Caffeinate Until… (`17:30`, `5:30pm`, `90m`, `2h`), presets, Agent Watch (stays awake while Claude Code or Codex is working, from hook files), Status; native power assertions, battery cutoff at 20%
-- Screenshots catalog: captures plus the saved files with a preview pane; search by name, date words (`today`, `7d`), or the text inside the image (on-device OCR, Vision); attach, copy image, paste image, Quick Look, reveal, copy path, trash; Paste Latest Screenshot pastes the newest file straight into the previous app
+- Screenshots catalog: captures plus the saved files with a preview pane; search by name, date words (`today`, `7d`), or the text inside the image (on-device OCR, Vision); attach, copy image, paste image, Quick Look, pin to top, reveal, copy path, trash; Paste Latest Screenshot pastes the newest file straight into the previous app
 - Screen Awareness: Send Focused Window to AI (`⌘⇧S`, or a double tap of right `⌘` from anywhere) attaches a screenshot plus the app name, window title, selection, readable text, and page URL; Send Screen, Send Screen Area, and Send Selected Text cover the narrower cases. The attachment card says what was included
 - Clipboard History: pin to top (`⌘⇧P`), save as snippet (`⌘⇧N`) or Quick Link (`⌘⇧L`), delete (`⌃X`)
 - Quick Links open in the browser you choose in Settings, or the system default

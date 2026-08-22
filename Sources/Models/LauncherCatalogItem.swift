@@ -9,7 +9,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var requiresInput: Bool = false
     /// Extra search words that are not part of the title (emoji names, tags).
     var keywords: String = ""
-    /// Clipboard entries only: pinned entries stay at the top and never expire.
+    /// Pinned items stay at the top of their catalog. Clipboard entries and
+    /// chats also never expire while pinned.
     var isPinned: Bool = false
     /// Screenshots only: when the file was captured, for date filters.
     var capturedAt: Date?

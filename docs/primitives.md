@@ -21,14 +21,18 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   Commands. Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
-  value, and optionally an alias, a global hotkey, and search keywords.
+  value, and optionally an alias, a global hotkey, search keywords, and a
+  pin. Pinned items sit at the top of their catalog, above learned
+  favourites, and outrank unpinned matches when you type.
 - **Action.** What Return and the other keys do to the item. The action
   table is the single source of truth for the ⌘K pane, the footer hints,
   the key-cap badges, and direct shortcuts. One table, four surfaces.
 - **Mode.** A state that captures typing for one purpose: Quick Link input,
-  Translate, Caffeinate Until, or an attached screenshot waiting for a
+  Caffeinate Until, Rename Chat, or an attached screenshot waiting for a
   question. Modes show their name on the left of the footer and leave on
   Backspace.
+- **Tool window.** A second panel for a two-pane job: the Translator
+  (`⇧⌘T`). Same tokens, same footer, same key meanings; Escape closes it.
 - **Answer.** An AI thread. While an answer is on screen the launcher list
   is hidden; typing is a follow-up; the question is shown above the answer.
 - **Context.** What travels with the next question: one or more screenshots
@@ -56,7 +60,7 @@ The same key means the same thing on every layer.
 | `⌘E` | Edit |
 | `⌘⇧A` / `⌘⇧H` | Set alias / set hotkey |
 | `⌃X` | Delete (press twice) |
-| `⌘⇧P` | Pin or unpin (clipboard) |
+| `⌘⇧P` | Pin to the top of its catalog, or unpin (snippets, quick links, clipboard, screenshots, chats) |
 | `⌘⇧N` / `⌘⇧L` | Save as snippet / save as quick link |
 | `⌘⇧C` | Copy path (apps) or copy answer |
 | `↑ ↓` | Move the highlight; `⌘1…9` is deliberately unused |

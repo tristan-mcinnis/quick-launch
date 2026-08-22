@@ -49,6 +49,10 @@ struct QuickSettings: Codable, Sendable {
         modifiers: 1_048_576 | 131_072
     )
 
+    // Translator window (⇧⌘T by default)
+    var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
+    var lastTranslationTarget: String = "zh-Hans"
+
     // Appearance
     var appearance: AppearancePreference = .dark
 
@@ -105,6 +109,9 @@ struct QuickSettings: Codable, Sendable {
         caffeinateBatteryCutoff = try c.decodeIfPresent(Int.self, forKey: .caffeinateBatteryCutoff) ?? 20
         caffeinateKeepDisplayAwake = try c.decodeIfPresent(Bool.self, forKey: .caffeinateKeepDisplayAwake) ?? false
         screenAwarenessDoubleTap = try c.decodeIfPresent(Bool.self, forKey: .screenAwarenessDoubleTap) ?? true
+        translatorHotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .translatorHotkey)
+            ?? ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
+        lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,
@@ -404,6 +411,17 @@ extension QuickSettings {
         if hotkey == clipboardHistoryHotkey {
             return "This conflicts with the Clipboard History hotkey."
         }
+        return nil
+    }
+
+    func translatorHotkeyConflict() -> String? {
+        let hotkey = translatorHotkey
+        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+            return "This conflicts with the main Quick Launch hotkey."
+        }
+        if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
+        if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
+        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
         return nil
     }
 

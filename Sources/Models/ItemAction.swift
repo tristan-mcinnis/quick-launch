@@ -122,6 +122,7 @@ enum ItemActionCatalog {
                 ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
                 ItemAction(kind: .edit, title: "Edit Snippet", systemImage: "pencil", shortcut: .command("e")),
+                pinAction(for: item),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
                 ItemAction(kind: .delete, title: "Delete Snippet", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
@@ -131,12 +132,7 @@ enum ItemActionCatalog {
                 ItemAction(kind: .primary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
-                ItemAction(
-                    kind: .pin,
-                    title: item.isPinned ? "Unpin" : "Pin to Top",
-                    systemImage: item.isPinned ? "pin.slash" : "pin",
-                    shortcut: .commandShift("p")
-                ),
+                pinAction(for: item),
                 ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")),
             ]
             if looksLikeURL(item.value) {
@@ -150,6 +146,7 @@ enum ItemActionCatalog {
                 ItemAction(kind: .secondary, title: "Copy Image", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Attach to Question", systemImage: "photo.badge.plus", shortcut: .commandShiftReturn),
                 ItemAction(kind: .quickLook, title: "Quick Look", systemImage: "eye", shortcut: .command("y")),
+                pinAction(for: item),
                 ItemAction(kind: .revealInFinder, title: "Reveal in Finder", systemImage: "folder", shortcut: .commandShift("r")),
                 ItemAction(kind: .copyPath, title: "Copy File Path", systemImage: "doc.on.clipboard", shortcut: .commandShift("c")),
                 ItemAction(kind: .delete, title: "Move to Trash", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
@@ -168,6 +165,7 @@ enum ItemActionCatalog {
                     shortcut: .returnKey
                 ),
                 ItemAction(kind: .secondary, title: "Copy Link", systemImage: "doc.on.doc", shortcut: .commandReturn),
+                pinAction(for: item),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
@@ -182,17 +180,22 @@ enum ItemActionCatalog {
                 ItemAction(kind: .primary, title: "Continue Chat", systemImage: "bubble.left.and.text.bubble.right", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Copy Last Answer", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .edit, title: "Rename Chat", systemImage: "pencil", shortcut: .command("e")),
-                ItemAction(
-                    kind: .pin,
-                    title: item.isPinned ? "Unpin" : "Pin to Top",
-                    systemImage: item.isPinned ? "pin.slash" : "pin",
-                    shortcut: .commandShift("p")
-                ),
+                pinAction(for: item),
                 ItemAction(kind: .delete, title: "Delete Chat", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
             ]
         case .application:
             return []
         }
+    }
+
+    /// The same pin on every pinnable kind: `⌘⇧P` toggles it.
+    private static func pinAction(for item: LauncherCatalogItem) -> ItemAction {
+        ItemAction(
+            kind: .pin,
+            title: item.isPinned ? "Unpin" : "Pin to Top",
+            systemImage: item.isPinned ? "pin.slash" : "pin",
+            shortcut: .commandShift("p")
+        )
     }
 
     static func looksLikeURL(_ value: String) -> Bool {

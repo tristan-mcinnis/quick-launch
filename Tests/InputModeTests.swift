@@ -6,44 +6,6 @@ import Testing
 @Suite("Input modes: translate, caffeinate until, clipboard pins", .serialized)
 @MainActor
 struct InputModeTests {
-    @Test func translateModeCapturesTypingFlipsDirectionAndTranslates() async {
-        let mock = MockQuickService()
-        await mock.setResponses([StreamDelta(text: "你好世界", finishReason: "stop")])
-        let vm = QuickViewModel(service: mock)
-        vm.input = "trans"
-        let translate = vm.launcherMatches.first {
-            if case .item(let item) = $0 { return item.itemID == "translate.mode" }
-            return false
-        }
-        #expect(translate != nil)
-        await vm.performLauncherResult(translate!)
-        #expect(vm.inputMode == .translate)
-        #expect(vm.launcherMatches.isEmpty)
-        #expect(vm.footerContext == "Translate")
-        #expect(vm.inputPlaceholder.hasPrefix("Type or paste"))
-
-        vm.input = "hello world"
-        #expect(vm.footerHints.map(\.label) == ["Translate", "To Chinese", "Back"])
-        vm.flipTranslationDirection()
-        #expect(vm.footerHints.map(\.label)[1] == "To English")
-        vm.flipTranslationDirection()
-        #expect(vm.effectiveTranslationDirection == .toChinese)
-
-        await vm.submitResolvingFuzzyAlias()
-        #expect(vm.inputMode == nil)
-        #expect(vm.output == "你好世界")
-        #expect(vm.lastQuestion == "hello world")
-        let sent = await mock.lastPrompt ?? ""
-        #expect(sent.contains("Simplified Chinese") && sent.contains("hello world"))
-
-        vm.startNewConversation()
-        vm.enterInputMode(.translate)
-        vm.leaveInputMode()
-        #expect(vm.inputMode == nil)
-        // Roots plus the learned Translate favourite.
-        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
-    }
-
     @Test func emptyBackspacePopsExactlyOneLayer() async {
         let vm = QuickViewModel(screenshotService: PopFakeScreenshotService())
         #expect(!vm.popLayerForEmptyBackspace())
@@ -52,7 +14,7 @@ struct InputModeTests {
         #expect(vm.popLayerForEmptyBackspace())
         #expect(vm.catalogScope == nil)
 
-        vm.enterInputMode(.translate)
+        vm.enterInputMode(.caffeinateUntil)
         vm.input = "typed"
         #expect(!vm.popLayerForEmptyBackspace(), "text present: Backspace deletes a character")
         vm.input = ""
@@ -172,7 +134,7 @@ struct InputModeTests {
 
         let file = vm.catalogMatches.first!
         #expect(ItemActionCatalog.actions(for: .item(file), pasteTarget: nil).map(\.title)
-            == ["Paste Image", "Copy Image", "Attach to Question", "Quick Look", "Reveal in Finder", "Copy File Path", "Move to Trash"])
+            == ["Paste Image", "Copy Image", "Attach to Question", "Quick Look", "Pin to Top", "Reveal in Finder", "Copy File Path", "Move to Trash"])
     }
 }
 

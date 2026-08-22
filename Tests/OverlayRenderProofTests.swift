@@ -51,9 +51,20 @@ struct OverlayRenderProofTests {
         vm.input = ""
         try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-caffeinate-dark.png")
         vm.leaveCatalog()
-        vm.enterInputMode(.translate)
-        vm.input = "Where is the nearest station?"
-        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-translate-dark.png")
+        let translator = TranslatorModel(lastTarget: .simplifiedChinese)
+        translator.source = "Where is the nearest station?"
+        translator.translation = "最近的车站在哪里？"
+        translator.pinyin = "zuì jìn de chē zhàn zài nǎ lǐ?"
+        translator.detectedSource = .english
+        let host = NSHostingView(rootView: TranslatorView(model: translator))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.frame = NSRect(origin: .zero, size: TranslatorView.size)
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw ProofError.noBitmap }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let image = NSImage(size: host.bounds.size)
+        image.addRepresentation(rep)
+        try Self.save(image, name: "translator-dark.png")
     }
 
     @Test func rendersEmojiGridAndScreenshotDetailPane() throws {

@@ -16,15 +16,16 @@ struct ItemActionTests {
         let snippet = LauncherCatalogItem(kind: .snippet, itemID: "a", title: "Sig", detail: "", value: "x")
         let actions = ItemActionCatalog.actions(for: .item(snippet), pasteTarget: "Mail")
         #expect(actions.map(\.title) == [
-            "Paste to Mail", "Copy to Clipboard", "Copy & Paste", "Edit Snippet",
+            "Paste to Mail", "Copy to Clipboard", "Copy & Paste", "Edit Snippet", "Pin to Top",
             "Set Alias…", "Set Hotkey…", "Delete Snippet",
         ])
         #expect(actions[0].shortcut?.keyCaps == ["↩"])
         #expect(actions[1].shortcut?.keyCaps == ["⌘", "↩"])
         #expect(actions[2].shortcut?.keyCaps == ["⇧", "⌘", "↩"])
         #expect(actions[3].shortcut?.keyCaps == ["⌘", "E"])
-        #expect(actions[6].shortcut?.keyCaps == ["⌃", "X"])
-        #expect(actions[6].isDestructive)
+        #expect(actions[4].shortcut?.keyCaps == ["⇧", "⌘", "P"])
+        #expect(actions[7].shortcut?.keyCaps == ["⌃", "X"])
+        #expect(actions[7].isDestructive)
     }
 
     @Test func otherKindsHaveTheRightPrimaryAndSecondaryActions() {
@@ -66,7 +67,7 @@ struct ItemActionTests {
         vm.handleCommandK()
         #expect(vm.isItemActionPanePresented)
         #expect(vm.activeItemActionForm == nil)
-        #expect(vm.focusedItemActions.count == 7)
+        #expect(vm.focusedItemActions.count == 8)
         vm.handleCommandK()
         #expect(!vm.isItemActionPanePresented)
     }

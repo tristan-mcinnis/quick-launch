@@ -91,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsPanel: NSPanel?
     private var globalHotKey: GlobalHotKey?
     private var clipboardHistoryHotKey: GlobalHotKey?
+    private var translatorHotKey: GlobalHotKey?
+    private var translatorPanel: TranslatorPanel?
+    private var translatorModel: TranslatorModel?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
     private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
     private var localMonitor: Any?
@@ -146,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayClearTask?.cancel()
         globalHotKey?.invalidate()
         clipboardHistoryHotKey?.invalidate()
+        translatorHotKey?.invalidate()
         clipboardHistory.stopMonitoring()
         actionHotKeys.values.forEach { $0.invalidate() }
         actionHotKeys.removeAll()
@@ -254,6 +258,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.configureClipboardHistory() }
         }
+
+        NotificationCenter.default.addObserver(
+            forName: .openTranslator,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.showTranslator() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .translatorSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.registerTranslatorHotkey() }
+        }
+        registerTranslatorHotkey()
 
         NotificationCenter.default.addObserver(
             forName: .screenAwarenessSettingsChanged,
@@ -508,6 +528,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vm.clipboardHistoryHotkeyRegistrationError = clipboardHistoryHotKey == nil
             ? "That shortcut is already used by macOS or another app."
             : nil
+    }
+
+    private func registerTranslatorHotkey() {
+        translatorHotKey?.invalidate()
+        translatorHotKey = nil
+        guard let vm = viewModel else { return }
+        guard vm.settings.translatorHotkeyConflict() == nil else {
+            vm.translatorHotkeyRegistrationError = vm.settings.translatorHotkeyConflict()
+            return
+        }
+        let hotkey = vm.settings.translatorHotkey
+        let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+        translatorHotKey = GlobalHotKey(
+            keyCode: UInt32(hotkey.keyCode),
+            modifiers: GlobalHotKey.carbonModifiers(from: flags)
+        ) { [weak self] in
+            self?.showTranslator()
+        }
+        vm.translatorHotkeyRegistrationError = translatorHotKey == nil
+            ? "That shortcut is already used by macOS or another app."
+            : nil
+    }
+
+    /// The Translator window: opened from ⇧⌘T or the Translate item. Arrives
+    /// with the selection of the app behind it; toggles closed on repeat.
+    func showTranslator() {
+        guard let vm = viewModel else { return }
+        if let panel = translatorPanel, panel.isVisible {
+            hideTranslator()
+            return
+        }
+        let target = selectedTextService.currentExternalTarget()
+        let selected = target.flatMap { selectedTextService.capture(from: $0, promptForPermission: false)?.text }
+        let model = translatorModel ?? makeTranslatorModel(for: vm)
+        translatorModel = model
+        model.prepare(target: target, selectedText: selected)
+        let panel = translatorPanel ?? makeTranslatorPanel(model: model)
+        translatorPanel = panel
+        if let screen = screenContainingMouse() {
+            let origin = ScreenPlacement.panelOrigin(
+                screenFrame: screen.frame,
+                visibleFrame: screen.visibleFrame,
+                panelWidth: TranslatorView.size.width,
+                inputHeight: TranslatorView.size.height
+            )
+            panel.setFrameOrigin(origin)
+        }
+        if self.panel?.isVisible == true { hideOverlay() }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+        panel.makeKey()
+    }
+
+    func hideTranslator() {
+        translatorPanel?.orderOut(nil)
+    }
+
+    private func makeTranslatorModel(for vm: QuickViewModel) -> TranslatorModel {
+        let model = TranslatorModel(
+            lastTarget: TranslationTarget.named(vm.settings.lastTranslationTarget) ?? .simplifiedChinese,
+            serviceFactory: { [weak vm] in vm?.makeCurrentService() },
+            selectedTextService: selectedTextService
+        )
+        model.onTargetChange = { [weak vm] target in
+            vm?.settings.lastTranslationTarget = target.code
+            vm?.settings.save()
+        }
+        model.onCommit = { record in
+            TranslationHistoryStore.append(record, to: TranslationHistoryStore.defaultURL())
+        }
+        return model
+    }
+
+    private func makeTranslatorPanel(model: TranslatorModel) -> TranslatorPanel {
+        let panel = TranslatorPanel(
+            contentRect: NSRect(origin: .zero, size: TranslatorView.size),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.contentViewController = NSHostingController(
+            rootView: TranslatorView(model: model)
+                .preferredColorScheme(viewModel?.settings.appearance.swiftUIColorScheme)
+        )
+        panel.shortcutHandler = { [weak self, weak model] characters, keyCode, modifiers in
+            guard let self, let model else { return false }
+            let isReturn = keyCode == 36 || keyCode == 76
+            if keyCode == 53, modifiers.isEmpty {
+                if model.isTargetPickerPresented {
+                    model.isTargetPickerPresented = false
+                } else if !model.source.isEmpty {
+                    model.clear()
+                } else {
+                    self.hideTranslator()
+                }
+                return true
+            }
+            if isReturn, modifiers == [.command] {
+                model.copyTranslation()
+                self.hideTranslator()
+                return true
+            }
+            if isReturn, modifiers == [.command, .shift] {
+                self.hideTranslator()
+                Task { @MainActor in _ = await model.pasteBack() }
+                return true
+            }
+            switch (characters?.lowercased(), modifiers) {
+            case ("s", [.command]):
+                model.swap()
+                return true
+            case ("p", [.command]):
+                model.isTargetPickerPresented.toggle()
+                return true
+            case ("v", [.command, .shift]):
+                model.useClipboardAsSource()
+                return true
+            case ("w", [.command]):
+                self.hideTranslator()
+                return true
+            default:
+                return false
+            }
+        }
+        return panel
     }
 
     private func showClipboardHistory() {

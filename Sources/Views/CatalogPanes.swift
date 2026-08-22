@@ -154,6 +154,7 @@ struct CatalogDetailPane: View {
             if let date = item.capturedAt {
                 list.append(("Captured", date.formatted(date: .abbreviated, time: .shortened)))
             }
+            if item.isPinned { list.append(("Pinned", "Yes")) }
             return list
         case .clipboard:
             let words = item.value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count

@@ -17,6 +17,7 @@ import Observation
     var modelRefreshMessage: String?
     var hotkeyRegistrationError: String?
     var clipboardHistoryHotkeyRegistrationError: String?
+    var translatorHotkeyRegistrationError: String?
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
     var isActionPalettePresented: Bool = false
     var isApplicationActionPanePresented: Bool = false
@@ -59,11 +60,8 @@ import Observation
     var caffeinateReason: String?
     /// Typing-capture modes beyond Quick Link input.
     var inputMode: InputMode?
-    /// Translate mode: direction chosen with ⇥, else detected from the text.
-    var translationOverride: TranslationDirection?
 
     enum InputMode: Equatable, Sendable {
-        case translate
         case caffeinateUntil
         case renameChat(UUID)
     }
@@ -263,8 +261,8 @@ import Observation
             .map(\.0))
     }
 
-    var snippets: [LauncherCatalogItem] { launcherCatalog?.snippets ?? [] }
-    var quickLinks: [LauncherCatalogItem] { launcherCatalog?.quickLinks ?? [] }
+    var snippets: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.snippets ?? []) }
+    var quickLinks: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.quickLinks ?? []) }
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
@@ -383,7 +381,7 @@ import Observation
             kind: .command,
             itemID: "translate.mode",
             title: "Translate",
-            detail: "Type text, Return translates; ⇥ flips the direction",
+            detail: "Open the Translator window (⇧⌘T): source above, translation below",
             value: "translate.mode",
             keywords: "chinese english zh en"
         )
@@ -450,7 +448,25 @@ import Observation
     /// Capture commands first, then the saved files, newest first.
     var screenshotItems: [LauncherCatalogItem] {
         let captures = ScreenshotKind.allCases.map(screenshotCommand(for:))
-        return captures + screenshotFiles
+        return captures + pinnedFirst(screenshotFiles)
+    }
+
+    /// Marks the items the user pinned and floats them to the top, keeping
+    /// the store's order inside each group. No pins: the array is returned as is.
+    func pinnedFirst(_ items: [LauncherCatalogItem]) -> [LauncherCatalogItem] {
+        let pinnedIDs = Set(settings.launcherItemConfigurations.lazy.filter(\.isPinned).map(\.id))
+        guard !pinnedIDs.isEmpty else { return items }
+        var pinned: [LauncherCatalogItem] = []
+        var rest: [LauncherCatalogItem] = []
+        for var item in items {
+            if pinnedIDs.contains(item.id) {
+                item.isPinned = true
+                pinned.append(item)
+            } else {
+                rest.append(item)
+            }
+        }
+        return pinned + rest
     }
 
     /// Files are listed when the catalog is entered, so typing never hits the disk.
@@ -537,14 +553,16 @@ import Observation
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
         let rows = Self.maxRows(for: catalogScope)
         guard !query.isEmpty else {
-            // Clipboard stays chronological. Other catalogs float learned
-            // favourites to the top so Return reaches them without typing.
+            // Clipboard stays chronological (its store puts pins first).
+            // Other catalogs put pinned items first, then learned favourites,
+            // so Return reaches them without typing.
             guard catalogScope != .clipboard, settings.launcherLearningEnabled else {
                 return Array(items.prefix(rows))
             }
             let favouriteLimit = catalogScope == .emoji ? 18 : rows
             let favourites = launcherUsage.topItemIDs(scope: scope, limit: favouriteLimit)
-            let ordered = favourites.compactMap { id in items.first { $0.id == id } }
+            let pinned = items.filter(\.isPinned)
+            let ordered = pinned + favourites.compactMap { id in items.first { $0.id == id && !$0.isPinned } }
             let rest = items.filter { item in !ordered.contains { $0.id == item.id } }
             return Array((ordered + rest).prefix(rows))
         }
@@ -576,7 +594,7 @@ import Observation
                 if !(matched.title.lowercased().contains(literal)), matched.kind == .screenshot {
                     matched.detail = "Text match · " + matched.detail
                 }
-                return (matched, score + LauncherRanker.boost(for: signals[item.id]))
+                return (matched, score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item))
             }
             .sorted { $0.1 == $1.1 ? ($0.0.capturedAt ?? .distantPast) > ($1.0.capturedAt ?? .distantPast) : $0.1 > $1.1 }
             .prefix(rows)
@@ -590,7 +608,7 @@ import Observation
                 alias: launcherItemAlias(for: item),
                 keywords: item.keywords
             ) else { return nil }
-            return (item, score + LauncherRanker.boost(for: signals[item.id]))
+            return (item, score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item))
         }
         .sorted { lhs, rhs in
             lhs.1 == rhs.1
@@ -680,7 +698,7 @@ import Observation
                 title: item.title,
                 alias: launcherItemAlias(for: item)
             ) else { continue }
-            scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id])))
+            scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item)))
         }
         return Array(scored
             .sorted { lhs, rhs in
@@ -690,6 +708,10 @@ import Observation
             }
             .prefix(Self.maxLauncherRows)
             .map(\.0))
+    }
+
+    private func pinBoost(_ item: LauncherCatalogItem) -> Int {
+        item.isPinned ? LauncherRanker.pinnedBoost : 0
     }
 
     /// Most-used root results, shown before the catalog roots on an empty query.
@@ -746,7 +768,6 @@ import Observation
             return "Reading text \(screenshotIndexProgress.completed)/\(screenshotIndexProgress.total)"
         }
         switch inputMode {
-        case .translate: return "Translate"
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
         case nil: break
@@ -772,13 +793,6 @@ import Observation
         }
         if let inputMode {
             switch inputMode {
-            case .translate:
-                let direction = effectiveTranslationDirection ?? .toChinese
-                return [
-                    FooterHint(label: "Translate", keys: ["↩"]),
-                    FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇥"]),
-                    FooterHint(label: "Back", keys: ["⌫"]),
-                ]
             case .caffeinateUntil:
                 return [
                     FooterHint(label: "Caffeinate", keys: ["↩"]),
@@ -929,7 +943,6 @@ import Observation
 
     var inputPlaceholder: String {
         switch inputMode {
-        case .translate: return "Type or paste text to translate…"
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
         case nil: break
@@ -1068,19 +1081,11 @@ import Observation
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
-        translationOverride = nil
         input = ""
         errorMessage = nil
         applicationSelectionIndex = 0
         if case .renameChat(let id) = mode {
             input = history.first { $0.id == id }?.title ?? ""
-        }
-        if mode == .translate,
-           let selected = captureSelectedText(promptForPermission: false)?.text
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-           !selected.isEmpty {
-            // Like the Companion translator: arrive with the selection filled in.
-            input = selected
         }
         requestInputFocus()
         noteInteraction()
@@ -1088,34 +1093,15 @@ import Observation
 
     func leaveInputMode() {
         inputMode = nil
-        translationOverride = nil
         input = ""
         errorMessage = nil
         requestInputFocus()
-    }
-
-    /// The direction Return will use in Translate mode.
-    var effectiveTranslationDirection: TranslationDirection? {
-        if let translationOverride { return translationOverride }
-        return translationDirection
-    }
-
-    /// ⇥ in Translate mode flips between English and Chinese.
-    func flipTranslationDirection() {
-        let current = effectiveTranslationDirection ?? .toChinese
-        translationOverride = current == .toChinese ? .toEnglish : .toChinese
     }
 
     /// Return in a mode. Returns `false` when no mode is active.
     func submitInputMode() async -> Bool {
         guard let inputMode else { return false }
         switch inputMode {
-        case .translate:
-            let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return true }
-            let direction = effectiveTranslationDirection ?? .toChinese
-            self.inputMode = nil
-            await translate(text, direction: direction)
         case .renameChat(let id):
             renameConversation(id: id, title: input)
             leaveInputMode()
@@ -1146,7 +1132,6 @@ import Observation
     func enterCatalog(_ scope: LauncherCatalogScope) {
         if scope == .screenshots { reloadScreenshotFiles() }
         inputMode = nil
-        translationOverride = nil
         catalogScope = scope
         pendingQuickLinkID = nil
         self.input = ""
@@ -1165,7 +1150,6 @@ import Observation
         catalogScope = nil
         pendingQuickLinkID = nil
         inputMode = nil
-        translationOverride = nil
         input = ""
         applicationSelectionIndex = 0
         requestInputFocus()
@@ -1195,7 +1179,6 @@ import Observation
         catalogScope = nil
         pendingQuickLinkID = nil
         inputMode = nil
-        translationOverride = nil
         input = ""
         applicationSelectionIndex = 0
         requestInputFocus()
@@ -1648,7 +1631,7 @@ import Observation
     /// Translate-mode override).
     func translateInput() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let direction = effectiveTranslationDirection else { return }
+        guard !text.isEmpty, let direction = translationDirection else { return }
         inputMode = nil
         await translate(text, direction: direction)
     }
@@ -1662,7 +1645,6 @@ import Observation
         }
         catalogScope = nil
         pendingQuickLinkID = nil
-        translationOverride = nil
         closeItemActionPane()
         await submit()
         // Show the text, not the expanded prompt, above the translation.
@@ -1778,7 +1760,9 @@ import Observation
         }
 
         if item.value == "translate.mode" {
-            enterInputMode(.translate)
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            NotificationCenter.default.post(name: .openTranslator, object: nil)
             return
         }
 
@@ -2103,14 +2087,17 @@ import Observation
             }
         case .pin:
             guard case .item(let item) = result else { return true }
-            if item.kind == .conversation, let id = UUID(uuidString: item.itemID) {
+            switch item.kind {
+            case .conversation:
+                guard let id = UUID(uuidString: item.itemID) else { return true }
                 togglePinConversation(id: id)
-                closeItemActionPane()
-                applicationSelectionIndex = 0
+            case .clipboard:
+                clipboardHistory?.togglePin(item)
+            case .snippet, .quickLink, .screenshot:
+                togglePinLauncherItem(item)
+            default:
                 return true
             }
-            guard item.kind == .clipboard else { return true }
-            clipboardHistory?.togglePin(item)
             invalidateLauncherRanking()
             closeItemActionPane()
             applicationSelectionIndex = 0
@@ -2168,6 +2155,7 @@ import Observation
                     let url = URL(fileURLWithPath: item.value)
                     do {
                         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                        removeLauncherItemConfiguration(for: item)
                         reloadScreenshotFiles()
                         closeItemActionPane()
                         applicationSelectionIndex = 0
@@ -2319,6 +2307,7 @@ import Observation
     func deleteSnippet(_ item: LauncherCatalogItem) -> Bool {
         do {
             try launcherCatalog?.deleteSnippet(item)
+            removeLauncherItemConfiguration(for: item)
             closeCatalogActionPane()
             applicationSelectionIndex = 0
             errorMessage = nil
@@ -2341,6 +2330,26 @@ import Observation
 
     func setLauncherItemAlias(_ alias: String, for item: LauncherCatalogItem) {
         updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.alias = alias }
+    }
+
+    func isLauncherItemPinned(_ item: LauncherCatalogItem) -> Bool {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.isPinned ?? false
+    }
+
+    /// `⌘⇧P` on a snippet, quick link, or screenshot. The pin lives in the
+    /// item's configuration record beside its alias and hotkey.
+    func togglePinLauncherItem(_ item: LauncherCatalogItem) {
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.isPinned.toggle() }
+        noteInteraction()
+    }
+
+    /// Drops the alias, hotkey, and pin of an item that no longer exists.
+    func removeLauncherItemConfiguration(for item: LauncherCatalogItem) {
+        let before = settings.launcherItemConfigurations.count
+        settings.launcherItemConfigurations.removeAll { $0.kind == item.kind && $0.itemID == item.itemID }
+        guard settings.launcherItemConfigurations.count != before else { return }
+        settings.save()
+        NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
     }
 
     func setLauncherItemHotkey(_ hotkey: ActionHotkey?, for item: LauncherCatalogItem) {
@@ -2377,16 +2386,13 @@ import Observation
             $0.kind == kind && $0.itemID == itemID
         }) {
             mutation(&settings.launcherItemConfigurations[index])
-            let configuration = settings.launcherItemConfigurations[index]
-            if configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               configuration.hotkey == nil {
+            if settings.launcherItemConfigurations[index].isEmpty {
                 settings.launcherItemConfigurations.remove(at: index)
             }
         } else {
             var configuration = LauncherItemConfiguration(kind: kind, itemID: itemID)
             mutation(&configuration)
-            if !configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || configuration.hotkey != nil {
+            if !configuration.isEmpty {
                 settings.launcherItemConfigurations.append(configuration)
             }
         }
@@ -2448,9 +2454,7 @@ import Observation
             $0.kind == .application && $0.itemID == application.id
         }) {
             mutation(&settings.launcherItemConfigurations[index])
-            let configuration = settings.launcherItemConfigurations[index]
-            if configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               configuration.hotkey == nil {
+            if settings.launcherItemConfigurations[index].isEmpty {
                 settings.launcherItemConfigurations.remove(at: index)
             }
         } else {
@@ -2459,8 +2463,7 @@ import Observation
                 itemID: application.id
             )
             mutation(&configuration)
-            if !configuration.alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || configuration.hotkey != nil {
+            if !configuration.isEmpty {
                 settings.launcherItemConfigurations.append(configuration)
             }
         }
@@ -2963,6 +2966,19 @@ import Observation
     private func resolvedModel(for provider: InferenceProvider, override: String?) -> String? {
         let model = override.flatMap { $0.isEmpty ? nil : $0 } ?? provider.selectedModel
         return model.isEmpty ? nil : model
+    }
+
+    /// The service for the selected provider and model, for the Translator
+    /// window. Nil when no usable provider is configured.
+    func makeCurrentService() -> (any QuickService)? {
+        guard let provider = settings.selectedProvider,
+              let model = resolvedModel(for: provider, override: nil)
+        else { return nil }
+        if service == nil, provider.kind == .openAICompatible, provider.location == .cloud,
+           (apiKeyProvider(provider.id) ?? "").isEmpty {
+            return nil
+        }
+        return makeService(provider: provider, model: model)
     }
 
     private func makeService(

@@ -152,6 +152,26 @@ private struct GeneralTab: View {
                     }
                 }
 
+                HStack {
+                    Text("Open Translator")
+                    Spacer()
+                    ActionHotkeyRecorderView(
+                        hotkey: Binding(
+                            get: { viewModel.settings.translatorHotkey },
+                            set: { value in
+                                viewModel.settings.translatorHotkey = value ?? ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
+                                viewModel.settings.save()
+                            }
+                        ),
+                        label: "",
+                        changeNotification: .translatorSettingsChanged
+                    )
+                    .frame(width: 220)
+                }
+                if let error = viewModel.settings.translatorHotkeyConflict() ?? viewModel.translatorHotkeyRegistrationError {
+                    Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
+                }
+
                 Toggle("Double-tap right ⌘ sends the focused window to AI", isOn: $viewModel.settings.screenAwarenessDoubleTap)
                     .onChange(of: viewModel.settings.screenAwarenessDoubleTap) { _, _ in
                         viewModel.settings.save()
