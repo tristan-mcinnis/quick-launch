@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- Screenshots: on-device OCR (Vision, en/zh) indexes the text inside every screenshot into one local JSON file, so `acme` finds the invoice; matches from image text are marked. A preview pane beside the list shows the image, dimensions, size, date, and the recognized text. New actions: Paste Image to the previous app, and a Paste Latest Screenshot command.
+- Emoji & Symbols is a 9-column grid with Frequently Used first; arrows move the highlight.
+- Screen Awareness: Send Focused Window to AI attaches a screenshot plus the app name, window title, selected text, focused field, readable text, and page URL, read through Accessibility; Send Screen, Send Screen Area (drag a rectangle), and Send Selected Text cover the rest. A double tap of the right ⌘ key triggers it from anywhere (Settings › General). The attachment card lists what was included; the model gets the image plus a bounded text preamble.
+- Clipboard History also shows a preview pane with character and word counts.
+- Rebuilt Settings: a top tab strip instead of the system tab view that overflowed into a "»" menu, a wider window, `⌘1`…`⌘6` to switch tabs, and one Items table (apps, snippets, quick links, windows, commands) with alias and hotkey editable in place, Raycast-style.
+- Answer state: while an answer is on screen the launcher rows are hidden, the question shows above the answer, and copy / paste back / save as snippet / search are keys (`⌘⇧C`, `⌘↩`, `⌘⇧N`, `⌘⇧W`) and `⌘K` actions instead of buttons. Backspace on an empty field pops back to the root.
+- Clipboard History: `⌘⇧P` pins an entry to the top (pinned entries never expire), `⌘⇧N` saves it as a snippet, `⌘⇧L` saves a URL as a Quick Link. Both open the new item's editor.
+- Quick Links open in the browser chosen in Settings › Clipboard & Links, or the system default.
+- Screenshots catalog: capture commands first, then the saved files newest first (macOS and CleanShot names), with the Companion's date words (`today`, `yesterday`, `7d`, `last 30 days`, `2026-08-11`) and actions: Attach `↩`, Copy Image `⌘↩`, Quick Look `⌘Y`, Reveal `⌘⇧R`, Copy Path `⌘⇧C`, Trash `⌃X`.
+- Translate as a mode: the Translate item (or `tr`) captures typing, arrives pre-filled with the selected text, `⇥` flips the direction, Return translates; the text shows above the translation.
+- Caffeinate catalog with native power assertions (no child process): toggle, Caffeinate Until… (`17:30`, `5:30pm`, `90m`, `2h`), presets, Agent Watch, Status. Agent Watch reads the hook files Claude Code and Codex write (Quick Launch's folder and the Tuna Companion folder), holds sleep while a turn is running, pauses at 20% on battery, and restores intent after a relaunch. `scripts/quick-launch-agent-event` is the hook command.
+- Launcher lists show up to nine rows so favourites and all seven catalogs fit.
+- Added the Emoji & Symbols catalog (1 594 entries generated from Unicode 16 names with hand-written search words for the common ones): emoji, flags, arrows, math, currency, punctuation, and key-cap symbols. Paste with Return, copy with `⌘↩`.
+- Added `⇧↩` translate: Chinese, Japanese, or Korean input goes to English, everything else to Simplified Chinese, through the `translate` and new `zh` saved prompts. The footer shows the direction before you press it.
+- Added timed Caffeinate commands (30 minutes, 1, 2, 4 hours) that switch off by themselves, and "Attach Latest Screenshot", which attaches the newest file from the macOS screenshots folder.
+- Launcher lists show up to seven rows so two learned favourites fit above the five catalog roots.
+- Replaced the `⌘K` button rows with a Raycast-style action list: every action shows its shortcut, the list is searchable, and the same keys work without opening it (`⌘↩` secondary, `⌘⇧↩` copy and paste, `⌘E` edit, `⌘⇧A` alias, `⌘⇧H` hotkey, `⌃X` delete with a confirm step, `⌘⇧C` copy path for apps). Clipboard entries can be deleted one by one.
+- The panel now opens with its input row on the display's centre line instead of a third of the way down.
+- DeepSeek `deepseek-v4-flash-vision-exp` is the default model for text and screenshots. Settings still on the old defaults move over once; explicit choices stay.
+- Removed the Apple on-device provider, the `apfel` helper process, the `ApfelServerKit` dependency, and MCP server configuration. Apple Intelligence is not available to this project. Old settings load unchanged; a stale Apple selection falls back to DeepSeek. `ApfelQuickService` is now `OpenAICompatibleService`. The package has one dependency (`swift-markdown`); `swift-testing` comes from the toolchain.
+- Faster open: removed the 90 ms fade-in, moved the selected-text Accessibility read off the hotkey path (it is read only when an action needs it), and cached the ranking pass so the list, footer, and panel sizing share one computation per keystroke.
+- Added screenshot attachments: "Screenshot of Previous App" and "Screenshot of This Display" are launcher commands with optional aliases and global hotkeys, and `⌘⇧S` / `⌘⇧D` attach one inside the open overlay. Captures use ScreenCaptureKit, stay in memory, exclude the overlay itself, and are capped at 2 560 px on the long edge. Backspace on an empty field removes the attachment.
+- Added a Vision model setting (Settings › Models). Attached screenshots go only to that model; the local MLX server stays the default, and DeepSeek's `deepseek-v4-flash-vision-exp` is available once you choose it. Follow-up questions in the same thread keep the screenshot in memory; history never stores it.
+- Added result actions to the `⌘K` palette: Save Result as Snippet (opens the new snippet's editor), Search the Web for Result, Copy Result, Paste Result Back.
+- Snippet creation writes to the existing snippet store with the same timestamped backup as edits.
+- Added launcher learning: the typed abbreviation and the item you chose are remembered per catalog, so that abbreviation ranks the item first next time; a decayed use count orders the rest, and the two most-used items appear above the catalog roots on an empty search. Stored locally in `launcher-usage.json`, with a toggle and a Forget button in Settings › General.
+- Merged apps, commands, snippets, quick links, and catalog roots into one ranked root search.
+- Restyled the overlay: monochrome tokens, blur material with a dark tint, hairline border, inset rounded selection, key-cap hotkey badges on rows, and a footer that shows the keys that work right now. Dark is the default appearance; an explicit light choice is kept.
+- Escape now closes the overlay from anywhere (a ⌘K pane closes first, a running stream stops first). Backspace on an empty field returns to the root, and the next open always starts at the root. Opening Settings hides the launcher.
+- Added window layouts Maximize, Almost Maximize, Center, Left Two Thirds, Right Two Thirds, and commands to move the window to the next or previous display.
+- Replaced the app icon with a black tile and a white bolt. The menu-bar bolt is unchanged.
+- Fixed HTTP 401 on model refresh and cloud requests: provider keys saved by earlier `apfel-quick` builds lived under the old Keychain service name. Keys are now read from the legacy service and migrated forward, and refresh errors say what to do.
+
 - Added snippet Edit and guarded Delete commands to the keyboard-navigable `Command+K` pane; changes update Tuna's existing Custom Items store with a safety backup.
 - Added empty-Backspace navigation from catalogues to the launcher root and a 15-second inactive catalogue reset.
 - Added ephemeral clipboard screenshot attachments, automatically routed to the local MLX vision server without persisting image data in settings or history.

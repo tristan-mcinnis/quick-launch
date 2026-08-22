@@ -10,11 +10,16 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 6. Paste existing Tuna snippets.
 7. Open existing Tuna Quick Links.
 8. Search and paste a bounded local text clipboard history.
-9. Resize the previous window into deterministic halves, thirds, and fourths.
-10. Keep the Mac awake with a native Caffeinate toggle.
+9. Resize the previous window into deterministic whole-screen, halves, thirds, two-thirds, and fourths layouts, or move it to another display.
+10. Keep the Mac awake with a native Caffeinate toggle or a timed session.
+11. Paste emoji and symbols by name.
+12. Translate typed or selected text between Chinese and English with one key.
+13. Attach a fresh or saved screenshot to a question and follow up on it.
 
-Screenshot-library management and the full Tuna translation window remain
-future catalogs. The current Translate action is a configurable selected-text
+Screenshot capture to the chat context is in the core: a window or display
+capture attaches to one question and follow-ups in that thread, never to
+history or disk. Screenshot-library management and the full Tuna translation
+window remain future catalogs. The current Translate action is a configurable selected-text
 AI action, not the full Tuna translation interface.
 
 It does not need file search, screen history, OCR, or a full chat workspace.
@@ -24,7 +29,10 @@ It does not need file search, screen history, OCR, or a full chat workspace.
 The app stays running as a small menu-bar process.
 
 - The main global hotkey opens one search field.
-- Typing filters items across the enabled catalogs.
+- Typing filters items across the enabled catalogs in one ranked list.
+- The launcher learns: the text typed when an item is chosen ranks that item first for the same text next time, per catalog, with a 14-day decay. Learning is local, bounded, optional, and can be forgotten.
+- Escape closes the panel from anywhere. Backspace on an empty field returns to the root. Reopening starts at the root.
+- A footer shows the keys that work now; rows show their global hotkey.
 - `Command+Shift+V` opens Clipboard History directly.
 - Arrows navigate. Return runs or pastes. `Command+C` copies a selected catalog item.
 - App filtering uses a startup cache and no polling or AI call.
@@ -54,9 +62,9 @@ The app stays running as a small menu-bar process.
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
-MCP configuration currently applies only to the managed `apfel` route. Pi can
-use its own configured tools and skills. OpenAI-compatible providers do not yet
-share a universal tool-host or tool-calling loop.
+Pi can use its own configured tools and skills. OpenAI-compatible providers
+do not share a tool-calling loop. There is no on-device Apple model and no MCP
+configuration.
 
 ## Tuna transition
 
@@ -65,7 +73,7 @@ Keep Tuna installed until each replacement passes the same real interaction.
 - Port the Tuna Companion translator behavior.
 - Tuna snippets and Quick Links are read live without exposing their values in logs or settings.
 - The native app and clipboard catalogs are active. Clipboard history is text-only.
-- Do not port Caffeinate, Screen OCR, Screenshots, or file search unless the product scope changes.
+- Caffeinate and screenshot capture are ported. Screen OCR to clipboard, the screenshot text index, and file search stay out unless the scope changes.
 
 Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in Quick Launch.
 

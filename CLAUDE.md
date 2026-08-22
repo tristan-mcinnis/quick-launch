@@ -8,7 +8,7 @@ rules below summarize the product goal for Claude-specific sessions.
 Quick Launch is an instant AI action overlay for macOS. Press a global hotkey,
 type a prompt or saved action, choose a model when needed, press Return, and
 copy the streamed result. Keep the overlay small and fast. Apple on-device AI
-is one optional provider, not a requirement. Local OpenAI-compatible servers,
+is not used. Local OpenAI-compatible servers,
 API providers, and one-shot CLI subscriptions can be swapped without turning
 the app into a broad chat or agent workspace. Short follow-ups and bounded
 local history support the immediate action. Finder automation, document
@@ -32,8 +32,9 @@ private keys, `.env` files, credentials, or local launcher data in source,
 tests, fixtures, screenshots, logs, commits, or Git history. API keys belong in
 macOS Keychain, and Tuna content must remain in its external live stores.
 
-The user-facing product name is always **Quick Launch**. Retain genuine `apfel`
-names only where they refer to the optional upstream engine or its integration.
+The user-facing product name is always **Quick Launch**. The `apfel` engine
+and Apple on-device provider were removed on 2026-08-22; `apfel` now appears
+only in upstream attribution, the legacy Keychain service name, and history.
 
 ## Verification
 

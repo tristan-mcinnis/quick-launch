@@ -8,25 +8,40 @@ Press `Option+Space`, type a prompt or saved action, choose a model when you
 want, and press `Return`. The reply streams into the overlay and is copied to
 the clipboard. It remains an action tool, not a full chat workspace.
 
-Quick Launch keeps the original Apple on-device path and adds swappable local,
-API, and subscription-backed models. It was forked from the original
-`apfel-quick` project.
+Quick Launch runs swappable local, API, and subscription-backed models. It was
+forked from the original `apfel-quick` project; the Apple on-device path that
+fork was built around was removed on 2026-08-22 (see "Removed" below).
 
 ## Core features
 
 - Global, configurable hotkey and small floating panel
 - Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
+- Learns from your choices: the text you typed when you picked an item ranks that item first next time (`cla` → Claude), with a 14-day decay so old favourites fade; most-used items show on an empty search; local only, one toggle and a Forget button
+- One ranked root search across apps, commands, snippets, quick links, and catalog roots
+- Raycast-style footer with the keys that work right now, and Sol-style hotkey badges on rows that have a global hotkey
+- Escape closes the launcher from anywhere; Backspace on an empty field returns to the root; reopening starts at the root
 - Finder indexing through the macOS CoreServices application catalog
 - Live Tuna Snippets and Quick Links, with aliases and optional per-item global hotkeys
-- Screenshot attachments from the clipboard, routed automatically to a local MLX vision model
+- Emoji & Symbols catalog as a grid: Frequently Used first, 1 500+ emoji, flags, arrows, math, currency, punctuation, and key symbols, searched by name or plain words (`fire`, `thumbs up`, `command`), pasted with Return or copied with `⌘↩`
+- Translate: a mode (type `tr`) that arrives with the selected text, `⇥` flips the direction, Return translates; `⇧↩` translates whatever is typed anywhere; `/zh` and `/translate` act on selected text
+- Caffeinate catalog: toggle, Caffeinate Until… (`17:30`, `5:30pm`, `90m`, `2h`), presets, Agent Watch (stays awake while Claude Code or Codex is working, from hook files), Status; native power assertions, battery cutoff at 20%
+- Screenshots catalog: captures plus the saved files with a preview pane; search by name, date words (`today`, `7d`), or the text inside the image (on-device OCR, Vision); attach, copy image, paste image, Quick Look, reveal, copy path, trash; Paste Latest Screenshot pastes the newest file straight into the previous app
+- Screen Awareness: Send Focused Window to AI (`⌘⇧S`, or a double tap of right `⌘` from anywhere) attaches a screenshot plus the app name, window title, selection, readable text, and page URL; Send Screen, Send Screen Area, and Send Selected Text cover the narrower cases. The attachment card says what was included
+- Clipboard History: pin to top (`⌘⇧P`), save as snippet (`⌘⇧N`) or Quick Link (`⌘⇧L`), delete (`⌃X`)
+- Quick Links open in the browser you choose in Settings, or the system default
+- Attach Latest Screenshot: the newest file in the macOS screenshots folder joins the next question
+- Screenshot attachments: `⌘⇧S` captures the app behind Quick Launch, `⌘⇧D` the display under the pointer, or run the two screenshot commands from any global hotkey; a clipboard image also attaches on open
+- One Vision model setting decides where screenshots go; DeepSeek `deepseek-v4-flash-vision-exp` by default (also the default text model), local MLX when chosen; follow-ups keep the screenshot in memory for the thread
+- `⌘K` on any row opens a Raycast-style action list with the shortcut beside each action: Return is the primary action, `⌘↩` the secondary (copy, show in Finder, copy link), `⌘⇧↩` copy and paste, `⌘E` edit, `⌘⇧A` alias, `⌘⇧H` hotkey, `⌃X` delete (press twice); the same keys work straight from the list
+- `⌘K` on a result: save as snippet, search the web for it, copy, or paste it back
+- The panel opens with its input row on the centre line of the display under the pointer
 - Local, bounded, clearable text clipboard history on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
-- Previous-window management for left/right/top/bottom halves, thirds, and fourths
+- Previous-window management: maximize, almost maximize, center, halves, thirds, two thirds, fourths, and move to the next or previous display
 - Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
 - Direct SearXNG web search for explicit searches and time-sensitive questions
 - Provider and model switcher inside the compact overlay menu
-- Apple on-device model through the bundled `apfel` engine, when available
 - Any OpenAI-compatible endpoint through a custom base URL
 - Built-in setup for LM Studio, DeepSeek, Moonshot/Kimi, and OpenAI
 - Local LM Studio model detection by scanning `~/.lmstudio/models`, without running `lms` or starting its server
@@ -50,8 +65,8 @@ API, and subscription-backed models. It was forked from the original
 - Apple Silicon
 - Xcode command-line tools for source builds
 
-The Apple Foundation Model is optional in this version. Select LM Studio, Pi,
-Claude Code, or an API provider if Apple Intelligence is unavailable.
+Select LM Studio, Pi, Claude Code, or an API provider. Apple Intelligence is
+not used.
 
 Optional integrations must already be installed and signed in:
 
@@ -84,13 +99,7 @@ Local builds use the stable designated requirement
 survive code changes. The generated `build` directory is excluded from
 Spotlight so it does not appear as a second Quick Launch installation.
 
-The build script bundles `apfel` when it is available. A local app can still be
-built without it. Source builds that need the Apple provider require `apfel`
-on `PATH`:
-
-```bash
-brew install Arthur-Ficial/tap/apfel
-```
+The build has no helper binaries and one package dependency (`swift-markdown`).
 
 ## Use
 
@@ -187,9 +196,8 @@ The Pi provider still runs a fresh one-shot `pi` process for prompts that need
 Pi extensions, skills, prompt templates, or custom tools. It disables Pi's
 built-in raw file tools for the quick overlay.
 
-MCP configuration in Quick Launch applies only to the managed `apfel` route.
 Pi can use the tools and skills in its own configuration. General
-OpenAI-compatible providers do not yet have a universal tool-calling loop.
+OpenAI-compatible providers do not have a tool-calling loop.
 
 ## Privacy boundary
 
@@ -216,7 +224,6 @@ OverlayView
       → live Tuna snippet and Quick Link catalogues
       → bounded local text clipboard history
       → bounded SearXNG snippet bundle
-      → managed apfel service
       → OpenAI-compatible SSE service
       → one-shot CLI service (Claude Code or Pi)
 
@@ -257,6 +264,31 @@ Finder file actions, document attachments, ambient screen capture, screenshot
 library management, the full Tuna translation window, voice input, and a larger
 chat workspace are deferred. Explicit clipboard image
 attachments are supported; Quick Launch does not observe or record the screen.
+
+## Agent Watch hooks
+
+Quick Launch keeps the Mac awake while an agent turn is running by watching
+small JSON files that agent hooks write. Point the hooks at the bundled
+script (it never fails a turn):
+
+```bash
+cp scripts/quick-launch-agent-event ~/.local/bin/ && chmod +x ~/.local/bin/quick-launch-agent-event
+```
+
+Claude Code (`~/.claude/settings.json`): `UserPromptSubmit` → `quick-launch-agent-event start claude`,
+`Stop` and `SessionEnd` → `quick-launch-agent-event stop claude`. Codex (`~/.codex/hooks.json`):
+the same three with `codex`. Hooks that still point at the Tuna Companion CLI
+keep working; Quick Launch watches that folder too.
+
+## Removed
+
+- **Apple on-device AI via `apfel` (2026-08-22).** The upstream fork shipped an
+  `apfel --serve` helper process that exposed Apple's Foundation Model over
+  localhost, plus MCP server configuration for that route. Apple Intelligence
+  is not available to this project, so the helper, the `ApfelServerKit`
+  dependency, the managed provider, and the MCP tab are gone. Settings saved
+  by earlier builds load unchanged; a stale Apple selection falls back to
+  DeepSeek. The OpenAI-compatible client lives on as `OpenAICompatibleService`.
 
 ## License
 

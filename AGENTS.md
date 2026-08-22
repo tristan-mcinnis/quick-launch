@@ -14,9 +14,10 @@ identifiers are:
 - Executable and release slug: `quick-launch`
 - Bundle identifier: `com.tristanmcinnis.quick-launch`
 
-`apfel` remains the name of an optional upstream inference engine. Do not
-rename genuine `apfel`, `ApfelServerKit`, or `ApfelQuickService` integration
-references to Quick Launch.
+`apfel` was the upstream inference engine. It was removed on 2026-08-22 and
+must not come back as a dependency or helper process. The name survives only
+in upstream attribution, the legacy Keychain service (`APIKeyStore`), and the
+changelog. The OpenAI-compatible client is `OpenAICompatibleService`.
 
 ## Repository
 
