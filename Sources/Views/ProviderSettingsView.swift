@@ -57,6 +57,10 @@ struct ProviderSettingsView: View {
 
                 Divider()
 
+                VisionModelPicker(viewModel: viewModel)
+
+                Divider()
+
                 Text("Quick-action instruction")
                     .font(.subheadline.weight(.medium))
                 TextEditor(text: $viewModel.settings.systemPrompt)
@@ -206,6 +210,65 @@ struct ProviderSettingsView: View {
             keyStatus = "Key saved in Keychain"
         } catch {
             keyStatus = error.localizedDescription
+        }
+    }
+}
+
+
+/// Chooses which provider and model receive attached screenshots.
+private struct VisionModelPicker: View {
+    @Bindable var viewModel: QuickViewModel
+
+    private struct Option: Identifiable {
+        let id: String
+        let label: String
+    }
+
+    private var options: [Option] {
+        viewModel.settings.providers
+            .filter { $0.kind == .openAICompatible }
+            .flatMap { provider -> [Option] in
+                let current = provider.selectedModel.isEmpty ? "selected model" : provider.selectedModel
+                var list = [Option(id: "\(provider.id.uuidString)|", label: "\(provider.name) · \(current)")]
+                for model in provider.models where model != provider.selectedModel {
+                    list.append(Option(id: "\(provider.id.uuidString)|\(model)", label: "\(provider.name) · \(model)"))
+                }
+                return list
+            }
+    }
+
+    private var selection: Binding<String> {
+        Binding(
+            get: {
+                let settings = viewModel.settings
+                let exact = "\(settings.visionProviderID.uuidString)|\(settings.visionModel)"
+                if options.contains(where: { $0.id == exact }) { return exact }
+                return "\(settings.visionProviderID.uuidString)|"
+            },
+            set: { value in
+                let parts = value.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                guard let first = parts.first, let providerID = UUID(uuidString: String(first)) else { return }
+                let model = parts.count > 1 ? String(parts[1]) : ""
+                viewModel.setVisionModel(providerID: providerID, model: model)
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Vision model") {
+                Picker("", selection: selection) {
+                    ForEach(options) { option in
+                        Text(option.label).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 330)
+            }
+            Text("Screenshots attached with ⌘⇧S or ⌘⇧D go only to this model. A local model keeps the image on this Mac. Refresh a provider's models to see new vision models.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

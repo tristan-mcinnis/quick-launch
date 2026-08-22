@@ -1,8 +1,8 @@
 import Foundation
 
-/// OpenAI Chat Completions client retained under the original type name so the
-/// managed apfel path and existing tests keep their stable API.
-struct ApfelQuickService: QuickService, @unchecked Sendable {
+/// Streaming OpenAI Chat Completions client. One instance per request;
+/// it holds no connection state between calls.
+struct OpenAICompatibleService: QuickService, @unchecked Sendable {
     let baseURL: URL
     let modelName: String
     let apiKey: String?
@@ -11,36 +11,20 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
 
     static let systemPrompt = QuickSettings.defaultSystemPrompt
 
+    /// `baseURL` is used as given; providers include `/v1` themselves when
+    /// their endpoint needs it.
     init(
         baseURL: URL,
-        modelName: String = "apple-foundationmodel",
+        modelName: String,
         apiKey: String? = nil,
         systemPrompt: String = QuickSettings.defaultSystemPrompt,
-        ensureV1: Bool = true,
         session: URLSession = .shared
     ) {
-        if ensureV1 && (baseURL.path.isEmpty || baseURL.path == "/") {
-            self.baseURL = baseURL.appendingPathComponent("v1")
-        } else {
-            self.baseURL = baseURL
-        }
+        self.baseURL = baseURL
         self.modelName = modelName
         self.apiKey = apiKey
         self.systemPrompt = systemPrompt
         self.session = session
-    }
-
-    init(
-        port: Int,
-        modelName: String = "apple-foundationmodel",
-        systemPrompt: String = QuickSettings.defaultSystemPrompt
-    ) {
-        self.init(
-            baseURL: URL(string: "http://127.0.0.1:\(port)")!,
-            modelName: modelName,
-            systemPrompt: systemPrompt,
-            ensureV1: true
-        )
     }
 
     func buildRequest(prompt: String) throws -> URLRequest {

@@ -22,14 +22,17 @@ struct InterfaceContractTests {
         #expect(!source.contains("Settings {\n            EmptyView()"))
     }
 
-    @Test("Result actions use the shared 44-point control target")
-    func resultActionTargets() throws {
+    @Test("Answer actions are keys from the shared table, not buttons")
+    func answerActionsAreKeys() throws {
         let overlay = try Self.source("Sources/Views/OverlayView.swift")
-        let tokens = try Self.source("Sources/Views/DesignTokens.swift")
-        #expect(tokens.contains("controlHeight: CGFloat = 44"))
-        #expect(overlay.components(separatedBy: "minHeight: AQDesign.controlHeight").count == 4)
-        #expect(overlay.contains("keyboardShortcut(\"c\", modifiers: [.command, .shift])"))
-        #expect(overlay.contains("keyboardShortcut(.return, modifiers: [.command])"))
+        let actions = try Self.source("Sources/Models/ItemAction.swift")
+        #expect(!overlay.contains("Paste Back"))
+        #expect(!overlay.contains("keyboardShortcut(\"c\", modifiers: [.command, .shift])"))
+        #expect(overlay.contains("viewModel.lastQuestion"))
+        #expect(overlay.contains("LauncherFooter(viewModel: viewModel)"))
+        #expect(actions.contains("enum ResultAction"))
+        #expect(actions.contains("case .copy: .commandShift(\"c\")"))
+        #expect(actions.contains("case .pasteBack: .commandReturn"))
         #expect(overlay.contains("viewModel.launcherMatches"))
     }
 }

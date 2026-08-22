@@ -5,16 +5,13 @@ let package = Package(
     name: "QuickLaunch",
     platforms: [.macOS(.v26)],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-testing.git", from: "0.12.0"),
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.5.0"),
-        .package(url: "https://github.com/Arthur-Ficial/apfel-server-kit.git", from: "1.0.0"),
     ],
     targets: [
         .executableTarget(
             name: "QuickLaunch",
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
-                .product(name: "ApfelServerKit", package: "apfel-server-kit"),
             ],
             path: "Sources",
             resources: [
@@ -34,9 +31,7 @@ let package = Package(
             name: "QuickLaunchTests",
             dependencies: [
                 "QuickLaunch",
-                .product(name: "Testing", package: "swift-testing"),
                 .product(name: "Markdown", package: "swift-markdown"),
-                .product(name: "ApfelServerKit", package: "apfel-server-kit"),
             ],
             path: "Tests"
         ),

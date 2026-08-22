@@ -7,15 +7,22 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var detail: String
     var value: String
     var requiresInput: Bool = false
+    /// Extra search words that are not part of the title (emoji names, tags).
+    var keywords: String = ""
+    /// Clipboard entries only: pinned entries stay at the top and never expire.
+    var isPinned: Bool = false
+    /// Screenshots only: when the file was captured, for date filters.
+    var capturedAt: Date?
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
     var defaultActionTitle: String {
         switch kind {
         case .application: "Open"
-        case .snippet, .clipboard: "Paste"
+        case .snippet, .clipboard, .emoji: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
         case .command: "Run"
+        case .screenshot: "Attach"
         }
     }
 
@@ -26,6 +33,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .quickLink: "link"
         case .clipboard: "clipboard"
         case .command: "rectangle.3.group"
+        case .emoji: "face.smiling"
+        case .screenshot: "photo"
         }
     }
 }
@@ -34,6 +43,9 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case snippets
     case quickLinks
     case clipboard
+    case emoji
+    case screenshots
+    case caffeinate
     case commands
 
     var id: String { rawValue }
@@ -42,6 +54,9 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "Snippets"
         case .quickLinks: "Quick Links"
         case .clipboard: "Clipboard History"
+        case .emoji: "Emoji & Symbols"
+        case .screenshots: "Screenshots"
+        case .caffeinate: "Caffeinate"
         case .commands: "Commands"
         }
     }
@@ -50,7 +65,10 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: ["snippets", "snippet", "sni"]
         case .quickLinks: ["quick links", "links", "link"]
         case .clipboard: ["clipboard history", "clipboard", "clip"]
-        case .commands: ["commands", "window management", "windows", "caffeinate"]
+        case .emoji: ["emoji", "emojis", "symbols", "symbol", "emoji and symbols"]
+        case .screenshots: ["screenshots", "screenshot", "shots", "capture", "photos"]
+        case .caffeinate: ["caffeinate", "caffeine", "awake", "keep awake", "decaffeinate", "sleep"]
+        case .commands: ["commands", "window management", "windows"]
         }
     }
     var systemImage: String {
@@ -58,6 +76,9 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "text.quote"
         case .quickLinks: "link"
         case .clipboard: "clipboard"
+        case .emoji: "face.smiling"
+        case .screenshots: "camera.viewfinder"
+        case .caffeinate: "cup.and.saucer"
         case .commands: "command"
         }
     }

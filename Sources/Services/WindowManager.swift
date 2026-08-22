@@ -6,6 +6,7 @@ import Foundation
 protocol WindowManaging: AnyObject {
     var isAccessibilityTrusted: Bool { get }
     func apply(_ layout: WindowLayout, to target: SelectionTarget) -> Bool
+    func move(_ move: WindowMove, target: SelectionTarget) -> Bool
 }
 
 @MainActor
@@ -13,8 +14,36 @@ final class WindowManager: WindowManaging {
     var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
 
     func apply(_ layout: WindowLayout, to target: SelectionTarget) -> Bool {
+        guard let window = focusedWindow(of: target),
+              let screenFrame = screenFrame(containing: window)
+        else { return false }
+        let unit = layout.normalizedFrame
+        let frame = CGRect(
+            x: screenFrame.minX + screenFrame.width * unit.minX,
+            y: screenFrame.minY + screenFrame.height * unit.minY,
+            width: screenFrame.width * unit.width,
+            height: screenFrame.height * unit.height
+        )
+        return set(frame, on: window, target: target)
+    }
+
+    func move(_ move: WindowMove, target: SelectionTarget) -> Bool {
+        guard let window = focusedWindow(of: target),
+              let windowFrame = frame(of: window)
+        else { return false }
+        let screens = NSScreen.screens.map(accessibilityFrame(for:))
+        guard screens.count > 1 else { return false }
+        let center = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+        let current = screens.firstIndex { $0.contains(center) } ?? 0
+        let source = screens[current]
+        let destination = screens[move.targetIndex(current: current, count: screens.count)]
+        let frame = WindowMove.relocatedFrame(window: windowFrame, from: source, to: destination)
+        return set(frame, on: window, target: target)
+    }
+
+    private func focusedWindow(of target: SelectionTarget) -> AXUIElement? {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        guard AXIsProcessTrustedWithOptions(options) else { return false }
+        guard AXIsProcessTrustedWithOptions(options) else { return nil }
         let application = AXUIElementCreateApplication(target.processIdentifier)
         var windowValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -24,18 +53,13 @@ final class WindowManager: WindowManaging {
         ) == .success,
         let windowValue,
         CFGetTypeID(windowValue) == AXUIElementGetTypeID()
-        else { return false }
-        let window = unsafeDowncast(windowValue, to: AXUIElement.self)
-        guard let screenFrame = screenFrame(containing: window) else { return false }
-        let unit = layout.normalizedFrame
-        var position = CGPoint(
-            x: screenFrame.minX + screenFrame.width * unit.minX,
-            y: screenFrame.minY + screenFrame.height * unit.minY
-        )
-        var size = CGSize(
-            width: screenFrame.width * unit.width,
-            height: screenFrame.height * unit.height
-        )
+        else { return nil }
+        return unsafeDowncast(windowValue, to: AXUIElement.self)
+    }
+
+    private func set(_ frame: CGRect, on window: AXUIElement, target: SelectionTarget) -> Bool {
+        var position = frame.origin
+        var size = frame.size
         guard let positionValue = AXValueCreate(.cgPoint, &position),
               let sizeValue = AXValueCreate(.cgSize, &size)
         else { return false }
@@ -56,7 +80,8 @@ final class WindowManager: WindowManaging {
         return positioned && sized
     }
 
-    private func screenFrame(containing window: AXUIElement) -> CGRect? {
+    /// The window's frame in the Accessibility (top-left origin) space.
+    private func frame(of window: AXUIElement) -> CGRect? {
         var positionRef: CFTypeRef?
         var sizeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -74,15 +99,24 @@ final class WindowManager: WindowManaging {
         guard AXValueGetValue(unsafeDowncast(positionRef, to: AXValue.self), .cgPoint, &position),
               AXValueGetValue(unsafeDowncast(sizeRef, to: AXValue.self), .cgSize, &size)
         else { return nil }
-        let center = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+        return CGRect(origin: position, size: size)
+    }
+
+    private func screenFrame(containing window: AXUIElement) -> CGRect? {
+        guard let windowFrame = frame(of: window) else { return nil }
+        let center = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
         let screen = NSScreen.screens.first { screen in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
                 as? NSNumber else { return false }
             return CGDisplayBounds(CGDirectDisplayID(number.uint32Value)).contains(center)
         } ?? NSScreen.main
         guard let screen else { return nil }
-        // Accessibility uses a top-left global coordinate space. Convert the
-        // AppKit visible frame so layouts avoid the menu bar and Dock.
+        return accessibilityFrame(for: screen)
+    }
+
+    /// Accessibility uses a top-left global coordinate space. Convert the
+    /// AppKit visible frame so layouts avoid the menu bar and Dock.
+    private func accessibilityFrame(for screen: NSScreen) -> CGRect {
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
         return CGRect(
             x: screen.visibleFrame.minX,

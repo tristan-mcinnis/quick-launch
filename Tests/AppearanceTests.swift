@@ -6,7 +6,7 @@ import SwiftUI
 /// TDD (RED) for dark mode (issue #10).
 ///
 /// Spec:
-/// - QuickSettings.colorScheme: `.system | .light | .dark`, default `.system`.
+/// - QuickSettings.colorScheme: `.system | .light | .dark`, default `.dark` (legacy blobs that never chose one migrate to dark).
 /// - AppearancePreference maps each case to `SwiftUI.ColorScheme?`
 ///   (nil = "follow system").
 /// - Legacy QuickSettings blobs written before this feature still decode.
@@ -57,9 +57,32 @@ struct AppearancePreferenceTests {
 @Suite("QuickSettings appearance")
 struct QuickSettingsAppearanceTests {
 
-    @Test func testDefaultIsSystem() {
+    @Test func testDefaultIsDark() {
         let s = QuickSettings()
-        #expect(s.appearance == .system)
+        #expect(s.appearance == .dark)
+    }
+
+    @Test func testLegacyExplicitLightChoiceSurvivesMigration() throws {
+        let legacy = #"""
+        {"configurationVersion":9,"appearance":"light"}
+        """#
+        let s = try JSONDecoder().decode(QuickSettings.self, from: Data(legacy.utf8))
+        #expect(s.appearance == .light)
+    }
+
+    @Test func testLegacySystemChoiceMovesToDarkOnce() throws {
+        let legacy = #"""
+        {"configurationVersion":9,"appearance":"system"}
+        """#
+        let migrated = try JSONDecoder().decode(QuickSettings.self, from: Data(legacy.utf8))
+        #expect(migrated.appearance == .dark)
+
+        // A deliberate return to "system" after the migration is respected.
+        var chosen = migrated
+        chosen.appearance = .system
+        let data = try JSONEncoder().encode(chosen)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+        #expect(back.appearance == .system)
     }
 
     @Test func testCustomAppearanceRoundTrips() throws {
@@ -75,6 +98,6 @@ struct QuickSettingsAppearanceTests {
         {"hotkeyKeyCode":49,"hotkeyModifiers":524288,"autoCopy":true,"launchAtLogin":true,"showMenuBar":true,"checkForUpdatesOnLaunch":true,"hasSeenWelcome":true,"launchAtLoginPromptShown":true}
         """#
         let s = try JSONDecoder().decode(QuickSettings.self, from: Data(legacy.utf8))
-        #expect(s.appearance == .system)
+        #expect(s.appearance == .dark)
     }
 }

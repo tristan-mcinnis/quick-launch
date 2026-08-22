@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 enum ActionOutputBehavior: String, Codable, Sendable, CaseIterable, Hashable {
     case showInOverlay
@@ -15,6 +16,21 @@ enum ActionOutputBehavior: String, Codable, Sendable, CaseIterable, Hashable {
 struct ActionHotkey: Codable, Sendable, Equatable, Hashable {
     var keyCode: UInt16
     var modifiers: UInt
+
+    /// Modifier symbols and the key, one entry per key cap: `["⌥", "⌘", "←"]`.
+    var keyCaps: [String] {
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
+        var caps: [String] = []
+        if flags.contains(.control) { caps.append("\u{2303}") }
+        if flags.contains(.option)  { caps.append("\u{2325}") }
+        if flags.contains(.shift)   { caps.append("\u{21E7}") }
+        if flags.contains(.command) { caps.append("\u{2318}") }
+        caps.append(QuickSettings.keyName(for: keyCode))
+        return caps
+    }
+
+    /// Compact form for labels and accessibility: `⌥⌘←`.
+    var displayName: String { keyCaps.joined() }
 }
 
 /// A saved prompt users can invoke with `<prefix><alias>`, e.g. `/translate`.
@@ -74,6 +90,12 @@ extension SavedPrompt {
             name: "Translate to English",
             alias: "translate",
             prompt: "Translate the following text to English. Return only the translation, no preamble.\n\n{selection}",
+            outputBehavior: .replaceSelection
+        ),
+        SavedPrompt(
+            name: "Translate to Chinese",
+            alias: "zh",
+            prompt: "Translate the following text to Simplified Chinese. Keep names, numbers, and formatting. Return only the translation, no preamble.\n\n{selection}",
             outputBehavior: .replaceSelection
         ),
         SavedPrompt(

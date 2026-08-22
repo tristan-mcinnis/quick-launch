@@ -24,14 +24,19 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 8)
+        #expect(settings.configurationVersion == 14)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)
         #expect(settings.clipboardHistoryHotkey.keyCode == 9)
         #expect(settings.reopenRetentionSeconds == 10)
-        #expect(settings.selectedProviderID == InferenceProvider.managedApfelID)
+        #expect(settings.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(!settings.systemPrompt.isEmpty)
+        #expect(settings.launcherItemConfigurations.contains {
+            $0.itemID == "window.leftHalf"
+                && $0.alias == "left"
+                && $0.hotkey == ActionHotkey(keyCode: 123, modifiers: 1_572_864)
+        })
     }
 
     @Test func testLauncherItemConfigurationRoundTrips() {

@@ -51,7 +51,11 @@ struct ModelCatalogService: Sendable {
               (200..<300).contains(http.statusCode)
         else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw QuickServiceError.serverError("Model refresh failed: HTTP \(status)")
+            throw QuickServiceError.serverError(Self.refreshFailureMessage(
+                status: status,
+                providerName: provider.name,
+                hasAPIKey: !(apiKey ?? "").isEmpty
+            ))
         }
         return try Self.parseModels(data)
     }
@@ -84,6 +88,21 @@ struct ModelCatalogService: Sendable {
             let text = String(data: data, encoding: .utf8) ?? ""
             return Self.parsePiModels(text)
         }.value
+    }
+
+    static func refreshFailureMessage(status: Int, providerName: String, hasAPIKey: Bool) -> String {
+        switch status {
+        case 401 where !hasAPIKey:
+            return "\(providerName) needs an API key. Add one under Settings › Models."
+        case 401, 403:
+            return "\(providerName) rejected the API key (HTTP \(status)). Check the key under Settings › Models."
+        case 404:
+            return "\(providerName) has no models endpoint at this URL (HTTP 404)."
+        case 429:
+            return "\(providerName) is rate limiting requests (HTTP 429). Try again in a moment."
+        default:
+            return "Model refresh failed: HTTP \(status)"
+        }
     }
 
     static func parseModels(_ data: Data) throws -> [String] {

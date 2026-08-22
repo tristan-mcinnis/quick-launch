@@ -7,6 +7,8 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         var id: String
         var value: String
         var capturedAt: Date
+        /// Optional so files written before pins existed still decode.
+        var pinned: Bool?
     }
 
     private(set) var entries: [LauncherCatalogItem] = []
@@ -38,9 +40,39 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, text.utf8.count <= 200_000 else { return }
         let id = StableIdentifier.make(text)
+        let wasPinned = storedEntries.first { $0.id == id }?.pinned ?? false
         storedEntries.removeAll { $0.id == id }
-        storedEntries.insert(StoredEntry(id: id, value: text, capturedAt: Date()), at: 0)
-        storedEntries = Array(storedEntries.prefix(max(1, min(limit, 200))))
+        storedEntries.insert(StoredEntry(id: id, value: text, capturedAt: Date(), pinned: wasPinned), at: 0)
+        prune(limit: limit)
+        rebuildPublicEntries()
+        save()
+    }
+
+    func togglePin(_ item: LauncherCatalogItem) {
+        guard let index = storedEntries.firstIndex(where: { $0.id == item.itemID }) else { return }
+        storedEntries[index].pinned = !(storedEntries[index].pinned ?? false)
+        rebuildPublicEntries()
+        save()
+    }
+
+    /// Keeps every pinned entry and the newest `limit` unpinned ones.
+    private func prune(limit: Int) {
+        let cap = max(1, min(limit, 200))
+        var kept: [StoredEntry] = []
+        var unpinned = 0
+        for entry in storedEntries {
+            if entry.pinned == true {
+                kept.append(entry)
+            } else if unpinned < cap {
+                kept.append(entry)
+                unpinned += 1
+            }
+        }
+        storedEntries = kept
+    }
+
+    func remove(_ item: LauncherCatalogItem) {
+        storedEntries.removeAll { $0.id == item.itemID }
         rebuildPublicEntries()
         save()
     }
@@ -61,7 +93,8 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     }
 
     private func rebuildPublicEntries() {
-        entries = storedEntries.map { entry in
+        let ordered = storedEntries.filter { $0.pinned == true } + storedEntries.filter { $0.pinned != true }
+        entries = ordered.map { entry in
             let normalized = entry.value
                 .replacingOccurrences(of: "\n", with: " ")
                 .replacingOccurrences(of: "\t", with: " ")
@@ -69,12 +102,15 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
             let title = normalized.count > 80
                 ? String(normalized.prefix(77)) + "…"
                 : normalized
+            let stamp = entry.capturedAt.formatted(date: .abbreviated, time: .shortened)
             return LauncherCatalogItem(
                 kind: .clipboard,
                 itemID: entry.id,
                 title: title,
-                detail: entry.capturedAt.formatted(date: .abbreviated, time: .shortened),
-                value: entry.value
+                detail: entry.pinned == true ? "Pinned · \(stamp)" : stamp,
+                value: entry.value,
+                keywords: entry.pinned == true ? "pinned" : "",
+                isPinned: entry.pinned == true
             )
         }
     }

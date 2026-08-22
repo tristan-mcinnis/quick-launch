@@ -6,7 +6,7 @@ import Foundation
 struct LocalModelDiscoveryTests {
     @Test func scansModelFilesWithoutCallingLMStudio() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("apfel-model-test-\(UUID().uuidString)")
+            .appendingPathComponent("quick-launch-model-test-\(UUID().uuidString)")
         let gguf = root.appendingPathComponent("google/gemma-4-e2b/model.gguf")
         let mlx = root.appendingPathComponent("mlx/qwen3.5-2b/config.json")
         try FileManager.default.createDirectory(

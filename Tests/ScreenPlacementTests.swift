@@ -37,4 +37,27 @@ struct ScreenPlacementTests {
             frames: frames
         ))
     }
+
+    @Test func panelInputRowSitsOnTheVisualCentreLine() {
+        let origin = ScreenPlacement.panelOrigin(
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875),
+            panelWidth: 620,
+            inputHeight: 60
+        )
+        #expect(origin.x == 410)
+        // Input row spans y 408...468, centred on 875 / 2 = 437.5.
+        #expect(origin.y == 408)
+
+        let second = ScreenPlacement.panelOrigin(
+            screenFrame: CGRect(x: 1440, y: -120, width: 1920, height: 1080),
+            visibleFrame: CGRect(x: 1440, y: -120, width: 1920, height: 1055),
+            panelWidth: 620,
+            inputHeight: 60
+        )
+        let expectedX: CGFloat = 2090
+        let expectedY: CGFloat = 378   // (-120 + 527.5 - 30) rounded
+        #expect(second.x == expectedX)
+        #expect(second.y == expectedY)
+    }
 }

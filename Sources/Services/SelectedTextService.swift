@@ -20,7 +20,13 @@ protocol SelectedTextServicing: AnyObject {
     func capture(from target: SelectionTarget, promptForPermission: Bool) -> SelectedTextContext?
     func replace(_ text: String, in context: SelectedTextContext) async -> Bool
     func paste(_ text: String, to target: SelectionTarget) async -> Bool
+    /// Activates `target` and presses ⌘V, for images already on the pasteboard.
+    func pastePasteboard(to target: SelectionTarget) async -> Bool
     func openAccessibilitySettings()
+}
+
+extension SelectedTextServicing {
+    func pastePasteboard(to target: SelectionTarget) async -> Bool { false }
 }
 
 @MainActor
@@ -161,6 +167,41 @@ final class SelectedTextService: SelectedTextServicing {
     private func activate(_ target: SelectionTarget) {
         NSRunningApplication(processIdentifier: target.processIdentifier)?
             .activate(from: .current, options: [.activateAllWindows])
+    }
+
+    func pastePasteboard(to target: SelectionTarget) async -> Bool {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options),
+              let app = NSRunningApplication(processIdentifier: target.processIdentifier)
+        else { return false }
+        app.activate(from: .current, options: [.activateAllWindows])
+        var becameFrontmost = false
+        for _ in 0..<20 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier {
+                becameFrontmost = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard becameFrontmost else { return false }
+        for _ in 0..<40 {
+            let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
+            if held.isEmpty { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return postCommandV()
+    }
+
+    private func postCommandV() -> Bool {
+        let source = CGEventSource(stateID: .privateState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        else { return false }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
     }
 
     func paste(_ text: String, to target: SelectionTarget) async -> Bool {

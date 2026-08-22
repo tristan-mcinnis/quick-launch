@@ -16,6 +16,8 @@ import AppKit
 @testable import QuickLaunch
 
 @Suite("DarkModeRenderProof")
+// AppKit text drawing is not thread-safe; keep these on the main actor.
+@MainActor
 struct DarkModeRenderProofTests {
 
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

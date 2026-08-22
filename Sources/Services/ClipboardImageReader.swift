@@ -18,6 +18,10 @@ enum ClipboardImageReader {
         return makeAttachment(data: png, mimeType: "image/png")
     }
 
+    static func attachment(data: Data, mimeType: String) -> QuickImageAttachment? {
+        makeAttachment(data: data, mimeType: mimeType)
+    }
+
     private static func makeAttachment(
         data: Data,
         mimeType: String

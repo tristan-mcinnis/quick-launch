@@ -4,7 +4,26 @@ import Security
 enum APIKeyStore {
     private static let service = "com.tristanmcinnis.quick-launch.provider-api-keys"
 
+    /// Service names used by earlier builds. Keys saved there are read once
+    /// and copied to `service`, so a rename never strands a provider key.
+    static let legacyServices = [
+        "com.fullstackoptimization.apfel-quick.provider-api-keys",
+    ]
+
     static func load(providerID: UUID) -> String? {
+        if let value = load(providerID: providerID, service: service) {
+            return value
+        }
+        for legacyService in legacyServices {
+            guard let value = load(providerID: providerID, service: legacyService) else { continue }
+            // Migrate forward. Leave the legacy item alone so older builds keep working.
+            try? save(value, providerID: providerID)
+            return value
+        }
+        return nil
+    }
+
+    private static func load(providerID: UUID, service: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -44,14 +63,16 @@ enum APIKeyStore {
     }
 
     static func delete(providerID: UUID) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: providerID.uuidString,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw APIKeyStoreError.keychain(status)
+        for candidate in [service] + legacyServices {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: candidate,
+                kSecAttrAccount as String: providerID.uuidString,
+            ]
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw APIKeyStoreError.keychain(status)
+            }
         }
     }
 }

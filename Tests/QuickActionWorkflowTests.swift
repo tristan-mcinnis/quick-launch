@@ -207,6 +207,15 @@ private final class FakeWindowManager: WindowManaging {
         appliedTarget = target
         return true
     }
+
+    var appliedMove: WindowMove?
+
+    func move(_ move: WindowMove, target: SelectionTarget) -> Bool {
+        wasPreparedWhenApplied = externalActionPrepared
+        appliedMove = move
+        appliedTarget = target
+        return true
+    }
 }
 
 @MainActor

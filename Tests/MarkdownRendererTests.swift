@@ -4,6 +4,8 @@ import AppKit
 @testable import QuickLaunch
 
 @Suite("MarkdownRenderer")
+// AppKit text drawing is not thread-safe; keep these on the main actor.
+@MainActor
 struct MarkdownRendererTests {
 
     // MARK: - Plain text passthrough

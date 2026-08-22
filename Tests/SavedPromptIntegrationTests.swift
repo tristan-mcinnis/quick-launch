@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 import Foundation
 @testable import QuickLaunch
@@ -13,17 +14,33 @@ struct SavedPromptIntegrationTests {
     private func makeViewModel(_ settings: QuickSettings = QuickSettings()) -> (QuickViewModel, CapturingService) {
         let service = CapturingService()
         let vm = QuickViewModel(settings: settings, service: service)
-        vm.serviceWaitTimeout = .milliseconds(100)
         return (vm, service)
     }
 
-    @Test func testBareAliasExpandsBeforeSend() async {
+    @Test func testBareAliasExpandsSelectedTextBeforeSend() async {
+        // A bare alias whose prompt uses {selection} reads the selected text
+        // from the app behind the overlay and sends the expanded prompt.
+        let (vm, service) = makeViewModel()
+        let target = SelectionTarget(processIdentifier: 4242, applicationName: "Notes")
+        vm.selectedTextService = StubSelectedTextService(text: "Bonjour le monde", target: target)
+        vm.rememberSelectionTarget(target)
+        vm.input = "/translate"
+        await vm.submit()
+        #expect(vm.errorMessage == nil)
+        let sent = await service.waitForPrompt()
+        #expect(sent?.hasPrefix("Translate") == true)
+        #expect(sent?.contains("Bonjour le monde") == true)
+        #expect(sent?.contains("/translate") == false)
+        #expect(sent?.contains("{selection}") == false)
+    }
+
+    @Test func testBareAliasWithoutSelectionExplainsInsteadOfSending() async {
         let (vm, service) = makeViewModel()
         vm.input = "/translate"
         await vm.submit()
-        let sent = await service.waitForPrompt()
-        #expect(sent?.hasPrefix("Translate") == true)
-        #expect(sent?.contains("/translate") == false)
+        #expect(vm.errorMessage == "This action needs selected text.")
+        let sent = await service.waitForPrompt(timeoutMs: 50)
+        #expect(sent == nil)
     }
 
     @Test func testAliasWithContextAppends() async {
@@ -113,4 +130,25 @@ actor CapturingService: QuickService {
     }
 
     nonisolated func healthCheck() async throws -> Bool { true }
+}
+
+/// Hands back fixed selected text without touching Accessibility.
+@MainActor
+private final class StubSelectedTextService: SelectedTextServicing {
+    let text: String
+    let target: SelectionTarget
+    var isAccessibilityTrusted: Bool { true }
+
+    init(text: String, target: SelectionTarget) {
+        self.text = text
+        self.target = target
+    }
+
+    func currentExternalTarget() -> SelectionTarget? { target }
+    func capture(from target: SelectionTarget, promptForPermission: Bool) -> SelectedTextContext? {
+        SelectedTextContext(target: target, text: text)
+    }
+    func replace(_ text: String, in context: SelectedTextContext) async -> Bool { true }
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool { true }
+    func openAccessibilitySettings() {}
 }

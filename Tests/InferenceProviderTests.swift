@@ -4,10 +4,11 @@ import Foundation
 
 @Suite("Inference providers")
 struct InferenceProviderTests {
-    @Test func defaultsIncludeManagedApfelAndLMStudio() {
+    @Test func defaultsIncludeDeepSeekAndLMStudio() {
         let providers = InferenceProvider.defaults
 
-        #expect(providers.contains { $0.kind == .managedApfel })
+        #expect(providers.contains { $0.id == InferenceProvider.deepSeekID })
+        #expect(!providers.contains { $0.name.localizedCaseInsensitiveContains("apfel") })
         #expect(providers.contains { $0.kind == .openAICompatible && $0.baseURL == "http://127.0.0.1:1234/v1" })
         #expect(providers.contains {
             $0.id == InferenceProvider.mlxVisionID
@@ -18,9 +19,9 @@ struct InferenceProviderTests {
     @Test func providerSelectionHasStableFallback() {
         let settings = QuickSettings()
 
-        #expect(settings.selectedProviderID == InferenceProvider.managedApfelID)
-        #expect(settings.selectedProvider?.kind == .managedApfel)
-        #expect(settings.selectedModel == "apple-foundationmodel")
+        #expect(settings.selectedProviderID == InferenceProvider.deepSeekID)
+        #expect(settings.selectedProvider?.kind == .openAICompatible)
+        #expect(settings.selectedModel == InferenceProvider.deepSeekVisionModel)
     }
 
     @Test func localProvidersAreClearlyMarked() {

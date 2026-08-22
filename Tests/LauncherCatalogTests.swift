@@ -7,7 +7,7 @@ import Testing
 struct LauncherCatalogTests {
     @Test func tunaCustomItemsAndSmartLinksAreLoadedWithoutMigration() throws {
         let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("apfel-catalog-tests-\(UUID().uuidString)")
+            .appendingPathComponent("quick-launch-catalog-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let preferences = folder.appendingPathComponent("Tuna.plist")
@@ -40,7 +40,7 @@ struct LauncherCatalogTests {
 
     @Test func clipboardHistoryDeduplicatesBoundsPersistsAndClears() {
         let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("apfel-clipboard-tests-\(UUID().uuidString)")
+            .appendingPathComponent("quick-launch-clipboard-tests-\(UUID().uuidString)")
         let file = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
         let store = ClipboardHistoryStore(fileURL: file)
@@ -59,13 +59,32 @@ struct LauncherCatalogTests {
     @Test func emptyLauncherShowsCatalogsAndScopeFiltersItems() {
         let service = FakeLauncherCatalog()
         let vm = QuickViewModel(launcherCatalog: service)
-        #expect(vm.launcherMatches.count == 4)
-        #expect(vm.launcherMatches.contains(.catalog(.commands, count: 12)))
+        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count)
+        #expect(vm.launcherMatches.contains(.catalog(.commands, count: 34)))
         vm.enterCatalog(.snippets)
         vm.input = "greet"
         #expect(vm.catalogMatches.map(\.title) == ["Greeting"])
         vm.handleCommandK()
         #expect(vm.isCatalogActionPanePresented)
+    }
+
+    @Test func windowAliasesAreSearchableFromTheLauncherRoot() {
+        let vm = QuickViewModel()
+        let item = vm.windowCommand(for: .bottomHalf)
+        vm.setLauncherItemAlias("lower", for: item)
+        vm.input = "lower"
+
+        #expect(vm.launcherMatches.contains(.item(item)))
+    }
+
+    @Test func settingsAreSearchableFromTheLauncherRoot() {
+        let vm = QuickViewModel()
+        vm.input = "settings"
+
+        #expect(vm.launcherMatches.contains {
+            guard case .item(let item) = $0 else { return false }
+            return item.itemID == "settings.open"
+        })
     }
 
     @Test func snippetCanBeEditedAndDeletedThroughCatalogService() throws {

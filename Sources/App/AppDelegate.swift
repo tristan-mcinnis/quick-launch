@@ -11,6 +11,14 @@ final class KeyablePanel: NSPanel {
 
     var commandKHandler: (() -> Void)?
     var commandCHandler: (() -> Bool)?
+    /// ⌘⇧S captures the previous app's window, ⌘⇧D the display under the pointer.
+    var screenshotHandler: ((ScreenshotKind) -> Void)?
+    /// Item shortcuts (⌘↩, ⌘E, ⌃X, ⌘⇧A…). Returns true when consumed.
+    var shortcutHandler: ((String?, UInt16, NSEvent.ModifierFlags) -> Bool)?
+    /// ⇧↩ translates the typed text. Returns true when consumed.
+    var translateHandler: (() -> Bool)?
+    /// ⌫ on an empty field pops a layer. Returns true when consumed.
+    var backspaceHandler: (() -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags
@@ -26,6 +34,32 @@ final class KeyablePanel: NSPanel {
            event.charactersIgnoringModifiers?.lowercased() == "k",
            modifiers == [.command] {
             commandKHandler?()
+            return true
+        }
+        if event.type == .keyDown,
+           modifiers == [.command, .shift],
+           let screenshotHandler,
+           let key = event.charactersIgnoringModifiers?.lowercased(),
+           let kind: ScreenshotKind = key == "s" ? .window : (key == "d" ? .display : nil) {
+            screenshotHandler(kind)
+            return true
+        }
+        if event.type == .keyDown,
+           modifiers == [.shift],
+           event.keyCode == 36 || event.keyCode == 76,
+           translateHandler?() == true {
+            return true
+        }
+        if event.type == .keyDown,
+           modifiers.isEmpty,
+           event.keyCode == 51,
+           backspaceHandler?() == true {
+            return true
+        }
+        if event.type == .keyDown,
+           !modifiers.isEmpty,
+           modifiers != [.shift],
+           shortcutHandler?(event.charactersIgnoringModifiers, event.keyCode, modifiers) == true {
             return true
         }
         return super.performKeyEquivalent(with: event)
@@ -57,14 +91,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayClearTask: Task<Void, Never>?
     private var overlayRetentionID: UUID?
 
-    private let serverManager = ServerManager()
     private let selectedTextService = SelectedTextService()
     private let applicationCatalog = ApplicationCatalogService()
     private let launcherCatalog = TunaCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = SearXNGSearchService()
     private let windowManager = WindowManager()
-    private let caffeinateManager = CaffeinateManager()
+    private let agentSessions = AgentSessionWatcher(folders: AgentSessionWatcher.defaultFolders())
+    private let powerSources = PowerSourceMonitor()
+    private lazy var caffeinateManager = CaffeinateManager(
+        assertion: PowerAssertion(),
+        watcher: agentSessions,
+        power: powerSources
+    )
+    private let launcherUsage = LauncherUsageStore(fileURL: LauncherUsageStore.defaultFileURL())
+    private let screenshotService = ScreenshotCaptureService()
+    private let screenAwareness = ScreenAwarenessService()
+    private let screenshotTextIndex = ScreenshotTextIndex(storeURL: ScreenshotTextIndex.defaultStoreURL())
+    private let doubleTapMonitor = ModifierDoubleTapMonitor()
 
     // MARK: - NSApplicationDelegate
 
@@ -77,6 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             webSearchService: webSearchService,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
+            launcherUsage: launcherUsage,
+            screenshotService: screenshotService,
+            screenAwareness: screenAwareness,
+            screenshotTextIndex: screenshotTextIndex,
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
@@ -97,8 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcherItemHotKeys.removeAll()
         if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
-        serverManager.stop()
-        caffeinateManager.setEnabled(false)
+        caffeinateManager.releaseForQuit()
     }
 
     // MARK: - Bootstrap
@@ -107,7 +154,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a. Load settings from UserDefaults
         let settings = QuickSettings.load()
         viewModel.settings = settings
-        viewModel.isCaffeinating = caffeinateManager.setEnabled(settings.caffeinateEnabled)
+        caffeinateManager.onChange = { [weak viewModel] in
+            viewModel?.syncCaffeinateState()
+        }
+        caffeinateManager.isAgentWatchEnabled = settings.caffeinateAgentWatch
+        caffeinateManager.batteryCutoff = settings.caffeinateBatteryCutoff
+        caffeinateManager.keepsDisplayAwake = settings.caffeinateKeepDisplayAwake
+        caffeinateManager.start()
+        doubleTapMonitor.onDoubleTap = { [weak self, weak viewModel] in
+            guard let self, let viewModel, viewModel.settings.screenAwarenessDoubleTap else { return }
+            viewModel.rememberSelectionTarget(self.selectedTextService.currentExternalTarget())
+            Task { @MainActor in
+                if await viewModel.attachScreenshot(.window, clearingInput: true) {
+                    self.showOverlay(captureSelectionTarget: false)
+                }
+            }
+        }
+        if settings.screenAwarenessDoubleTap { doubleTapMonitor.start() }
+        // Re-assert the intent from before the relaunch; an expired timer is gone.
+        if settings.caffeinateEnabled {
+            caffeinateManager.setEnabled(true)
+        } else if let until = settings.caffeinateUntil, until > Date() {
+            caffeinateManager.enable(until: until)
+        }
+        viewModel.syncCaffeinateState()
         viewModel.settings.save()
         viewModel.loadHistory()
         configureClipboardHistory()
@@ -177,6 +247,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.configureClipboardHistory() }
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .screenAwarenessSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self, weak viewModel] _ in
+            Task { @MainActor [weak self, weak viewModel] in
+                guard let self, let viewModel else { return }
+                if viewModel.settings.screenAwarenessDoubleTap { self.doubleTapMonitor.start() } else { self.doubleTapMonitor.stop() }
+            }
+        }
+
+        // A screenshot command run from a global hotkey needs the panel back.
+        NotificationCenter.default.addObserver(
+            forName: .presentOverlay,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.showOverlay(captureSelectionTarget: false) }
+        }
+
         // Open settings in its own panel (not .sheet — avoids gray corner artifact)
         NotificationCenter.default.addObserver(
             forName: .openSettings,
@@ -186,36 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.showSettingsPanel() }
         }
 
-        NotificationCenter.default.addObserver(
-            forName: .providerChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self, weak viewModel] _ in
-            Task { @MainActor [weak self, weak viewModel] in
-                guard let self, let viewModel else { return }
-                if viewModel.settings.selectedProvider?.kind == .managedApfel {
-                    self.startManagedService(for: viewModel)
-                }
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: .managedServiceRequested,
-            object: nil,
-            queue: .main
-        ) { [weak self, weak viewModel] _ in
-            Task { @MainActor [weak self, weak viewModel] in
-                guard let self, let viewModel else { return }
-                self.startManagedService(for: viewModel)
-            }
-        }
-
         // Panel auto-resize: observe viewModel state and grow/shrink the panel
         // to fit the current overlay content.
         startPanelSizeObserver(viewModel: viewModel)
 
-        // f. Show WelcomeOverlayView FIRST — before we block on server start
-        //    so the user sees UI immediately on first run.
+        // f. Show WelcomeOverlayView first so the user sees UI immediately.
         if !settings.hasSeenWelcome {
             showWelcomePanel()
         } else if !settings.launchAtLoginPromptShown {
@@ -226,21 +291,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Provider and network work remain dormant until the user runs an
         // action or explicitly refreshes/checks from Settings.
-    }
-
-    private func startManagedService(for viewModel: QuickViewModel) {
-        guard viewModel.service == nil else { return }
-        Task { [weak self, weak viewModel] in
-            guard let self, let viewModel else { return }
-            if let port = await self.serverManager.start() {
-                await MainActor.run {
-                    viewModel.service = ApfelQuickService(
-                        port: port,
-                        systemPrompt: viewModel.settings.systemPrompt
-                    )
-                }
-            }
-        }
     }
 
     // MARK: - Panel construction
@@ -260,6 +310,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel.copySelectedLauncherItem()
             return true
         }
+        panel.screenshotHandler = { [weak viewModel] kind in
+            Task { @MainActor in
+                await viewModel?.attachScreenshot(kind, clearingInput: false)
+            }
+        }
+        panel.shortcutHandler = { [weak viewModel] characters, keyCode, modifiers in
+            viewModel?.performShortcut(characters: characters, keyCode: keyCode, modifiers: modifiers) ?? false
+        }
+        panel.translateHandler = { [weak viewModel] in
+            guard let viewModel, viewModel.translationDirection != nil else { return false }
+            Task { @MainActor in await viewModel.translateInput() }
+            return true
+        }
+        panel.backspaceHandler = { [weak viewModel] in
+            viewModel?.popLayerForEmptyBackspace() ?? false
+        }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -272,17 +338,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingController = NSHostingController(
             rootView: OverlayView(viewModel: viewModel)
-                .frame(width: 620)
         )
         hostingController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 60)
         panel.contentViewController = hostingController
 
         // Center on the display that contains the pointer.
         if let screen = screenContainingMouse() {
-            let width: CGFloat = 620
-            let x = screen.frame.midX - width / 2
-            let y = screen.frame.maxY - screen.frame.height * 0.35
-            panel.setFrame(NSRect(x: x, y: y, width: width, height: 60), display: false)
+            let origin = ScreenPlacement.panelOrigin(
+                screenFrame: screen.frame,
+                visibleFrame: screen.visibleFrame,
+                panelWidth: 620,
+                inputHeight: PanelSizing.inputHeight
+            )
+            panel.setFrame(NSRect(x: origin.x, y: origin.y, width: 620, height: 60), display: false)
         }
 
         return panel
@@ -301,27 +369,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
-            let width: CGFloat = 620
-            let x = screen.frame.midX - width / 2
-            let y = screen.frame.maxY - screen.frame.height * 0.35
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            let origin = ScreenPlacement.panelOrigin(
+                screenFrame: screen.frame,
+                visibleFrame: screen.visibleFrame,
+                panelWidth: 620,
+                inputHeight: PanelSizing.inputHeight
+            )
+            // Keep the input row on the centre line whatever the panel's
+            // current height: the frame's top edge is what the eye reads.
+            var frame = panel.frame
+            frame.origin = NSPoint(x: origin.x, y: origin.y - (frame.height - PanelSizing.inputHeight))
+            panel.setFrameOrigin(frame.origin)
         }
-        let shouldAnimate = !panel.isVisible
-            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if shouldAnimate { panel.alphaValue = 0.88 }
+        // No fade. The panel appears on the same frame as the hotkey, like
+        // Raycast; a fade only adds perceived latency.
+        panel.alphaValue = 1
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKey()
         viewModel?.requestInputFocus()
-        if shouldAnimate {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.09
-                context.allowsImplicitAnimation = true
-                panel.animator().alphaValue = 1
-            }
-        } else {
-            panel.alphaValue = 1
-        }
     }
 
     func hideOverlay() {
@@ -334,6 +400,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel?.contextualCatalogItemID = nil
         viewModel?.actionQuery = ""
         viewModel?.rememberSelectionTarget(nil)
+        // Next open starts at the root, like Raycast.
+        if viewModel?.catalogScope != nil || viewModel?.pendingQuickLinkID != nil || viewModel?.inputMode != nil {
+            viewModel?.leaveCatalog()
+        }
 
         overlayClearTask?.cancel()
         guard let viewModel else { return }
@@ -384,14 +454,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = vm.settings.hotkeyKeyCode
         let modifierFlags = NSEvent.ModifierFlags(rawValue: vm.settings.hotkeyModifiers)
 
-        if let conflict = QuickSettings.knownSystemHotkeyConflict(
-            keyCode: keyCode,
-            modifiers: vm.settings.hotkeyModifiers
-        ) {
-            vm.hotkeyRegistrationError = conflict
-            return
-        }
-
         globalHotKey = GlobalHotKey(
             keyCode: UInt32(keyCode),
             modifiers: GlobalHotKey.carbonModifiers(from: modifierFlags)
@@ -399,7 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.toggleOverlay()
         }
         vm.hotkeyRegistrationError = globalHotKey == nil
-            ? "That shortcut is already used by macOS or another app."
+            ? "Unable to register this shortcut. Check that macOS or another app is not using it."
             : nil
     }
 
@@ -510,6 +572,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let application = applicationCatalog.applications.first(where: {
                $0.id == configuration.itemID
            }) {
+            vm.learnDirectUse(of: application)
             _ = applicationCatalog.launch(application)
             return
         }
@@ -517,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             kind: configuration.kind,
             itemID: configuration.itemID
         ) else { return }
+        vm.learnDirectUse(of: item)
         vm.rememberSelectionTarget(selectedTextService.currentExternalTarget())
         if item.kind == .quickLink, item.requiresInput {
             vm.pendingQuickLinkID = item.id
@@ -683,6 +747,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.actionQuery
             _ = viewModel.input
             _ = viewModel.pendingImage
+            _ = viewModel.activeItemActionForm
+            _ = viewModel.deleteArmedItemID
+            _ = viewModel.lastQuestion
+            _ = viewModel.pendingContext
+            _ = viewModel.applicationSelectionIndex
+            _ = viewModel.screenshotIndexProgress
+            _ = viewModel.applicationSelectionIndex
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
                 guard let self, let viewModel else { return }
@@ -701,21 +772,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
-            actionCount: vm.isCatalogActionPanePresented
-                ? 5
-                : (vm.isApplicationActionPanePresented
-                    ? 3
-                    : (vm.isActionPalettePresented ? vm.actionMatches.count : 0)),
+            actionCount: vm.isItemActionPanePresented
+                ? (vm.activeItemActionForm == .edit
+                    ? 5
+                    : (vm.activeItemActionForm != nil ? 2 : max(1, vm.focusedItemActions.count)))
+                : (vm.isActionPalettePresented ? vm.actionMatches.count : 0),
             suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 0
                 : max(vm.launcherMatches.count, vm.savedPromptMatches.count),
-            showsResultActions: !vm.output.isEmpty && !vm.isStreaming,
-            hasAttachment: vm.pendingImage != nil
+            showsResultActions: false,
+            hasAttachment: vm.pendingImage != nil,
+            showsFooter: vm.showsLauncherFooter,
+            launcherRowCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
+                ? 0
+                : vm.launcherMatches.count,
+            showsQuestion: (vm.lastQuestion?.isEmpty == false) && !vm.isConversationHistoryPresented,
+            gridRows: vm.isGridCatalog
+                ? Int((Double(vm.launcherMatches.count) / Double(QuickViewModel.gridColumns)).rounded(.up))
+                    + max(0, vm.gridSections.count - 1)
+                : 0,
+            gridSections: vm.isGridCatalog ? vm.gridSections.count : 0,
+            showsDetailPane: vm.showsDetailPane
         )
+        let width = vm.currentPanelWidth
         var frame = panel.frame
-        if abs(frame.height - total) > 1 {
+        if abs(frame.height - total) > 1 || abs(frame.width - width) > 1 {
             let delta = total - frame.height
+            let centreX = frame.midX
             frame.size.height = total
+            frame.size.width = width
+            frame.origin.x = (centreX - width / 2).rounded()
             frame.origin.y -= delta  // grow down from the top
             panel.setFrame(frame, display: true, animate: false)
         }
@@ -752,6 +838,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings panel
 
     func showSettingsPanel() {
+        // Settings is a different job. Get the launcher out of the way.
+        if panel?.isVisible == true { hideOverlay() }
         if let existing = settingsPanel, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -759,12 +847,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let vm = viewModel else { return }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+            contentRect: NSRect(origin: .zero, size: SettingsView.windowSize),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        panel.title = "Settings"
+        panel.title = "Quick Launch Settings"
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 2)
         panel.isReleasedWhenClosed = false
         panel.center()

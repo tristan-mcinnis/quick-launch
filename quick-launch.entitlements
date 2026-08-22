@@ -3,7 +3,7 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Outgoing network: connects to localhost apfel server -->
+    <!-- Outgoing network: API providers and local model servers -->
     <key>com.apple.security.network.client</key>
     <true/>
 </dict>

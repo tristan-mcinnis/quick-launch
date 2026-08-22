@@ -23,6 +23,10 @@ import Observation
     var contextualApplicationID: String?
     var isCatalogActionPanePresented: Bool = false
     var contextualCatalogItemID: String?
+    /// Sub-form shown in the ⌘K pane instead of the action list.
+    var activeItemActionForm: ItemActionForm?
+    /// Item whose Delete action was pressed once; a second press deletes.
+    var deleteArmedItemID: String?
     var catalogScope: LauncherCatalogScope?
     var pendingQuickLinkID: String?
     var isConversationHistoryPresented: Bool = false
@@ -32,26 +36,50 @@ import Observation
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
     var pendingImage: QuickImageAttachment?
+    /// Screen Awareness: what was read from the window behind the overlay.
+    var pendingContext: CaptureContext?
+    var screenshotIndexProgress = ScreenshotTextIndex.Progress()
+    /// What the user typed for the answer on screen, shown above it.
+    var lastQuestion: String?
     var isCaffeinating: Bool = false
+    /// End of a timed Caffeinate session, for the command title.
+    var caffeinateEndsAt: Date?
+    var caffeinateReason: String?
+    /// Typing-capture modes beyond Quick Link input.
+    var inputMode: InputMode?
+    /// Translate mode: direction chosen with ⇥, else detected from the text.
+    var translationOverride: TranslationDirection?
+
+    enum InputMode: Equatable, Sendable {
+        case translate
+        case caffeinateUntil
+    }
 
     // MARK: - Dependencies
 
+    /// Test seam. When set, every provider resolves to this service.
+    /// Production leaves it nil and builds a client per provider.
     var service: (any QuickService)?
     var selectedTextService: (any SelectedTextServicing)?
     var applicationCatalog: (any ApplicationCatalogServicing)?
     var launcherCatalog: (any LauncherCatalogServicing)?
     var clipboardHistory: (any ClipboardHistoryServicing)?
     var webSearchService: (any WebSearchServicing)?
-    var imageService: (any QuickService)?
     var windowManager: (any WindowManaging)?
     var caffeinateManager: (any CaffeinateManaging)?
+    var screenshotService: (any ScreenshotCapturing)?
+    var screenAwareness: (any ScreenAwarenessReading)?
+    /// On-device OCR over the screenshots folder. Defaults to in-memory;
+    /// the app injects one backed by a file.
+    @ObservationIgnored var screenshotTextIndex: ScreenshotTextIndex
+    /// Learned ranking. Defaults to an in-memory store; the app injects a
+    /// persistent one.
+    @ObservationIgnored var launcherUsage: LauncherUsageStore
     @ObservationIgnored var prepareForExternalAction: (() -> Void)?
     @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
-
-    // How long submit() waits for `service` to be injected before giving up.
-    // Exposed so tests can lower this to keep them fast.
-    @ObservationIgnored var serviceWaitTimeout: Duration = .seconds(5)
+    /// Keychain lookup, replaceable in tests so they never touch the real Keychain.
+    @ObservationIgnored var apiKeyProvider: (UUID) -> String? = { APIKeyStore.load(providerID: $0) }
 
     // How long the "just copied" flag stays true after auto-copy.
     @ObservationIgnored var justCopiedTimeout: Duration = .seconds(2)
@@ -66,6 +94,9 @@ import Observation
     @ObservationIgnored let currentVersion: String
     @ObservationIgnored private(set) var selectionTarget: SelectionTarget?
     @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
+    /// Image of the current thread, kept in memory only so follow-ups can
+    /// refer to it. Never written to history or disk.
+    @ObservationIgnored private(set) var conversationImage: QuickImageAttachment?
 
     // MARK: - Init
 
@@ -77,9 +108,12 @@ import Observation
         launcherCatalog: (any LauncherCatalogServicing)? = nil,
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
-        imageService: (any QuickService)? = nil,
         windowManager: (any WindowManaging)? = nil,
         caffeinateManager: (any CaffeinateManaging)? = nil,
+        launcherUsage: LauncherUsageStore? = nil,
+        screenshotService: (any ScreenshotCapturing)? = nil,
+        screenAwareness: (any ScreenAwarenessReading)? = nil,
+        screenshotTextIndex: ScreenshotTextIndex? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.settings = settings
@@ -89,10 +123,16 @@ import Observation
         self.launcherCatalog = launcherCatalog
         self.clipboardHistory = clipboardHistory
         self.webSearchService = webSearchService
-        self.imageService = imageService
         self.windowManager = windowManager
         self.caffeinateManager = caffeinateManager
+        self.launcherUsage = launcherUsage ?? LauncherUsageStore(fileURL: nil)
+        self.screenshotService = screenshotService
+        self.screenAwareness = screenAwareness
+        self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
         self.currentVersion = currentVersion
+        self.screenshotTextIndex.onProgress = { [weak self] progress in
+            self?.screenshotIndexProgress = progress
+        }
     }
 
     // MARK: - Submit
@@ -121,57 +161,93 @@ import Observation
         .map(\.0)
     }
 
-    var applicationMatches: [LaunchableApplication] {
-        guard let applicationCatalog else { return [] }
-        guard catalogScope == nil, pendingQuickLinkID == nil else { return [] }
+    /// The launcher query when the root launcher is active, otherwise `nil`.
+    private var rootLauncherQuery: String? {
+        guard catalogScope == nil, pendingQuickLinkID == nil else { return nil }
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.count >= 1,
               query.count <= 64,
               !query.hasPrefix(settings.savedPromptPrefix),
               !query.contains("\n")
-        else { return [] }
+        else { return nil }
+        return query
+    }
 
-        let foldedQuery = query.folding(
-            options: [.caseInsensitive, .diacriticInsensitive],
-            locale: .current
-        ).lowercased()
+    private func learnedSignals(query: String, scope: String) -> [String: LauncherRankSignal] {
+        guard settings.launcherLearningEnabled else { return [:] }
+        return launcherUsage.signals(query: query, scope: scope)
+    }
 
-        return Array(applicationCatalog.applications.compactMap { application -> (LaunchableApplication, Int)? in
-            let name = application.name.folding(
-                options: [.caseInsensitive, .diacriticInsensitive],
-                locale: .current
-            ).lowercased()
-            let alias = settings.launcherItemConfiguration(
-                kind: .application,
-                itemID: application.id
-            )?.alias.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let nameScore = FuzzyMatcher.score(query: query, candidate: application.name)
-            let aliasScore = alias.isEmpty
-                ? nil
-                : FuzzyMatcher.score(query: query, candidate: alias)
-            guard var score = [nameScore, aliasScore].compactMap({ $0 }).max() else {
-                return nil
-            }
-            if name == foldedQuery { score += 10_000 }
-            else if name.hasPrefix(foldedQuery) { score += 2_000 }
-            else if name.contains(foldedQuery) { score += 500 }
-            if alias.folding(
-                options: [.caseInsensitive, .diacriticInsensitive],
-                locale: .current
-            ).lowercased() == foldedQuery {
-                score += 12_000
-            }
-            score -= min(application.name.count, 100)
-            return (application, score)
+    /// Fuzzy score for a title plus optional alias, with the same exact and
+    /// prefix bonuses every catalog uses. `foldedQuery` comes from
+    /// `FuzzyMatcher.fold` so one ranking pass folds the query once.
+    private func matchScore(
+        foldedQuery: String,
+        title: String,
+        alias: String,
+        keywords: String = ""
+    ) -> Int? {
+        let foldedTitle = FuzzyMatcher.fold(title)
+        let titleScore = FuzzyMatcher.score(foldedQuery: foldedQuery, foldedCandidate: foldedTitle)
+        var foldedAlias = ""
+        var aliasScore: Int?
+        if !alias.isEmpty {
+            foldedAlias = FuzzyMatcher.fold(alias)
+            aliasScore = FuzzyMatcher.score(foldedQuery: foldedQuery, foldedCandidate: foldedAlias)
         }
-        .sorted {
-            if $0.1 == $1.1 {
-                return $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending
-            }
-            return $0.1 > $1.1
+        var keywordScore: Int?
+        if !keywords.isEmpty,
+           let raw = FuzzyMatcher.score(foldedQuery: foldedQuery, foldedCandidate: FuzzyMatcher.fold(keywords)) {
+            // Keywords help but never outrank the same match on a title.
+            keywordScore = raw - 50
+            let words = FuzzyMatcher.fold(keywords).split(separator: " ")
+            if words.contains(where: { $0 == Substring(foldedQuery) }) { keywordScore = raw + 1_500 }
+            else if words.contains(where: { $0.hasPrefix(foldedQuery) }) { keywordScore = raw + 800 }
         }
-        .prefix(6)
-        .map(\.0))
+        guard var score = [titleScore, aliasScore, keywordScore].compactMap({ $0 }).max() else { return nil }
+        if foldedTitle == foldedQuery { score += 10_000 }
+        else if foldedTitle.hasPrefix(foldedQuery) { score += 2_000 }
+        else if foldedTitle.contains(foldedQuery) { score += 500 }
+        if !foldedAlias.isEmpty, foldedAlias == foldedQuery { score += 12_000 }
+        score -= min(title.count, 100)
+        return score
+    }
+
+    private func scoredApplications(
+        foldedQuery: String,
+        signals: [String: LauncherRankSignal]
+    ) -> [(LaunchableApplication, Int)] {
+        guard let applicationCatalog else { return [] }
+        let aliases = settings.launcherItemConfigurations.reduce(into: [String: String]()) { map, entry in
+            guard entry.kind == .application else { return }
+            let alias = entry.alias.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !alias.isEmpty { map[entry.itemID] = alias }
+        }
+        return applicationCatalog.applications.compactMap { application in
+            guard let score = matchScore(
+                foldedQuery: foldedQuery,
+                title: application.name,
+                alias: aliases[application.id] ?? ""
+            ) else { return nil }
+            let boost = LauncherRanker.boost(
+                for: signals[LauncherSearchResult.application(application).id]
+            )
+            return (application, score + boost)
+        }
+    }
+
+    var applicationMatches: [LaunchableApplication] {
+        guard let query = rootLauncherQuery else { return [] }
+        let signals = learnedSignals(query: query, scope: LauncherUsageStore.rootScope)
+        return Array(scoredApplications(foldedQuery: FuzzyMatcher.fold(query), signals: signals)
+            .sorted {
+                if $0.1 == $1.1 {
+                    return $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending
+                }
+                return $0.1 > $1.1
+            }
+            .prefix(6)
+            .map(\.0))
     }
 
     var snippets: [LauncherCatalogItem] { launcherCatalog?.snippets ?? [] }
@@ -179,24 +255,151 @@ import Observation
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
+    func windowCommand(for layout: WindowLayout) -> LauncherCatalogItem {
+        LauncherCatalogItem(
+            kind: .command,
+            itemID: "window.\(layout.rawValue)",
+            title: layout.title,
+            detail: "Resize the frontmost window",
+            value: "window.\(layout.rawValue)"
+        )
+    }
+
+    func windowMoveCommand(for move: WindowMove) -> LauncherCatalogItem {
+        LauncherCatalogItem(
+            kind: .command,
+            itemID: "window.\(move.rawValue)",
+            title: move.title,
+            detail: move.detail,
+            value: "window.\(move.rawValue)"
+        )
+    }
+
+    func screenshotCommand(for kind: ScreenshotKind) -> LauncherCatalogItem {
+        LauncherCatalogItem(
+            kind: .command,
+            itemID: kind.commandID,
+            title: kind.title,
+            detail: kind.detail,
+            value: kind.commandID
+        )
+    }
+
     var systemCommands: [LauncherCatalogItem] {
-        let layouts = WindowLayout.allCases.map { layout in
+        let layouts = WindowLayout.allCases.map(windowCommand(for:))
+            + WindowMove.allCases.map(windowMoveCommand(for:))
+        let screenshots = ScreenshotKind.allCases.map(screenshotCommand(for:)) + [
             LauncherCatalogItem(
                 kind: .command,
-                itemID: "window.\(layout.rawValue)",
-                title: layout.title,
-                detail: "Move the previous window",
-                value: "window.\(layout.rawValue)"
-            )
-        }
+                itemID: "awareness.area",
+                title: "Send Screen Area to AI",
+                detail: "Drag out an area of the screen, then ask about it",
+                value: "awareness.area",
+                keywords: "screenshot region selection capture"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "awareness.selection",
+                title: "Send Selected Text to AI",
+                detail: "Only the text highlighted in the app behind Quick Launch",
+                value: "awareness.selection",
+                keywords: "selection context"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: LatestScreenshotFinder.commandID,
+                title: "Attach Latest Screenshot",
+                detail: "The newest file in your screenshots folder, then ask about it",
+                value: LatestScreenshotFinder.commandID
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "screenshot.pasteLatest",
+                title: "Paste Latest Screenshot",
+                detail: "Paste the newest screenshot into the app behind Quick Launch",
+                value: "screenshot.pasteLatest",
+                keywords: "image paste"
+            ),
+        ]
+        let caffeinateDetail: String = {
+            if let caffeinateEndsAt, isCaffeinating {
+                return "Awake until \(caffeinateEndsAt.formatted(date: .omitted, time: .shortened))"
+            }
+            return isCaffeinating ? "This Mac will stay awake" : "Prevent this Mac from sleeping"
+        }()
         let caffeine = LauncherCatalogItem(
             kind: .command,
             itemID: "caffeinate.toggle",
             title: isCaffeinating ? "Turn Caffeinate Off" : "Turn Caffeinate On",
-            detail: isCaffeinating ? "This Mac will stay awake" : "Prevent this Mac from sleeping",
+            detail: caffeinateDetail,
             value: "caffeinate.toggle"
         )
-        return layouts + [caffeine]
+        let timed = Self.caffeinateDurations.map { minutes in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "caffeinate.\(minutes)",
+                title: "Caffeinate for \(Self.durationTitle(minutes: minutes))",
+                detail: "Stay awake, then let the Mac sleep again",
+                value: "caffeinate.\(minutes)"
+            )
+        }
+        let until = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.until",
+            title: "Caffeinate Until…",
+            detail: "A time like 17:30 or 5:30pm, or a duration like 90m or 2h",
+            value: "caffeinate.until",
+            keywords: "timer schedule"
+        )
+        let agentWatch = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.agentWatch",
+            title: settings.caffeinateAgentWatch ? "Agent Watch: On" : "Agent Watch: Off",
+            detail: "Stay awake while Claude Code or Codex is working",
+            value: "caffeinate.agentWatch",
+            keywords: "agent claude codex"
+        )
+        let status = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.status",
+            title: "Caffeinate Status",
+            detail: caffeinateManager?.statusSummary ?? "Decaffeinated. Normal Mac sleep is enabled.",
+            value: "caffeinate.status"
+        )
+        let translate = LauncherCatalogItem(
+            kind: .command,
+            itemID: "translate.mode",
+            title: "Translate",
+            detail: "Type text, Return translates; ⇥ flips the direction",
+            value: "translate.mode",
+            keywords: "chinese english zh en"
+        )
+        let settings = LauncherCatalogItem(
+            kind: .command,
+            itemID: "settings.open",
+            title: "Open Quick Launch Settings",
+            detail: "Configure Quick Launch",
+            value: "settings.open"
+        )
+        return layouts + screenshots + [translate, caffeine, until] + timed + [agentWatch, status, settings]
+    }
+
+    /// Everything in the Caffeinate catalog, in the order it reads best.
+    var caffeinateItems: [LauncherCatalogItem] {
+        let ids = ["caffeinate.toggle", "caffeinate.until", "caffeinate.30", "caffeinate.60",
+                   "caffeinate.120", "caffeinate.240", "caffeinate.agentWatch", "caffeinate.status"]
+        let all = systemCommands
+        return ids.compactMap { id in all.first { $0.itemID == id } }
+    }
+
+    static let caffeinateDurations = [30, 60, 120, 240]
+
+    static func durationTitle(minutes: Int) -> String {
+        switch minutes {
+        case ..<60: "\(minutes) Minutes"
+        case 60: "1 Hour"
+        default: minutes % 60 == 0 ? "\(minutes / 60) Hours" : "\(minutes) Minutes"
+        }
     }
 
     var catalogItems: [LauncherCatalogItem] {
@@ -205,61 +408,468 @@ import Observation
         case .snippets: return snippets
         case .quickLinks: return quickLinks
         case .clipboard: return clipboardEntries
+        case .emoji: return EmojiCatalog.items
+        case .screenshots: return screenshotItems
+        case .caffeinate: return caffeinateItems
         case .commands: return systemCommands
         }
     }
 
+    /// Capture commands first, then the saved files, newest first.
+    var screenshotItems: [LauncherCatalogItem] {
+        let captures = ScreenshotKind.allCases.map(screenshotCommand(for:))
+        return captures + screenshotFiles
+    }
+
+    /// Files are listed when the catalog is entered, so typing never hits the disk.
+    private(set) var screenshotFiles: [LauncherCatalogItem] = []
+
+    func reloadScreenshotFiles() {
+        screenshotFiles = ScreenshotLibrary.items(in: screenshotsFolder)
+        if settings.screenshotTextSearch {
+            screenshotTextIndex.refresh(for: screenshotFiles)
+        }
+        invalidateLauncherRanking()
+    }
+
+    /// Maximum rows the launcher list shows at once.
+    static let maxLauncherRows = 9
+    /// The emoji grid shows more: 9 columns by 7 rows.
+    static let maxGridCells = 63
+    static let gridColumns = 9
+    static let panelWidth: CGFloat = 620
+    static let panelWidthWithDetail: CGFloat = 860
+
+    /// Emoji & Symbols is a grid, everything else a list.
+    var isGridCatalog: Bool { catalogScope == .emoji && !isItemActionPanePresented }
+
+    /// Screenshots and Clipboard History show a preview beside the list.
+    var showsDetailPane: Bool {
+        guard catalogScope == .screenshots || catalogScope == .clipboard,
+              !isItemActionPanePresented, !isActionPalettePresented,
+              inputMode == nil, pendingImage == nil
+        else { return false }
+        return detailItem != nil
+    }
+
+    var detailItem: LauncherCatalogItem? {
+        guard catalogScope == .screenshots || catalogScope == .clipboard else { return nil }
+        let matches = launcherMatches
+        guard !matches.isEmpty,
+              case .item(let item) = matches[min(applicationSelectionIndex, matches.count - 1)],
+              item.kind == .screenshot || item.kind == .clipboard
+        else { return nil }
+        return item
+    }
+
+    var currentPanelWidth: CGFloat { showsDetailPane ? Self.panelWidthWithDetail : Self.panelWidth }
+
+    struct GridSection: Equatable {
+        let title: String
+        let range: Range<Int>
+    }
+
+    /// Section headers over `launcherMatches` in the emoji grid.
+    var gridSections: [GridSection] {
+        guard isGridCatalog else { return [] }
+        let count = launcherMatches.count
+        guard count > 0 else { return [] }
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty, emojiFavouriteCount > 0 {
+            let favourites = min(emojiFavouriteCount, count)
+            var sections = [GridSection(title: "Frequently Used", range: 0..<favourites)]
+            if favourites < count { sections.append(GridSection(title: "All", range: favourites..<count)) }
+            return sections
+        }
+        return [GridSection(title: query.isEmpty ? "All" : "Results", range: 0..<count)]
+    }
+
+    private var emojiFavouriteCount: Int {
+        guard settings.launcherLearningEnabled else { return 0 }
+        return min(18, launcherUsage.topItemIDs(scope: LauncherCatalogScope.emoji.rawValue, limit: 18).count)
+    }
+
+    static func maxRows(for scope: LauncherCatalogScope?) -> Int {
+        scope == .emoji ? maxGridCells : maxLauncherRows
+    }
+
+    func screenshotText(for item: LauncherCatalogItem) -> String? {
+        screenshotTextIndex.text(for: item)
+    }
+    /// Learned favourites shown above the catalog roots when nothing is typed.
+    static let emptyQueryFavouriteRows = 2
+
     var catalogMatches: [LauncherCatalogItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let items = catalogItems
-        guard !query.isEmpty else { return Array(items.prefix(6)) }
+        let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
+        let rows = Self.maxRows(for: catalogScope)
+        guard !query.isEmpty else {
+            // Clipboard stays chronological. Other catalogs float learned
+            // favourites to the top so Return reaches them without typing.
+            guard catalogScope != .clipboard, settings.launcherLearningEnabled else {
+                return Array(items.prefix(rows))
+            }
+            let favouriteLimit = catalogScope == .emoji ? 18 : rows
+            let favourites = launcherUsage.topItemIDs(scope: scope, limit: favouriteLimit)
+            let ordered = favourites.compactMap { id in items.first { $0.id == id } }
+            let rest = items.filter { item in !ordered.contains { $0.id == item.id } }
+            return Array((ordered + rest).prefix(rows))
+        }
+        let signals = learnedSignals(query: query, scope: scope)
+        if catalogScope == .screenshots {
+            let parsed = ScreenshotQuery.parse(query)
+            let windowed = items.filter { item in
+                guard let interval = parsed.interval else { return true }
+                guard let capturedAt = item.capturedAt else { return parsed.needle.isEmpty ? false : true }
+                return interval.contains(capturedAt)
+            }
+            guard !parsed.needle.isEmpty else { return Array(windowed.prefix(rows)) }
+            let foldedNeedle = FuzzyMatcher.fold(parsed.needle)
+            let literal = ScreenshotTextIndex.normalize(parsed.needle)
+            let words = literal.split(separator: " ").map(String.init)
+            return Array(windowed.compactMap { item -> (LauncherCatalogItem, Int)? in
+                var best: Int?
+                if let score = matchScore(foldedQuery: foldedNeedle, title: item.title, alias: launcherItemAlias(for: item), keywords: item.keywords) {
+                    best = score + 1_000
+                }
+                // Text inside the image: literal, whitespace-flattened, all words present.
+                if item.kind == .screenshot, settings.screenshotTextSearch,
+                   let text = screenshotTextIndex.normalizedText(for: item),
+                   text.contains(literal) || (words.count > 1 && words.allSatisfy { text.contains($0) }) {
+                    best = max(best ?? 0, 500)
+                }
+                guard let score = best else { return nil }
+                var matched = item
+                if !(matched.title.lowercased().contains(literal)), matched.kind == .screenshot {
+                    matched.detail = "Text match · " + matched.detail
+                }
+                return (matched, score + LauncherRanker.boost(for: signals[item.id]))
+            }
+            .sorted { $0.1 == $1.1 ? ($0.0.capturedAt ?? .distantPast) > ($1.0.capturedAt ?? .distantPast) : $0.1 > $1.1 }
+            .prefix(rows)
+            .map(\.0))
+        }
+        let foldedQuery = FuzzyMatcher.fold(query)
         return Array(items.compactMap { item -> (LauncherCatalogItem, Int)? in
-            let alias = launcherItemAlias(for: item)
-            let score = [
-                FuzzyMatcher.score(query: query, candidate: item.title),
-                alias.isEmpty ? nil : FuzzyMatcher.score(query: query, candidate: alias),
-            ].compactMap { $0 }.max()
-            guard var score else { return nil }
-            if item.title.localizedCaseInsensitiveCompare(query) == .orderedSame { score += 10_000 }
-            if alias.localizedCaseInsensitiveCompare(query) == .orderedSame { score += 12_000 }
-            return (item, score)
+            guard let score = matchScore(
+                foldedQuery: foldedQuery,
+                title: item.title,
+                alias: launcherItemAlias(for: item),
+                keywords: item.keywords
+            ) else { return nil }
+            return (item, score + LauncherRanker.boost(for: signals[item.id]))
         }
         .sorted { lhs, rhs in
             lhs.1 == rhs.1
                 ? lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
                 : lhs.1 > rhs.1
         }
-        .prefix(6)
+        .prefix(rows)
         .map(\.0))
     }
 
+    /// Everything the root launcher can reach in one keystroke, ranked in one
+    /// list: apps, commands, catalog roots, snippets, and quick links. Learned
+    /// choices outrank fuzzy text matches.
+    ///
+    /// The view, the footer, and the panel sizer all read this several times
+    /// per keystroke, so one ranking pass is cached until any input changes.
     var launcherMatches: [LauncherSearchResult] {
-        guard pendingImage == nil else { return [] }
+        let key = launcherMatchesCacheKey
+        if let cached = launcherMatchesCache, cached.key == key { return cached.value }
+        let value = rankLauncherMatches()
+        launcherMatchesCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var launcherMatchesCache: (key: String, value: [LauncherSearchResult])?
+    /// Bumped whenever learned ranking changes, so the cache cannot go stale.
+    @ObservationIgnored private var launcherRankingVersion = 0
+
+    private var launcherMatchesCacheKey: String {
+        [
+            input,
+            catalogScope?.rawValue ?? "",
+            pendingQuickLinkID ?? "",
+            hasPendingAttachment ? "1" : "0",
+            isAnswerActive ? "1" : "0",
+            inputMode == nil ? "" : "mode",
+            String(snippets.count),
+            String(quickLinks.count),
+            String(clipboardEntries.count),
+            isCaffeinating ? "1" : "0",
+            settings.launcherLearningEnabled ? "1" : "0",
+            settings.savedPromptPrefix,
+            String(settings.launcherItemConfigurations.hashValue),
+            String(launcherRankingVersion),
+        ].joined(separator: "\u{1F}")
+    }
+
+    /// An AI thread owns the panel: no launcher rows, typing is a follow-up.
+    var isAnswerActive: Bool {
+        isStreaming || !output.isEmpty || isConversationHistoryPresented
+    }
+
+    private func rankLauncherMatches() -> [LauncherSearchResult] {
+        guard !hasPendingAttachment, !isAnswerActive, inputMode == nil else { return [] }
         if catalogScope != nil {
             return catalogMatches.map(LauncherSearchResult.item)
         }
         guard pendingQuickLinkID == nil else { return [] }
-        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        let roots = LauncherCatalogScope.allCases.compactMap { scope -> LauncherSearchResult? in
-            let count = catalogCount(scope)
-            guard query.isEmpty || scope.aliases.contains(where: {
-                FuzzyMatcher.score(query: query, candidate: $0) != nil
-            }) else { return nil }
-            return .catalog(scope, count: count)
+        let roots = LauncherCatalogScope.allCases.map { scope in
+            LauncherSearchResult.catalog(scope, count: catalogCount(scope))
         }
-        let apps = applicationMatches.map(LauncherSearchResult.application)
-        let commands: [LauncherSearchResult] = query.isEmpty ? [] : systemCommands.compactMap { item in
-            let alias = launcherItemAlias(for: item)
-            guard FuzzyMatcher.score(query: query, candidate: item.title) != nil
-                || (!alias.isEmpty && FuzzyMatcher.score(query: query, candidate: alias) != nil)
-            else { return nil }
+        guard let query = rootLauncherQuery else {
+            guard input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+            return Array((emptyQueryFavourites + roots).prefix(Self.maxLauncherRows))
+        }
+        let signals = learnedSignals(query: query, scope: LauncherUsageStore.rootScope)
+        let foldedQuery = FuzzyMatcher.fold(query)
+        var scored: [(LauncherSearchResult, Int)] = []
+
+        for root in roots {
+            guard case .catalog(let scope, _) = root else { continue }
+            let best = scope.aliases.compactMap { alias in
+                matchScore(foldedQuery: foldedQuery, title: scope.title, alias: alias)
+            }.max()
+            guard let best else { continue }
+            scored.append((root, best + LauncherRanker.boost(for: signals[root.id])))
+        }
+        for (application, score) in scoredApplications(foldedQuery: foldedQuery, signals: signals) {
+            scored.append((.application(application), score))
+        }
+        for item in systemCommands + snippets + quickLinks {
+            guard let score = matchScore(
+                foldedQuery: foldedQuery,
+                title: item.title,
+                alias: launcherItemAlias(for: item)
+            ) else { continue }
+            scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id])))
+        }
+        return Array(scored
+            .sorted { lhs, rhs in
+                lhs.1 == rhs.1
+                    ? Self.displayTitle(lhs.0).localizedCaseInsensitiveCompare(Self.displayTitle(rhs.0)) == .orderedAscending
+                    : lhs.1 > rhs.1
+            }
+            .prefix(Self.maxLauncherRows)
+            .map(\.0))
+    }
+
+    /// Most-used root results, shown before the catalog roots on an empty query.
+    private var emptyQueryFavourites: [LauncherSearchResult] {
+        guard settings.launcherLearningEnabled else { return [] }
+        let ids = launcherUsage.topItemIDs(
+            scope: LauncherUsageStore.rootScope,
+            limit: Self.emptyQueryFavouriteRows * 3
+        )
+        var favourites: [LauncherSearchResult] = []
+        for id in ids where favourites.count < Self.emptyQueryFavouriteRows {
+            if let result = rootResult(id: id) { favourites.append(result) }
+        }
+        return favourites
+    }
+
+    private func rootResult(id: String) -> LauncherSearchResult? {
+        if let application = applications.first(where: {
+            LauncherSearchResult.application($0).id == id
+        }) {
+            return .application(application)
+        }
+        if let item = (systemCommands + snippets + quickLinks).first(where: { $0.id == id }) {
             return .item(item)
         }
-        return Array((commands + roots + apps).prefix(6))
+        return nil
+    }
+
+    private static func displayTitle(_ result: LauncherSearchResult) -> String {
+        switch result {
+        case .application(let application): application.name
+        case .catalog(let scope, _): scope.title
+        case .item(let item): item.title
+        }
+    }
+
+    // MARK: - Footer and badges
+
+    struct FooterHint: Equatable, Sendable {
+        let label: String
+        let keys: [String]
+    }
+
+    /// The footer hides while a pane with its own hints (⌘K) is open.
+    var showsLauncherFooter: Bool {
+        !isActionPalettePresented
+            && !isApplicationActionPanePresented
+            && !isCatalogActionPanePresented
+    }
+
+    /// Left side of the footer: where the user is, or which model answers.
+    var footerContext: String {
+        if catalogScope == .screenshots, screenshotIndexProgress.isRunning {
+            return "Reading text \(screenshotIndexProgress.completed)/\(screenshotIndexProgress.total)"
+        }
+        switch inputMode {
+        case .translate: return "Translate"
+        case .caffeinateUntil: return "Caffeinate Until"
+        case nil: break
+        }
+        if let pendingQuickLink { return pendingQuickLink.title }
+        if let catalogScope { return catalogScope.title }
+        if isStreaming || !output.isEmpty || pendingImage != nil { return activeModelDisplay }
+        if !launcherMatches.isEmpty, !input.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Quick Launch"
+        }
+        return activeModelDisplay
+    }
+
+    /// Right side of the footer: what Return and the main shortcuts do now.
+    var footerHints: [FooterHint] {
+        if isStreaming { return [FooterHint(label: "Stop", keys: ["esc"])] }
+        if hasPendingAttachment {
+            return [
+                FooterHint(label: "Ask", keys: ["↩"]),
+                FooterHint(label: "Remove", keys: ["⌫"]),
+                FooterHint(label: "Retake", keys: ScreenshotKind.window.overlayKeyCaps),
+            ]
+        }
+        if let inputMode {
+            switch inputMode {
+            case .translate:
+                let direction = effectiveTranslationDirection ?? .toChinese
+                return [
+                    FooterHint(label: "Translate", keys: ["↩"]),
+                    FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇥"]),
+                    FooterHint(label: "Back", keys: ["⌫"]),
+                ]
+            case .caffeinateUntil:
+                return [
+                    FooterHint(label: "Caffeinate", keys: ["↩"]),
+                    FooterHint(label: "Back", keys: ["⌫"]),
+                ]
+            }
+        }
+        if pendingQuickLink != nil {
+            return [
+                FooterHint(label: "Open", keys: ["↩"]),
+                FooterHint(label: "Back", keys: ["⌫"]),
+            ]
+        }
+        let matches = launcherMatches
+        if !matches.isEmpty {
+            let index = min(applicationSelectionIndex, matches.count - 1)
+            var hints = [FooterHint(label: primaryActionTitle(for: matches[index]), keys: ["↩"])]
+            if case .item = matches[index], catalogScope != nil {
+                hints.append(FooterHint(label: "Copy", keys: ["⌘", "C"]))
+            }
+            if catalogScope == nil {
+                if let direction = translationDirection {
+                    hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
+                } else {
+                    hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
+                }
+            }
+            if case .catalog = matches[index] {
+                // Roots have no ⌘K actions.
+            } else {
+                hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
+            }
+            if catalogScope != nil {
+                hints.append(FooterHint(label: "Back", keys: ["⌫"]))
+            }
+            return hints
+        }
+        if !output.isEmpty {
+            return [
+                FooterHint(label: "Follow up", keys: ["↩"]),
+                FooterHint(label: "Paste back", keys: ResultAction.pasteBack.shortcut.keyCaps),
+                FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps),
+                FooterHint(label: "Actions", keys: ["⌘", "K"]),
+            ]
+        }
+        if !savedPromptMatches.isEmpty {
+            return [
+                FooterHint(label: "Complete", keys: ["⇥"]),
+                FooterHint(label: "Run", keys: ["↩"]),
+            ]
+        }
+        if catalogScope != nil {
+            return [FooterHint(label: "Back", keys: ["⌫"])]
+        }
+        var hints = [FooterHint(label: input.isEmpty ? "Open" : "Ask", keys: ["↩"])]
+        if let direction = translationDirection {
+            hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
+        }
+        hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
+        hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
+        return hints
+    }
+
+    private func primaryActionTitle(for result: LauncherSearchResult) -> String {
+        switch result {
+        case .application: "Open"
+        case .catalog: "Browse"
+        case .item(let item): item.defaultActionTitle
+        }
+    }
+
+    /// The global hotkey bound to a launcher row, for its key-cap badge.
+    func hotkey(for result: LauncherSearchResult) -> ActionHotkey? {
+        switch result {
+        case .application(let application):
+            return applicationHotkey(for: application)
+        case .catalog(let scope, _):
+            return scope == .clipboard ? settings.clipboardHistoryHotkey : nil
+        case .item(let item):
+            return launcherItemHotkey(for: item)
+        }
+    }
+
+    /// Scope key used when learning from a selection in the current view.
+    private var learningScope: String {
+        catalogScope?.rawValue ?? LauncherUsageStore.rootScope
+    }
+
+    /// Remember that the user chose `result` for the current input.
+    func learn(_ result: LauncherSearchResult) {
+        guard settings.launcherLearningEnabled else { return }
+        launcherUsage.recordSelection(query: input, scope: learningScope, itemID: result.id)
+        launcherRankingVersion += 1
+    }
+
+    /// Remember a use that skipped the launcher, such as a global hotkey.
+    func learnDirectUse(of item: LauncherCatalogItem) {
+        guard settings.launcherLearningEnabled else { return }
+        launcherUsage.recordUse(itemID: item.id)
+        launcherRankingVersion += 1
+    }
+
+    func learnDirectUse(of application: LaunchableApplication) {
+        guard settings.launcherLearningEnabled else { return }
+        launcherUsage.recordUse(itemID: LauncherSearchResult.application(application).id)
+        launcherRankingVersion += 1
+    }
+
+    func forgetLearnedRanking() {
+        launcherUsage.reset()
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+    }
+
+    /// Call after an alias or hotkey edit so cached rankings pick it up.
+    func invalidateLauncherRanking() {
+        launcherRankingVersion += 1
     }
 
     var contextualCatalogItem: LauncherCatalogItem? {
         guard let contextualCatalogItemID else { return nil }
+        if contextualCatalogItemID.hasPrefix("emoji:") {
+            return EmojiCatalog.items.first { $0.id == contextualCatalogItemID }
+        }
+        if contextualCatalogItemID.hasPrefix("screenshot:") {
+            return screenshotFiles.first { $0.id == contextualCatalogItemID }
+        }
         return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
         }
@@ -271,6 +881,11 @@ import Observation
     }
 
     var inputPlaceholder: String {
+        switch inputMode {
+        case .translate: return "Type or paste text to translate…"
+        case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
+        case nil: break
+        }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
         if let catalogScope { return "Search \(catalogScope.title.lowercased())…" }
         return isFollowUp ? "Ask a follow-up…" : "Search apps, snippets, links, or ask anything…"
@@ -278,7 +893,7 @@ import Observation
 
     var activeProvider: InferenceProvider? { settings.selectedProvider }
     var activeModelDisplay: String {
-        if pendingImage != nil { return "Local MLX Vision" }
+        if pendingImage != nil { return visionDisplayName }
         guard let provider = activeProvider else { return "No model" }
         return provider.selectedModel.isEmpty ? provider.name : provider.selectedModel
     }
@@ -315,6 +930,7 @@ import Observation
             await submit()
             return
         }
+        if await submitInputMode() { return }
         if let pendingQuickLink {
             openQuickLink(pendingQuickLink, input: input)
             return
@@ -335,6 +951,11 @@ import Observation
 
     func resetApplicationSelection() {
         applicationSelectionIndex = 0
+    }
+
+    /// ↑↓ move a whole grid row in Emoji & Symbols, one item elsewhere.
+    func moveSelectionVertically(_ direction: Int) {
+        moveApplicationSelection(isGridCatalog ? direction * Self.gridColumns : direction)
     }
 
     func moveApplicationSelection(_ delta: Int) {
@@ -364,18 +985,12 @@ import Observation
         let matches = launcherMatches
         guard !matches.isEmpty else { return false }
         let index = min(applicationSelectionIndex, matches.count - 1)
-        switch matches[index] {
-        case .application(let application):
-            _ = launch(application: application)
-        case .catalog(let scope, _):
-            enterCatalog(scope)
-        case .item(let item):
-            await performLauncherItem(item)
-        }
+        await performLauncherResult(matches[index])
         return true
     }
 
     func performLauncherResult(_ result: LauncherSearchResult) async {
+        learn(result)
         switch result {
         case .application(let application):
             _ = launch(application: application)
@@ -386,7 +1001,93 @@ import Observation
         }
     }
 
+    /// Pull what the manager knows into the observable state.
+    func syncCaffeinateState() {
+        isCaffeinating = caffeinateManager?.isEnabled ?? false
+        caffeinateEndsAt = caffeinateManager?.endsAt
+        caffeinateReason = caffeinateManager?.reason
+        invalidateLauncherRanking()
+    }
+
+    // MARK: - Input modes
+
+    func enterInputMode(_ mode: InputMode) {
+        inputMode = mode
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        translationOverride = nil
+        input = ""
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        if mode == .translate,
+           let selected = captureSelectedText(promptForPermission: false)?.text
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+           !selected.isEmpty {
+            // Like the Companion translator: arrive with the selection filled in.
+            input = selected
+        }
+        requestInputFocus()
+        noteInteraction()
+    }
+
+    func leaveInputMode() {
+        inputMode = nil
+        translationOverride = nil
+        input = ""
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    /// The direction Return will use in Translate mode.
+    var effectiveTranslationDirection: TranslationDirection? {
+        if let translationOverride { return translationOverride }
+        return translationDirection
+    }
+
+    /// ⇥ in Translate mode flips between English and Chinese.
+    func flipTranslationDirection() {
+        let current = effectiveTranslationDirection ?? .toChinese
+        translationOverride = current == .toChinese ? .toEnglish : .toChinese
+    }
+
+    /// Return in a mode. Returns `false` when no mode is active.
+    func submitInputMode() async -> Bool {
+        guard let inputMode else { return false }
+        switch inputMode {
+        case .translate:
+            let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return true }
+            let direction = effectiveTranslationDirection ?? .toChinese
+            self.inputMode = nil
+            await translate(text, direction: direction)
+        case .caffeinateUntil:
+            let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let date = try CaffeinateSchedule.parse(text)
+                guard let caffeinateManager, caffeinateManager.enable(until: date) else {
+                    errorMessage = "Could not start Caffeinate."
+                    requestInputFocus()
+                    return true
+                }
+                syncCaffeinateState()
+                settings.caffeinateEnabled = false
+                settings.caffeinateUntil = date
+                persistSettings(settings)
+                leaveInputMode()
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            } catch {
+                errorMessage = error.localizedDescription
+                requestInputFocus()
+            }
+        }
+        return true
+    }
+
     func enterCatalog(_ scope: LauncherCatalogScope) {
+        if scope == .screenshots { reloadScreenshotFiles() }
+        inputMode = nil
+        translationOverride = nil
         catalogScope = scope
         pendingQuickLinkID = nil
         self.input = ""
@@ -404,6 +1105,8 @@ import Observation
         contextualApplicationID = nil
         catalogScope = nil
         pendingQuickLinkID = nil
+        inputMode = nil
+        translationOverride = nil
         input = ""
         applicationSelectionIndex = 0
         requestInputFocus()
@@ -432,6 +1135,8 @@ import Observation
         contextualApplicationID = nil
         catalogScope = nil
         pendingQuickLinkID = nil
+        inputMode = nil
+        translationOverride = nil
         input = ""
         applicationSelectionIndex = 0
         requestInputFocus()
@@ -442,6 +1147,9 @@ import Observation
         case .snippets: snippets.count
         case .quickLinks: quickLinks.count
         case .clipboard: clipboardEntries.count
+        case .emoji: EmojiCatalog.items.count
+        case .screenshots: screenshotItems.count
+        case .caffeinate: caffeinateItems.count
         case .commands: systemCommands.count
         }
     }
@@ -515,16 +1223,421 @@ import Observation
             } else {
                 openQuickLink(item, input: "")
             }
-        case .snippet, .clipboard:
+        case .snippet, .clipboard, .emoji:
             _ = await pasteLauncherItem(item)
+        case .screenshot:
+            attachScreenshotFile(item)
         case .application:
             return
         case .command:
+            if let kind = ScreenshotKind(commandID: item.value) {
+                if await attachScreenshot(kind, clearingInput: true) {
+                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                }
+                return
+            }
+            if item.value == LatestScreenshotFinder.commandID {
+                if attachLatestScreenshot() {
+                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                }
+                return
+            }
+            if item.value == "awareness.area" {
+                if await attachScreenArea() {
+                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                }
+                return
+            }
+            if item.value == "awareness.selection" {
+                if attachSelectedText() {
+                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                }
+                return
+            }
+            if item.value == "screenshot.pasteLatest" {
+                await pasteLatestScreenshot()
+                return
+            }
             performSystemCommand(item)
         }
     }
 
+    // MARK: - Screenshots
+
+    /// Capture a screenshot and attach it to the next question.
+    /// `clearingInput` drops the command text that was typed to reach here;
+    /// the overlay shortcut passes `false` so a half-typed question survives.
+    @discardableResult
+    func attachScreenshot(_ kind: ScreenshotKind, clearingInput: Bool) async -> Bool {
+        guard let screenshotService else {
+            errorMessage = "Screenshots are not available in this build."
+            requestInputFocus()
+            return false
+        }
+        do {
+            let attachment = try await screenshotService.capture(
+                kind,
+                target: selectionTarget,
+                ownProcess: ProcessInfo.processInfo.processIdentifier
+            )
+            pendingImage = attachment
+            if kind == .window, let selectionTarget {
+                var context = screenAwareness?.readContext(for: selectionTarget)
+                    ?? CaptureContext(appName: selectionTarget.applicationName)
+                context.hasScreenshot = true
+                pendingContext = context
+            } else if let selectionTarget {
+                pendingContext = CaptureContext(appName: selectionTarget.applicationName, hasScreenshot: true)
+            } else {
+                pendingContext = nil
+            }
+            catalogScope = nil
+            pendingQuickLinkID = nil
+            isActionPalettePresented = false
+            isApplicationActionPanePresented = false
+            isCatalogActionPanePresented = false
+            if clearingInput { input = "" }
+            errorMessage = nil
+            applicationSelectionIndex = 0
+            requestInputFocus()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
+    }
+
+    // MARK: - Result actions
+
+    /// Actions available on the answer on screen.
+    var resultActions: [ResultAction] {
+        guard !output.isEmpty, !isStreaming else { return [] }
+        return ResultAction.allCases
+    }
+
+    func performResultAction(_ action: ResultAction) async {
+        switch action {
+        case .pasteBack:
+            _ = await pasteOutputToPreviousApp()
+        case .copy:
+            copyOutputAndMark()
+            isActionPalettePresented = false
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        case .saveSnippet:
+            saveOutputAsSnippet()
+        case .searchWeb:
+            await searchWebForOutput()
+        }
+    }
+
+    /// Save the current result as a new snippet, then open its ⌘K pane so
+    /// the title can be edited in place.
+    func saveOutputAsSnippet() {
+        let value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            errorMessage = "There is no result to save yet."
+            requestInputFocus()
+            return
+        }
+        guard let launcherCatalog else {
+            errorMessage = LauncherCatalogError.creationUnsupported.localizedDescription
+            requestInputFocus()
+            return
+        }
+        let prompt = currentConversation?.messages.first(where: { $0.role == .user })?.content
+        let title = Self.snippetTitle(from: prompt ?? value)
+        do {
+            let item = try launcherCatalog.createSnippet(title: title, value: value)
+            isActionPalettePresented = false
+            actionQuery = ""
+            errorMessage = nil
+            contextualCatalogItemID = item.id
+            isCatalogActionPanePresented = true
+            noteInteraction()
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+        }
+    }
+
+    /// First line of `text`, trimmed to a short title.
+    static func snippetTitle(from text: String) -> String {
+        let firstLine = text
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        let cleaned = firstLine.trimmingCharacters(in: CharacterSet(charactersIn: "#*>-• "))
+        guard !cleaned.isEmpty else { return "Quick Launch result" }
+        return cleaned.count > 48 ? String(cleaned.prefix(47)).trimmingCharacters(in: .whitespaces) + "…" : cleaned
+    }
+
+    /// Run a web search using the current result as the query.
+    func searchWebForOutput() async {
+        let query = Self.searchQuery(from: output)
+        guard !query.isEmpty else {
+            errorMessage = "There is no result to search for yet."
+            requestInputFocus()
+            return
+        }
+        isActionPalettePresented = false
+        actionQuery = ""
+        startNewConversation()
+        input = "search the web for \(query)"
+        await submit()
+    }
+
+    /// First sentence or line of `text`, capped for a search box.
+    static func searchQuery(from text: String) -> String {
+        let firstLine = text
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        let cleaned = firstLine.trimmingCharacters(in: CharacterSet(charactersIn: "#*>-• "))
+        return String(cleaned.prefix(160))
+    }
+
+    /// Folder scanned by "Attach Latest Screenshot"; tests point it elsewhere.
+    @ObservationIgnored var screenshotsFolder: URL = LatestScreenshotFinder.screenshotsFolder()
+
+    /// Send Screen Area to AI: the system selection rectangle, then attach.
+    @discardableResult
+    func attachScreenArea() async -> Bool {
+        guard let screenAwareness else {
+            errorMessage = "Screen capture is not available in this build."
+            requestInputFocus()
+            return false
+        }
+        prepareForExternalAction?()
+        guard let attachment = await screenAwareness.captureArea() else {
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        pendingImage = attachment
+        pendingContext = selectionTarget.map { CaptureContext(appName: $0.applicationName, hasScreenshot: true) }
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        input = ""
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        requestInputFocus()
+        return true
+    }
+
+    /// Send Selected Text to AI: context only, no image.
+    @discardableResult
+    func attachSelectedText() -> Bool {
+        guard let selectionTarget else {
+            errorMessage = ScreenshotCaptureError.noPreviousApp.localizedDescription
+            requestInputFocus()
+            return false
+        }
+        guard let selected = captureSelectedText(promptForPermission: true)?.text
+                .trimmingCharacters(in: .whitespacesAndNewlines), !selected.isEmpty else {
+            errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                ? "Allow Accessibility in System Settings, then select text and try again."
+                : "Nothing is selected in \(selectionTarget.applicationName)."
+            requestInputFocus()
+            return false
+        }
+        var context = screenAwareness?.readContext(for: selectionTarget)
+            ?? CaptureContext(appName: selectionTarget.applicationName)
+        context.selectedText = selected
+        context.appText = nil
+        context.focusedValue = nil
+        pendingContext = context
+        pendingImage = nil
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        input = ""
+        errorMessage = nil
+        requestInputFocus()
+        return true
+    }
+
+    /// Paste Latest Screenshot: newest file straight into the app behind.
+    func pasteLatestScreenshot() async {
+        guard let url = LatestScreenshotFinder.newestScreenshot(in: screenshotsFolder) else {
+            errorMessage = "No screenshot found in \(screenshotsFolder.lastPathComponent)."
+            requestInputFocus()
+            return
+        }
+        await pasteImageFile(url)
+    }
+
+    /// Copies an image file to the pasteboard and presses ⌘V in the previous app.
+    @discardableResult
+    func pasteImageFile(_ url: URL) async -> Bool {
+        guard ScreenshotLibrary.copyImage(at: url) else {
+            errorMessage = "Could not read \(url.lastPathComponent)."
+            requestInputFocus()
+            return false
+        }
+        guard let target = selectionTarget, let selectedTextService else {
+            markJustCopied()
+            errorMessage = "No app was behind Quick Launch. The image was copied instead."
+            requestInputFocus()
+            return false
+        }
+        prepareForExternalAction?()
+        await Task.yield()
+        guard await selectedTextService.pastePasteboard(to: target) else {
+            markJustCopied()
+            errorMessage = "Could not paste into \(target.applicationName). The image was copied instead."
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        input = ""
+        return true
+    }
+
+    /// Attach a saved screenshot file to the next question.
+    @discardableResult
+    func attachScreenshotFile(_ item: LauncherCatalogItem) -> Bool {
+        let url = URL(fileURLWithPath: item.value)
+        guard let attachment = LatestScreenshotFinder.attachment(for: url) else {
+            errorMessage = "Could not read \(url.lastPathComponent)."
+            requestInputFocus()
+            return false
+        }
+        learn(.item(item))
+        pendingImage = attachment
+        pendingContext = CaptureContext(appName: item.title, hasScreenshot: true)
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        input = ""
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        requestInputFocus()
+        return true
+    }
+
+    /// Attach the newest saved screenshot from the screenshots folder.
+    @discardableResult
+    func attachLatestScreenshot() -> Bool {
+        guard let url = LatestScreenshotFinder.newestScreenshot(in: screenshotsFolder) else {
+            errorMessage = "No screenshot found in \(screenshotsFolder.lastPathComponent)."
+            requestInputFocus()
+            return false
+        }
+        guard let attachment = LatestScreenshotFinder.attachment(for: url) else {
+            errorMessage = "Could not read \(url.lastPathComponent)."
+            requestInputFocus()
+            return false
+        }
+        pendingImage = attachment
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        input = ""
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        requestInputFocus()
+        return true
+    }
+
+    // MARK: - Translate (⇧↩)
+
+    /// Direction ⇧↩ would use for the current input.
+    var translationDirection: TranslationDirection? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, pendingImage == nil, !text.hasPrefix(settings.savedPromptPrefix) else { return nil }
+        return TranslationDirection.detect(text)
+    }
+
+    /// ⇧↩: translate the typed text, direction from the script (or the
+    /// Translate-mode override).
+    func translateInput() async {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let direction = effectiveTranslationDirection else { return }
+        inputMode = nil
+        await translate(text, direction: direction)
+    }
+
+    private func translate(_ text: String, direction: TranslationDirection) async {
+        if settings.savedPrompts.contains(where: { $0.alias == direction.alias }) {
+            input = settings.savedPromptPrefix + direction.alias + " " + text
+        } else {
+            let target = direction == .toEnglish ? "English" : "Simplified Chinese"
+            input = "Translate the following text to \(target). Return only the translation, no preamble.\n\n\(text)"
+        }
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        translationOverride = nil
+        closeItemActionPane()
+        await submit()
+        // Show the text, not the expanded prompt, above the translation.
+        lastQuestion = text
+    }
+
+    /// Provider that receives attached images.
+    var visionProvider: InferenceProvider? {
+        settings.providers.first { $0.id == settings.visionProviderID }
+            ?? settings.providers.first { $0.id == InferenceProvider.mlxVisionID }
+    }
+
+    /// Model used for images: the explicit vision model, else the vision
+    /// provider's selected model.
+    var visionModelName: String {
+        guard let visionProvider else { return "" }
+        return settings.visionModel.isEmpty ? visionProvider.selectedModel : settings.visionModel
+    }
+
+    var visionDisplayName: String {
+        guard let visionProvider else { return "No vision model" }
+        let model = visionModelName
+        return model.isEmpty ? visionProvider.name : "\(visionProvider.name) · \(model)"
+    }
+
+    /// Title of the attachment card: "Screen Awareness · Safari" or "Screenshot attached".
+    var attachmentTitle: String {
+        if let pendingContext, pendingContext.includedSources.count > (pendingContext.hasScreenshot ? 1 : 0) || pendingImage == nil {
+            return "Screen Awareness · \(pendingContext.appName)"
+        }
+        return "Screenshot attached"
+    }
+
+    /// Subtitle of the attachment card: what is included and where it goes.
+    var attachmentSubtitle: String {
+        var parts: [String] = []
+        if let pendingContext {
+            if let title = pendingContext.windowTitle, !title.isEmpty { parts.append(title) }
+            parts.append(pendingContext.includedSources.joined(separator: ", "))
+        }
+        parts.append(pendingImage != nil ? visionRoutingNote : "Sent as text")
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// Anything waiting to travel with the next question.
+    var hasPendingAttachment: Bool { pendingImage != nil || pendingContext != nil }
+
+    /// One line under the attachment saying where the image goes.
+    var visionRoutingNote: String {
+        guard let visionProvider else { return "Choose a vision model in Settings › Models" }
+        return visionProvider.location == .local
+            ? "Sent only to \(visionProvider.name) on this Mac"
+            : "Sent to \(visionProvider.name)"
+    }
+
+    func setVisionModel(providerID: UUID, model: String) {
+        settings.visionProviderID = providerID
+        settings.visionModel = model
+        persistSettings(settings)
+    }
+
     func performSystemCommand(_ item: LauncherCatalogItem) {
+        if item.value == "settings.open" {
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            NotificationCenter.default.post(name: .openSettings, object: nil)
+            return
+        }
+
         if item.value == "caffeinate.toggle" {
             let desired = !isCaffeinating
             guard caffeinateManager?.setEnabled(desired) == true else {
@@ -532,8 +1645,56 @@ import Observation
                 requestInputFocus()
                 return
             }
-            isCaffeinating = desired
+            syncCaffeinateState()
             settings.caffeinateEnabled = desired
+            settings.caffeinateUntil = nil
+            persistSettings(settings)
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            return
+        }
+
+        if item.value == "caffeinate.until" {
+            enterInputMode(.caffeinateUntil)
+            return
+        }
+
+        if item.value == "caffeinate.agentWatch" {
+            settings.caffeinateAgentWatch.toggle()
+            caffeinateManager?.isAgentWatchEnabled = settings.caffeinateAgentWatch
+            persistSettings(settings)
+            syncCaffeinateState()
+            input = ""
+            invalidateLauncherRanking()
+            return
+        }
+
+        if item.value == "caffeinate.status" {
+            output = caffeinateManager?.statusSummary ?? "Decaffeinated. Normal Mac sleep is enabled."
+            lastQuestion = "Caffeinate status"
+            errorMessage = nil
+            input = ""
+            requestInputFocus()
+            return
+        }
+
+        if item.value == "translate.mode" {
+            enterInputMode(.translate)
+            return
+        }
+
+        if item.value.hasPrefix("caffeinate."),
+           let minutes = Int(item.value.dropFirst("caffeinate.".count)) {
+            guard let caffeinateManager, caffeinateManager.enable(for: TimeInterval(minutes * 60)) else {
+                errorMessage = "Could not start Caffeinate."
+                requestInputFocus()
+                return
+            }
+            syncCaffeinateState()
+            // A timed session is restored after a relaunch, an indefinite
+            // one is the launch-time preference.
+            settings.caffeinateEnabled = false
+            settings.caffeinateUntil = caffeinateManager.endsAt
             persistSettings(settings)
             input = ""
             NotificationCenter.default.post(name: .dismissOverlay, object: nil)
@@ -541,7 +1702,6 @@ import Observation
         }
 
         guard item.value.hasPrefix("window."),
-              let layout = WindowLayout(rawValue: String(item.value.dropFirst("window.".count))),
               let target = selectionTarget,
               let windowManager
         else {
@@ -549,10 +1709,24 @@ import Observation
             requestInputFocus()
             return
         }
-        prepareForExternalAction?()
-        guard windowManager.apply(layout, to: target) else {
+        let name = String(item.value.dropFirst("window.".count))
+        let applied: Bool
+        if let layout = WindowLayout(rawValue: name) {
+            prepareForExternalAction?()
+            applied = windowManager.apply(layout, to: target)
+        } else if let move = WindowMove(rawValue: name) {
+            prepareForExternalAction?()
+            applied = windowManager.move(move, target: target)
+        } else {
+            errorMessage = "Unknown window command."
+            requestInputFocus()
+            return
+        }
+        guard applied else {
             errorMessage = windowManager.isAccessibilityTrusted
-                ? "Could not resize \(target.applicationName)."
+                ? (WindowMove(rawValue: name) != nil && NSScreen.screens.count < 2
+                    ? "Only one display is connected."
+                    : "Could not move \(target.applicationName).")
                 : "Accessibility access is required for window management."
             requestInputFocus()
             return
@@ -576,10 +1750,37 @@ import Observation
             requestInputFocus()
             return
         }
-        NSWorkspace.shared.open(url)
+        openInQuickLinkBrowser(url)
         self.input = ""
         pendingQuickLinkID = nil
         NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+    }
+
+    /// Browsers that can open web links, for the Quick Links setting.
+    static var installedBrowsers: [LaunchableApplication] {
+        guard let probe = URL(string: "https://example.com") else { return [] }
+        return NSWorkspace.shared.urlsForApplications(toOpen: probe)
+            .compactMap { url in
+                let bundle = Bundle(url: url)
+                let name = (bundle?.infoDictionary?["CFBundleDisplayName"] as? String)
+                    ?? (bundle?.infoDictionary?["CFBundleName"] as? String)
+                    ?? url.deletingPathExtension().lastPathComponent
+                return LaunchableApplication(name: name, bundleIdentifier: bundle?.bundleIdentifier, url: url)
+            }
+            .filter { $0.bundleIdentifier != nil }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Open `url` in the browser chosen in Settings, or the system default.
+    func openInQuickLinkBrowser(_ url: URL) {
+        if let bundleID = settings.quickLinkBrowserBundleID,
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration, completionHandler: nil)
+        } else {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private var isBareAliasQuery: Bool {
@@ -589,14 +1790,12 @@ import Observation
         return !rest.isEmpty && !rest.contains(where: { $0.isWhitespace })
     }
 
+    /// Remember the app behind the overlay. The selected text is read later,
+    /// only when an action needs it, so an Accessibility round trip never
+    /// sits between the hotkey and the panel.
     func rememberSelectionTarget(_ target: SelectionTarget?) {
         selectionTarget = target
         selectedTextContext = nil
-        guard let target, let selectedTextService else { return }
-        selectedTextContext = selectedTextService.capture(
-            from: target,
-            promptForPermission: false
-        )
     }
 
     func toggleActionPalette() {
@@ -609,47 +1808,310 @@ import Observation
         if !isActionPalettePresented { requestInputFocus() }
     }
 
-    func handleCommandK() {
+    // MARK: - Item actions (⌘K pane and direct shortcuts)
+
+    var isItemActionPanePresented: Bool {
+        isCatalogActionPanePresented || isApplicationActionPanePresented
+    }
+
+    /// The result that ⌘K and direct shortcuts act on: the pane's item when a
+    /// pane is open, otherwise the highlighted row.
+    var focusedLauncherResult: LauncherSearchResult? {
+        if isCatalogActionPanePresented, let item = contextualCatalogItem { return .item(item) }
+        if isApplicationActionPanePresented, let application = contextualApplication {
+            return .application(application)
+        }
         let matches = launcherMatches
-        if !matches.isEmpty {
-            let index = min(applicationSelectionIndex, matches.count - 1)
-            switch matches[index] {
-            case .application(let application):
-                contextualApplicationID = application.id
-                isApplicationActionPanePresented.toggle()
-                isCatalogActionPanePresented = false
-                contextualCatalogItemID = nil
-                isActionPalettePresented = false
-                actionQuery = ""
-                noteInteraction()
-                return
-            case .item(let item) where item.kind != .clipboard:
-                contextualCatalogItemID = item.id
-                isCatalogActionPanePresented.toggle()
-                isApplicationActionPanePresented = false
-                contextualApplicationID = nil
-                isActionPalettePresented = false
-                actionQuery = ""
-                noteInteraction()
-                return
-            default:
-                break
-            }
+        guard !matches.isEmpty else { return nil }
+        return matches[min(applicationSelectionIndex, matches.count - 1)]
+    }
+
+    var focusedItemActions: [ItemAction] {
+        guard let result = focusedLauncherResult else { return [] }
+        var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName)
+        if deleteArmedItemID == result.id,
+           let index = actions.firstIndex(where: { $0.kind == .delete }) {
+            actions[index] = ItemAction(
+                kind: .delete,
+                title: "Confirm Delete",
+                systemImage: "trash.fill",
+                shortcut: actions[index].shortcut,
+                isDestructive: true
+            )
+        }
+        return actions
+    }
+
+    func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
+        switch result {
+        case .application(let application):
+            contextualApplicationID = application.id
+            isApplicationActionPanePresented = true
+            isCatalogActionPanePresented = false
+            contextualCatalogItemID = nil
+        case .item(let item):
+            contextualCatalogItemID = item.id
+            isCatalogActionPanePresented = true
+            isApplicationActionPanePresented = false
+            contextualApplicationID = nil
+        case .catalog:
+            return
+        }
+        isActionPalettePresented = false
+        actionQuery = ""
+        activeItemActionForm = form
+        deleteArmedItemID = nil
+        noteInteraction()
+    }
+
+    func closeItemActionPane() {
+        isCatalogActionPanePresented = false
+        isApplicationActionPanePresented = false
+        contextualCatalogItemID = nil
+        contextualApplicationID = nil
+        activeItemActionForm = nil
+        deleteArmedItemID = nil
+        actionQuery = ""
+        requestInputFocus()
+        noteInteraction()
+    }
+
+    /// Backspace on an empty field pops one layer: attachment, answer,
+    /// mode, catalog, or Quick Link input. Returns `false` when there is
+    /// nothing to pop so the key deletes text as usual.
+    @discardableResult
+    func popLayerForEmptyBackspace() -> Bool {
+        guard input.isEmpty, !isItemActionPanePresented, !isActionPalettePresented else { return false }
+        if hasPendingAttachment {
+            removePendingImage()
+            return true
+        }
+        if isAnswerActive {
+            startNewConversation()
+            return true
+        }
+        if inputMode != nil {
+            leaveInputMode()
+            return true
+        }
+        if catalogScope != nil || pendingQuickLinkID != nil {
+            leaveCatalog()
+            return true
+        }
+        return false
+    }
+
+    /// Escape: a form goes back to the list, the list closes the pane.
+    func dismissItemActionLayer() {
+        if activeItemActionForm != nil {
+            activeItemActionForm = nil
+            deleteArmedItemID = nil
+            noteInteraction()
+        } else {
+            closeItemActionPane()
+        }
+    }
+
+    func handleCommandK() {
+        if isItemActionPanePresented {
+            closeItemActionPane()
+            return
+        }
+        if let result = focusedLauncherResult, case .catalog = result {
+            // Catalog roots have no actions; fall through to the prompt palette.
+        } else if let result = focusedLauncherResult {
+            openActionPane(for: result)
+            return
         }
         toggleActionPalette()
     }
 
+    /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
+    /// Returns `false` when nothing matched so the key reaches SwiftUI.
+    func performShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
+           let action = resultActions.first(where: {
+               $0.shortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
+           }) {
+            Task { await performResultAction(action) }
+            return true
+        }
+        guard pendingImage == nil,
+              !isActionPalettePresented,
+              activeItemActionForm == nil,
+              let result = focusedLauncherResult
+        else { return false }
+        guard let action = focusedItemActions.first(where: {
+            $0.shortcut?.matches(characters: characters, keyCode: keyCode, modifiers: modifiers) == true
+        }), action.kind != .primary else { return false }
+        if !performSynchronously(action, on: result) {
+            Task { await perform(action, on: result) }
+        }
+        return true
+    }
+
+    func perform(_ action: ItemAction, on result: LauncherSearchResult) async {
+        if performSynchronously(action, on: result) { return }
+        switch action.kind {
+        case .primary:
+            closeItemActionPane()
+            await performLauncherResult(result)
+        case .copyAndPaste:
+            guard case .item(let item) = result else { return }
+            closeItemActionPane()
+            if item.kind == .screenshot {
+                if await pasteImageFile(URL(fileURLWithPath: item.value)) {
+                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                }
+            } else {
+                _ = await copyAndPasteLauncherItem(item)
+            }
+        default:
+            break
+        }
+    }
+
+    /// Actions that finish without awaiting anything. Returns `false` for
+    /// the two that paste, which must await the previous app.
+    @discardableResult
+    private func performSynchronously(_ action: ItemAction, on result: LauncherSearchResult) -> Bool {
+        if action.kind != .delete { deleteArmedItemID = nil }
+        switch action.kind {
+        case .primary, .copyAndPaste:
+            return false
+        case .secondary:
+            switch result {
+            case .application(let application):
+                revealInFinder(application)
+            case .item(let item) where item.kind == .screenshot:
+                if ScreenshotLibrary.copyImage(at: URL(fileURLWithPath: item.value)) {
+                    markJustCopied()
+                    closeItemActionPane()
+                    input = ""
+                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                } else {
+                    errorMessage = "Could not read \(item.title)."
+                    requestInputFocus()
+                }
+            case .item(let item):
+                copyLauncherItem(item)
+                closeItemActionPane()
+                input = ""
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            case .catalog:
+                break
+            }
+        case .pin:
+            guard case .item(let item) = result, item.kind == .clipboard else { return true }
+            clipboardHistory?.togglePin(item)
+            invalidateLauncherRanking()
+            closeItemActionPane()
+            applicationSelectionIndex = 0
+        case .saveAsSnippet:
+            guard case .item(let item) = result else { return true }
+            saveClipboardEntry(item, asLink: false)
+        case .saveAsQuickLink:
+            guard case .item(let item) = result else { return true }
+            saveClipboardEntry(item, asLink: true)
+        case .revealInFinder:
+            guard case .item(let item) = result, item.kind == .screenshot else { return true }
+            closeItemActionPane()
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.value)])
+        case .quickLook:
+            guard case .item(let item) = result, item.kind == .screenshot else { return true }
+            ScreenshotLibrary.quickLook(URL(fileURLWithPath: item.value))
+        case .edit:
+            openActionPane(for: result, form: .edit)
+        case .setAlias:
+            openActionPane(for: result, form: .alias)
+        case .setHotkey:
+            openActionPane(for: result, form: .hotkey)
+        case .copyPath:
+            let path: String
+            switch result {
+            case .application(let application): path = application.url.path
+            case .item(let item) where item.kind == .screenshot: path = item.value
+            default: return true
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+            markJustCopied()
+            closeItemActionPane()
+        case .delete:
+            guard case .item(let item) = result else { return true }
+            if deleteArmedItemID == result.id {
+                deleteArmedItemID = nil
+                switch item.kind {
+                case .snippet:
+                    _ = deleteSnippet(item)
+                case .clipboard:
+                    clipboardHistory?.remove(item)
+                    closeItemActionPane()
+                    applicationSelectionIndex = 0
+                case .screenshot:
+                    let url = URL(fileURLWithPath: item.value)
+                    do {
+                        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                        reloadScreenshotFiles()
+                        closeItemActionPane()
+                        applicationSelectionIndex = 0
+                    } catch {
+                        errorMessage = "Could not move \(item.title) to the Trash."
+                        requestInputFocus()
+                    }
+                default:
+                    break
+                }
+            } else {
+                if !isItemActionPanePresented { openActionPane(for: result) }
+                deleteArmedItemID = result.id
+                noteInteraction()
+            }
+        }
+        return true
+    }
+
+    /// Turn a clipboard entry into a snippet or a Quick Link, then open the
+    /// new item's editor so the title can be fixed right away.
+    private func saveClipboardEntry(_ item: LauncherCatalogItem, asLink: Bool) {
+        guard let launcherCatalog else {
+            errorMessage = LauncherCatalogError.creationUnsupported.localizedDescription
+            requestInputFocus()
+            return
+        }
+        do {
+            let created: LauncherCatalogItem
+            if asLink {
+                let host = URL(string: item.value.trimmingCharacters(in: .whitespacesAndNewlines))?.host ?? "Link"
+                created = try launcherCatalog.createQuickLink(title: host, value: item.value)
+            } else {
+                created = try launcherCatalog.createSnippet(title: Self.snippetTitle(from: item.value), value: item.value)
+            }
+            errorMessage = nil
+            catalogScope = asLink ? .quickLinks : .snippets
+            input = ""
+            openActionPane(for: .item(created), form: asLink ? .alias : .edit)
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+        }
+    }
+
+    private func revealInFinder(_ application: LaunchableApplication) {
+        closeItemActionPane()
+        input = ""
+        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        NSWorkspace.shared.activateFileViewerSelecting([application.url])
+    }
+
     func closeApplicationActionPane() {
-        isApplicationActionPanePresented = false
-        contextualApplicationID = nil
-        requestInputFocus()
+        closeItemActionPane()
     }
 
     func closeCatalogActionPane() {
-        isCatalogActionPanePresented = false
-        contextualCatalogItemID = nil
-        requestInputFocus()
-        noteInteraction()
+        closeItemActionPane()
     }
 
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) -> Bool {
@@ -659,6 +2121,7 @@ import Observation
             contextualCatalogItemID = launcherCatalog?.snippets.first {
                 $0.itemID == item.itemID
             }?.id
+            activeItemActionForm = nil
             noteInteraction()
             return true
         } catch {
@@ -872,6 +2335,7 @@ import Observation
         isConversationHistoryPresented = false
         let submittedInput = input
         let submittedImage = pendingImage
+            ?? ((isFollowUp && !shouldStartNewConversation) ? conversationImage : nil)
 
         // Expand saved-prompt aliases before anything else. Non-matches
         // (including inputs that look like `/foo` but reference an unknown
@@ -885,6 +2349,13 @@ import Observation
         if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            submittedImage != nil {
             effectivePrompt = "Describe this screenshot and answer the most likely useful question about it."
+        }
+        let submittedContext = pendingContext
+        if let submittedContext, action == nil {
+            let preamble = submittedContext.promptPreamble()
+            if !preamble.isEmpty {
+                effectivePrompt = preamble + "\n\nQuestion: " + effectivePrompt
+            }
         }
         if action != nil, effectivePrompt.contains("{selection}") {
             guard let selected = captureSelectedText(promptForPermission: true) else {
@@ -969,15 +2440,29 @@ import Observation
             for: usedWebSearch ? nil : action?.providerID,
             image: submittedImage
         ),
-              let model = resolvedModel(for: provider, override: action?.model)
+              let model = resolvedModel(
+                for: provider,
+                override: submittedImage != nil
+                    ? (settings.visionModel.isEmpty ? nil : settings.visionModel)
+                    : action?.model
+              )
         else {
-            errorMessage = "Choose a provider and model in Settings."
+            errorMessage = submittedImage != nil
+                ? "Choose a vision model in Settings › Models."
+                : "Choose a provider and model in Settings."
             requestInputFocus()
             return
         }
 
-        if provider.kind == .managedApfel, service == nil {
-            NotificationCenter.default.post(name: .managedServiceRequested, object: nil)
+        // The injected `service` (tests) bypasses the key check; production
+        // never sets it.
+        if service == nil,
+           provider.kind == .openAICompatible,
+           provider.location == .cloud,
+           (apiKeyProvider(provider.id) ?? "").isEmpty {
+            errorMessage = "\(provider.name) needs an API key. Add it under Settings › Models."
+            requestInputFocus()
+            return
         }
 
         if shouldStartNewConversation || (action != nil && isFollowUp) {
@@ -1005,21 +2490,17 @@ import Observation
         }
         input = ""
         pendingImage = nil
+        pendingContext = nil
+        lastQuestion = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if submittedImage != nil { conversationImage = submittedImage }
 
         errorMessage = nil
         output = ""
         isStreaming = true
-        let waitingService = await waitForService(
-            provider: provider,
-            model: model,
-            timeout: serviceWaitTimeout
-        )
-        guard let service = waitingService else {
+        guard let service = makeService(provider: provider, model: model) else {
             isStreaming = false
             rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
-            errorMessage = provider.kind == .managedApfel
-                ? "Still starting on-device AI — please try again in a moment."
-                : "\(provider.name) is not available. Check its model, endpoint, or installed command."
+            errorMessage = "\(provider.name) is not available. Check its model, endpoint, or installed command."
             requestInputFocus()
             return
         }
@@ -1044,7 +2525,7 @@ import Observation
                     persistCurrentConversation()
                 }
                 if action?.outputBehavior == .replaceSelection, !output.isEmpty {
-                    if let context = selectedTextContext,
+                    if let context = captureSelectedText(promptForPermission: false),
                        let selectedTextService,
                        await selectedTextService.replace(output, in: context) {
                         NotificationCenter.default.post(name: .dismissOverlay, object: nil)
@@ -1095,7 +2576,7 @@ import Observation
                 .dropFirst(min(invocation.count, submittedInput.count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !trailing.isEmpty { return trailing }
-            return selectedTextContext?.text
+            return captureSelectedText(promptForPermission: false)?.text
         }
         return WebSearchIntentDetector.shouldSearch(submittedInput)
             ? submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1240,7 +2721,7 @@ import Observation
         settings.providers.removeAll { $0.id == id }
         if settings.selectedProviderID == id {
             settings.selectedProviderID = settings.providers.first?.id
-                ?? InferenceProvider.managedApfelID
+                ?? InferenceProvider.deepSeekID
         }
         try? APIKeyStore.delete(providerID: id)
         settings.save()
@@ -1281,10 +2762,7 @@ import Observation
         for overrideID: UUID?,
         image: QuickImageAttachment? = nil
     ) -> InferenceProvider? {
-        if image != nil,
-           let vision = settings.providers.first(where: {
-               $0.id == InferenceProvider.mlxVisionID
-           }) {
+        if image != nil, let vision = visionProvider {
             return vision
         }
         if let overrideID,
@@ -1303,20 +2781,15 @@ import Observation
         provider: InferenceProvider,
         model: String
     ) -> (any QuickService)? {
+        if let service { return service }
         switch provider.kind {
-        case .managedApfel:
-            return service
         case .openAICompatible:
-            if provider.id == InferenceProvider.mlxVisionID, let imageService {
-                return imageService
-            }
             guard let url = URL(string: provider.baseURL) else { return nil }
-            return ApfelQuickService(
+            return OpenAICompatibleService(
                 baseURL: url,
                 modelName: model,
-                apiKey: APIKeyStore.load(providerID: provider.id),
-                systemPrompt: settings.systemPrompt,
-                ensureV1: false
+                apiKey: apiKeyProvider(provider.id),
+                systemPrompt: settings.systemPrompt
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
@@ -1326,22 +2799,6 @@ import Observation
                 systemPrompt: settings.systemPrompt
             )
         }
-    }
-
-    private func waitForService(
-        provider: InferenceProvider,
-        model: String,
-        timeout: Duration
-    ) async -> (any QuickService)? {
-        if let resolved = makeService(provider: provider, model: model) { return resolved }
-        guard provider.kind == .managedApfel else { return nil }
-        let deadline = ContinuousClock.now.advanced(by: timeout)
-        let pollInterval: Duration = .milliseconds(50)
-        while ContinuousClock.now < deadline {
-            if let resolved = makeService(provider: provider, model: model) { return resolved }
-            try? await Task.sleep(for: pollInterval)
-        }
-        return makeService(provider: provider, model: model)
     }
 
     // MARK: - Cancel
@@ -1416,6 +2873,7 @@ import Observation
         isConversationHistoryPresented = false
         actionQuery = ""
         pendingImage = nil
+        lastQuestion = nil
     }
 
     func captureImageFromClipboard() {
@@ -1430,6 +2888,7 @@ import Observation
 
     func removePendingImage() {
         pendingImage = nil
+        pendingContext = nil
         requestInputFocus()
     }
 
@@ -1447,6 +2906,8 @@ import Observation
 
     func startNewConversation() {
         currentConversation = nil
+        conversationImage = nil
+        lastQuestion = nil
         isConversationHistoryPresented = false
         output = ""
         errorMessage = nil

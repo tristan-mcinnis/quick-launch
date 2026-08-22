@@ -77,7 +77,8 @@ struct PanelSizingTests {
             output: "", isStreaming: false, errorMessage: nil, suggestionCount: 20
         )
         #expect(three == 186)
-        #expect(many == 312)
+        let expectedMany: CGFloat = 60 + 9 * 42
+        #expect(many == expectedMany)
     }
 
     @Test func testCompletedResultActionsAddCompactFooter() {
@@ -98,5 +99,38 @@ struct PanelSizingTests {
             hasAttachment: true
         )
         #expect(height == 118)
+    }
+
+    // MARK: - Footer and launcher rows
+
+    @Test func testFooterAddsItsRowAndDivider() {
+        let h = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, showsFooter: true
+        )
+        let expected: CGFloat = 60 + AQDesign.footerHeight + 1
+        #expect(h == expected)
+    }
+
+    @Test func testLauncherRowsIncludeListInset() {
+        let plain = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 3
+        )
+        let launcher = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil,
+            suggestionCount: 3, launcherRowCount: 3
+        )
+        let expectedPlain: CGFloat = 60 + 3 * 42
+        #expect(plain == expectedPlain)
+        let expectedLauncher: CGFloat = plain + PanelSizing.launcherListInset
+        #expect(launcher == expectedLauncher)
+    }
+
+    @Test func testFooterIsNotCountedBehindActionPanes() {
+        // Action panes carry their own hint row; the caller passes showsFooter: false.
+        let h = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil, actionCount: 5, showsFooter: false
+        )
+        let expected: CGFloat = 60 + 76 + 5 * 42
+        #expect(h == expected)
     }
 }

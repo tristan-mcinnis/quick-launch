@@ -213,9 +213,6 @@ if curl -fsSL -o "$DOWNLOADED_ZIP" \
     xcrun stapler validate "$EXTRACTED_APP" >/dev/null 2>&1 \
         && pass "Notarisation ticket valid" || fail "Notarisation ticket MISSING"
 
-    # apfel embedded
-    [[ -x "$EXTRACTED_APP/Contents/Helpers/apfel" ]] \
-        && pass "apfel binary embedded in Contents/Helpers/" || fail "apfel binary NOT embedded"
 
     # Code signature identity
     SIGNER="$(codesign -dvvv "$EXTRACTED_APP" 2>&1 | grep "^Authority=" | head -1)"

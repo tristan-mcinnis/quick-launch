@@ -2,25 +2,13 @@ import Testing
 import Foundation
 @testable import QuickLaunch
 
-// TDD (RED phase) — ApfelQuickService does not yet exist.
-// Tests define the intended API for the buildRequest(prompt:) helper.
-//
-// Intended shape:
-//   struct ApfelQuickService: QuickService {
-//       let baseURL: URL       // e.g. http://127.0.0.1:11450
-//       let modelName: String
-//
-//       func buildRequest(prompt: String) throws -> URLRequest
-//       func send(prompt: String) -> AsyncThrowingStream<StreamDelta, Error>
-//       func healthCheck() async throws -> Bool
-//   }
+@Suite("OpenAICompatibleService")
+struct OpenAICompatibleServiceTests {
 
-@Suite("ApfelQuickService")
-struct ApfelQuickServiceTests {
-
-    private func makeService(port: Int = 11450) -> ApfelQuickService {
-        let url = URL(string: "http://127.0.0.1:\(port)")!
-        return ApfelQuickService(baseURL: url, modelName: "test-model")
+    private func makeService(port: Int = 11450) -> OpenAICompatibleService {
+        // Providers include `/v1` in their base URL when the endpoint needs it.
+        let url = URL(string: "http://127.0.0.1:\(port)/v1")!
+        return OpenAICompatibleService(baseURL: url, modelName: "test-model")
     }
 
     // MARK: - 1. HTTP method is POST
@@ -49,12 +37,11 @@ struct ApfelQuickServiceTests {
     }
 
     @Test func testBuildRequestAddsBearerAPIKey() throws {
-        let service = ApfelQuickService(
+        let service = OpenAICompatibleService(
             baseURL: URL(string: "https://example.com/v1")!,
             modelName: "test-model",
             apiKey: "secret-key",
-            systemPrompt: "Return only the result.",
-            ensureV1: false
+            systemPrompt: "Return only the result."
         )
 
         let request = try service.buildRequest(prompt: "hello")
@@ -63,11 +50,10 @@ struct ApfelQuickServiceTests {
     }
 
     @Test func testBuildRequestUsesEditableSystemPrompt() throws {
-        let service = ApfelQuickService(
+        let service = OpenAICompatibleService(
             baseURL: URL(string: "https://example.com/v1")!,
             modelName: "test-model",
-            systemPrompt: "My custom action rules",
-            ensureV1: false
+            systemPrompt: "My custom action rules"
         )
 
         let request = try service.buildRequest(prompt: "hello")
@@ -79,10 +65,9 @@ struct ApfelQuickServiceTests {
     }
 
     @Test func testVersionedBaseURLIsNotDuplicated() throws {
-        let service = ApfelQuickService(
+        let service = OpenAICompatibleService(
             baseURL: URL(string: "http://127.0.0.1:1234/v1")!,
-            modelName: "local-model",
-            ensureV1: false
+            modelName: "local-model"
         )
 
         let request = try service.buildRequest(prompt: "hello")
@@ -168,10 +153,9 @@ struct ApfelQuickServiceTests {
     }
 
     @Test func testBuildRequestAddsImageToLastUserMessage() throws {
-        let service = ApfelQuickService(
+        let service = OpenAICompatibleService(
             baseURL: URL(string: "http://127.0.0.1:8080")!,
-            modelName: "vision-model",
-            ensureV1: false
+            modelName: "vision-model"
         )
         let image = QuickImageAttachment(
             data: Data([0x89, 0x50, 0x4E, 0x47]),

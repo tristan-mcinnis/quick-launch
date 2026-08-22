@@ -37,26 +37,36 @@ struct OverlayView: View {
                     .submitLabel(.send)
                     .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
                     .onKeyPress(.tab) {
+                        if viewModel.inputMode == .translate {
+                            viewModel.flipTranslationDirection()
+                            return .handled
+                        }
                         guard !viewModel.savedPromptMatches.isEmpty else { return .ignored }
                         viewModel.completeFirstFuzzyAlias()
                         return .handled
                     }
                     .onKeyPress(.downArrow) {
                         guard !viewModel.launcherMatches.isEmpty else { return .ignored }
-                        viewModel.moveApplicationSelection(1)
+                        viewModel.moveSelectionVertically(1)
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
                         guard !viewModel.launcherMatches.isEmpty else { return .ignored }
+                        viewModel.moveSelectionVertically(-1)
+                        return .handled
+                    }
+                    .onKeyPress(.rightArrow) {
+                        guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
+                        viewModel.moveApplicationSelection(1)
+                        return .handled
+                    }
+                    .onKeyPress(.leftArrow) {
+                        guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
                         viewModel.moveApplicationSelection(-1)
                         return .handled
                     }
                     .onKeyPress(.delete) {
-                        guard viewModel.input.isEmpty,
-                              viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil
-                        else { return .ignored }
-                        viewModel.leaveCatalog()
-                        return .handled
+                        viewModel.popLayerForEmptyBackspace() ? .handled : .ignored
                     }
                     .onChange(of: viewModel.input) { _, _ in
                         viewModel.resetApplicationSelection()
@@ -90,10 +100,10 @@ struct OverlayView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
 
-            if let image = viewModel.pendingImage {
+            if viewModel.hasPendingAttachment {
                 Divider()
                 HStack(spacing: AQDesign.Space.standard) {
-                    if let preview = NSImage(data: image.data) {
+                    if let image = viewModel.pendingImage, let preview = NSImage(data: image.data) {
                         Image(nsImage: preview)
                             .resizable()
                             .scaledToFill()
@@ -104,11 +114,15 @@ struct OverlayView: View {
                             )
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Screenshot attached")
+                        Text(viewModel.attachmentTitle)
                             .font(AQDesign.TypeToken.body.weight(.semibold))
-                        Text("Sent only to Local MLX Vision")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(viewModel.attachmentSubtitle)
                             .font(AQDesign.TypeToken.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     Spacer()
                     Button {
@@ -125,17 +139,10 @@ struct OverlayView: View {
                 .padding(.vertical, 8)
             }
 
-            if viewModel.isCatalogActionPanePresented,
-               let item = viewModel.contextualCatalogItem {
+            if viewModel.isItemActionPanePresented,
+               let result = viewModel.focusedLauncherResult {
                 Divider()
-                CatalogItemActionPane(viewModel: viewModel, item: item)
-            } else if viewModel.isApplicationActionPanePresented,
-               let application = viewModel.contextualApplication {
-                Divider()
-                ApplicationActionPane(
-                    viewModel: viewModel,
-                    application: application
-                )
+                ItemActionPane(viewModel: viewModel, result: result)
             } else if viewModel.isActionPalettePresented {
                 Divider()
                 QuickActionPalette(viewModel: viewModel)
@@ -146,28 +153,16 @@ struct OverlayView: View {
                !viewModel.isCatalogActionPanePresented,
                !viewModel.launcherMatches.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(
-                        Array(viewModel.launcherMatches.enumerated()),
-                        id: \.element.id
-                    ) { index, result in
-                        Button {
-                            Task { await viewModel.performLauncherResult(result) }
-                        } label: {
-                            LauncherResultRow(
-                                result: result,
-                                isSelected: index == viewModel.applicationSelectionIndex
-                            )
-                            .padding(.horizontal, 20)
-                            .frame(height: 42)
-                            .background(
-                                index == viewModel.applicationSelectionIndex
-                                    ? AQDesign.ColorToken.selectionFill
-                                    : .clear
-                            )
-                            .contentShape(Rectangle())
+                if viewModel.isGridCatalog {
+                    EmojiGridView(viewModel: viewModel)
+                } else {
+                    HStack(alignment: .top, spacing: 0) {
+                        launcherList
+                            .frame(width: viewModel.showsDetailPane ? 380 : nil)
+                        if viewModel.showsDetailPane, let item = viewModel.detailItem {
+                            Divider()
+                            CatalogDetailPane(viewModel: viewModel, item: item)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -207,48 +202,27 @@ struct OverlayView: View {
                     .transition(.opacity)
             } else if !viewModel.output.isEmpty || viewModel.isStreaming {
                 Divider()
-                MarkdownTextView(
-                    attributedString: MarkdownRenderer.render(viewModel.output),
-                    isStreaming: viewModel.isStreaming
-                )
-                .frame(maxHeight: 380)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let question = viewModel.lastQuestion, !question.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "text.cursor")
+                                .font(AQDesign.TypeToken.caption)
+                            Text(question)
+                                .font(AQDesign.TypeToken.label)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Question: \(question)")
+                    }
+                    MarkdownTextView(
+                        attributedString: MarkdownRenderer.render(viewModel.output),
+                        isStreaming: viewModel.isStreaming
+                    )
+                    .frame(maxHeight: 380)
+                }
                 .padding(20)
                 .transition(.opacity)
-            }
-
-            if !viewModel.output.isEmpty && !viewModel.isStreaming {
-                Divider()
-                HStack(spacing: AQDesign.Space.standard) {
-                    Button {
-                        viewModel.copyOutputAndMark()
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                            .frame(minWidth: 92, minHeight: AQDesign.controlHeight)
-                            .contentShape(Rectangle())
-                    }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-                    .help("Copy result (Command-Shift-C)")
-                    Button {
-                        Task { await viewModel.pasteOutputToPreviousApp() }
-                    } label: {
-                        Label(
-                            viewModel.pasteTargetName.map { "Paste to \($0)" } ?? "Paste Back",
-                            systemImage: "arrow.turn.down.right"
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(minWidth: 120, minHeight: AQDesign.controlHeight)
-                        .contentShape(Rectangle())
-                    }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .help("Paste result into the previous app (Command-Return)")
-                    Spacer()
-                }
-                .font(AQDesign.TypeToken.label)
-                .buttonStyle(.borderless)
-                .tint(AQDesign.ColorToken.accent)
-                .padding(.horizontal, 20)
-                .frame(height: AQDesign.controlHeight)
             }
 
             // Error message
@@ -270,9 +244,24 @@ struct OverlayView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
+
+            if viewModel.showsLauncherFooter {
+                Divider()
+                LauncherFooter(viewModel: viewModel)
+            }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .frame(width: viewModel.currentPanelWidth)
+        .background {
+            ZStack {
+                Rectangle().fill(.regularMaterial)
+                AQDesign.ColorToken.panelTint
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: AQDesign.cornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: AQDesign.cornerRadius)
+                .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: 1)
+        )
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
         .animation(
             reduceMotion ? nil : .easeOut(duration: AQDesign.motionDuration),
@@ -287,11 +276,11 @@ struct OverlayView: View {
         .onKeyPress(.escape) {
             if viewModel.isStreaming {
                 viewModel.cancel()
-            } else if viewModel.isCatalogActionPanePresented {
-                viewModel.closeCatalogActionPane()
-            } else if viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil {
-                viewModel.leaveCatalog()
+            } else if viewModel.isItemActionPanePresented {
+                viewModel.dismissItemActionLayer()
             } else {
+                // Raycast convention: Escape closes the window from anywhere.
+                // Backspace on an empty field is the way back to the root.
                 NotificationCenter.default.post(name: .dismissOverlay, object: nil)
             }
             return .handled
@@ -305,12 +294,57 @@ struct OverlayView: View {
         }
     }
 
+    private var launcherList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(
+                Array(viewModel.launcherMatches.enumerated()),
+                id: \.element.id
+            ) { index, result in
+                Button {
+                    Task { await viewModel.performLauncherResult(result) }
+                } label: {
+                    LauncherResultRow(
+                        result: result,
+                        isSelected: index == viewModel.applicationSelectionIndex,
+                        hotkey: viewModel.hotkey(for: result)
+                    )
+                    .padding(.horizontal, 12)
+                    .frame(height: 42)
+                    .background(
+                        RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
+                            .fill(
+                                index == viewModel.applicationSelectionIndex
+                                    ? AQDesign.ColorToken.selectionFill
+                                    : .clear
+                            )
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
     private var moreMenu: some View {
         Menu {
             Button {
                 viewModel.toggleActionPalette()
             } label: {
                 Label("Quick Actions…", systemImage: "wand.and.stars")
+            }
+
+            Divider()
+            ForEach(ScreenshotKind.allCases, id: \.rawValue) { kind in
+                Button {
+                    Task { await viewModel.attachScreenshot(kind, clearingInput: false) }
+                } label: {
+                    Label(
+                        "\(kind.title)  \(kind.overlayKeyCaps.joined())",
+                        systemImage: kind.systemImage
+                    )
+                }
             }
 
             Divider()
@@ -442,6 +476,7 @@ private struct ConversationTranscript: View {
 private struct LauncherResultRow: View {
     let result: LauncherSearchResult
     let isSelected: Bool
+    var hotkey: ActionHotkey? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -453,11 +488,13 @@ private struct LauncherResultRow: View {
                     .foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            if isSelected {
-                Text("\(action)  ↩").font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(.secondary)
+            if let hotkey {
+                KeyCapGroup(keys: hotkey.keyCaps)
+                    .accessibilityLabel("Hotkey \(hotkey.displayName)")
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(isSelected ? "Selected, \(action) with Return" : "")
     }
 
     @ViewBuilder private var icon: some View {
@@ -468,7 +505,16 @@ private struct LauncherResultRow: View {
         case .catalog(let scope, _):
             Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
         case .item(let item):
-            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+            if item.kind == .emoji {
+                Text(item.value).font(.system(size: 18))
+            } else if item.kind == .screenshot, let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
+                Image(nsImage: thumbnail)
+                    .resizable().scaledToFill()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+            }
         }
     }
 
@@ -495,207 +541,326 @@ private struct LauncherResultRow: View {
     }
 }
 
-private struct CatalogItemActionPane: View {
+/// Raycast-style actions for one row: a list with the shortcut on the right,
+/// a search field at the bottom, and small forms for edit, alias, and hotkey.
+private struct ItemActionPane: View {
     @Bindable var viewModel: QuickViewModel
-    let item: LauncherCatalogItem
-    @FocusState private var focusedAction: CatalogAction?
-    @State private var isEditing = false
-    @State private var editedTitle: String
-    @State private var editedValue: String
-    @State private var deleteIsArmed = false
+    let result: LauncherSearchResult
+    @State private var selectedIndex = 0
+    @FocusState private var searchFocused: Bool
+    @State private var editedTitle = ""
+    @State private var editedValue = ""
+    @FocusState private var formFocused: Bool
 
-    private enum CatalogAction: Int, CaseIterable, Hashable {
-        case paste
-        case copy
-        case copyAndPaste
-        case edit
-        case delete
+    private var actions: [ItemAction] {
+        let all = viewModel.focusedItemActions
+        let query = viewModel.actionQuery
+        guard !query.isEmpty else { return all }
+        return all.filter { FuzzyMatcher.score(query: query, candidate: $0.title) != nil }
     }
 
-    init(viewModel: QuickViewModel, item: LauncherCatalogItem) {
-        self.viewModel = viewModel
-        self.item = item
-        _editedTitle = State(initialValue: item.title)
-        _editedValue = State(initialValue: item.value)
+    private var item: LauncherCatalogItem? {
+        if case .item(let item) = result { return item }
+        return nil
+    }
+
+    private var application: LaunchableApplication? {
+        if case .application(let application) = result { return application }
+        return nil
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
-            HStack {
-                Label(item.title, systemImage: item.systemImage)
-                    .font(AQDesign.TypeToken.body.weight(.semibold)).lineLimit(1)
-                Spacer()
-                if item.kind == .quickLink || item.kind == .command {
-                    Button(item.defaultActionTitle) {
-                        Task { await viewModel.performLauncherItem(item) }
-                    }.buttonStyle(.borderedProminent)
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 20)
+                .frame(height: 44)
+            Divider()
+            if let form = viewModel.activeItemActionForm {
+                formView(form)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            } else {
+                list
+                Divider()
+                searchField
+            }
+        }
+        .onAppear {
+            syncEditor()
+            focusSearch()
+        }
+        .onChange(of: viewModel.activeItemActionForm) { _, form in
+            syncEditor()
+            if form == nil { focusSearch() } else { focusForm() }
+        }
+        .onChange(of: viewModel.actionQuery) { _, _ in selectedIndex = 0 }
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            icon.frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(AQDesign.TypeToken.body.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(subtitle)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(viewModel.activeItemActionForm == nil ? "Actions" : formTitle)
+                .font(AQDesign.TypeToken.label)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
+        if let application {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+                .resizable().scaledToFit()
+        } else if let item, item.kind == .emoji {
+            Text(item.value).font(.system(size: 18))
+        } else if let item {
+            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+        }
+    }
+
+    private var title: String {
+        application?.name ?? item?.title ?? ""
+    }
+
+    private var subtitle: String {
+        if application != nil { return "Application" }
+        guard let item else { return "" }
+        switch item.kind {
+        case .snippet: return "Snippet"
+        case .clipboard: return item.detail
+        case .quickLink: return "Quick Link"
+        case .command: return item.detail
+        case .emoji: return "Emoji"
+        case .screenshot: return item.detail
+        case .application: return "Application"
+        }
+    }
+
+    private var formTitle: String {
+        switch viewModel.activeItemActionForm {
+        case .edit: "Edit"
+        case .alias: "Alias"
+        case .hotkey: "Hotkey"
+        case nil: ""
+        }
+    }
+
+    // MARK: Action list
+
+    private var list: some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                    Button {
+                        Task { await viewModel.perform(action, on: result) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: action.systemImage)
+                                .frame(width: 18)
+                                .foregroundStyle(
+                                    action.isDestructive
+                                        ? AQDesign.ColorToken.danger
+                                        : (index == selectedIndex ? AQDesign.ColorToken.accent : .secondary)
+                                )
+                            Text(action.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(action.isDestructive ? AQDesign.ColorToken.danger : .primary)
+                            Spacer()
+                            if let shortcut = action.shortcut {
+                                KeyCapGroup(keys: shortcut.keyCaps)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 42)
+                        .background(
+                            RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
+                                .fill(index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            if isEditing {
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        }
+        .frame(maxHeight: 6 * 42 + 12)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search actions…", text: $viewModel.actionQuery)
+                .textFieldStyle(.plain)
+                .font(AQDesign.TypeToken.body)
+                .focused($searchFocused)
+                .onSubmit { runSelected() }
+                .onKeyPress(.downArrow) { move(1); return .handled }
+                .onKeyPress(.upArrow) { move(-1); return .handled }
+            KeyCapGroup(keys: ["⌘", "K"])
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 40)
+    }
+
+    // MARK: Forms
+
+    @ViewBuilder
+    private func formView(_ form: ItemActionForm) -> some View {
+        switch form {
+        case .edit:
+            VStack(alignment: .leading, spacing: 8) {
                 TextField("Snippet name", text: $editedTitle)
                     .textFieldStyle(.roundedBorder)
+                    .focused($formFocused)
                     .onChange(of: editedTitle) { _, _ in viewModel.noteInteraction() }
                 TextEditor(text: $editedValue)
                     .font(.body.monospaced())
                     .frame(minHeight: 72, maxHeight: 130)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
                     .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
-                HStack {
-                    Button("Save") {
-                        if viewModel.updateSnippet(item, title: editedTitle, value: editedValue) {
-                            isEditing = false
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("Cancel") {
-                        editedTitle = item.title
-                        editedValue = item.value
-                        isEditing = false
-                    }
-                }
-            } else if item.kind == .snippet || item.kind == .clipboard {
                 HStack(spacing: AQDesign.Space.standard) {
-                    Button("Paste") {
-                        Task { await viewModel.pasteLauncherItem(item) }
+                    Button {
+                        saveEdit()
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
                     }
-                    .focused($focusedAction, equals: .paste)
-                    Button("Copy") { viewModel.copyLauncherItem(item) }
-                        .focused($focusedAction, equals: .copy)
-                    Button("Copy & Paste") {
-                        Task { await viewModel.copyAndPasteLauncherItem(item) }
-                    }
-                    .focused($focusedAction, equals: .copyAndPaste)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                if item.kind == .snippet {
-                    HStack(spacing: AQDesign.Space.standard) {
-                        Button("Edit") { isEditing = true; deleteIsArmed = false }
-                            .focused($focusedAction, equals: .edit)
-                        Button(deleteIsArmed ? "Confirm Delete" : "Delete") {
-                            if deleteIsArmed {
-                                _ = viewModel.deleteSnippet(item)
-                            } else {
-                                deleteIsArmed = true
-                            }
-                        }
-                        .tint(AQDesign.ColorToken.danger)
-                        .focused($focusedAction, equals: .delete)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                }
-            }
-            if !isEditing {
-                TextField("Search alias", text: Binding(
-                    get: { viewModel.launcherItemAlias(for: item) },
-                    set: { viewModel.setLauncherItemAlias($0, for: item) }
-                )).textFieldStyle(.roundedBorder)
-                ActionHotkeyRecorderView(
-                    hotkey: Binding(
-                        get: { viewModel.launcherItemHotkey(for: item) },
-                        set: { viewModel.setLauncherItemHotkey($0, for: item) }
-                    ),
-                    label: "Global hotkey",
-                    changeNotification: .launcherItemHotkeysChanged
-                )
-                if let conflict = viewModel.launcherItemConfigurationConflict(for: item) {
-                    Text(conflict).font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(AQDesign.ColorToken.danger)
-                }
-            }
-            HStack {
-                Text("←→ Navigate · Return runs · Command-K closes")
-                Spacer()
-                Button("Done") { viewModel.closeCatalogActionPane() }.buttonStyle(.plain)
-            }.font(AQDesign.TypeToken.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, AQDesign.Space.section)
-        .padding(.vertical, 12)
-        .onAppear {
-            if item.kind == .snippet || item.kind == .clipboard { focusedAction = .paste }
-        }
-        .onKeyPress(.leftArrow) {
-            moveFocus(-1)
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            moveFocus(1)
-            return .handled
-        }
-    }
-
-    private func moveFocus(_ delta: Int) {
-        guard item.kind == .snippet || item.kind == .clipboard else { return }
-        let actions = item.kind == .snippet
-            ? CatalogAction.allCases
-            : [.paste, .copy, .copyAndPaste]
-        let current = focusedAction?.rawValue ?? 0
-        focusedAction = actions[(current + delta + actions.count) % actions.count]
-    }
-}
-
-private struct ApplicationActionPane: View {
-    @Bindable var viewModel: QuickViewModel
-    let application: LaunchableApplication
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
-            HStack(spacing: AQDesign.Space.standard) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
-                    Text(application.name)
-                        .font(AQDesign.TypeToken.body.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("Application actions")
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .buttonStyle(.borderedProminent)
+                    Button("Cancel") { viewModel.dismissItemActionLayer() }
+                    Spacer()
+                    Text("⌘↩ saves · esc cancels")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button("Open") {
-                    _ = viewModel.launch(application: application)
+            }
+        case .alias:
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Alias, for example: work chat", text: aliasBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($formFocused)
+                    .onSubmit { viewModel.dismissItemActionLayer() }
+                if let conflict = conflictMessage {
+                    Text(conflict)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.danger)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AQDesign.ColorToken.accent)
-                .frame(minHeight: AQDesign.controlHeight)
+                HStack {
+                    Text("An alias is a short word you type to reach this item first.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Done") { viewModel.dismissItemActionLayer() }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                }
             }
-
-            TextField("Search alias", text: Binding(
-                get: { viewModel.applicationAlias(for: application) },
-                set: { viewModel.setApplicationAlias($0, for: application) }
-            ))
-            .textFieldStyle(.roundedBorder)
-
-            ActionHotkeyRecorderView(
-                hotkey: Binding(
-                    get: { viewModel.applicationHotkey(for: application) },
-                    set: { viewModel.setApplicationHotkey($0, for: application) }
-                ),
-                label: "Global hotkey",
-                changeNotification: .launcherItemHotkeysChanged
-            )
-
-            if let conflict = viewModel.applicationConfigurationConflict(for: application) {
-                Text(conflict)
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(AQDesign.ColorToken.danger)
+        case .hotkey:
+            VStack(alignment: .leading, spacing: 8) {
+                ActionHotkeyRecorderView(
+                    hotkey: hotkeyBinding,
+                    label: "Global hotkey",
+                    changeNotification: .launcherItemHotkeysChanged
+                )
+                if let conflict = conflictMessage {
+                    Text(conflict)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.danger)
+                }
+                HStack {
+                    Text("A global hotkey runs this item from anywhere.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Done") { viewModel.dismissItemActionLayer() }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                }
             }
-
-            HStack {
-                Text("Return opens · Command-K closes actions")
-                Spacer()
-                Button("Done") { viewModel.closeApplicationActionPane() }
-                    .buttonStyle(.plain)
-            }
-            .font(AQDesign.TypeToken.caption)
-            .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, AQDesign.Space.section)
-        .padding(.vertical, 12)
+    }
+
+    private var aliasBinding: Binding<String> {
+        Binding(
+            get: {
+                if let application { return viewModel.applicationAlias(for: application) }
+                if let item { return viewModel.launcherItemAlias(for: item) }
+                return ""
+            },
+            set: { value in
+                if let application { viewModel.setApplicationAlias(value, for: application) }
+                else if let item { viewModel.setLauncherItemAlias(value, for: item) }
+            }
+        )
+    }
+
+    private var hotkeyBinding: Binding<ActionHotkey?> {
+        Binding(
+            get: {
+                if let application { return viewModel.applicationHotkey(for: application) }
+                if let item { return viewModel.launcherItemHotkey(for: item) }
+                return nil
+            },
+            set: { value in
+                if let application { viewModel.setApplicationHotkey(value, for: application) }
+                else if let item { viewModel.setLauncherItemHotkey(value, for: item) }
+            }
+        )
+    }
+
+    private var conflictMessage: String? {
+        if let application { return viewModel.applicationConfigurationConflict(for: application) }
+        if let item { return viewModel.launcherItemConfigurationConflict(for: item) }
+        return nil
+    }
+
+    // MARK: Helpers
+
+    private func syncEditor() {
+        guard let item else { return }
+        editedTitle = item.title
+        editedValue = item.value
+    }
+
+    private func saveEdit() {
+        guard let item else { return }
+        _ = viewModel.updateSnippet(item, title: editedTitle, value: editedValue)
+    }
+
+    private func focusSearch() {
+        Task { @MainActor in
+            await Task.yield()
+            searchFocused = true
+        }
+    }
+
+    private func focusForm() {
+        Task { @MainActor in
+            await Task.yield()
+            formFocused = true
+        }
+    }
+
+    private func move(_ delta: Int) {
+        let count = actions.count
+        guard count > 0 else { return }
+        selectedIndex = (selectedIndex + delta + count) % count
+    }
+
+    private func runSelected() {
+        let current = actions
+        guard current.indices.contains(selectedIndex) else { return }
+        Task { await viewModel.perform(current[selectedIndex], on: result) }
     }
 }
 
@@ -704,7 +869,28 @@ private struct QuickActionPalette: View {
     @State private var selectedIndex = 0
     @FocusState private var searchFocused: Bool
 
-    private var actions: [SavedPrompt] { viewModel.actionMatches }
+    enum Entry: Identifiable {
+        case result(ResultAction)
+        case prompt(SavedPrompt)
+
+        var id: String {
+            switch self {
+            case .result(let action): "result:" + action.id
+            case .prompt(let prompt): "prompt:" + prompt.id.uuidString
+            }
+        }
+    }
+
+    private var resultActions: [ResultAction] {
+        let query = viewModel.actionQuery
+        return viewModel.resultActions.filter { action in
+            query.isEmpty || FuzzyMatcher.score(query: query, candidate: action.title) != nil
+        }
+    }
+
+    private var entries: [Entry] {
+        resultActions.map(Entry.result) + viewModel.actionMatches.map(Entry.prompt)
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -728,38 +914,16 @@ private struct QuickActionPalette: View {
 
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
-                        Button { run(action) } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: action.outputBehavior == .replaceSelection
-                                      ? "text.cursor" : "sparkles")
-                                    .frame(width: 18)
-                                    .foregroundStyle(
-                                        index == selectedIndex
-                                            ? AQDesign.ColorToken.accent
-                                            : .secondary
-                                    )
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(action.name)
-                                        .font(.system(size: 13, weight: .medium))
-                                    Text("\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let hotkey = action.hotkey {
-                                    Text(hotkeyDisplayName(hotkey))
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                            .frame(height: 42)
-                            .background(
-                                index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear,
-                                in: RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                            )
-                            .contentShape(Rectangle())
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        Button { run(entry) } label: {
+                            row(for: entry, isSelected: index == selectedIndex)
+                                .padding(.horizontal, 20)
+                                .frame(height: 42)
+                                .background(
+                                    index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear,
+                                    in: RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
+                                )
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -784,6 +948,45 @@ private struct QuickActionPalette: View {
         .onChange(of: viewModel.actionQuery) { _, _ in selectedIndex = 0 }
     }
 
+    @ViewBuilder
+    private func row(for entry: Entry, isSelected: Bool) -> some View {
+        switch entry {
+        case .result(let action):
+            HStack(spacing: 10) {
+                Image(systemName: action.systemImage)
+                    .frame(width: 18)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(action.title)
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Answer")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                KeyCapGroup(keys: action.shortcut.keyCaps)
+            }
+        case .prompt(let action):
+            HStack(spacing: 10) {
+                Image(systemName: action.outputBehavior == .replaceSelection
+                      ? "text.cursor" : "sparkles")
+                    .frame(width: 18)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(action.name)
+                        .font(.system(size: 13, weight: .medium))
+                    Text("\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let hotkey = action.hotkey {
+                    KeyCapGroup(keys: hotkey.keyCaps)
+                }
+            }
+        }
+    }
+
     private func focusSearch() {
         Task { @MainActor in
             await Task.yield()
@@ -792,34 +995,95 @@ private struct QuickActionPalette: View {
     }
 
     private func move(_ delta: Int) {
-        guard !actions.isEmpty else { return }
-        selectedIndex = (selectedIndex + delta + actions.count) % actions.count
+        let count = entries.count
+        guard count > 0 else { return }
+        selectedIndex = (selectedIndex + delta + count) % count
     }
 
     private func runSelected() {
-        guard actions.indices.contains(selectedIndex) else { return }
-        run(actions[selectedIndex])
+        let current = entries
+        guard current.indices.contains(selectedIndex) else { return }
+        run(current[selectedIndex])
     }
 
-    private func run(_ action: SavedPrompt) {
-        Task { await viewModel.perform(action: action) }
+    private func run(_ entry: Entry) {
+        switch entry {
+        case .result(let action):
+            Task { await viewModel.performResultAction(action) }
+        case .prompt(let action):
+            Task { await viewModel.perform(action: action) }
+        }
     }
+}
 
-    private func hotkeyDisplayName(_ hotkey: ActionHotkey) -> String {
-        var settings = QuickSettings()
-        settings.hotkeyKeyCode = hotkey.keyCode
-        settings.hotkeyModifiers = hotkey.modifiers
-        return settings.hotkeyDisplayName
+/// Raycast-style key hints: context on the left, actions on the right.
+private struct LauncherFooter: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(viewModel.footerContext)
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 12)
+            ForEach(viewModel.footerHints, id: \.label) { hint in
+                HStack(spacing: 5) {
+                    Text(hint.label)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                    KeyCapGroup(keys: hint.keys)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: AQDesign.footerHeight)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A short run of key caps such as ⌥ ⌘ ←.
+struct KeyCapGroup: View {
+    let keys: [String]
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                KeyCap(text: key)
+            }
+        }
+    }
+}
+
+struct KeyCap: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(AQDesign.TypeToken.keyCap)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, text.count > 1 ? 5 : 0)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(
+                RoundedRectangle(cornerRadius: AQDesign.keyCapCornerRadius)
+                    .fill(AQDesign.ColorToken.keyCapFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AQDesign.keyCapCornerRadius)
+                    .strokeBorder(AQDesign.ColorToken.keyCapStroke, lineWidth: 0.5)
+            )
     }
 }
 
 extension Notification.Name {
     static let dismissOverlay = Notification.Name("QuickLaunch.dismissOverlay")
+    static let presentOverlay = Notification.Name("QuickLaunch.presentOverlay")
+    static let screenAwarenessSettingsChanged = Notification.Name("QuickLaunch.screenAwarenessSettingsChanged")
     static let openSettings = Notification.Name("QuickLaunch.openSettings")
     static let hotkeyChanged = Notification.Name("QuickLaunch.hotkeyChanged")
     static let actionHotkeysChanged = Notification.Name("QuickLaunch.actionHotkeysChanged")
     static let launcherItemHotkeysChanged = Notification.Name("QuickLaunch.launcherItemHotkeysChanged")
     static let clipboardHistorySettingsChanged = Notification.Name("QuickLaunch.clipboardHistorySettingsChanged")
     static let providerChanged = Notification.Name("QuickLaunch.providerChanged")
-    static let managedServiceRequested = Notification.Name("QuickLaunch.managedServiceRequested")
 }

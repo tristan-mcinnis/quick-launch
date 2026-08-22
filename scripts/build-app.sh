@@ -11,16 +11,6 @@ ICON_SOURCE="$ROOT_DIR/Sources/Resources/AppIcon.icns"
 ENTITLEMENTS="${ENTITLEMENTS:-$ROOT_DIR/quick-launch.entitlements}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
-resolve_helper() {
-    if [[ -n "${APFEL_HELPER_PATH:-}" && -x "${APFEL_HELPER_PATH}" ]]; then
-        print -- "${APFEL_HELPER_PATH}"; return 0
-    fi
-    if command -v apfel >/dev/null 2>&1; then
-        command -v apfel; return 0
-    fi
-    return 1
-}
-
 codesign_path() {
     local target="$1"
     shift || true
@@ -34,11 +24,6 @@ codesign_path() {
 
 sign_bundle() {
     xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-
-    # Sign embedded helpers first (before signing the bundle)
-    if [[ -x "$APP_BUNDLE/Contents/Helpers/apfel" ]]; then
-        codesign_path "$APP_BUNDLE/Contents/Helpers/apfel"
-    fi
 
     if [[ -n "$ENTITLEMENTS" && -f "$ENTITLEMENTS" ]]; then
         codesign_path "$APP_BUNDLE" \
@@ -60,7 +45,7 @@ BIN_PATH="${BIN_DIR}/${SWIFT_TARGET}"
 mkdir -p "$ROOT_DIR/build"
 touch "$ROOT_DIR/build/.metadata_never_index"
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Helpers"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/${APP_NAME}"
 chmod +x "$APP_BUNDLE/Contents/MacOS/${APP_NAME}"
@@ -71,15 +56,6 @@ cp "$ROOT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
 [[ -f "$ICON_SOURCE" ]] && cp "$ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]] && cp "$ROOT_DIR/PrivacyInfo.xcprivacy" "$APP_BUNDLE/Contents/Resources/"
-
-if HELPER_PATH="$(resolve_helper 2>/dev/null)"; then
-    print "==> Embedding apfel helper from ${HELPER_PATH}"
-    cp "$HELPER_PATH" "$APP_BUNDLE/Contents/Helpers/apfel"
-    chmod +x "$APP_BUNDLE/Contents/Helpers/apfel"
-else
-    print "==> NOTE: apfel was not found. Building without the optional Apple provider helper." >&2
-    print "==> LM Studio, API, Claude Code, and Pi providers remain available." >&2
-fi
 
 print "==> Signing bundle (${SIGN_IDENTITY})"
 sign_bundle

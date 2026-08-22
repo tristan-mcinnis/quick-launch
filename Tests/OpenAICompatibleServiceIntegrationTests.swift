@@ -3,13 +3,13 @@ import Foundation
 import Network
 @testable import QuickLaunch
 
-// Real-HTTP integration tests for ApfelQuickService.
+// Real-HTTP integration tests for OpenAICompatibleService.
 // These spin up an in-process HTTP server on a random local port,
-// point ApfelQuickService at it, and verify the full streaming flow:
+// point OpenAICompatibleService at it, and verify the full streaming flow:
 // buildRequest → URLSession.bytes → SSEParser → StreamDelta yield.
 
-@Suite("ApfelQuickService Integration", .serialized)
-struct ApfelQuickServiceIntegrationTests {
+@Suite("OpenAICompatibleService Integration", .serialized)
+struct OpenAICompatibleServiceIntegrationTests {
 
     // MARK: — Streams a simple 3-delta response
 
@@ -30,7 +30,7 @@ struct ApfelQuickServiceIntegrationTests {
         defer { Task { await server.stop() } }
         let port = try await server.start()
 
-        let service = ApfelQuickService(port: port)
+        let service = OpenAICompatibleService(baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!, modelName: "test-model")
         var collected = ""
         for try await delta in service.send(prompt: "hi") {
             if let text = delta.text { collected += text }
@@ -57,7 +57,7 @@ struct ApfelQuickServiceIntegrationTests {
         defer { Task { await server.stop() } }
         let port = try await server.start()
 
-        let service = ApfelQuickService(port: port)
+        let service = OpenAICompatibleService(baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!, modelName: "test-model")
         var collected = ""
         for try await delta in service.send(prompt: "x") {
             if let text = delta.text { collected += text }
@@ -76,7 +76,7 @@ struct ApfelQuickServiceIntegrationTests {
         defer { Task { await server.stop() } }
         let port = try await server.start()
 
-        let service = ApfelQuickService(port: port)
+        let service = OpenAICompatibleService(baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!, modelName: "test-model")
         do {
             for try await _ in service.send(prompt: "hi") {}
             Issue.record("Expected error to be thrown")

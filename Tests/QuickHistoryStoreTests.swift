@@ -9,7 +9,7 @@ struct QuickHistoryStoreTests {
     }
 
     @Test func upsertKeepsNewestConversationAndBoundsHistory() {
-        let providerID = InferenceProvider.managedApfelID
+        let providerID = InferenceProvider.deepSeekID
         let old = QuickConversation(
             updatedAt: Date(timeIntervalSince1970: 1),
             providerID: providerID,
@@ -51,7 +51,7 @@ struct QuickHistoryStoreTests {
     @Test func clearRemovesSavedHistory() {
         let defaults = freshDefaults()
         let conversation = QuickConversation(
-            providerID: InferenceProvider.managedApfelID,
+            providerID: InferenceProvider.deepSeekID,
             model: "apple-foundationmodel"
         )
         QuickHistoryStore.save([conversation], limit: 20, to: defaults)

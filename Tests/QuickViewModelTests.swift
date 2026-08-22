@@ -182,17 +182,31 @@ struct QuickViewModelTests {
         #expect(vm.isStreaming == false)
     }
 
-    // MARK: - 11. Nil service shows a friendly starting message after timeout
+    // MARK: - 11. A cloud provider without an API key fails fast, offline
 
-    @Test func testServiceNilShowsErrorMessage() async throws {
+    @Test func testMissingAPIKeyFailsBeforeAnyRequest() async throws {
         let vm = QuickViewModel(service: nil as (any QuickService)?)
-        vm.serviceWaitTimeout = .milliseconds(150)
+        vm.apiKeyProvider = { _ in nil }
         vm.input = "hello"
         await vm.submit()
 
-        #expect(vm.errorMessage != nil)
         let msg = vm.errorMessage ?? ""
-        #expect(msg.lowercased().contains("start") || msg.lowercased().contains("wait"))
+        #expect(msg.contains("needs an API key"))
+        #expect(msg.contains("Settings"))
+        #expect(vm.isStreaming == false)
+        #expect(vm.input == "hello")
+        #expect(vm.currentConversation == nil)
+    }
+
+    @Test func testUnusableEndpointRollsBackTheSubmission() async throws {
+        let vm = QuickViewModel(service: nil as (any QuickService)?)
+        vm.apiKeyProvider = { _ in "test-key" }
+        let index = try #require(vm.settings.providers.firstIndex { $0.id == vm.settings.selectedProviderID })
+        vm.settings.providers[index].baseURL = ""
+        vm.input = "hello"
+        await vm.submit()
+
+        #expect(vm.errorMessage?.contains("not available") == true)
         #expect(vm.isStreaming == false)
         #expect(vm.input == "hello")
         #expect(vm.currentConversation?.messages.isEmpty == true)
@@ -209,7 +223,7 @@ struct QuickViewModelTests {
         #expect(callCount == 0)
     }
 
-    @Test func screenshotRoutesToLocalVisionWithDefaultPrompt() async throws {
+    @Test func screenshotRoutesToTheVisionProviderWithDefaultPrompt() async throws {
         let vision = MockQuickService()
         await vision.setResponses([
             StreamDelta(text: "A settings window", finishReason: "stop")
@@ -217,7 +231,7 @@ struct QuickViewModelTests {
         var settings = QuickSettings()
         settings.autoCopy = false
         settings.historyEnabled = false
-        let vm = QuickViewModel(settings: settings, imageService: vision)
+        let vm = QuickViewModel(settings: settings, service: vision)
         let attachment = QuickImageAttachment(
             data: Data([1, 2, 3]),
             mimeType: "image/png",
@@ -231,7 +245,7 @@ struct QuickViewModelTests {
         #expect(vm.output == "A settings window")
         #expect(await vision.lastImage == attachment)
         #expect(await vision.lastPrompt?.contains("Describe this screenshot") == true)
-        #expect(vm.currentConversation?.providerID == InferenceProvider.mlxVisionID)
+        #expect(vm.currentConversation?.providerID == InferenceProvider.deepSeekID)
         #expect(vm.pendingImage == nil)
     }
 
@@ -381,42 +395,32 @@ struct QuickViewModelTests {
         #expect(vm.justCopied == false)
     }
 
-    // MARK: - 23a. Service-not-ready behaviour (service injected late)
+    // MARK: - 23a. The injected service is used without any key or network
 
-    @Test func testSubmitWaitsForServiceToBecomeReady() async throws {
-        // Start with service = nil, inject it mid-submit, confirm submit still succeeds
+    @Test func testSubmitUsesTheInjectedServiceWithoutTouchingTheKeychain() async throws {
         let vm = QuickViewModel(service: nil)
         vm.settings.autoCopy = false
+        var keychainReads = 0
+        vm.apiKeyProvider = { _ in keychainReads += 1; return nil }
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Paris", finishReason: "stop")])
+        vm.service = service
         vm.input = "what is the capital of france"
-
-        // Inject service after 100ms
-        Task {
-            try? await Task.sleep(for: .milliseconds(100))
-            let service = MockQuickService()
-            await service.setResponses([
-                StreamDelta(text: "Paris", finishReason: "stop"),
-            ])
-            await MainActor.run { vm.service = service }
-        }
 
         await vm.submit()
         #expect(vm.output == "Paris")
         #expect(vm.errorMessage == nil)
+        #expect(keychainReads == 0)
     }
 
-    @Test func testSubmitShowsStartingMessageWhenServiceNil() async throws {
-        // When service is nil, submit should surface a friendly "starting" message
-        // (not a hard "not connected" error), and if service never arrives,
-        // the error should reflect timeout, not configuration failure.
+    @Test func testMissingKeyMessageNamesTheProvider() async throws {
         let vm = QuickViewModel(service: nil)
+        vm.apiKeyProvider = { _ in "" }
         vm.settings.autoCopy = false
         vm.input = "hi"
-        vm.serviceWaitTimeout = .milliseconds(200)  // fast timeout for tests
         await vm.submit()
-        #expect(vm.errorMessage != nil)
-        // It should mention "starting" or "waiting", not "Not connected"
         let msg = vm.errorMessage ?? ""
-        #expect(msg.lowercased().contains("start") || msg.lowercased().contains("wait") || msg.lowercased().contains("ready"))
+        #expect(msg.hasPrefix("DeepSeek API needs an API key"))
     }
 
     // MARK: - 23. Math expressions are evaluated locally
@@ -585,7 +589,7 @@ struct QuickViewModelTests {
             SavedPrompt(
                 alias: "clean",
                 prompt: "Clean this up.",
-                providerID: InferenceProvider.managedApfelID,
+                providerID: InferenceProvider.deepSeekID,
                 model: "apple-foundationmodel"
             )
         ]

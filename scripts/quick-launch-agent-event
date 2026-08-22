@@ -1,0 +1,38 @@
+#!/bin/zsh
+# Quick Launch agent hook: keeps the Mac awake while an agent is working.
+#
+# usage: quick-launch-agent-event <start|refresh|stop|wait> <claude|codex>
+# The hook's JSON arrives on stdin; only session_id is read. Always exits 0
+# so a hook can never fail an agent turn.
+#
+# Claude Code (~/.claude/settings.json):
+#   UserPromptSubmit → start, Stop → stop, SessionEnd → stop
+# Codex (~/.codex/hooks.json): the same three events.
+set +e
+action="${1:-start}"
+provider="${2:-claude}"
+folder="$HOME/Library/Application Support/Quick Launch/AgentSessions"
+mkdir -p "$folder" 2>/dev/null
+
+payload="$(cat 2>/dev/null)"
+session_id="$(printf '%s' "$payload" | /usr/bin/python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("session_id") or "default")
+except Exception:
+    print("default")' 2>/dev/null)"
+[[ -z "$session_id" ]] && session_id="default"
+
+encoded="$(printf '%s' "$session_id" | /usr/bin/base64 | tr '/+' '_-' | tr -d '=\n')"
+file="$folder/${provider}-${encoded}.json"
+
+case "$action" in
+  start|refresh)
+    stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '{"sessionID":"%s","provider":"%s","updatedAt":"%s"}\n' \
+      "${session_id//\"/}" "$provider" "$stamp" > "$file" 2>/dev/null
+    ;;
+  stop|wait)
+    rm -f "$file" 2>/dev/null
+    ;;
+esac
+exit 0

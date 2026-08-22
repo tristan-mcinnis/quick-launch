@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 8
+    var configurationVersion: Int = 14
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -14,6 +14,16 @@ struct QuickSettings: Codable, Sendable {
     var launchAtLogin: Bool = true       // Start at login
     var showMenuBar: Bool = true         // Show status bar icon
     var caffeinateEnabled: Bool = true    // Keep this Mac awake while Quick Launch runs
+    /// Manual timed session to restore after a relaunch.
+    var caffeinateUntil: Date?
+    var caffeinateAgentWatch: Bool = true
+    /// On battery at or below this percent, sleep is allowed again. 0 disables.
+    var caffeinateBatteryCutoff: Int = 20
+    var caffeinateKeepDisplayAwake: Bool = false
+    /// Double tap of the right ⌘ key sends the focused window to AI.
+    var screenAwarenessDoubleTap: Bool = true
+    /// Read text inside screenshots with on-device OCR for search.
+    var screenshotTextSearch: Bool = true
 
     // Updates
     var checkForUpdatesOnLaunch: Bool = false
@@ -25,7 +35,11 @@ struct QuickSettings: Codable, Sendable {
     // Saved prompts (aliases)
     var savedPromptPrefix: String = "/"
     var savedPrompts: [SavedPrompt] = SavedPrompt.defaults
-    var launcherItemConfigurations: [LauncherItemConfiguration] = []
+    var launcherItemConfigurations: [LauncherItemConfiguration] = Self.defaultWindowConfigurations
+    /// Rank launcher results by what was chosen before (local only).
+    var launcherLearningEnabled: Bool = true
+    /// Bundle identifier of the browser that opens Quick Links; nil = system default.
+    var quickLinkBrowserBundleID: String?
 
     // Clipboard history
     var clipboardHistoryEnabled: Bool = true
@@ -36,14 +50,16 @@ struct QuickSettings: Codable, Sendable {
     )
 
     // Appearance
-    var appearance: AppearancePreference = .system
-
-    // MCP servers (attached to apfel --serve at launch)
-    var mcpServers: [MCPServerConfig] = []
+    var appearance: AppearancePreference = .dark
 
     // Inference providers and the current model
     var providers: [InferenceProvider] = InferenceProvider.defaults
-    var selectedProviderID: UUID = InferenceProvider.managedApfelID
+    var selectedProviderID: UUID = InferenceProvider.deepSeekID
+    /// Where attached screenshots go. DeepSeek's flash vision model by
+    /// default; the local MLX server remains selectable for offline use.
+    var visionProviderID: UUID = InferenceProvider.deepSeekID
+    /// Model used with `visionProviderID`; empty means that provider's selected model.
+    var visionModel: String = InferenceProvider.deepSeekVisionModel
     var systemPrompt: String = QuickSettings.defaultSystemPrompt
 
     // Lightweight follow-up history
@@ -63,7 +79,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 8
+        configurationVersion = 14
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -78,7 +94,18 @@ struct QuickSettings: Codable, Sendable {
         launcherItemConfigurations = try c.decodeIfPresent(
             [LauncherItemConfiguration].self,
             forKey: .launcherItemConfigurations
-        ) ?? []
+        ) ?? Self.defaultWindowConfigurations
+        launcherLearningEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .launcherLearningEnabled
+        ) ?? true
+        quickLinkBrowserBundleID = try c.decodeIfPresent(String.self, forKey: .quickLinkBrowserBundleID)
+        caffeinateUntil = try c.decodeIfPresent(Date.self, forKey: .caffeinateUntil)
+        caffeinateAgentWatch = try c.decodeIfPresent(Bool.self, forKey: .caffeinateAgentWatch) ?? true
+        caffeinateBatteryCutoff = try c.decodeIfPresent(Int.self, forKey: .caffeinateBatteryCutoff) ?? 20
+        caffeinateKeepDisplayAwake = try c.decodeIfPresent(Bool.self, forKey: .caffeinateKeepDisplayAwake) ?? false
+        screenAwarenessDoubleTap = try c.decodeIfPresent(Bool.self, forKey: .screenAwarenessDoubleTap) ?? true
+        screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .clipboardHistoryEnabled
@@ -92,11 +119,16 @@ struct QuickSettings: Codable, Sendable {
             forKey: .clipboardHistoryHotkey
         ) ?? ActionHotkey(keyCode: 9, modifiers: 1_048_576 | 131_072)
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
-        mcpServers = try c.decodeIfPresent([MCPServerConfig].self, forKey: .mcpServers) ?? []
-        providers = try c.decodeIfPresent([InferenceProvider].self, forKey: .providers)
-            ?? InferenceProvider.defaults
+        visionProviderID = try c.decodeIfPresent(UUID.self, forKey: .visionProviderID)
+            ?? InferenceProvider.deepSeekID
+        visionModel = try c.decodeIfPresent(String.self, forKey: .visionModel)
+            ?? InferenceProvider.deepSeekVisionModel
+        providers = try c.decodeIfPresent(
+            LossyDecodableArray<InferenceProvider>.self,
+            forKey: .providers
+        )?.elements ?? InferenceProvider.defaults
         selectedProviderID = try c.decodeIfPresent(UUID.self, forKey: .selectedProviderID)
-            ?? InferenceProvider.managedApfelID
+            ?? InferenceProvider.deepSeekID
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
             ?? Self.defaultSystemPrompt
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
@@ -148,12 +180,89 @@ struct QuickSettings: Codable, Sendable {
            }) {
             providers.append(vision)
         }
+        if decodedConfigurationVersion < 9 {
+            for configuration in Self.defaultWindowConfigurations where
+                !launcherItemConfigurations.contains(where: { $0.id == configuration.id }) {
+                launcherItemConfigurations.append(configuration)
+            }
+        }
+        if decodedConfigurationVersion < 11,
+           let index = providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }),
+           !providers[index].models.contains(InferenceProvider.deepSeekVisionModel) {
+            providers[index].models.append(InferenceProvider.deepSeekVisionModel)
+        }
+        if decodedConfigurationVersion < 13 {
+            // DeepSeek's flash vision model became the default for text and
+            // images on 2026-08-22. Move settings that still sit on the old
+            // defaults; explicit choices of another model stay.
+            if let index = providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }) {
+                if !providers[index].models.contains(InferenceProvider.deepSeekVisionModel) {
+                    providers[index].models.append(InferenceProvider.deepSeekVisionModel)
+                }
+                if providers[index].selectedModel == "deepseek-v4-flash" {
+                    providers[index].selectedModel = InferenceProvider.deepSeekVisionModel
+                }
+            }
+            if visionProviderID == InferenceProvider.mlxVisionID, visionModel.isEmpty {
+                visionProviderID = InferenceProvider.deepSeekID
+                visionModel = InferenceProvider.deepSeekVisionModel
+            }
+        }
+        if decodedConfigurationVersion < 14,
+           !savedPrompts.contains(where: { $0.alias == "zh" }),
+           let chinese = SavedPrompt.defaults.first(where: { $0.alias == "zh" }) {
+            savedPrompts.append(chinese)
+        }
+        if providers.isEmpty { providers = InferenceProvider.defaults }
+        // A removed provider (the Apple on-device route, 2026-08-22) must not
+        // leave a dangling selection.
+        if !providers.contains(where: { $0.id == selectedProviderID }) {
+            selectedProviderID = providers.first(where: { $0.id == InferenceProvider.deepSeekID })?.id
+                ?? providers[0].id
+        }
+        if !providers.contains(where: { $0.id == visionProviderID }) {
+            visionProviderID = providers.first(where: { $0.id == InferenceProvider.mlxVisionID })?.id
+                ?? providers.first(where: { $0.kind == .openAICompatible })?.id
+                ?? providers[0].id
+        }
+        if decodedConfigurationVersion < 10, appearance == .system {
+            // The overlay moved to a dark, monochrome look. Settings that never
+            // chose an appearance follow it; an explicit light choice stays.
+            appearance = .dark
+        }
     }
 
     init() {}
 }
 
 extension QuickSettings {
+    static let defaultWindowConfigurations: [LauncherItemConfiguration] = [
+        LauncherItemConfiguration(
+            kind: .command,
+            itemID: "window.leftHalf",
+            alias: "left",
+            hotkey: ActionHotkey(keyCode: 123, modifiers: 1_572_864)
+        ),
+        LauncherItemConfiguration(
+            kind: .command,
+            itemID: "window.rightHalf",
+            alias: "right",
+            hotkey: ActionHotkey(keyCode: 124, modifiers: 1_572_864)
+        ),
+        LauncherItemConfiguration(
+            kind: .command,
+            itemID: "window.bottomHalf",
+            alias: "bottom",
+            hotkey: ActionHotkey(keyCode: 125, modifiers: 1_572_864)
+        ),
+        LauncherItemConfiguration(
+            kind: .command,
+            itemID: "window.topHalf",
+            alias: "top",
+            hotkey: ActionHotkey(keyCode: 126, modifiers: 1_572_864)
+        ),
+    ]
+
     static let defaultSystemPrompt: String = """
     You are a fast, direct assistant in a Spotlight-style action overlay. \
     Return only the result the user asked for. No preamble, no postamble, \
@@ -219,19 +328,6 @@ extension QuickSettings {
             || flags.contains(.command)
     }
 
-    static func knownSystemHotkeyConflict(
-        keyCode: UInt16,
-        modifiers: UInt
-    ) -> String? {
-        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
-            .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.function, .numericPad, .capsLock])
-        if keyCode == 49, flags == [.command] {
-            return "Command+Space is reserved by Spotlight. Choose another shortcut."
-        }
-        return nil
-    }
-
     /// Map key codes to display names.
     static func keyName(for keyCode: UInt16) -> String {
         switch keyCode {
@@ -240,6 +336,10 @@ extension QuickSettings {
         case 48: return "\u{21E5}"   // Tab
         case 51: return "\u{232B}"   // Delete
         case 53: return "\u{238B}"   // Escape
+        case 123: return "\u{2190}"  // Left Arrow
+        case 124: return "\u{2192}"  // Right Arrow
+        case 125: return "\u{2193}"  // Down Arrow
+        case 126: return "\u{2191}"  // Up Arrow
         default:
             let letterMap: [UInt16: String] = [
                 0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
@@ -293,12 +393,6 @@ extension QuickSettings {
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
             return "This conflicts with the main Quick Launch hotkey."
         }
-        if let conflict = Self.knownSystemHotkeyConflict(
-            keyCode: hotkey.keyCode,
-            modifiers: hotkey.modifiers
-        ) {
-            return conflict
-        }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
             return "This conflicts with a quick-action hotkey."
         }
@@ -317,12 +411,6 @@ extension QuickSettings {
         let hotkey = clipboardHistoryHotkey
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
             return "This conflicts with the main Quick Launch hotkey."
-        }
-        if let conflict = Self.knownSystemHotkeyConflict(
-            keyCode: hotkey.keyCode,
-            modifiers: hotkey.modifiers
-        ) {
-            return conflict
         }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
             return "This conflicts with a quick-action hotkey."

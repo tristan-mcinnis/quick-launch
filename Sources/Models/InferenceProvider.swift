@@ -1,7 +1,6 @@
 import Foundation
 
 enum InferenceProviderKind: String, Codable, Sendable, CaseIterable {
-    case managedApfel
     case openAICompatible
     case commandLine
 }
@@ -72,9 +71,10 @@ struct InferenceProvider: Codable, Sendable, Equatable, Identifiable, Hashable {
 }
 
 extension InferenceProvider {
-    static let managedApfelID = UUID(uuidString: "4C690EC2-A0E1-4C1B-A7F2-DB72511E794B")!
     static let lmStudioID = UUID(uuidString: "EB79F178-A20A-4BB2-B0CE-C751E6480E0D")!
     static let deepSeekID = UUID(uuidString: "D49908A5-649F-462B-A569-F75495568A82")!
+    /// DeepSeek's image-capable model (api-docs.deepseek.com/guides/vision).
+    static let deepSeekVisionModel = "deepseek-v4-flash-vision-exp"
     static let moonshotID = UUID(uuidString: "9001D74E-B44B-46F7-B8BF-803E743A64C1")!
     static let openAIID = UUID(uuidString: "343A1F1C-C113-493F-92B8-F93D0636603F")!
     static let claudeCodeID = UUID(uuidString: "DD72A9CC-D388-471A-A081-A8C5DD55BC3E")!
@@ -83,15 +83,6 @@ extension InferenceProvider {
 
     static var defaults: [InferenceProvider] {
         return [
-            InferenceProvider(
-                id: managedApfelID,
-                name: "Apple on-device (apfel)",
-                kind: .managedApfel,
-                location: .local,
-                models: ["apple-foundationmodel"],
-                selectedModel: "apple-foundationmodel",
-                isBuiltIn: true
-            ),
             InferenceProvider(
                 id: lmStudioID,
                 name: "LM Studio",
@@ -121,8 +112,8 @@ extension InferenceProvider {
                 kind: .openAICompatible,
                 location: .cloud,
                 baseURL: "https://api.deepseek.com",
-                models: ["deepseek-v4-flash", "deepseek-v4-pro"],
-                selectedModel: "deepseek-v4-flash",
+                models: ["deepseek-v4-flash", "deepseek-v4-pro", deepSeekVisionModel],
+                selectedModel: deepSeekVisionModel,
                 discovery: .openAI,
                 isBuiltIn: true
             ),
@@ -190,5 +181,26 @@ extension InferenceProvider {
                 isBuiltIn: true
             ),
         ]
+    }
+}
+
+/// Decodes an array and drops elements that no longer decode, for example a
+/// provider kind that was removed, instead of failing the whole settings blob.
+struct LossyDecodableArray<Element: Decodable>: Decodable {
+    let elements: [Element]
+
+    private struct Skip: Decodable {}
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var result: [Element] = []
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) {
+                result.append(element)
+            } else if (try? container.decode(Skip.self)) == nil {
+                break
+            }
+        }
+        elements = result
     }
 }

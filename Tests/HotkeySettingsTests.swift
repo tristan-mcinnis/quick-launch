@@ -6,6 +6,15 @@ import Carbon.HIToolbox
 @Suite("HotkeySettings")
 struct HotkeySettingsTests {
 
+    @Test func testArrowKeysHaveReadableDisplayNames() {
+        var settings = QuickSettings()
+        settings.hotkeyModifiers = 1_572_864
+        settings.hotkeyKeyCode = 123
+        #expect(settings.hotkeyDisplayName == "⌥⌘←")
+        settings.hotkeyKeyCode = 124
+        #expect(settings.hotkeyDisplayName == "⌥⌘→")
+    }
+
     // MARK: - Display name
 
     @Test func testDisplayNameOptionSpace() {
@@ -70,21 +79,11 @@ struct HotkeySettingsTests {
         )
     }
 
-    @Test func testCommandSpaceReportsSpotlightConflict() {
-        let message = QuickSettings.knownSystemHotkeyConflict(
+    @Test func testCommandSpaceIsAValidUserChoice() {
+        #expect(QuickSettings.isValidHotkey(
             keyCode: 49,
             modifiers: NSEvent.ModifierFlags.command.rawValue
-        )
-        #expect(message == "Command+Space is reserved by Spotlight. Choose another shortcut.")
-    }
-
-    @Test func testOptionSpaceHasNoKnownSystemConflict() {
-        #expect(
-            QuickSettings.knownSystemHotkeyConflict(
-                keyCode: 49,
-                modifiers: NSEvent.ModifierFlags.option.rawValue
-            ) == nil
-        )
+        ))
     }
 
     @Test func testLauncherItemHotkeyConflictsWithMainHotkey() {

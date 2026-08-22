@@ -63,7 +63,7 @@ final class TunaCatalogService: LauncherCatalogServicing {
         transform: (inout [String: Any]) -> Bool
     ) throws {
         guard let data = try? Data(contentsOf: preferencesURL),
-              var root = try? PropertyListSerialization.propertyList(
+              let root = try? PropertyListSerialization.propertyList(
                 from: data, format: nil
               ) as? [String: Any],
               let nested = root["CustomItemsCatalogItems"] as? Data,
@@ -83,7 +83,56 @@ final class TunaCatalogService: LauncherCatalogServicing {
         } else {
             records.remove(at: index)
         }
+        try writeRecords(records, root: root)
+    }
 
+    func createSnippet(title: String, value: String) throws -> LauncherCatalogItem {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty, !value.isEmpty else { throw MutationError.invalidSnippet }
+        guard let data = try? Data(contentsOf: preferencesURL),
+              let root = try? PropertyListSerialization.propertyList(
+                from: data, format: nil
+              ) as? [String: Any],
+              let nested = root["CustomItemsCatalogItems"] as? Data,
+              var records = try? PropertyListSerialization.propertyList(
+                from: nested, format: nil
+              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+        let id = UUID().uuidString.lowercased()
+        records.append(["kind": "text", "id": id, "label": cleanTitle, "value": value])
+        try writeRecords(records, root: root)
+        guard let item = snippets.first(where: {
+            $0.itemID.lowercased().hasSuffix(id) || ($0.title == cleanTitle && $0.value == value)
+        }) else { throw MutationError.snippetNotFound }
+        return item
+    }
+
+    func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
+            throw MutationError.invalidSnippet
+        }
+        guard let data = try? Data(contentsOf: preferencesURL),
+              let root = try? PropertyListSerialization.propertyList(
+                from: data, format: nil
+              ) as? [String: Any],
+              let nested = root["CustomItemsCatalogItems"] as? Data,
+              var records = try? PropertyListSerialization.propertyList(
+                from: nested, format: nil
+              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+        let id = UUID().uuidString.lowercased()
+        records.append(["kind": "url", "id": id, "label": cleanTitle, "value": cleanValue])
+        try writeRecords(records, root: root)
+        guard let item = quickLinks.first(where: {
+            $0.itemID.lowercased().hasSuffix(id) || ($0.title == cleanTitle && $0.value == cleanValue)
+        }) else { throw MutationError.snippetNotFound }
+        return item
+    }
+
+    /// Writes the custom-item records back with a timestamped backup beside
+    /// the store, then reloads both catalogs.
+    private func writeRecords(_ records: [[String: Any]], root: [String: Any]) throws {
+        var root = root
         let backup = preferencesURL.deletingLastPathComponent().appendingPathComponent(
             "\(preferencesURL.lastPathComponent).quick-launch-backup-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)"
         )
