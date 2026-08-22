@@ -172,7 +172,7 @@ struct InputModeTests {
 
         let file = vm.catalogMatches.first!
         #expect(ItemActionCatalog.actions(for: .item(file), pasteTarget: nil).map(\.title)
-            == ["Attach to Question", "Copy Image", "Paste Image", "Quick Look", "Reveal in Finder", "Copy File Path", "Move to Trash"])
+            == ["Paste Image", "Copy Image", "Attach to Question", "Quick Look", "Reveal in Finder", "Copy File Path", "Move to Trash"])
     }
 }
 

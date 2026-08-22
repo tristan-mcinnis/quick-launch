@@ -22,8 +22,12 @@ struct AnswerStateTests {
         #expect(vm.isAnswerActive)
         #expect(vm.lastQuestion == "who won the world cup")
         #expect(vm.launcherMatches.isEmpty)
-        #expect(vm.footerHints.map(\.label) == ["Follow up", "Paste back", "Copy", "Actions"])
-        #expect(vm.resultActions == ResultAction.allCases)
+        #expect(vm.footerHints.map(\.label) == ["Paste back", "Copy", "Actions"])
+        vm.input = "and"
+        #expect(vm.footerHints.first?.label == "Follow up")
+        vm.input = ""
+        #expect(vm.resultActions.contains(.pasteBack) && vm.resultActions.contains(.renameChat))
+        #expect(!vm.resultActions.contains(.previousChat), "one chat: nothing to browse")
         #expect(vm.footerContext == vm.activeModelDisplay)
     }
 

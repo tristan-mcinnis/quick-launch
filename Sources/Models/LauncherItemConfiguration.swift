@@ -8,6 +8,7 @@ enum LauncherItemKind: String, Codable, Sendable {
     case command
     case emoji
     case screenshot
+    case conversation
 }
 
 /// User-owned configuration shared by searchable launcher items.

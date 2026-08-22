@@ -32,12 +32,19 @@ struct OpenAICompatibleService: QuickService, @unchecked Sendable {
     }
 
     func buildRequest(messages: [QuickMessage]) throws -> URLRequest {
-        try buildRequest(messages: messages, image: nil)
+        try buildRequest(messages: messages, images: [])
     }
 
     func buildRequest(
         messages: [QuickMessage],
         image: QuickImageAttachment?
+    ) throws -> URLRequest {
+        try buildRequest(messages: messages, images: image.map { [$0] } ?? [])
+    }
+
+    func buildRequest(
+        messages: [QuickMessage],
+        images: [QuickImageAttachment]
     ) throws -> URLRequest {
         let url = baseURL.appendingPathComponent("chat/completions")
         var request = URLRequest(url: url)
@@ -53,16 +60,14 @@ struct OpenAICompatibleService: QuickService, @unchecked Sendable {
         ]
         for (index, message) in messages.enumerated() {
             let isLastUserMessage = index == messages.indices.last && message.role == .user
-            if isLastUserMessage, let image {
+            if isLastUserMessage, !images.isEmpty {
+                var parts: [[String: Any]] = [["type": "text", "text": message.content]]
+                for image in images {
+                    parts.append(["type": "image_url", "image_url": ["url": image.dataURL]])
+                }
                 wireMessages.append([
                     "role": message.role.rawValue,
-                    "content": [
-                        ["type": "text", "text": message.content],
-                        [
-                            "type": "image_url",
-                            "image_url": ["url": image.dataURL],
-                        ],
-                    ],
+                    "content": parts,
                 ])
             } else {
                 wireMessages.append([
@@ -81,17 +86,17 @@ struct OpenAICompatibleService: QuickService, @unchecked Sendable {
     }
 
     func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
-        send(messages: messages, image: nil)
+        send(messages: messages, images: [])
     }
 
     func send(
         messages: [QuickMessage],
-        image: QuickImageAttachment?
+        images: [QuickImageAttachment]
     ) -> AsyncThrowingStream<StreamDelta, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try buildRequest(messages: messages, image: image)
+                    let request = try buildRequest(messages: messages, images: images)
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         throw QuickServiceError.connectionFailed("Invalid HTTP response")

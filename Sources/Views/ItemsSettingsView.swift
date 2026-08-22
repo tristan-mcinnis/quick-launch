@@ -54,6 +54,7 @@ struct ItemsSettingsView: View {
                 case .clipboard: "Clipboard"
                 case .emoji: "Emoji"
                 case .screenshot: "Screenshot"
+                case .conversation: "Chat"
                 case .application: "App"
                 }
             }

@@ -22,7 +22,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .snippet, .clipboard, .emoji: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
         case .command: "Run"
-        case .screenshot: "Attach"
+        case .screenshot: "Paste"
+        case .conversation: "Continue"
         }
     }
 
@@ -35,6 +36,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .command: "rectangle.3.group"
         case .emoji: "face.smiling"
         case .screenshot: "photo"
+        case .conversation: "bubble.left.and.text.bubble.right"
         }
     }
 }
@@ -46,6 +48,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case emoji
     case screenshots
     case caffeinate
+    case chats
     case commands
 
     var id: String { rawValue }
@@ -57,6 +60,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .emoji: "Emoji & Symbols"
         case .screenshots: "Screenshots"
         case .caffeinate: "Caffeinate"
+        case .chats: "Quick AI Chats"
         case .commands: "Commands"
         }
     }
@@ -68,6 +72,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .emoji: ["emoji", "emojis", "symbols", "symbol", "emoji and symbols"]
         case .screenshots: ["screenshots", "screenshot", "shots", "capture", "photos"]
         case .caffeinate: ["caffeinate", "caffeine", "awake", "keep awake", "decaffeinate", "sleep"]
+        case .chats: ["chats", "quick ai", "ai chats", "history", "conversations", "recent chats"]
         case .commands: ["commands", "window management", "windows"]
         }
     }
@@ -79,6 +84,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .emoji: "face.smiling"
         case .screenshots: "camera.viewfinder"
         case .caffeinate: "cup.and.saucer"
+        case .chats: "bubble.left.and.text.bubble.right"
         case .commands: "command"
         }
     }

@@ -146,9 +146,9 @@ enum ItemActionCatalog {
             return actions
         case .screenshot:
             return [
-                ItemAction(kind: .primary, title: "Attach to Question", systemImage: "photo.badge.plus", shortcut: .returnKey),
+                ItemAction(kind: .primary, title: pasteTarget.map { "Paste Image to \($0)" } ?? "Paste Image", systemImage: "arrow.turn.down.right", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Copy Image", systemImage: "doc.on.doc", shortcut: .commandReturn),
-                ItemAction(kind: .copyAndPaste, title: pasteTarget.map { "Paste Image to \($0)" } ?? "Paste Image", systemImage: "arrow.turn.down.right", shortcut: .commandShiftReturn),
+                ItemAction(kind: .copyAndPaste, title: "Attach to Question", systemImage: "photo.badge.plus", shortcut: .commandShiftReturn),
                 ItemAction(kind: .quickLook, title: "Quick Look", systemImage: "eye", shortcut: .command("y")),
                 ItemAction(kind: .revealInFinder, title: "Reveal in Finder", systemImage: "folder", shortcut: .commandShift("r")),
                 ItemAction(kind: .copyPath, title: "Copy File Path", systemImage: "doc.on.clipboard", shortcut: .commandShift("c")),
@@ -177,6 +177,19 @@ enum ItemActionCatalog {
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
+        case .conversation:
+            return [
+                ItemAction(kind: .primary, title: "Continue Chat", systemImage: "bubble.left.and.text.bubble.right", shortcut: .returnKey),
+                ItemAction(kind: .secondary, title: "Copy Last Answer", systemImage: "doc.on.doc", shortcut: .commandReturn),
+                ItemAction(kind: .edit, title: "Rename Chat", systemImage: "pencil", shortcut: .command("e")),
+                ItemAction(
+                    kind: .pin,
+                    title: item.isPinned ? "Unpin" : "Pin to Top",
+                    systemImage: item.isPinned ? "pin.slash" : "pin",
+                    shortcut: .commandShift("p")
+                ),
+                ItemAction(kind: .delete, title: "Delete Chat", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
+            ]
         case .application:
             return []
         }
@@ -202,12 +215,21 @@ enum ItemActionForm: Equatable, Sendable {
 }
 
 /// Actions on an AI answer. One table drives the footer, the ⌘K palette,
-/// and the direct keys, like `ItemAction` does for rows.
+/// and the direct keys, like `ItemAction` does for rows. Keys follow
+/// Raycast's Quick AI: Return pastes, ⌘N new chat, ⌘R regenerate,
+/// ⌘[ and ⌘] browse recent chats.
 enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case pasteBack
     case copy
     case saveSnippet
     case searchWeb
+    case regenerate
+    case newChat
+    case previousChat
+    case nextChat
+    case renameChat
+    case pinChat
+    case deleteChat
 
     var id: String { rawValue }
 
@@ -217,6 +239,13 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: "Copy Answer"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
+        case .regenerate: "Regenerate Answer"
+        case .newChat: "New Chat"
+        case .previousChat: "Previous Chat"
+        case .nextChat: "Next Chat"
+        case .renameChat: "Rename Chat"
+        case .pinChat: "Pin Chat"
+        case .deleteChat: "Delete Chat"
         }
     }
 
@@ -226,6 +255,13 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: "doc.on.doc"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
+        case .regenerate: "arrow.clockwise"
+        case .newChat: "plus.bubble"
+        case .previousChat: "chevron.left"
+        case .nextChat: "chevron.right"
+        case .renameChat: "pencil"
+        case .pinChat: "pin"
+        case .deleteChat: "trash"
         }
     }
 
@@ -235,6 +271,15 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: .commandShift("c")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
+        case .regenerate: .command("r")
+        case .newChat: .command("n")
+        case .previousChat: .command("[")
+        case .nextChat: .command("]")
+        case .renameChat: .command("e")
+        case .pinChat: .commandShift("p")
+        case .deleteChat: .control("x")
         }
     }
+
+    var isDestructive: Bool { self == .deleteChat }
 }

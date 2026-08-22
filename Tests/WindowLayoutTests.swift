@@ -24,9 +24,9 @@ struct WindowLayoutTests {
     }
 
     @Test func layoutsUseFamiliarDirectionalNamesAndGroups() {
-        #expect(WindowLayout.firstThird.title == "Left Third")
-        #expect(WindowLayout.centerThird.title == "Middle Third")
-        #expect(WindowLayout.lastFourth.title == "Right Fourth")
+        #expect(WindowLayout.firstThird.title == "First Third")
+        #expect(WindowLayout.centerThird.title == "Center Third")
+        #expect(WindowLayout.lastFourth.title == "Last Fourth")
         #expect(WindowLayout.leftHalf.groupTitle == "Halves")
         #expect(WindowLayout.centerThird.groupTitle == "Thirds")
         #expect(WindowLayout.thirdFourth.groupTitle == "Fourths")
@@ -43,15 +43,18 @@ struct WindowLayoutTests {
         }
         let full = CGRect(x: 0, y: 0, width: 1, height: 1)
         #expect(WindowLayout.maximize.normalizedFrame == full)
-        let centerMidX: CGFloat = WindowLayout.center.normalizedFrame.midX
-        #expect(centerMidX == 0.5)
+        let centerHalfMidX: CGFloat = WindowLayout.centerHalf.normalizedFrame.midX
+        #expect(centerHalfMidX == 0.5)
+        #expect(WindowLayout.allCases.count == 26)
+        #expect(WindowLayout.topRightSixth.normalizedFrame.maxX == 1.0)
+        #expect(WindowLayout.bottomLeftQuarter.normalizedFrame.minY == 0.5)
         let leftTwoThirdsMaxX: CGFloat = WindowLayout.leftTwoThirds.normalizedFrame.maxX
         let lastThirdMinX: CGFloat = WindowLayout.lastThird.normalizedFrame.minX
         #expect(leftTwoThirdsMaxX == lastThirdMinX)
         let rightTwoThirdsMinX: CGFloat = WindowLayout.rightTwoThirds.normalizedFrame.minX
         let firstThirdMaxX: CGFloat = WindowLayout.firstThird.normalizedFrame.maxX
         #expect(rightTwoThirdsMinX == firstThirdMaxX)
-        #expect(WindowLayout.groupTitles == ["Whole Screen", "Halves", "Thirds", "Fourths"])
+        #expect(WindowLayout.groupTitles == ["Whole Screen", "Halves", "Quarters", "Thirds", "Fourths", "Sixths"])
         let groups = Set(WindowLayout.allCases.map(\.groupTitle))
         #expect(groups == Set(WindowLayout.groupTitles))
     }
@@ -75,5 +78,40 @@ struct WindowLayoutTests {
         let inside = clamped.minX >= small.minX && clamped.minY >= small.minY
         #expect(fits)
         #expect(inside)
+    }
+
+    @Test func inDisplayMovesAreExactAndStayOnScreen() {
+        let screen = CGRect(x: 0, y: 25, width: 1440, height: 875)
+        let window = CGRect(x: 100, y: 100, width: 800, height: 500)
+        #expect(WindowMove.center.adjustedFrame(window: window, screen: screen) == CGRect(x: 320, y: 213, width: 800, height: 500))
+        #expect(WindowMove.maximizeHeight.adjustedFrame(window: window, screen: screen) == CGRect(x: 100, y: 25, width: 800, height: 875))
+        #expect(WindowMove.maximizeWidth.adjustedFrame(window: window, screen: screen) == CGRect(x: 0, y: 100, width: 1440, height: 500))
+        #expect(WindowMove.moveLeft.adjustedFrame(window: window, screen: screen)?.minX == 0)
+        #expect(WindowMove.moveRight.adjustedFrame(window: window, screen: screen)?.maxX == 1440)
+        #expect(WindowMove.moveUp.adjustedFrame(window: window, screen: screen)?.minY == 25)
+        #expect(WindowMove.moveDown.adjustedFrame(window: window, screen: screen)?.maxY == 900)
+        let reasonable = WindowMove.reasonableSize.adjustedFrame(window: window, screen: screen)!
+        #expect(reasonable.width == 864 && reasonable.height == 525)
+        let larger = WindowMove.larger.adjustedFrame(window: window, screen: screen)!
+        #expect(larger.width == 880 && larger.height == 550)
+        let huge = WindowMove.larger.adjustedFrame(window: CGRect(x: 0, y: 25, width: 1400, height: 870), screen: screen)!
+        #expect(huge.width <= 1440 && huge.height <= 875 && huge.minY >= 25)
+        #expect(WindowMove.restore.adjustedFrame(window: window, screen: screen) == nil)
+        #expect(WindowMove.allCases.count == 14)
+    }
+
+    @Test func repeatingLeftHalfCyclesOnlyWhenTheWindowIsStillWhereWeLeftIt() {
+        let screen = CGRect(x: 0, y: 25, width: 1440, height: 875)
+        let half = WindowLayout.leftHalf.frame(in: screen)
+        #expect(WindowCycling.next(requested: .leftHalf, lastLayout: nil, lastFrame: nil, current: half) == .leftHalf)
+        #expect(WindowCycling.next(requested: .leftHalf, lastLayout: .leftHalf, lastFrame: half, current: half) == .leftTwoThirds)
+        let twoThirds = WindowLayout.leftTwoThirds.frame(in: screen)
+        #expect(WindowCycling.next(requested: .leftHalf, lastLayout: .leftTwoThirds, lastFrame: twoThirds, current: twoThirds) == .firstThird)
+        let third = WindowLayout.firstThird.frame(in: screen)
+        #expect(WindowCycling.next(requested: .leftHalf, lastLayout: .firstThird, lastFrame: third, current: third) == .leftHalf)
+        // The user moved the window by hand: start over.
+        #expect(WindowCycling.next(requested: .leftHalf, lastLayout: .leftHalf, lastFrame: half, current: half.offsetBy(dx: 40, dy: 0)) == .leftHalf)
+        // Quarters and thirds never cycle.
+        #expect(WindowCycling.next(requested: .topLeftQuarter, lastLayout: .topLeftQuarter, lastFrame: half, current: half) == .topLeftQuarter)
     }
 }

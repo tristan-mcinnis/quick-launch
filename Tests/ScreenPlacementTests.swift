@@ -60,4 +60,16 @@ struct ScreenPlacementTests {
         #expect(second.x == expectedX)
         #expect(second.y == expectedY)
     }
+
+    @Test func tallPanelsShiftUpToStayOnScreen() {
+        let visible = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        let fits = CGRect(x: 410, y: 300, width: 620, height: 400)
+        #expect(ScreenPlacement.clamped(frame: fits, within: visible) == fits)
+        let low = CGRect(x: 410, y: -200, width: 620, height: 500)
+        let shifted = ScreenPlacement.clamped(frame: low, within: visible)
+        #expect(shifted.minY == 12 && shifted.height == 500)
+        let tall = CGRect(x: 410, y: 100, width: 620, height: 900)
+        let pinned = ScreenPlacement.clamped(frame: tall, within: visible)
+        #expect(pinned.minY == 12)
+    }
 }

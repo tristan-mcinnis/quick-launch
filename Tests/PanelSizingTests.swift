@@ -33,7 +33,7 @@ struct PanelSizingTests {
         // 10 000 chars -> approxLines ~ 167 -> 167*22+40 well past 380, so capped
         let long = String(repeating: "x", count: 10_000)
         let h = PanelSizing.panelHeight(output: long, isStreaming: false, errorMessage: nil)
-        #expect(h == CGFloat(60 + 380))
+        #expect(h == CGFloat(60 + 560))
     }
 
     // MARK: - Error banner adds 40

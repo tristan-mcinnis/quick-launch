@@ -60,7 +60,7 @@ struct LauncherCatalogTests {
         let service = FakeLauncherCatalog()
         let vm = QuickViewModel(launcherCatalog: service)
         #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count)
-        #expect(vm.launcherMatches.contains(.catalog(.commands, count: 34)))
+        #expect(vm.launcherMatches.contains(.catalog(.commands, count: vm.systemCommands.count)))
         vm.enterCatalog(.snippets)
         vm.input = "greet"
         #expect(vm.catalogMatches.map(\.title) == ["Greeting"])
@@ -124,7 +124,10 @@ struct LauncherCatalogTests {
         vm.enterCatalog(.snippets)
         vm.input = "greet"
         vm.noteInteraction()
-        try? await Task.sleep(for: .milliseconds(60))
+        // Other suites share the main actor; wait for the reset rather than a fixed delay.
+        for _ in 0..<100 where vm.catalogScope != nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         #expect(vm.catalogScope == nil)
         #expect(vm.input.isEmpty)
     }

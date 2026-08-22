@@ -15,6 +15,18 @@ enum ScreenPlacement {
         )
     }
 
+    /// Keeps a panel inside the visible frame: shifts up when it would run off
+    /// the bottom, never above the top. `margin` keeps a little air.
+    static func clamped(frame: CGRect, within visibleFrame: CGRect, margin: CGFloat = 12) -> CGRect {
+        var result = frame
+        let minY = visibleFrame.minY + margin
+        let maxY = visibleFrame.maxY - margin
+        if result.minY < minY { result.origin.y = minY }
+        if result.maxY > maxY { result.origin.y = maxY - result.height }
+        if result.minY < minY { result.origin.y = minY }   // taller than the screen: pin to the bottom margin
+        return result
+    }
+
     static func screenIndex(containing point: CGPoint, frames: [CGRect]) -> Int? {
         frames.firstIndex(where: { $0.contains(point) }) ?? frames.indices.first
     }

@@ -35,7 +35,19 @@ import Observation
     var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
-    var pendingImage: QuickImageAttachment?
+    /// Screenshots waiting to travel with the next question, oldest first.
+    var pendingImages: [QuickImageAttachment] = []
+    /// The newest attachment. Setting appends; setting nil clears all.
+    var pendingImage: QuickImageAttachment? {
+        get { pendingImages.last }
+        set {
+            if let newValue {
+                if !pendingImages.contains(newValue) { pendingImages.append(newValue) }
+            } else {
+                pendingImages.removeAll()
+            }
+        }
+    }
     /// Screen Awareness: what was read from the window behind the overlay.
     var pendingContext: CaptureContext?
     var screenshotIndexProgress = ScreenshotTextIndex.Progress()
@@ -53,6 +65,7 @@ import Observation
     enum InputMode: Equatable, Sendable {
         case translate
         case caffeinateUntil
+        case renameChat(UUID)
     }
 
     // MARK: - Dependencies
@@ -96,7 +109,7 @@ import Observation
     @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
     /// Image of the current thread, kept in memory only so follow-ups can
     /// refer to it. Never written to history or disk.
-    @ObservationIgnored private(set) var conversationImage: QuickImageAttachment?
+    @ObservationIgnored private(set) var conversationImages: [QuickImageAttachment] = []
 
     // MARK: - Init
 
@@ -411,7 +424,26 @@ import Observation
         case .emoji: return EmojiCatalog.items
         case .screenshots: return screenshotItems
         case .caffeinate: return caffeinateItems
+        case .chats: return conversationItems
         case .commands: return systemCommands
+        }
+    }
+
+    /// Recent Quick AI chats, pinned first, as launcher items.
+    var conversationItems: [LauncherCatalogItem] {
+        QuickHistoryStore.ordered(history).map { conversation in
+            let turns = conversation.messages.filter { $0.role == .user }.count
+            let stamp = conversation.updatedAt.formatted(date: .abbreviated, time: .shortened)
+            let count = turns == 1 ? "1 question" : "\(turns) questions"
+            return LauncherCatalogItem(
+                kind: .conversation,
+                itemID: conversation.id.uuidString,
+                title: conversation.title,
+                detail: (conversation.isPinned ? "Pinned · " : "") + "\(count) · \(stamp)",
+                value: conversation.lastAnswer ?? "",
+                keywords: conversation.isPinned ? "pinned" : "",
+                isPinned: conversation.isPinned
+            )
         }
     }
 
@@ -588,22 +620,25 @@ import Observation
     @ObservationIgnored private var launcherRankingVersion = 0
 
     private var launcherMatchesCacheKey: String {
-        [
-            input,
-            catalogScope?.rawValue ?? "",
-            pendingQuickLinkID ?? "",
-            hasPendingAttachment ? "1" : "0",
-            isAnswerActive ? "1" : "0",
-            inputMode == nil ? "" : "mode",
-            String(snippets.count),
-            String(quickLinks.count),
-            String(clipboardEntries.count),
-            isCaffeinating ? "1" : "0",
-            settings.launcherLearningEnabled ? "1" : "0",
-            settings.savedPromptPrefix,
-            String(settings.launcherItemConfigurations.hashValue),
-            String(launcherRankingVersion),
-        ].joined(separator: "\u{1F}")
+        var parts: [String] = []
+        parts.append(input)
+        parts.append(catalogScope?.rawValue ?? "")
+        parts.append(pendingQuickLinkID ?? "")
+        parts.append(hasPendingAttachment ? "1" : "0")
+        parts.append(isAnswerActive ? "1" : "0")
+        parts.append(inputMode == nil ? "" : "mode")
+        parts.append(String(snippets.count))
+        parts.append(String(quickLinks.count))
+        parts.append(String(clipboardEntries.count))
+        parts.append(String(history.count))
+        let pinnedChats = history.filter { $0.isPinned }.count
+        parts.append(String(pinnedChats))
+        parts.append(isCaffeinating ? "1" : "0")
+        parts.append(settings.launcherLearningEnabled ? "1" : "0")
+        parts.append(settings.savedPromptPrefix)
+        parts.append(String(settings.launcherItemConfigurations.hashValue))
+        parts.append(String(launcherRankingVersion))
+        return parts.joined(separator: "\u{1F}")
     }
 
     /// An AI thread owns the panel: no launcher rows, typing is a follow-up.
@@ -713,6 +748,7 @@ import Observation
         switch inputMode {
         case .translate: return "Translate"
         case .caffeinateUntil: return "Caffeinate Until"
+        case .renameChat: return "Rename Chat"
         case nil: break
         }
         if let pendingQuickLink { return pendingQuickLink.title }
@@ -748,6 +784,11 @@ import Observation
                     FooterHint(label: "Caffeinate", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
+            case .renameChat:
+                return [
+                    FooterHint(label: "Save", keys: ["↩"]),
+                    FooterHint(label: "Back", keys: ["⌫"]),
+                ]
             }
         }
         if pendingQuickLink != nil {
@@ -781,12 +822,15 @@ import Observation
             return hints
         }
         if !output.isEmpty {
-            return [
-                FooterHint(label: "Follow up", keys: ["↩"]),
-                FooterHint(label: "Paste back", keys: ResultAction.pasteBack.shortcut.keyCaps),
+            var hints = [
+                input.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? FooterHint(label: "Paste back", keys: ["↩"])
+                    : FooterHint(label: "Follow up", keys: ["↩"]),
                 FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps),
-                FooterHint(label: "Actions", keys: ["⌘", "K"]),
             ]
+            if history.count > 1 { hints.append(FooterHint(label: "Chats", keys: ["⌘", "[", "]"])) }
+            hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
+            return hints
         }
         if !savedPromptMatches.isEmpty {
             return [
@@ -870,6 +914,9 @@ import Observation
         if contextualCatalogItemID.hasPrefix("screenshot:") {
             return screenshotFiles.first { $0.id == contextualCatalogItemID }
         }
+        if contextualCatalogItemID.hasPrefix("conversation:") {
+            return conversationItems.first { $0.id == contextualCatalogItemID }
+        }
         return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
         }
@@ -884,6 +931,7 @@ import Observation
         switch inputMode {
         case .translate: return "Type or paste text to translate…"
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
+        case .renameChat: return "New name for this chat…"
         case nil: break
         }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
@@ -931,6 +979,10 @@ import Observation
             return
         }
         if await submitInputMode() { return }
+        if isAnswerActive, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !output.isEmpty {
+            await performResultAction(.pasteBack)
+            return
+        }
         if let pendingQuickLink {
             openQuickLink(pendingQuickLink, input: input)
             return
@@ -1020,6 +1072,9 @@ import Observation
         input = ""
         errorMessage = nil
         applicationSelectionIndex = 0
+        if case .renameChat(let id) = mode {
+            input = history.first { $0.id == id }?.title ?? ""
+        }
         if mode == .translate,
            let selected = captureSelectedText(promptForPermission: false)?.text
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1061,6 +1116,10 @@ import Observation
             let direction = effectiveTranslationDirection ?? .toChinese
             self.inputMode = nil
             await translate(text, direction: direction)
+        case .renameChat(let id):
+            renameConversation(id: id, title: input)
+            leaveInputMode()
+            enterCatalog(.chats)
         case .caffeinateUntil:
             let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
             do {
@@ -1150,6 +1209,7 @@ import Observation
         case .emoji: EmojiCatalog.items.count
         case .screenshots: screenshotItems.count
         case .caffeinate: caffeinateItems.count
+        case .chats: history.count
         case .commands: systemCommands.count
         }
     }
@@ -1226,7 +1286,12 @@ import Observation
         case .snippet, .clipboard, .emoji:
             _ = await pasteLauncherItem(item)
         case .screenshot:
-            attachScreenshotFile(item)
+            if await pasteImageFile(URL(fileURLWithPath: item.value)) {
+                learn(.item(item))
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            }
+        case .conversation:
+            continueConversation(itemID: item.itemID)
         case .application:
             return
         case .command:
@@ -1313,7 +1378,12 @@ import Observation
     /// Actions available on the answer on screen.
     var resultActions: [ResultAction] {
         guard !output.isEmpty, !isStreaming else { return [] }
-        return ResultAction.allCases
+        var actions: [ResultAction] = [.pasteBack, .copy, .saveSnippet, .searchWeb, .regenerate, .newChat]
+        if currentConversation != nil {
+            actions += [.renameChat, .pinChat, .deleteChat]
+        }
+        if history.count > 1 { actions += [.previousChat, .nextChat] }
+        return actions
     }
 
     func performResultAction(_ action: ResultAction) async {
@@ -1328,6 +1398,30 @@ import Observation
             saveOutputAsSnippet()
         case .searchWeb:
             await searchWebForOutput()
+        case .regenerate:
+            isActionPalettePresented = false
+            await regenerateLastAnswer()
+        case .newChat:
+            isActionPalettePresented = false
+            startNewConversation()
+        case .previousChat:
+            isActionPalettePresented = false
+            browseConversations(-1)
+        case .nextChat:
+            isActionPalettePresented = false
+            browseConversations(1)
+        case .renameChat:
+            guard let id = currentConversation?.id else { return }
+            isActionPalettePresented = false
+            enterInputMode(.renameChat(id))
+        case .pinChat:
+            guard let id = currentConversation?.id else { return }
+            isActionPalettePresented = false
+            togglePinConversation(id: id)
+        case .deleteChat:
+            guard let id = currentConversation?.id else { return }
+            isActionPalettePresented = false
+            deleteConversation(id: id)
         }
     }
 
@@ -1596,10 +1690,10 @@ import Observation
 
     /// Title of the attachment card: "Screen Awareness · Safari" or "Screenshot attached".
     var attachmentTitle: String {
-        if let pendingContext, pendingContext.includedSources.count > (pendingContext.hasScreenshot ? 1 : 0) || pendingImage == nil {
+        if let pendingContext, pendingContext.includedSources.count > (pendingContext.hasScreenshot ? 1 : 0) || pendingImages.isEmpty {
             return "Screen Awareness · \(pendingContext.appName)"
         }
-        return "Screenshot attached"
+        return pendingImages.count > 1 ? "\(pendingImages.count) screenshots attached" : "Screenshot attached"
     }
 
     /// Subtitle of the attachment card: what is included and where it goes.
@@ -1609,12 +1703,17 @@ import Observation
             if let title = pendingContext.windowTitle, !title.isEmpty { parts.append(title) }
             parts.append(pendingContext.includedSources.joined(separator: ", "))
         }
-        parts.append(pendingImage != nil ? visionRoutingNote : "Sent as text")
+        parts.append(!pendingImages.isEmpty ? visionRoutingNote : "Sent as text")
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// Anything waiting to travel with the next question.
-    var hasPendingAttachment: Bool { pendingImage != nil || pendingContext != nil }
+    var hasPendingAttachment: Bool { !pendingImages.isEmpty || pendingContext != nil }
+
+    func clearAttachments() {
+        pendingImages.removeAll()
+        pendingContext = nil
+    }
 
     /// One line under the attachment saying where the image goes.
     var visionRoutingNote: String {
@@ -1723,10 +1822,13 @@ import Observation
             return
         }
         guard applied else {
+            let isDisplayMove = name == WindowMove.nextDisplay.rawValue || name == WindowMove.previousDisplay.rawValue
             errorMessage = windowManager.isAccessibilityTrusted
-                ? (WindowMove(rawValue: name) != nil && NSScreen.screens.count < 2
+                ? (isDisplayMove && NSScreen.screens.count < 2
                     ? "Only one display is connected."
-                    : "Could not move \(target.applicationName).")
+                    : (name == WindowMove.restore.rawValue
+                        ? "Nothing to restore yet for \(target.applicationName)."
+                        : "Could not resize \(target.applicationName)."))
                 : "Accessibility access is required for window management."
             requestInputFocus()
             return
@@ -1960,9 +2062,7 @@ import Observation
             guard case .item(let item) = result else { return }
             closeItemActionPane()
             if item.kind == .screenshot {
-                if await pasteImageFile(URL(fileURLWithPath: item.value)) {
-                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-                }
+                attachScreenshotFile(item)
             } else {
                 _ = await copyAndPasteLauncherItem(item)
             }
@@ -2002,7 +2102,14 @@ import Observation
                 break
             }
         case .pin:
-            guard case .item(let item) = result, item.kind == .clipboard else { return true }
+            guard case .item(let item) = result else { return true }
+            if item.kind == .conversation, let id = UUID(uuidString: item.itemID) {
+                togglePinConversation(id: id)
+                closeItemActionPane()
+                applicationSelectionIndex = 0
+                return true
+            }
+            guard item.kind == .clipboard else { return true }
             clipboardHistory?.togglePin(item)
             invalidateLauncherRanking()
             closeItemActionPane()
@@ -2023,6 +2130,10 @@ import Observation
             guard case .item(let item) = result, item.kind == .screenshot else { return true }
             ScreenshotLibrary.quickLook(URL(fileURLWithPath: item.value))
         case .edit:
+            if case .item(let item) = result, item.kind == .conversation, let id = UUID(uuidString: item.itemID) {
+                enterInputMode(.renameChat(id))
+                return true
+            }
             openActionPane(for: result, form: .edit)
         case .setAlias:
             openActionPane(for: result, form: .alias)
@@ -2050,6 +2161,9 @@ import Observation
                     clipboardHistory?.remove(item)
                     closeItemActionPane()
                     applicationSelectionIndex = 0
+                case .conversation:
+                    if let id = UUID(uuidString: item.itemID) { deleteConversation(id: id) }
+                    closeItemActionPane()
                 case .screenshot:
                     let url = URL(fileURLWithPath: item.value)
                     do {
@@ -2071,6 +2185,77 @@ import Observation
             }
         }
         return true
+    }
+
+    // MARK: - Quick AI chats
+
+    func continueConversation(itemID: String) {
+        guard let id = UUID(uuidString: itemID) else { return }
+        closeItemActionPane()
+        catalogScope = nil
+        inputMode = nil
+        loadConversation(id: id)
+        lastQuestion = currentConversation?.messages.last(where: { $0.role == .user })?.content
+        invalidateLauncherRanking()
+        requestInputFocus()
+    }
+
+    func togglePinConversation(id: UUID) {
+        guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        history[index].isPinned.toggle()
+        if currentConversation?.id == id { currentConversation?.isPinned = history[index].isPinned }
+        saveHistory()
+        invalidateLauncherRanking()
+    }
+
+    func renameConversation(id: UUID, title: String) {
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        history[index].customTitle = clean.isEmpty ? nil : clean
+        if currentConversation?.id == id { currentConversation?.customTitle = history[index].customTitle }
+        saveHistory()
+        invalidateLauncherRanking()
+    }
+
+    func deleteConversation(id: UUID) {
+        history.removeAll { $0.id == id }
+        if currentConversation?.id == id { startNewConversation() }
+        saveHistory()
+        invalidateLauncherRanking()
+        applicationSelectionIndex = 0
+    }
+
+    private func saveHistory() {
+        if settings.historyEnabled {
+            QuickHistoryStore.save(history, limit: settings.historyLimit)
+        }
+    }
+
+    /// ⌘[ / ⌘] or ↑↓ on an answer: move through recent chats, pinned first.
+    func browseConversations(_ delta: Int) {
+        let ordered = QuickHistoryStore.ordered(history)
+        guard !ordered.isEmpty else { return }
+        let currentIndex = ordered.firstIndex { $0.id == currentConversation?.id }
+        let next: Int
+        if let currentIndex {
+            next = (currentIndex + delta + ordered.count) % ordered.count
+        } else {
+            next = delta < 0 ? 0 : ordered.count - 1
+        }
+        continueConversation(itemID: ordered[next].id.uuidString)
+    }
+
+    /// ⌘R: send the last question again and replace the answer.
+    func regenerateLastAnswer() async {
+        guard var conversation = currentConversation,
+              let lastUser = conversation.messages.lastIndex(where: { $0.role == .user })
+        else { return }
+        let question = conversation.messages[lastUser].content
+        conversation.messages.removeSubrange(lastUser...)
+        currentConversation = conversation
+        output = ""
+        input = question
+        await submit()
     }
 
     /// Turn a clipboard entry into a snippet or a Quick Link, then open the
@@ -2334,8 +2519,10 @@ import Observation
         guard !input.isEmpty || pendingImage != nil else { return }
         isConversationHistoryPresented = false
         let submittedInput = input
-        let submittedImage = pendingImage
-            ?? ((isFollowUp && !shouldStartNewConversation) ? conversationImage : nil)
+        let submittedImages = !pendingImages.isEmpty
+            ? pendingImages
+            : ((isFollowUp && !shouldStartNewConversation) ? conversationImages : [])
+        let submittedImage = submittedImages.last
 
         // Expand saved-prompt aliases before anything else. Non-matches
         // (including inputs that look like `/foo` but reference an unknown
@@ -2489,10 +2676,10 @@ import Observation
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
         input = ""
-        pendingImage = nil
+        pendingImages.removeAll()
         pendingContext = nil
         lastQuestion = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if submittedImage != nil { conversationImage = submittedImage }
+        if !submittedImages.isEmpty { conversationImages = submittedImages }
 
         errorMessage = nil
         output = ""
@@ -2500,12 +2687,13 @@ import Observation
         guard let service = makeService(provider: provider, model: model) else {
             isStreaming = false
             rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
+            pendingImages = submittedImages
             errorMessage = "\(provider.name) is not available. Check its model, endpoint, or installed command."
             requestInputFocus()
             return
         }
 
-        let stream = service.send(messages: requestMessages, image: submittedImage)
+        let stream = service.send(messages: requestMessages, images: submittedImages)
 
         streamTask = Task {
             do {
@@ -2886,8 +3074,13 @@ import Observation
         }
     }
 
+    /// Backspace: drop the newest attachment; the × button clears all.
     func removePendingImage() {
-        pendingImage = nil
+        if pendingImages.count > 1 {
+            pendingImages.removeLast()
+            return
+        }
+        pendingImages.removeAll()
         pendingContext = nil
         requestInputFocus()
     }
@@ -2906,7 +3099,7 @@ import Observation
 
     func startNewConversation() {
         currentConversation = nil
-        conversationImage = nil
+        conversationImages = []
         lastQuestion = nil
         isConversationHistoryPresented = false
         output = ""

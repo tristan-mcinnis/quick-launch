@@ -20,6 +20,20 @@ final class KeyablePanel: NSPanel {
     /// ⌫ on an empty field pops a layer. Returns true when consumed.
     var backspaceHandler: (() -> Bool)?
 
+    /// Unmodified keys never reach `performKeyEquivalent`; the field editor
+    /// eats Backspace before SwiftUI sees it. `sendEvent` sees everything.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown,
+           event.keyCode == 51,
+           event.modifierFlags
+               .intersection(.deviceIndependentFlagsMask)
+               .subtracting([.function, .numericPad, .capsLock]).isEmpty,
+           backspaceHandler?() == true {
+            return
+        }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
@@ -48,12 +62,6 @@ final class KeyablePanel: NSPanel {
            modifiers == [.shift],
            event.keyCode == 36 || event.keyCode == 76,
            translateHandler?() == true {
-            return true
-        }
-        if event.type == .keyDown,
-           modifiers.isEmpty,
-           event.keyCode == 51,
-           backspaceHandler?() == true {
             return true
         }
         if event.type == .keyDown,
@@ -765,7 +773,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resizePanelForContent() {
         guard let panel, let vm = viewModel else { return }
-        let visibleBody = vm.isConversationHistoryPresented
+        let visibleBody = vm.conversationMessages.count > 2
             ? vm.conversationTranscriptText
             : vm.output
         let total = PanelSizing.panelHeight(
@@ -781,7 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? 0
                 : max(vm.launcherMatches.count, vm.savedPromptMatches.count),
             showsResultActions: false,
-            hasAttachment: vm.pendingImage != nil,
+            hasAttachment: vm.hasPendingAttachment,
             showsFooter: vm.showsLauncherFooter,
             launcherRowCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
                 ? 0
@@ -803,6 +811,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frame.size.width = width
             frame.origin.x = (centreX - width / 2).rounded()
             frame.origin.y -= delta  // grow down from the top
+            if let screen = panel.screen ?? screenContainingMouse() {
+                frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+            }
             panel.setFrame(frame, display: true, animate: false)
         }
     }

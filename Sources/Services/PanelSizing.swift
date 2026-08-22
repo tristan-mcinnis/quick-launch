@@ -6,7 +6,7 @@ import CoreFoundation
 enum PanelSizing {
 
     static let inputHeight: CGFloat = 60
-    static let maxBodyHeight: CGFloat = 380
+    static let maxBodyHeight: CGFloat = 560
     static let errorBannerHeight: CGFloat = 40
     static let attachmentHeight: CGFloat = 58
     /// Footer row plus its divider.

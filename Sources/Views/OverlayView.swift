@@ -46,11 +46,19 @@ struct OverlayView: View {
                         return .handled
                     }
                     .onKeyPress(.downArrow) {
+                        if viewModel.isAnswerActive, viewModel.input.isEmpty {
+                            viewModel.browseConversations(1)
+                            return .handled
+                        }
                         guard !viewModel.launcherMatches.isEmpty else { return .ignored }
                         viewModel.moveSelectionVertically(1)
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
+                        if viewModel.isAnswerActive, viewModel.input.isEmpty {
+                            viewModel.browseConversations(-1)
+                            return .handled
+                        }
                         guard !viewModel.launcherMatches.isEmpty else { return .ignored }
                         viewModel.moveSelectionVertically(-1)
                         return .handled
@@ -82,10 +90,16 @@ struct OverlayView: View {
                         Task { await viewModel.submitResolvingFuzzyAlias() }
                     }
                 } label: {
-                    Image(systemName: sendIcon)
-                        .foregroundStyle(sendColor)
-                        .font(.system(size: 20))
-                        .contentTransition(.symbolEffect(.replace))
+                    if viewModel.isStreaming {
+                        ThinkingIndicator()
+                            .frame(width: 22, height: 22)
+                            .help("Working… press Escape to stop")
+                    } else {
+                        Image(systemName: sendIcon)
+                            .foregroundStyle(sendColor)
+                            .font(.system(size: 20))
+                            .contentTransition(.symbolEffect(.replace))
+                    }
                 }
                 .buttonStyle(.plain)
                 .disabled(
@@ -103,15 +117,19 @@ struct OverlayView: View {
             if viewModel.hasPendingAttachment {
                 Divider()
                 HStack(spacing: AQDesign.Space.standard) {
-                    if let image = viewModel.pendingImage, let preview = NSImage(data: image.data) {
-                        Image(nsImage: preview)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 40, height: 40)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .accessibilityLabel(
-                                "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
-                            )
+                    HStack(spacing: 4) {
+                        ForEach(Array(viewModel.pendingImages.suffix(4).enumerated()), id: \.offset) { _, image in
+                            if let preview = NSImage(data: image.data) {
+                                Image(nsImage: preview)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .accessibilityLabel(
+                                        "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
+                                    )
+                            }
+                        }
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(viewModel.attachmentTitle)
@@ -126,14 +144,14 @@ struct OverlayView: View {
                     }
                     Spacer()
                     Button {
-                        viewModel.removePendingImage()
+                        viewModel.clearAttachments()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .frame(width: 40, height: 40)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Remove attached screenshot")
-                    .help("Remove screenshot")
+                    .accessibilityLabel("Remove attachments")
+                    .help("Remove all attachments (⌫ removes the newest)")
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
@@ -196,13 +214,15 @@ struct OverlayView: View {
                 }
             }
 
-            if viewModel.isConversationHistoryPresented {
-                Divider()
-                ConversationTranscript(messages: viewModel.conversationMessages)
-                    .transition(.opacity)
-            } else if !viewModel.output.isEmpty || viewModel.isStreaming {
+            if !viewModel.output.isEmpty || viewModel.isStreaming {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
+                    if viewModel.conversationMessages.count > 2 {
+                        // Earlier turns, compact; the latest answer follows in full.
+                        ConversationTranscript(messages: Array(viewModel.conversationMessages.dropLast(2)))
+                            .frame(maxHeight: 240)
+                        Divider()
+                    }
                     if let question = viewModel.lastQuestion, !question.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "text.cursor")
@@ -215,11 +235,22 @@ struct OverlayView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Question: \(question)")
                     }
-                    MarkdownTextView(
-                        attributedString: MarkdownRenderer.render(viewModel.output),
-                        isStreaming: viewModel.isStreaming
-                    )
-                    .frame(maxHeight: 380)
+                    if viewModel.isStreaming, viewModel.output.isEmpty {
+                        HStack(spacing: 8) {
+                            ThinkingIndicator()
+                                .frame(width: 18, height: 18)
+                            Text("Thinking…")
+                                .font(AQDesign.TypeToken.label)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(height: 28)
+                    } else {
+                        MarkdownTextView(
+                            attributedString: MarkdownRenderer.render(viewModel.output),
+                            isStreaming: viewModel.isStreaming
+                        )
+                        .frame(maxHeight: PanelSizing.maxBodyHeight)
+                    }
                 }
                 .padding(20)
                 .transition(.opacity)
@@ -351,20 +382,6 @@ struct OverlayView: View {
             modelSubmenu
             historySubmenu
 
-            if !viewModel.conversationMessages.isEmpty {
-                Divider()
-                Button {
-                    viewModel.toggleConversationHistory()
-                } label: {
-                    Label(
-                        viewModel.isConversationHistoryPresented
-                            ? "Show Latest Result"
-                            : "Show Conversation",
-                        systemImage: "text.bubble"
-                    )
-                }
-            }
-
             Divider()
             Button {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
@@ -453,18 +470,23 @@ private struct ConversationTranscript: View {
                                 .foregroundStyle(
                                     message.role == .user ? AQDesign.ColorToken.accent : .secondary
                                 )
-                            Text(String(message.content.prefix(8_000)))
-                                .font(.system(size: 13))
+                            Text(String(message.content.prefix(2_000)))
+                                .font(.system(size: 12))
+                                .lineLimit(message.role == .user ? 3 : 8)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .id(message.id)
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
             }
-            .frame(maxHeight: 380)
             .onAppear {
+                guard let lastID = messages.last?.id else { return }
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+            .onChange(of: messages.count) { _, _ in
                 guard let lastID = messages.last?.id else { return }
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
@@ -643,6 +665,7 @@ private struct ItemActionPane: View {
         case .command: return item.detail
         case .emoji: return "Emoji"
         case .screenshot: return item.detail
+        case .conversation: return item.detail
         case .application: return "Application"
         }
     }
@@ -1086,4 +1109,26 @@ extension Notification.Name {
     static let launcherItemHotkeysChanged = Notification.Name("QuickLaunch.launcherItemHotkeysChanged")
     static let clipboardHistorySettingsChanged = Notification.Name("QuickLaunch.clipboardHistorySettingsChanged")
     static let providerChanged = Notification.Name("QuickLaunch.providerChanged")
+}
+
+
+/// Three dots that breathe in turn: the model is working. Subtle on purpose.
+struct ThinkingIndicator: View {
+    @State private var phase = 0
+    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(AQDesign.ColorToken.accent)
+                    .frame(width: 5, height: 5)
+                    .opacity(index == phase ? 0.95 : 0.3)
+                    .scaleEffect(index == phase ? 1.15 : 0.85)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: phase)
+        .onReceive(timer) { _ in phase = (phase + 1) % 3 }
+        .accessibilityLabel("Working")
+    }
 }

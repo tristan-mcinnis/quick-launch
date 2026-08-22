@@ -7,7 +7,7 @@ enum QuickHistoryStore {
         guard let data = defaults.data(forKey: defaultsKey),
               let conversations = try? JSONDecoder().decode([QuickConversation].self, from: data)
         else { return [] }
-        return conversations.sorted { $0.updatedAt > $1.updatedAt }
+        return ordered(conversations)
     }
 
     static func save(
@@ -15,7 +15,7 @@ enum QuickHistoryStore {
         limit: Int,
         to defaults: UserDefaults = .standard
     ) {
-        let bounded = Array(conversations.sorted { $0.updatedAt > $1.updatedAt }.prefix(max(1, limit)))
+        let bounded = bounded(conversations, limit: limit)
         if let data = try? JSONEncoder().encode(bounded) {
             defaults.set(data, forKey: defaultsKey)
         }
@@ -28,7 +28,31 @@ enum QuickHistoryStore {
     ) -> [QuickConversation] {
         var result = conversations.filter { $0.id != conversation.id }
         result.append(conversation)
-        return Array(result.sorted { $0.updatedAt > $1.updatedAt }.prefix(max(1, limit)))
+        return bounded(result, limit: limit)
+    }
+
+    /// Pinned chats first, then newest first.
+    static func ordered(_ conversations: [QuickConversation]) -> [QuickConversation] {
+        conversations.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    /// Keeps every pinned chat and the newest `limit` unpinned ones.
+    static func bounded(_ conversations: [QuickConversation], limit: Int) -> [QuickConversation] {
+        let cap = max(1, limit)
+        var kept: [QuickConversation] = []
+        var unpinned = 0
+        for conversation in ordered(conversations) {
+            if conversation.isPinned {
+                kept.append(conversation)
+            } else if unpinned < cap {
+                kept.append(conversation)
+                unpinned += 1
+            }
+        }
+        return kept
     }
 
     static func clear(from defaults: UserDefaults = .standard) {
