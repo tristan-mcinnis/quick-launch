@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Window management rebuilt for accuracy: the window that is actually on top is resized (matched against the on-screen window list, not the app's "focused" window), `AXEnhancedUserInterface` is switched off during the change so Chromium and Electron apps (Helium, Slack, VS Code) resize correctly, size is set before and after position, the display is chosen by overlap, and the result is verified. Raycast's full command set is in: Maximize Height/Width, Reasonable Size, Center (keeps size), Center Half, Quarters, Sixths, Make Smaller/Larger, Move to edges, Restore, Toggle Fullscreen. Left and Right Half cycle on repeat.
+- Streaming shows a subtle three-dot thinking indicator instead of a white stop square; Escape still stops.
+- Answers get up to 560 px and earlier turns 240 px; the panel shifts up rather than running off the bottom of the display.
+- Backspace on an empty field is now intercepted at the panel's `sendEvent`, so it pops a layer (attachment, answer, mode, catalog) even though the text field's editor swallows the key.
+- Screenshots: Return on a file pastes the image into the previous app; `⌘⇧↩` attaches it to the question instead. Several screenshots can be attached to one question; Backspace removes the newest.
+- Quick AI, after Raycast's Quick AI: Return on an answer pastes it back, typing follows up, earlier turns stay visible above the latest answer, `⌘N` starts a new chat, `⌘R` regenerates, `⌘[`/`⌘]` or `↑↓` browse recent chats. New Quick AI Chats catalog with Continue, Copy Last Answer, Rename (`⌘E`), Pin (`⌘⇧P`, pinned chats never expire), Delete (`⌃X`).
 - Screenshots: on-device OCR (Vision, en/zh) indexes the text inside every screenshot into one local JSON file, so `acme` finds the invoice; matches from image text are marked. A preview pane beside the list shows the image, dimensions, size, date, and the recognized text. New actions: Paste Image to the previous app, and a Paste Latest Screenshot command.
 - Emoji & Symbols is a 9-column grid with Frequently Used first; arrows move the highlight.
 - Screen Awareness: Send Focused Window to AI attaches a screenshot plus the app name, window title, selected text, focused field, readable text, and page URL, read through Accessibility; Send Screen, Send Screen Area (drag a rectangle), and Send Selected Text cover the rest. A double tap of the right ⌘ key triggers it from anywhere (Settings › General). The attachment card lists what was included; the model gets the image plus a bounded text preamble.

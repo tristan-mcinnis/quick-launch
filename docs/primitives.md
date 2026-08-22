@@ -31,8 +31,8 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   Backspace.
 - **Answer.** An AI thread. While an answer is on screen the launcher list
   is hidden; typing is a follow-up; the question is shown above the answer.
-- **Context.** What travels with the next question: a screenshot and/or a
-  capture bundle (app name, window title, selected text, focused field,
+- **Context.** What travels with the next question: one or more screenshots
+  and/or a capture bundle (app name, window title, selected text, focused field,
   readable text, page URL). Shown as one attachment card; sent once, as an
   image plus a bounded text preamble; never stored.
 
@@ -42,13 +42,15 @@ The same key means the same thing on every layer.
 
 | Key | Meaning |
 |---|---|
-| `↩` | Primary action: open, paste, run, browse, ask, follow up |
+| `↩` | Primary action: open, paste, run, browse, ask; on an answer with nothing typed, paste the answer back; with text typed, follow up |
 | `⌘↩` | Secondary action: copy, show in Finder, copy link, paste back an answer |
 | `⌘⇧↩` | Copy and paste |
 | `⌘K` | Open or close the action list for the highlighted row |
 | `⎋` | Close the overlay from anywhere (a ⌘K form steps back first; a stream stops first) |
 | `⌫` on empty | Pop one layer: catalog → root, mode → root, answer → root, attachment → removed |
 | `⇧↩` | Translate the typed text (direction from the script) |
+| `⌘N` / `⌘R` | New chat / regenerate the last answer |
+| `⌘[` / `⌘]` or `↑ ↓` on an answer | Previous / next recent chat |
 | `⌘⇧S` / `⌘⇧D` | Send the focused window / this screen to AI (screenshot plus context) |
 | double tap right `⌘` | Send the focused window to AI from anywhere |
 | `⌘E` | Edit |
@@ -77,8 +79,10 @@ overlay.
 - **Detail pane.** Catalogs of things worth previewing (Screenshots,
   Clipboard History) show the list on the left and a preview plus an
   Information block on the right; the panel widens to fit.
-- **Answer.** Question line, answer, footer hints. Copy and paste are keys,
-  not buttons.
+- **Answer.** Earlier turns compact and scrollable above, the latest question
+  and answer in full, footer hints. Copy and paste are keys, not buttons.
+  Recent chats are a catalog (Quick AI Chats): continue, copy last answer,
+  rename, pin, delete.
 - **Settings.** A top tab strip, no system tab view. One searchable table
   lists every configurable item with its alias and hotkey in place.
 

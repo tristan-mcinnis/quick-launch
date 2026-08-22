@@ -33,11 +33,13 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Screenshot attachments: `⌘⇧S` captures the app behind Quick Launch, `⌘⇧D` the display under the pointer, or run the two screenshot commands from any global hotkey; a clipboard image also attaches on open
 - One Vision model setting decides where screenshots go; DeepSeek `deepseek-v4-flash-vision-exp` by default (also the default text model), local MLX when chosen; follow-ups keep the screenshot in memory for the thread
 - `⌘K` on any row opens a Raycast-style action list with the shortcut beside each action: Return is the primary action, `⌘↩` the secondary (copy, show in Finder, copy link), `⌘⇧↩` copy and paste, `⌘E` edit, `⌘⇧A` alias, `⌘⇧H` hotkey, `⌃X` delete (press twice); the same keys work straight from the list
+- Quick AI: Return on an answer pastes it into the previous app, typing asks a follow-up, earlier turns stay visible above; `⌘N` new chat, `⌘R` regenerate, `⌘[`/`⌘]` or `↑↓` flip between recent chats; the Quick AI Chats catalog lists them with continue, copy last answer, rename, pin, delete
 - `⌘K` on a result: save as snippet, search the web for it, copy, or paste it back
+- Several screenshots can ride on one question; Backspace drops the newest, the × clears all
 - The panel opens with its input row on the centre line of the display under the pointer
 - Local, bounded, clearable text clipboard history on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
-- Previous-window management: maximize, almost maximize, center, halves, thirds, two thirds, fourths, and move to the next or previous display
+- Window management, Raycast's full set: Maximize, Almost Maximize, Maximize Height/Width, Reasonable Size, Center, Left/Center/Right/Top/Bottom Half, four Quarters, Thirds and Two Thirds, Fourths, six Sixths, Make Smaller/Larger, Move Left/Right/Up/Down, Restore, Toggle Fullscreen, Move to Next/Previous Display. Left and Right Half cycle half → two thirds → third on repeat. Every command takes an alias and a hotkey in Settings › Items › Windows
 - Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
 - Direct SearXNG web search for explicit searches and time-sensitive questions
