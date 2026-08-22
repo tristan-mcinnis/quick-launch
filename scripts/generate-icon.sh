@@ -11,43 +11,56 @@ OUTPUT="$OUTPUT_DIR/AppIcon.icns"
 
 mkdir -p "$RESOURCES_DIR" "$OUTPUT_DIR"
 
-# Generate source PNG if it doesn't exist
+# Generate source PNG if it doesn't exist.
+# Design: black macOS squircle, white lightning bolt. Monochrome, low key.
+# Delete Resources/icon-1024.png to regenerate.
 if [[ ! -f "$ICON_SOURCE" ]]; then
     echo "Generating source icon..."
-    python3 -c "
-import struct, zlib, math
+    python3 - "$ICON_SOURCE" <<'PY'
+import sys
+from PIL import Image, ImageDraw, ImageFilter
 
-def create_png(width, height, pixels):
-    def chunk(ctype, data):
-        c = ctype + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-    raw = b''
-    for y in range(height):
-        raw += b'\x00'  # filter byte
-        for x in range(width):
-            raw += bytes(pixels(x, y))
-    return (b'\x89PNG\r\n\x1a\n' +
-            chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)) +
-            chunk(b'IDAT', zlib.compress(raw, 9)) +
-            chunk(b'IEND', b''))
+out = sys.argv[1]
+SIZE = 1024
+SS = 4                      # supersample for clean edges
+S = SIZE * SS
 
-size = 1024
-cx, cy = size / 2, size / 2
-r = size * 0.42
+# macOS icon grid: the tile is 824 px wide on a 1024 canvas, radius ~22.5 %.
+tile = int(824 * SS)
+inset = (S - tile) // 2
+radius = int(tile * 0.225)
 
-# Lightning bolt polygon (centred, white) — defined as a series of points
-# Classic 'jagged Z' shape for speed/electricity
-bolt = [
-    (-0.10, -0.42),  # top-right of head
-    ( 0.18, -0.42),  # top tip
-    (-0.02, -0.05),  # inner notch right
-    ( 0.16, -0.05),  # right shoulder
-    (-0.18,  0.42),  # bottom tip
-    (-0.18,  0.42),
-    ( 0.02,  0.05),  # inner notch left
-    (-0.16,  0.05),  # left shoulder
-]
-# Re-order so it forms a proper closed polygon
+img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+draw = ImageDraw.Draw(img)
+
+# Tile: near black with a faint vertical lift at the top.
+tile_img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+tile_draw = ImageDraw.Draw(tile_img)
+tile_draw.rounded_rectangle(
+    (inset, inset, inset + tile, inset + tile), radius=radius, fill=(14, 14, 16, 255)
+)
+gradient = Image.new("L", (1, tile))
+for y in range(tile):
+    gradient.putpixel((0, y), int(34 * (1 - y / tile)))
+gradient = gradient.resize((tile, tile))
+lift = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+lift.paste(Image.new("RGBA", (tile, tile), (255, 255, 255, 255)), (inset, inset), gradient)
+mask = Image.new("L", (S, S), 0)
+ImageDraw.Draw(mask).rounded_rectangle(
+    (inset, inset, inset + tile, inset + tile), radius=radius, fill=255
+)
+tile_img = Image.composite(Image.alpha_composite(tile_img, lift), tile_img, mask)
+img = Image.alpha_composite(img, tile_img)
+
+# Hairline highlight just inside the edge.
+draw = ImageDraw.Draw(img)
+draw.rounded_rectangle(
+    (inset + SS, inset + SS, inset + tile - SS, inset + tile - SS),
+    radius=radius - SS, outline=(255, 255, 255, 28), width=int(1.5 * SS)
+)
+
+# Bolt: same silhouette as the original mark, in white. Coordinates are in
+# bolt units where the bolt spans y = -0.42 ... 0.42.
 bolt = [
     ( 0.10, -0.42),
     (-0.20,  0.04),
@@ -56,49 +69,16 @@ bolt = [
     ( 0.22, -0.06),
     ( 0.00, -0.06),
 ]
+bolt_height = tile * 0.50
+scale = bolt_height / 0.84
+cx, cy = S / 2, S / 2
+points = [(cx + x * scale, cy + y * scale) for x, y in bolt]
+draw.polygon(points, fill=(246, 246, 247, 255))
 
-def point_in_poly(px, py, poly):
-    inside = False
-    n = len(poly)
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi):
-            inside = not inside
-        j = i
-    return inside
-
-def pixel(x, y):
-    dx, dy = x - cx, y - cy
-    dist = math.sqrt(dx*dx + dy*dy)
-    if dist <= r:
-        # Deep purple → violet radial gradient
-        t = dist / r
-        rb = int( 96 + ( 60 -  96) * t)   # 96 → 60
-        g  = int( 32 + ( 18 -  32) * t)   # 32 → 18
-        b  = int(168 + (110 - 168) * t)   # 168 → 110
-        # Subtle top highlight
-        highlight = max(0, min(1, 1 - (dy + r * 0.4) / (r * 0.8)))
-        rb = min(255, int(rb + 30 * highlight))
-        g  = min(255, int(g  + 18 * highlight))
-        b  = min(255, int(b  + 28 * highlight))
-        # Anti-aliased disc edge
-        edge = max(0, min(1, (r - dist) * 2))
-        a = int(255 * edge)
-
-        # Lightning bolt overlay (white) in normalised coords
-        nx = dx / r * 0.42
-        ny = dy / r * 0.42
-        if point_in_poly(nx, ny, bolt):
-            return (255, 245, 210, a)  # warm white bolt for contrast
-        return (rb, g, b, a)
-    return (0, 0, 0, 0)
-
-with open('$ICON_SOURCE', 'wb') as f:
-    f.write(create_png(size, size, pixel))
-print('Generated icon-1024.png')
-"
+img = img.resize((SIZE, SIZE), Image.LANCZOS)
+img.save(out, "PNG")
+print("Generated", out)
+PY
 fi
 
 # Generate iconset
