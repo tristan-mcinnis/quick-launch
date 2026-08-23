@@ -54,63 +54,17 @@ enum FolderLocationService {
         )
     }
 
-    /// Fronts an existing Finder window already showing the folder, or opens a new one.
-    /// The script is fixed; the path arrives as `item 1 of argv`, never interpolated.
-    static let finderScript = """
-    on run argv
-      set p to POSIX file (item 1 of argv) as alias
-      tell application "Finder"
-        activate
-        repeat with w in (every Finder window)
-          try
-            if (target of w as alias) is p then
-              set index of w to 1
-              return "fronted"
-            end if
-          end try
-        end repeat
-        set nw to make new Finder window to p
-        set index of nw to 1
-        return "opened"
-      end tell
-    end run
-    """
-
-    static func openPlan(for location: FolderLocation) -> (executable: String, arguments: [String]) {
-        ("/usr/bin/osascript", ["-e", finderScript, "--", location.expandedURL.path])
-    }
-
-    /// Runs the plan; on any failure falls back to `NSWorkspace.shared.open` so the folder always opens.
-    /// Returns false only when both fail.
+    /// Opens the folder in Finder right away. This used to front an existing
+    /// Finder window through an osascript AppleScript, but that Apple Event
+    /// exchange could hang for minutes on a busy system (measured at 107 s),
+    /// so Return now takes the fast native route every time.
     @MainActor
     static func open(_ location: FolderLocation) async -> Bool {
-        if await runPlan(openPlan(for: location)) { return true }
-        return NSWorkspace.shared.open(location.expandedURL)
+        NSWorkspace.shared.open(location.expandedURL)
     }
 
     @MainActor
     static func reveal(_ location: FolderLocation) {
         NSWorkspace.shared.activateFileViewerSelecting([location.expandedURL])
-    }
-
-    private static func runPlan(_ plan: (executable: String, arguments: [String])) async -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return false
-        }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in continuation.resume() }
-        }
-        guard process.terminationStatus == 0 else { return false }
-        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text == "fronted" || text == "opened"
     }
 }

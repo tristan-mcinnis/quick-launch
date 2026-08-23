@@ -76,6 +76,9 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     /// ⌘↩: copy, reveal, or copy link.
     case secondary
     case copyAndPaste
+    /// Runs a launcher command (Screen Awareness captures and the like) from
+    /// a catalog's ⌘K list; `commandValue` holds the command item's value.
+    case runCommand
     case edit
     case setAlias
     case setHotkey
@@ -101,8 +104,10 @@ struct ItemAction: Identifiable, Equatable, Sendable {
     let systemImage: String
     let shortcut: KeyShortcut?
     var isDestructive: Bool = false
+    /// For `.runCommand`: the launcher command's value ("screenshot.window", …).
+    var commandValue: String? = nil
 
-    var id: String { kind.rawValue }
+    var id: String { kind.rawValue + ":" + (commandValue ?? "") }
 }
 
 /// Raycast conventions: Return is the primary action, ⌘↩ the secondary,

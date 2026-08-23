@@ -59,6 +59,39 @@ struct ScreenAwarenessTests {
         #expect(empty.errorMessage?.contains("copied") == true)
     }
 
+    @Test func screenshotsCatalogOffersCaptureCommandsBehindCommandK() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-cmdk-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Self.writeImage(to: folder.appendingPathComponent("Screenshot 2026-08-22 at 10.00.00.png"), text: "x")
+
+        let vm = QuickViewModel(screenshotTextIndex: ScreenshotTextIndex(storeURL: nil))
+        vm.settings.screenshotTextSearch = false
+        vm.screenshotsFolder = folder
+        vm.enterCatalog(.screenshots)
+        // The list holds only the file; the capture and AI commands do not.
+        #expect(vm.catalogItems.allSatisfy { $0.kind == .screenshot })
+
+        vm.handleCommandK()
+        #expect(vm.isCatalogActionPanePresented)
+        let titles = vm.focusedItemActions.map(\.title)
+        for expected in ["Send Focused Window to AI", "Send Screen to AI", "Attach Latest Screenshot", "Paste Latest Screenshot"] {
+            #expect(titles.contains(expected), "\(expected) belongs in ⌘K")
+        }
+        // None of them steal a keyboard shortcut from the file's own actions.
+        #expect(vm.focusedItemActions.filter { $0.kind == .runCommand }.allSatisfy { $0.shortcut == nil })
+
+        // Running one dispatches the real command: Attach Latest Screenshot
+        // pulls the newest file in as a pending attachment.
+        let attach = vm.focusedItemActions.first {
+            $0.kind == .runCommand && $0.commandValue == LatestScreenshotFinder.commandID
+        }!
+        vm.rememberSelectionTarget(Self.safari)
+        await vm.perform(attach, on: vm.focusedLauncherResult!)
+        #expect(vm.pendingImage != nil)
+        #expect(vm.pendingContext?.hasScreenshot == true)
+    }
+
     @Test func focusedWindowCaptureAttachesImageAndContextAndPrefixesTheQuestion() async {
         let mock = MockQuickService()
         await mock.setResponses([StreamDelta(text: "It is the Raycast manual.", finishReason: "stop")])
@@ -249,11 +282,9 @@ struct ScreenAwarenessTests {
         vm.settings.screenshotTextSearch = false
         vm.screenshotsFolder = folder
         vm.enterCatalog(.screenshots)
-        #expect(!vm.showsDetailPane, "capture commands are highlighted first; they have no preview")
-        vm.applicationSelectionIndex = vm.launcherMatches.firstIndex { if case .item(let item) = $0 { return item.kind == .screenshot }; return false } ?? 0
-        #expect(vm.showsDetailPane)
+        // The newest file is highlighted straight away; the detail pane opens with it.
+        #expect(vm.showsDetailPane, "the newest screenshot leads the list and carries the preview")
         #expect(vm.detailItem?.kind == .screenshot)
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthWithDetail)
         #expect(ScreenshotThumbnailCache.thumbnail(forPath: vm.detailItem!.value) != nil)
         #expect(ScreenshotThumbnailCache.pixelSize(forPath: vm.detailItem!.value) == CGSize(width: 400, height: 120))
 

@@ -116,8 +116,9 @@ struct InputModeTests {
         vm.screenshotsFolder = folder
         vm.enterCatalog(.screenshots)
         let items = vm.catalogItems
-        #expect(items.prefix(2).allSatisfy { $0.kind == .command })
-        #expect(items.filter { $0.kind == .screenshot }.count == 2)
+        // The catalog is a pure file list; capture and AI commands live in ⌘K.
+        #expect(items.allSatisfy { $0.kind == .screenshot })
+        #expect(items.count == 2)
         // Temp paths come back through /private; compare file names.
         func names(_ list: [LauncherCatalogItem]) -> [String] { list.map { ($0.value as NSString).lastPathComponent } }
         #expect(names(items.filter { $0.kind == .screenshot }).first == recent.lastPathComponent)
@@ -153,6 +154,9 @@ struct InputModeTests {
         vm.settings.screenshotTextSearch = false
         vm.screenshotsFolder = folder
         vm.enterCatalog(.screenshots)
+        // Newest capture first, no command rows above it.
+        #expect(vm.catalogMatches.count == 2)
+        #expect((vm.catalogMatches.first?.value as NSString?)?.lastPathComponent == recent.lastPathComponent)
 
         // The word people actually type must not empty the catalog.
         vm.input = "screenshots"
@@ -160,7 +164,7 @@ struct InputModeTests {
         #expect(pluralHits.count == 2)
         #expect((pluralHits.first?.value as NSString?)?.lastPathComponent == recent.lastPathComponent)
         vm.input = "screenshot"
-        #expect(vm.catalogMatches.count == 2, "capture commands have no filename words; both files match")
+        #expect(vm.catalogMatches.count == 2, "every file answers the singular too")
 
         // Date words work after the search words too.
         vm.input = "09 today"
@@ -214,11 +218,11 @@ struct InputModeTests {
         let vm = QuickViewModel()
         vm.settings.screenshotTextSearch = false
         vm.screenshotsFolder = folder
-        // Nothing scanned yet: the count would be commands only.
-        #expect(vm.catalogCount(.screenshots) == 2)
+        // Nothing scanned yet: the count is zero, and no commands pad the list.
+        #expect(vm.catalogCount(.screenshots) == 0)
         vm.refreshScreenshotFilesInBackground()
         await vm.waitForScreenshotScanForTesting()
-        #expect(vm.catalogCount(.screenshots) == 4, "two capture commands plus two files")
+        #expect(vm.catalogCount(.screenshots) == 2)
         #expect(vm.lastScreenshotScanAt != nil)
         // Entering straight after a warm scan trusts it; files are already there.
         vm.enterCatalog(.screenshots)

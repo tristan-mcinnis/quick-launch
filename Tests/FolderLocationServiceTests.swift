@@ -90,28 +90,6 @@ struct FolderLocationServiceTests {
         #expect(result.first?.id == "home")
     }
 
-    @Test func openPlanUsesOsascriptWithPathAsLastArgument() {
-        let location = FolderLocation(id: "x", title: "X", path: "~/Downloads", systemImage: "folder", isBuiltIn: true)
-        let plan = FolderLocationService.openPlan(for: location)
-        #expect(plan.executable == "/usr/bin/osascript")
-        #expect(plan.arguments.first == "-e")
-        #expect(plan.arguments.contains(FolderLocationService.finderScript))
-        #expect(plan.arguments.contains("--"))
-        #expect(plan.arguments.last == location.expandedURL.path)
-        #expect(plan.arguments.firstIndex(of: "--")! < plan.arguments.count - 1)
-    }
-
-    @Test func openPlanScriptNeverContainsThePath() {
-        let location = FolderLocation(id: "x", title: "X", path: "/tmp/it's \"quoted\"", systemImage: "folder", isBuiltIn: false)
-        let plan = FolderLocationService.openPlan(for: location)
-        let script = plan.arguments[1]
-        #expect(!script.contains("/tmp"))
-        #expect(!script.contains("quoted"))
-        #expect(script.contains("item 1 of argv"))
-        #expect(script.contains("return \"fronted\""))
-        #expect(script.contains("return \"opened\""))
-    }
-
     @Test func folderLocationRoundTripsThroughCodable() throws {
         let location = FolderLocationService.custom(from: URL(fileURLWithPath: "/Users/someone/Projects"))
         let data = try JSONEncoder().encode(location)

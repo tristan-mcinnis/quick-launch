@@ -570,10 +570,41 @@ import Observation
         }
     }
 
-    /// Capture commands first, then the saved files, newest first.
+    /// The saved files, newest first, pins floated. The capture and AI
+    /// commands are not rows here; they live behind ⌘K so the list stays a
+    /// pure screenshots list (they stay searchable from the root).
     var screenshotItems: [LauncherCatalogItem] {
-        let captures = ScreenshotKind.allCases.map(screenshotCommand(for:))
-        return captures + pinnedFirst(screenshotFiles)
+        pinnedFirst(screenshotFiles)
+    }
+
+    /// The capture and Screen Awareness commands offered in the Screenshots
+    /// catalog's ⌘K pane. No shortcuts: they are palette rows only.
+    static let screenAwarenessCommandValues = [
+        ScreenshotKind.window.commandID,
+        ScreenshotKind.display.commandID,
+        "awareness.area",
+        LatestScreenshotFinder.commandID,
+        "screenshot.pasteLatest",
+    ]
+    private static let screenCommandIcons = [
+        "screenshot.window": "macwindow.on.rectangle",
+        "screenshot.display": "rectangle.dashed.badge.record",
+        "awareness.area": "rectangle.dashed",
+        "screenshot.latest": "photo.badge.arrow.down",
+        "screenshot.pasteLatest": "arrow.turn.down.right",
+    ]
+
+    var screenAwarenessActions: [ItemAction] {
+        Self.screenAwarenessCommandValues.compactMap { value in
+            guard let command = systemCommands.first(where: { $0.value == value }) else { return nil }
+            return ItemAction(
+                kind: .runCommand,
+                title: command.title,
+                systemImage: Self.screenCommandIcons[value] ?? "photo",
+                shortcut: nil,
+                commandValue: value
+            )
+        }
     }
 
     /// Marks the items the user pinned and floats them to the top, keeping
@@ -1952,6 +1983,9 @@ import Observation
             return false
         }
         pendingImage = attachment
+        // Same attachment card as the other captures: what it is and where
+        // it came from.
+        pendingContext = selectionTarget.map { CaptureContext(appName: $0.applicationName, hasScreenshot: true) }
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
@@ -2420,6 +2454,11 @@ import Observation
             isRunning = runningApplication(for: application) != nil
         }
         var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName, isRunning: isRunning)
+        // In the Screenshots catalog the capture and AI commands ride along
+        // in every ⌘K pane; the list itself stays a pure file list.
+        if catalogScope == .screenshots {
+            actions.append(contentsOf: screenAwarenessActions)
+        }
         if deleteArmedItemID == result.id,
            let index = actions.firstIndex(where: { $0.kind == .delete }) {
             actions[index] = ItemAction(
@@ -2555,6 +2594,12 @@ import Observation
             } else {
                 _ = await copyAndPasteLauncherItem(item)
             }
+        case .runCommand:
+            guard let value = action.commandValue,
+                  let command = systemCommands.first(where: { $0.value == value })
+            else { return }
+            closeItemActionPane()
+            await performLauncherItem(command)
         default:
             break
         }
@@ -2566,7 +2611,7 @@ import Observation
     private func performSynchronously(_ action: ItemAction, on result: LauncherSearchResult) -> Bool {
         if action.kind != .delete { deleteArmedItemID = nil }
         switch action.kind {
-        case .primary, .copyAndPaste:
+        case .primary, .copyAndPaste, .runCommand:
             return false
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
