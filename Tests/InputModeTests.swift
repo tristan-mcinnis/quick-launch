@@ -228,6 +228,39 @@ struct InputModeTests {
         vm.enterCatalog(.screenshots)
         #expect(vm.catalogItems.filter { $0.kind == .screenshot }.count == 2)
     }
+
+    @Test func aLateStaleScanNeverClobbersNewerFiles() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-scanrace-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let older = folder.appendingPathComponent("Screenshot 2026-08-22 at 16.00.08.png")
+        try png.write(to: older)
+
+        let vm = QuickViewModel()
+        vm.settings.screenshotTextSearch = false
+        vm.screenshotsFolder = folder
+        vm.reloadScreenshotFiles()
+        #expect(vm.screenshotFiles.count == 1)
+
+        // The capture lands after a background scan was already requested.
+        let newer = folder.appendingPathComponent("Screenshot 2026-08-23 at 15.23.18.png")
+        try png.write(to: newer)
+        vm.reloadScreenshotFiles()
+        let freshNames = vm.screenshotFiles.map { ($0.value as NSString).lastPathComponent }
+
+        // The slow scan from before the capture arrives last; it must lose.
+        let staleItems = ScreenshotLibrary.items(in: folder, now: Date(timeIntervalSinceNow: -120))
+            .filter { ($0.value as NSString).lastPathComponent == older.lastPathComponent }
+        vm.applyScreenshotScan(staleItems, from: folder, requestedAt: Date(timeIntervalSinceNow: -120))
+        #expect(vm.screenshotFiles.count == 2)
+        #expect(vm.screenshotFiles.map { ($0.value as NSString).lastPathComponent } == freshNames)
+
+        // A scan requested after the reload still applies.
+        let laterItems = Array(vm.screenshotFiles)
+        vm.applyScreenshotScan(laterItems, from: folder, requestedAt: Date())
+        #expect(vm.screenshotFiles.count == 2)
+    }
 }
 
 @MainActor

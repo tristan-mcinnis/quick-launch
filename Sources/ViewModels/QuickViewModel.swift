@@ -1816,11 +1816,11 @@ import Observation
     func refreshScreenshotFilesInBackground() {
         guard screenshotScanTask == nil else { return }
         let folder = screenshotsFolder
-        let now = Date()
+        let requestedAt = Date()
         screenshotScanTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let items = ScreenshotLibrary.items(in: folder, now: now)
+            let items = ScreenshotLibrary.items(in: folder, now: requestedAt)
             await MainActor.run { [weak self] in
-                self?.applyScreenshotScan(items, from: folder, scannedAt: now)
+                self?.applyScreenshotScan(items, from: folder, requestedAt: requestedAt)
             }
         }
     }
@@ -1841,11 +1841,16 @@ import Observation
         screenshotScanTask = nil
     }
 
-    private func applyScreenshotScan(_ items: [LauncherCatalogItem], from folder: URL, scannedAt: Date) {
+    /// Applies a finished background scan. A scan that was requested before
+    /// newer data already landed (a synchronous reload on catalog entry, or
+    /// a later scan) is dropped: without this, a slow listing taken before
+    /// the newest capture would land afterwards and push it off the top.
+    func applyScreenshotScan(_ items: [LauncherCatalogItem], from folder: URL, requestedAt: Date) {
         screenshotScanTask = nil
         guard folder == screenshotsFolder else { return }
+        if let applied = lastScreenshotScanAt, requestedAt < applied { return }
         screenshotFiles = items
-        lastScreenshotScanAt = scannedAt
+        lastScreenshotScanAt = Date()
         if settings.screenshotTextSearch {
             screenshotTextIndex.refresh(for: items)
         }
