@@ -152,6 +152,9 @@ import Observation
         self.currentVersion = currentVersion
         self.screenshotTextIndex.onProgress = { [weak self] progress in
             self?.screenshotIndexProgress = progress
+            // Newly recognized text changes what queries match; drop cached
+            // rankings so text hits appear without waiting for a keystroke.
+            self?.invalidateLauncherRanking()
         }
     }
 
@@ -233,6 +236,19 @@ import Observation
         if !foldedAlias.isEmpty, foldedAlias == foldedQuery { score += 12_000 }
         score -= min(title.count, 100)
         return score
+    }
+
+    /// Query variants that forgive a trailing plural "s": `screenshots` also
+    /// tries `screenshot`, which is what screenshot filenames contain. The
+    /// singular form is only kept when it stays long enough to be meaningful
+    /// (`shots` keeps `shot`; `lens`, `bus`, and `this` keep their exact form),
+    /// so short words never turn into loose subsequence noise.
+    static func searchVariants(for needle: String) -> [String] {
+        let folded = FuzzyMatcher.fold(needle.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard folded.count > 4, folded.hasSuffix("s"), !folded.hasSuffix("ss"),
+              !folded.hasSuffix("us"), !folded.hasSuffix("is") else { return [folded] }
+        let singular = String(folded.dropLast())
+        return singular.count >= 4 ? [folded, singular] : [folded]
     }
 
     private func scoredApplications(
@@ -583,6 +599,7 @@ import Observation
 
     func reloadScreenshotFiles() {
         screenshotFiles = ScreenshotLibrary.items(in: screenshotsFolder)
+        lastScreenshotScanAt = Date()
         if settings.screenshotTextSearch {
             screenshotTextIndex.refresh(for: screenshotFiles)
         }
@@ -684,23 +701,32 @@ import Observation
                 return interval.contains(capturedAt)
             }
             guard !parsed.needle.isEmpty else { return Array(windowed.prefix(rows)) }
-            let foldedNeedle = FuzzyMatcher.fold(parsed.needle)
-            let literal = ScreenshotTextIndex.normalize(parsed.needle)
-            let words = literal.split(separator: " ").map(String.init)
+            let variants = Self.searchVariants(for: parsed.needle)
+            // One normalized form per variant for OCR containment.
+            let literals = variants.map(ScreenshotTextIndex.normalize)
             return Array(windowed.compactMap { item -> (LauncherCatalogItem, Int)? in
                 var best: Int?
-                if let score = matchScore(foldedQuery: foldedNeedle, title: item.title, alias: launcherItemAlias(for: item), keywords: item.keywords) {
-                    best = score + 1_000
-                }
-                // Text inside the image: literal, whitespace-flattened, all words present.
-                if item.kind == .screenshot, settings.screenshotTextSearch,
-                   let text = screenshotTextIndex.normalizedText(for: item),
-                   text.contains(literal) || (words.count > 1 && words.allSatisfy { text.contains($0) }) {
-                    best = max(best ?? 0, 500)
+                var titleHit = false
+                for (index, variant) in variants.enumerated() {
+                    if let score = matchScore(foldedQuery: variant, title: item.title, alias: launcherItemAlias(for: item), keywords: item.keywords) {
+                        best = max(best ?? 0, score + 1_000)
+                        titleHit = true
+                    }
+                    // Text inside the image: literal, whitespace-flattened,
+                    // all words present, tried per plural variant.
+                    if item.kind == .screenshot, settings.screenshotTextSearch,
+                       let text = screenshotTextIndex.normalizedText(for: item) {
+                        let literal = literals[index]
+                        let words = literal.split(separator: " ").map(String.init)
+                        if !literal.isEmpty,
+                           text.contains(literal) || (words.count > 1 && words.allSatisfy { text.contains($0) }) {
+                            best = max(best ?? 0, 500)
+                        }
+                    }
                 }
                 guard let score = best else { return nil }
                 var matched = item
-                if !(matched.title.lowercased().contains(literal)), matched.kind == .screenshot {
+                if !titleHit, !(matched.title.lowercased().contains(literals[0])), matched.kind == .screenshot {
                     matched.detail = "Text match · " + matched.detail
                 }
                 return (matched, score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item))
@@ -1342,7 +1368,14 @@ import Observation
     }
 
     func enterCatalog(_ scope: LauncherCatalogScope) {
-        if scope == .screenshots { reloadScreenshotFiles() }
+        if scope == .screenshots {
+            // A scan from the last two seconds is already on screen; rescanning
+            // would only repeat work. Anything older reads the disk once, now.
+            let isFresh = lastScreenshotScanAt.map {
+                Date().timeIntervalSince($0) < Self.screenshotScanFreshness
+            } ?? false
+            if !isFresh { reloadScreenshotFiles() }
+        }
         inputMode = nil
         catalogScope = scope
         pendingQuickLinkID = nil
@@ -1438,7 +1471,23 @@ import Observation
 
     @discardableResult
     func pasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
-        guard let target = selectionTarget, let selectedTextService else {
+        var target = selectionTarget
+        if let selectedTextService {
+            // A stale capture (app quit) or a missed one (opened from the
+            // menu bar, or the window stack changed) falls back to asking
+            // the window stack what sits behind the overlay right now.
+            // Only a confirmed quit invalidates the capture; an unknown pid
+            // (test stubs, odd processes) keeps its captured target.
+            if let captured = target,
+               NSRunningApplication(processIdentifier: captured.processIdentifier)?.isTerminated == true {
+                target = nil
+            }
+            if target == nil, let fresh = selectedTextService.currentExternalTarget() {
+                target = fresh
+                rememberSelectionTarget(fresh)
+            }
+        }
+        guard let target, let selectedTextService else {
             copyLauncherItem(item)
             errorMessage = "No text field was available behind Quick Launch. The item was copied instead."
             requestInputFocus()
@@ -1717,7 +1766,60 @@ import Observation
     }
 
     /// Folder scanned by "Attach Latest Screenshot"; tests point it elsewhere.
-    @ObservationIgnored var screenshotsFolder: URL = LatestScreenshotFinder.screenshotsFolder()
+    /// Pointing it somewhere new invalidates the cached scan so the next
+    /// catalog entry rescans from disk.
+    @ObservationIgnored var screenshotsFolder: URL = LatestScreenshotFinder.screenshotsFolder() {
+        didSet {
+            if oldValue != screenshotsFolder { lastScreenshotScanAt = nil }
+        }
+    }
+    /// When `screenshotFiles` was read from disk; nil until the first scan.
+    @ObservationIgnored private(set) var lastScreenshotScanAt: Date?
+    @ObservationIgnored private var screenshotScanTask: Task<Void, Never>?
+    /// A scan this fresh is trusted on catalog entry, so entering costs nothing.
+    static let screenshotScanFreshness: TimeInterval = 2
+
+    /// Reads the folder off the main thread and swaps the list in when done.
+    /// Repeated calls collapse into the running scan. Keeps the root badge
+    /// and a first catalog entry instant: no disk work on the hot path.
+    func refreshScreenshotFilesInBackground() {
+        guard screenshotScanTask == nil else { return }
+        let folder = screenshotsFolder
+        let now = Date()
+        screenshotScanTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let items = ScreenshotLibrary.items(in: folder, now: now)
+            await MainActor.run { [weak self] in
+                self?.applyScreenshotScan(items, from: folder, scannedAt: now)
+            }
+        }
+    }
+
+    /// Warms the list when the cached scan is older than the freshness window.
+    /// Called whenever the overlay appears, off the keystroke path.
+    func warmScreenshotCatalogIfStale() {
+        guard catalogScope != .screenshots else { return }
+        if let last = lastScreenshotScanAt, Date().timeIntervalSince(last) < Self.screenshotScanFreshness {
+            return
+        }
+        refreshScreenshotFilesInBackground()
+    }
+
+    /// Waits out a running background scan, for tests.
+    func waitForScreenshotScanForTesting() async {
+        await screenshotScanTask?.value
+        screenshotScanTask = nil
+    }
+
+    private func applyScreenshotScan(_ items: [LauncherCatalogItem], from folder: URL, scannedAt: Date) {
+        screenshotScanTask = nil
+        guard folder == screenshotsFolder else { return }
+        screenshotFiles = items
+        lastScreenshotScanAt = scannedAt
+        if settings.screenshotTextSearch {
+            screenshotTextIndex.refresh(for: items)
+        }
+        invalidateLauncherRanking()
+    }
 
     /// Send Screen Area to AI: the system selection rectangle, then attach.
     @discardableResult

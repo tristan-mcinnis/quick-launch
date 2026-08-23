@@ -189,6 +189,8 @@ enum ScreenshotThumbnailCache {
     private static let cache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 300
+        // Roughly 64 MB of decoded pixels; NSCache evicts under pressure too.
+        cache.totalCostLimit = 64 * 1_024 * 1_024
         return cache
     }()
 
@@ -199,7 +201,7 @@ enum ScreenshotThumbnailCache {
             return nil
         }
         let result = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
-        cache.setObject(result, forKey: key)
+        cache.setObject(result, forKey: key, cost: max(1, image.width * image.height * 4))
         return result
     }
 

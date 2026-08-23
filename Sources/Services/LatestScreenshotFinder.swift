@@ -6,6 +6,9 @@ import Foundation
 enum LatestScreenshotFinder {
     static let commandID = "screenshot.latest"
     static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "tiff"]
+    /// Filename prefixes macOS and CleanShot use. One list shared with the
+    /// Screenshots catalog, so both agree on what counts as a screenshot.
+    static let namePrefixes: Set<String> = ["screenshot", "screen shot", "cleanshot", "scr-"]
 
     /// `com.apple.screencapture location`, falling back to the Desktop.
     static func screenshotsFolder(fileManager: FileManager = .default) -> URL {
@@ -22,7 +25,7 @@ enum LatestScreenshotFinder {
         return fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
     }
 
-    /// Newest image whose name starts with the screenshot prefix.
+    /// Newest image whose name starts with a known screenshot prefix.
     static func newestScreenshot(in folder: URL, fileManager: FileManager = .default) -> URL? {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: folder,
@@ -32,7 +35,7 @@ enum LatestScreenshotFinder {
         return urls
             .filter { url in
                 imageExtensions.contains(url.pathExtension.lowercased())
-                    && url.lastPathComponent.lowercased().hasPrefix("screenshot")
+                    && namePrefixes.contains { url.lastPathComponent.lowercased().hasPrefix($0) }
             }
             .max { lhs, rhs in
                 let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast

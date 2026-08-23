@@ -137,6 +137,93 @@ struct InputModeTests {
         #expect(ItemActionCatalog.actions(for: .item(file), pasteTarget: nil).map(\.title)
             == ["Paste Image", "Copy Image", "Attach to Question", "Quick Look", "Pin to Top", "Reveal in Finder", "Copy File Path", "Move to Trash"])
     }
+
+    @Test func screenshotSearchForgivesPluralsAndDateWordsAnywhere() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-shotsearch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let old = folder.appendingPathComponent("Screenshot 2026-08-11 at 14.32.07.png")
+        let recent = folder.appendingPathComponent("Screenshot 2026-08-22 at 09.00.00.png")
+        try png.write(to: old); try png.write(to: recent)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -10 * 86_400)], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: recent.path)
+
+        let vm = QuickViewModel()
+        vm.settings.screenshotTextSearch = false
+        vm.screenshotsFolder = folder
+        vm.enterCatalog(.screenshots)
+
+        // The word people actually type must not empty the catalog.
+        vm.input = "screenshots"
+        let pluralHits = vm.catalogMatches.filter { $0.kind == .screenshot }
+        #expect(pluralHits.count == 2)
+        #expect((pluralHits.first?.value as NSString?)?.lastPathComponent == recent.lastPathComponent)
+        vm.input = "screenshot"
+        #expect(vm.catalogMatches.count == 2, "capture commands have no filename words; both files match")
+
+        // Date words work after the search words too.
+        vm.input = "09 today"
+        #expect(vm.catalogMatches.map { ($0.value as NSString).lastPathComponent } == [recent.lastPathComponent])
+        let after = ScreenshotQuery.parse("acme today")
+        #expect(after.needle == "acme" && after.interval != nil)
+        #expect(ScreenshotQuery.parse("meeting 7d").needle == "meeting")
+        #expect(ScreenshotQuery.parse("meeting 7d").interval != nil)
+        let dated = ScreenshotQuery.parse("2026-08-11 report")
+        #expect(dated.needle == "report")
+        #expect(dated.interval != nil && dated.interval!.duration == 86_400)
+        // Conflicting date words degrade to no filter instead of zero rows.
+        let conflict = ScreenshotQuery.parse("today yesterday acme")
+        #expect(conflict.interval == nil)
+        #expect(conflict.needle == "acme")
+    }
+
+    @Test func latestScreenshotFinderUnderstandsEveryCatalogPrefix() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-prefixes-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let older = folder.appendingPathComponent("Screenshot 2026-08-20 at 10.00.00.png")
+        let cleanshot = folder.appendingPathComponent("CleanShot 2026-08-22 at 10.00.00.png")
+        try png.write(to: older); try png.write(to: cleanshot)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86_400)], ofItemAtPath: older.path)
+        #expect(LatestScreenshotFinder.newestScreenshot(in: folder)?.lastPathComponent == cleanshot.lastPathComponent)
+        #expect(!LatestScreenshotFinder.namePrefixes.isEmpty)
+        for prefix in ["screen shot", "scr-"] {
+            #expect(LatestScreenshotFinder.namePrefixes.contains(prefix))
+        }
+    }
+
+    @Test func searchVariantsFoldPluralsOnlyWhenSafe() {
+        #expect(QuickViewModel.searchVariants(for: "Screenshots") == ["screenshots", "screenshot"])
+        #expect(QuickViewModel.searchVariants(for: "shots") == ["shots", "shot"])
+        #expect(QuickViewModel.searchVariants(for: "lens") == ["lens"])
+        #expect(QuickViewModel.searchVariants(for: "glass") == ["glass"])
+        #expect(QuickViewModel.searchVariants(for: "this") == ["this"])
+        #expect(QuickViewModel.searchVariants(for: "acme invoice") == ["acme invoice"])
+    }
+
+    @Test func backgroundScanCountsRealFilesBeforeTheCatalogOpens() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-warmscan-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        try png.write(to: folder.appendingPathComponent("Screenshot 2026-08-20 at 10.00.00.png"))
+        try png.write(to: folder.appendingPathComponent("Screenshot 2026-08-21 at 10.00.00.png"))
+
+        let vm = QuickViewModel()
+        vm.settings.screenshotTextSearch = false
+        vm.screenshotsFolder = folder
+        // Nothing scanned yet: the count would be commands only.
+        #expect(vm.catalogCount(.screenshots) == 2)
+        vm.refreshScreenshotFilesInBackground()
+        await vm.waitForScreenshotScanForTesting()
+        #expect(vm.catalogCount(.screenshots) == 4, "two capture commands plus two files")
+        #expect(vm.lastScreenshotScanAt != nil)
+        // Entering straight after a warm scan trusts it; files are already there.
+        vm.enterCatalog(.screenshots)
+        #expect(vm.catalogItems.filter { $0.kind == .screenshot }.count == 2)
+    }
 }
 
 @MainActor

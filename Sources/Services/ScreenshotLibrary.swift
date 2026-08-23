@@ -5,8 +5,12 @@ import Foundation
 /// Tuna Companion screenshots browser: newest first, 240 at most, names
 /// that macOS and CleanShot use, date words in the query.
 enum ScreenshotLibrary {
-    static let maximumItems = 240
-    static let namePrefixes = ["screenshot", "screen shot", "cleanshot", "scr-"]
+    /// The catalog lists and indexes the newest 400 captures; older files
+    /// stay out so scans, thumbnails, and OCR stay fast.
+    static let maximumItems = 400
+    /// Shared with `LatestScreenshotFinder` so "Paste Latest Screenshot"
+    /// finds everything the catalog lists.
+    static let namePrefixes: Set<String> = LatestScreenshotFinder.namePrefixes
 
     static func items(in folder: URL, fileManager: FileManager = .default, now: Date = Date()) -> [LauncherCatalogItem] {
         guard let urls = try? fileManager.contentsOfDirectory(
@@ -83,14 +87,15 @@ enum ScreenshotLibrary {
     }
 }
 
-/// Date words at the front of a screenshots query: `today acme` means both.
+/// Date words anywhere in a screenshots query: `today acme` and
+/// `acme today` both mean today plus the word acme.
 struct ScreenshotQuery: Equatable {
     var interval: DateInterval?
     var needle: String
 
     static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current) -> ScreenshotQuery {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lowered = trimmed.lowercased()
+        guard !trimmed.isEmpty else { return ScreenshotQuery(interval: nil, needle: trimmed) }
         let startOfToday = calendar.startOfDay(for: now)
         func days(_ count: Int) -> DateInterval {
             DateInterval(start: calendar.date(byAdding: .day, value: -(count - 1), to: startOfToday)!, end: now.addingTimeInterval(1))
@@ -105,31 +110,54 @@ struct ScreenshotQuery: Equatable {
             }()),
             ("this month", DateInterval(start: calendar.dateInterval(of: .month, for: now)!.start, end: now.addingTimeInterval(1))),
         ]
+        var working = trimmed
+        var intervals: [DateInterval] = []
+
+        /// Removes the first match of `pattern` from `working` and hands it back.
+        func takeFirstMatch(_ pattern: String) -> Substring? {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+            let full = NSRange(working.startIndex..., in: working)
+            guard let match = regex.firstMatch(in: working, range: full),
+                  let range = Range(match.range, in: working)
+            else { return nil }
+            let taken = working[range]
+            working.removeSubrange(range)
+            return taken
+        }
+
+        // Longest phrase first so "this month" wins before "this".
         for (phrase, interval) in phrases.sorted(by: { $0.0.count > $1.0.count }) {
-            if lowered == phrase || lowered.hasPrefix(phrase + " ") {
-                return ScreenshotQuery(interval: interval, needle: String(trimmed.dropFirst(phrase.count)).trimmingCharacters(in: .whitespaces))
-            }
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: phrase) + "\\b"
+            if takeFirstMatch(pattern) != nil { intervals.append(interval) }
         }
-        if let match = lowered.range(of: #"^(\d{1,3})d\b"#, options: .regularExpression),
-           let count = Int(lowered[match].dropLast()) {
-            return ScreenshotQuery(interval: days(max(1, count)), needle: String(trimmed[match.upperBound...]).trimmingCharacters(in: .whitespaces))
+        // `7d`, `last 30 days`, and a bare ISO date work wherever they sit.
+        if let taken = takeFirstMatch(#"\b(\d{1,3})d\b"#), let count = Int(taken.filter(\.isNumber)), count >= 1 {
+            intervals.append(days(count))
         }
-        if let match = lowered.range(of: #"^last (\d{1,3}) days?\b"#, options: .regularExpression) {
-            let digits = lowered[match].filter(\.isNumber)
-            if let count = Int(digits) {
-                return ScreenshotQuery(interval: days(max(1, count)), needle: String(trimmed[match.upperBound...]).trimmingCharacters(in: .whitespaces))
-            }
+        if let taken = takeFirstMatch(#"\blast (\d{1,3}) days?\b"#), let count = Int(taken.filter(\.isNumber)), count >= 1 {
+            intervals.append(days(count))
         }
-        if let match = lowered.range(of: #"^(\d{4})-(\d{2})-(\d{2})\b"#, options: .regularExpression) {
-            let parts = lowered[match].split(separator: "-").compactMap { Int($0) }
+        if let taken = takeFirstMatch(#"\b(\d{4})-(\d{2})-(\d{2})\b"#) {
+            let parts = taken.split(separator: "-").compactMap { Int($0) }
             if parts.count == 3, let day = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) {
                 let start = calendar.startOfDay(for: day)
-                return ScreenshotQuery(
-                    interval: DateInterval(start: start, end: calendar.date(byAdding: .day, value: 1, to: start)!),
-                    needle: String(trimmed[match.upperBound...]).trimmingCharacters(in: .whitespaces)
-                )
+                intervals.append(DateInterval(start: start, end: calendar.date(byAdding: .day, value: 1, to: start)!))
             }
         }
-        return ScreenshotQuery(interval: nil, needle: trimmed)
+
+        let needle = working.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+        var combined = intervals.first
+        for interval in intervals.dropFirst() {
+            guard let current = combined,
+                  let merged = current.intersection(with: interval),
+                  // Touching-but-empty overlaps (today + yesterday) filter nothing.
+                  merged.duration > 0
+            else {
+                combined = nil
+                break
+            }
+            combined = merged
+        }
+        return ScreenshotQuery(interval: combined, needle: needle)
     }
 }

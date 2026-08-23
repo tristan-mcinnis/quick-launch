@@ -326,6 +326,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Warm what the first keystrokes will need, off the hotkey path.
         AppIconCache.prewarm(paths: applicationCatalog.applications.map(\.url.path))
         applicationCatalog.loadAlternateNames()
+        // Screenshots list for the root badge and an instant catalog entry.
+        viewModel.refreshScreenshotFilesInBackground()
     }
 
     // MARK: - Panel construction
@@ -403,6 +405,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel?.captureImageFromClipboard()
         }
         applicationCatalog.refreshIfNeeded()
+        // Keep the Screenshots badge and first entry honest without ever
+        // touching the disk on the keystroke path.
+        viewModel?.warmScreenshotCatalogIfStale()
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
             let origin = ScreenPlacement.panelOrigin(

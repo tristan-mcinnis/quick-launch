@@ -11,6 +11,8 @@ struct CaptureContext: Equatable, Sendable {
     var focusedValue: String?
     var appText: String?
     var pageURL: String?
+    /// Finder frontmost: paths highlighted in the front window, bounded to 20.
+    var selectedFilePaths: [String] = []
     var hasScreenshot: Bool = false
 
     /// Human list for the attachment card: "Screenshot, App content, Selection".
@@ -21,11 +23,13 @@ struct CaptureContext: Equatable, Sendable {
         if appText?.isEmpty == false { list.append("App content") }
         if focusedValue?.isEmpty == false { list.append("Focused field") }
         if selectedText?.isEmpty == false { list.append("Selection") }
+        if !selectedFilePaths.isEmpty { list.append("Files") }
         return list
     }
 
     var captureTypeTitle: String {
         let hasText = (appText?.isEmpty == false) || (selectedText?.isEmpty == false) || (focusedValue?.isEmpty == false)
+            || !selectedFilePaths.isEmpty
         switch (hasScreenshot, hasText) {
         case (true, true): return "Screenshot + App Content"
         case (true, false): return "Screenshot"
@@ -47,6 +51,9 @@ struct CaptureContext: Equatable, Sendable {
         }
         if let focusedValue, !focusedValue.isEmpty, focusedValue != selectedText {
             lines.append("Focused field:\n\(focusedValue)")
+        }
+        if !selectedFilePaths.isEmpty {
+            lines.append("Selected files:\n" + selectedFilePaths.joined(separator: "\n"))
         }
         if let appText, !appText.isEmpty {
             lines.append("Readable text in the window:\n\(appText)")
@@ -109,7 +116,30 @@ final class ScreenAwarenessService: ScreenAwarenessReading {
         if !collected.isEmpty {
             context.appText = String(collected.joined(separator: "\n").prefix(Self.maximumAppText))
         }
+        if target.applicationName == "Finder" {
+            context.selectedFilePaths = Self.finderSelectedFilePaths(window: window)
+        }
         return context
+    }
+
+    /// The rows highlighted in a Finder list, gallery, or icon view, as file
+    /// paths. Bounded to 20 so a Select All cannot flood the prompt.
+    static func finderSelectedFilePaths(window: AXUIElement) -> [String] {
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            window,
+            kAXSelectedRowsAttribute as CFString,
+            &raw
+        ) == .success, let rows = raw as? [AXUIElement] else { return [] }
+        var paths: [String] = []
+        for row in rows.prefix(20) {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(row, "AXURL" as CFString, &value) == .success,
+                  let url = value as? URL ?? (value as? NSURL)?.absoluteURL
+            else { continue }
+            paths.append(url.path)
+        }
+        return paths
     }
 
     /// The system tool draws the selection rectangle; the file is read and

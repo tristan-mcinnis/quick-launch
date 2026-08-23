@@ -233,30 +233,9 @@ final class SelectedTextService: SelectedTextServicing {
             return false
         }
 
-        // Accessibility insertion is more reliable for web/Electron composers
-        // than synthesising Command-V. Setting selected text inserts at the
-        // caret when there is no selection and replaces an active selection.
-        let application = AXUIElementCreateApplication(target.processIdentifier)
-        if let focused = focusedElement(in: application) {
-            var settable = DarwinBoolean(false)
-            if AXUIElementIsAttributeSettable(
-                focused,
-                kAXSelectedTextAttribute as CFString,
-                &settable
-            ) == .success,
-            settable.boolValue,
-            AXUIElementSetAttributeValue(
-                focused,
-                kAXSelectedTextAttribute as CFString,
-                text as CFString
-            ) == .success {
-                logger.info("Paste completed by Accessibility insertion")
-                return true
-            }
-        }
-
+        // The text lands on the clipboard first, so whatever happens next the
+        // content is one manual Command-V away and never silently lost.
         let pasteboard = NSPasteboard.general
-        let previousText = pasteboard.string(forType: .string)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
@@ -266,29 +245,47 @@ final class SelectedTextService: SelectedTextServicing {
             try? await Task.sleep(for: .milliseconds(20))
         }
 
-        let source = CGEventSource(stateID: .privateState)
-        guard let down = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: 9,
-            keyDown: true
-        ), let up = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: 9,
-            keyDown: false
-        ) else { return false }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-        logger.info("Paste fallback posted Command-V")
-
-        try? await Task.sleep(for: .milliseconds(450))
-        if pasteboard.string(forType: .string) == text {
-            pasteboard.clearContents()
-            if let previousText {
-                pasteboard.setString(previousText, forType: .string)
-            }
+        // Fast path: accessibility insertion at the caret, no keystrokes.
+        if insertAtCaret(text, processIdentifier: target.processIdentifier) { return true }
+        // Fallback: a synthesised Command-V into the now-frontmost app.
+        guard postCommandV() else {
+            logger.error("Could not synthesise Command-V")
+            return false
         }
+        logger.info("Paste completed by Command-V fallback")
+        return true
+    }
+
+    /// Sets the caret text through Accessibility and verifies the write took:
+    /// some apps report the attribute as settable and then drop it, which used
+    /// to report a paste that never happened.
+    private func insertAtCaret(_ text: String, processIdentifier: pid_t) -> Bool {
+        let application = AXUIElementCreateApplication(processIdentifier)
+        guard let focused = focusedElement(in: application) else { return false }
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(
+            focused,
+            kAXSelectedTextAttribute as CFString,
+            &settable
+        ) == .success,
+        settable.boolValue,
+        AXUIElementSetAttributeValue(
+            focused,
+            kAXSelectedTextAttribute as CFString,
+            text as CFString
+        ) == .success
+        else { return false }
+
+        var valueRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            focused,
+            kAXValueAttribute as CFString,
+            &valueRef
+        ) == .success, let value = valueRef as? String, !value.contains(text) {
+            logger.error("The app dropped the accessibility insertion; using Command-V instead")
+            return false
+        }
+        logger.info("Paste completed by Accessibility insertion")
         return true
     }
 }

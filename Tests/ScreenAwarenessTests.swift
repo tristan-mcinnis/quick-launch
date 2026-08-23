@@ -29,6 +29,36 @@ struct ScreenAwarenessTests {
         #expect(long.promptPreamble(limit: 500).count <= 501)
     }
 
+    @Test func finderSelectionJoinsTheContextCardAndPreamble() {
+        let context = CaptureContext(
+            appName: "Finder",
+            selectedFilePaths: ["/tmp/brief.pdf", "/tmp/invoice.png"],
+            hasScreenshot: true
+        )
+        #expect(context.includedSources == ["Screenshot", "Files"])
+        #expect(context.captureTypeTitle == "Screenshot + App Content")
+        let preamble = context.promptPreamble()
+        #expect(preamble.contains("Selected files:\n/tmp/brief.pdf\n/tmp/invoice.png"))
+    }
+
+    @Test func pasteResolvesAFreshTargetWhenNothingWasCaptured() async {
+        let service = FallbackPasteSelection(fallbackTarget: Self.safari)
+        let vm = QuickViewModel(selectedTextService: service)
+        let item = LauncherCatalogItem(kind: .clipboard, itemID: "entry", title: "Entry", detail: "", value: "quarterly numbers")
+        // No target was captured when the overlay opened; the window stack
+        // still knows what sits behind, and Return must paste there.
+        #expect(await vm.pasteLauncherItem(item))
+        #expect(service.pastedText == "quarterly numbers")
+        #expect(service.pastedTo == Self.safari)
+        #expect(vm.errorMessage == nil)
+        #expect(vm.selectionTarget == Self.safari)
+
+        // With no window behind at all, the copy fallback still explains itself.
+        let empty = QuickViewModel(selectedTextService: FallbackPasteSelection(fallbackTarget: nil))
+        #expect(await empty.pasteLauncherItem(item) == false)
+        #expect(empty.errorMessage?.contains("copied") == true)
+    }
+
     @Test func focusedWindowCaptureAttachesImageAndContextAndPrefixesTheQuestion() async {
         let mock = MockQuickService()
         await mock.setResponses([StreamDelta(text: "It is the Raycast manual.", finishReason: "stop")])
@@ -305,5 +335,26 @@ private final class StubSelection: SelectedTextServicing {
         pastedTo = target
         return true
     }
+    func openAccessibilitySettings() {}
+}
+
+/// Answers `currentExternalTarget` with a fixed app (or nil) and records the
+/// last text paste, so tests can pin the clipboard Return flow.
+@MainActor
+private final class FallbackPasteSelection: SelectedTextServicing {
+    let fallbackTarget: SelectionTarget?
+    private(set) var pastedTo: SelectionTarget?
+    private(set) var pastedText: String?
+    var isAccessibilityTrusted: Bool { true }
+    init(fallbackTarget: SelectionTarget?) { self.fallbackTarget = fallbackTarget }
+    func currentExternalTarget() -> SelectionTarget? { fallbackTarget }
+    func capture(from target: SelectionTarget, promptForPermission: Bool) -> SelectedTextContext? { nil }
+    func replace(_ text: String, in context: SelectedTextContext) async -> Bool { true }
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+        pastedText = text
+        pastedTo = target
+        return true
+    }
+    func pastePasteboard(to target: SelectionTarget) async -> Bool { true }
     func openAccessibilitySettings() {}
 }
