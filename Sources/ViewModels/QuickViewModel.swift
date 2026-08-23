@@ -64,6 +64,9 @@ import Observation
     enum InputMode: Equatable, Sendable {
         case caffeinateUntil
         case renameChat(UUID)
+        /// Typing goes to the AI only; no launcher rows. Entered with Tab,
+        /// the Ask AI row, or its hotkey.
+        case askAI
     }
 
     // MARK: - Dependencies
@@ -102,6 +105,12 @@ import Observation
     // MARK: - Private
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
+    /// Tokens arrive faster than the overlay can re-render a long answer, so
+    /// deltas collect here and `output` is published at most every 33 ms.
+    @ObservationIgnored private var streamBuffer = ""
+    @ObservationIgnored private var streamFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var lastStreamFlush = ContinuousClock.now
+    static let streamFlushInterval: Duration = .milliseconds(33)
     @ObservationIgnored let currentVersion: String
     @ObservationIgnored private(set) var selectionTarget: SelectionTarget?
     @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
@@ -218,7 +227,9 @@ import Observation
         guard var score = [titleScore, aliasScore, keywordScore].compactMap({ $0 }).max() else { return nil }
         if foldedTitle == foldedQuery { score += 10_000 }
         else if foldedTitle.hasPrefix(foldedQuery) { score += 2_000 }
-        else if foldedTitle.contains(foldedQuery) { score += 500 }
+        // A whole typed phrase inside a title ("dark mode" in "Toggle Dark
+        // Mode") is nearly as strong as a prefix, and beats the Ask AI row.
+        else if foldedTitle.contains(foldedQuery) { score += foldedQuery.contains(" ") ? 1_950 : 500 }
         if !foldedAlias.isEmpty, foldedAlias == foldedQuery { score += 12_000 }
         score -= min(title.count, 100)
         return score
@@ -238,7 +249,8 @@ import Observation
             guard let score = matchScore(
                 foldedQuery: foldedQuery,
                 title: application.name,
-                alias: aliases[application.id] ?? ""
+                alias: aliases[application.id] ?? "",
+                keywords: application.alternateNames.joined(separator: " ")
             ) else { return nil }
             let boost = LauncherRanker.boost(
                 for: signals[LauncherSearchResult.application(application).id]
@@ -294,6 +306,80 @@ import Observation
             detail: kind.detail,
             value: kind.commandID
         )
+    }
+
+    /// Built-in user folders plus the ones added in Settings, pinned first.
+    var folderItems: [LauncherCatalogItem] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let locations = FolderLocationService.available(custom: settings.customFolders)
+        return pinnedFirst(locations.map { location in
+            let path = location.expandedURL.path
+            let shown = path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+            return LauncherCatalogItem(
+                kind: .folder,
+                itemID: location.id,
+                title: location.title,
+                detail: shown,
+                value: path,
+                keywords: "folder finder directory open " + (location.isBuiltIn ? "" : "custom")
+            )
+        })
+    }
+
+    func folderLocation(for item: LauncherCatalogItem) -> FolderLocation? {
+        FolderLocationService.available(custom: settings.customFolders).first { $0.id == item.itemID }
+    }
+
+    /// Quick toggles, System Settings panes, and the clipboard and screen
+    /// helpers, as Commands catalog items.
+    var utilityCommands: [LauncherCatalogItem] {
+        let toggles = QuickToggle.allCases.map { toggle in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "toggle.\(toggle.rawValue)",
+                title: toggle.title,
+                detail: toggle.detail,
+                value: "toggle.\(toggle.rawValue)",
+                keywords: toggle.keywords + " toggle quick"
+            )
+        }
+        let panes = SystemSettingsPaneCatalog.panes.map { pane in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "settingspane.\(pane.id)",
+                title: "\(pane.title) Settings",
+                detail: "Open this pane in System Settings",
+                value: "settingspane.\(pane.id)",
+                keywords: pane.keywords + " system preferences pane"
+            )
+        }
+        let helpers = [
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "ocr.area",
+                title: "Copy Text from Screen Area",
+                detail: "Drag out an area; the text in it is read on this Mac and copied",
+                value: "ocr.area",
+                keywords: "ocr read recognize text screenshot copy"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "paste.plain",
+                title: "Paste as Plain Text",
+                detail: "Paste the clipboard into the app behind Quick Launch without formatting",
+                value: "paste.plain",
+                keywords: "plain text paste clipboard unformatted"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "clipboard.cleanLink",
+                title: "Clean Link on Clipboard",
+                detail: "Strip utm_ and other tracking parameters from the copied link",
+                value: "clipboard.cleanLink",
+                keywords: "url link clean tracking utm clipboard"
+            ),
+        ]
+        return toggles + helpers + panes
     }
 
     var systemCommands: [LauncherCatalogItem] {
@@ -390,9 +476,10 @@ import Observation
             itemID: "settings.open",
             title: "Open Quick Launch Settings",
             detail: "Configure Quick Launch",
-            value: "settings.open"
+            value: "settings.open",
+            keywords: "settings preferences configure quick launch"
         )
-        return layouts + screenshots + [translate, caffeine, until] + timed + [agentWatch, status, settings]
+        return layouts + screenshots + [translate, caffeine, until] + timed + [agentWatch, status, settings] + utilityCommands
     }
 
     /// Everything in the Caffeinate catalog, in the order it reads best.
@@ -413,6 +500,27 @@ import Observation
         }
     }
 
+    static let askAIItemID = "ask"
+
+    /// The one row that sends the typed text to the model. Same record as
+    /// every other item: it can be pinned, aliased, given a hotkey, and it
+    /// learns from use.
+    func askAIItem(query: String) -> LauncherCatalogItem {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var item = LauncherCatalogItem(
+            kind: .askAI,
+            itemID: Self.askAIItemID,
+            title: "Ask AI",
+            detail: trimmed.isEmpty
+                ? "Ask \(activeModelDisplay) anything. ⇥ switches to AI from any search"
+                : "\u{201C}\(trimmed)\u{201D} to \(activeModelDisplay)",
+            value: trimmed,
+            keywords: "ai ask chat question prompt"
+        )
+        item.isPinned = isLauncherItemPinned(item)
+        return item
+    }
+
     var catalogItems: [LauncherCatalogItem] {
         guard let catalogScope else { return [] }
         switch catalogScope {
@@ -424,6 +532,7 @@ import Observation
         case .caffeinate: return caffeinateItems
         case .chats: return conversationItems
         case .commands: return systemCommands
+        case .folders: return folderItems
         }
     }
 
@@ -481,7 +590,7 @@ import Observation
     }
 
     /// Maximum rows the launcher list shows at once.
-    static let maxLauncherRows = 9
+    static let maxLauncherRows = 12
     /// The emoji grid shows more: 9 columns by 7 rows.
     static let maxGridCells = 63
     static let gridColumns = 9
@@ -656,6 +765,8 @@ import Observation
         parts.append(settings.savedPromptPrefix)
         parts.append(String(settings.launcherItemConfigurations.hashValue))
         parts.append(String(launcherRankingVersion))
+        parts.append(String(applicationCatalog?.version ?? 0))
+        parts.append(activeModelDisplay)
         return parts.joined(separator: "\u{1F}")
     }
 
@@ -675,11 +786,23 @@ import Observation
         }
         guard let query = rootLauncherQuery else {
             guard input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-            return Array((emptyQueryFavourites + roots).prefix(Self.maxLauncherRows))
+            let favourites = emptyQueryFavourites
+            let ask = LauncherSearchResult.item(askAIItem(query: ""))
+            let ordered = favourites.contains { $0.id == ask.id } ? favourites + roots : favourites + [ask] + roots
+            return Array(ordered.prefix(Self.maxLauncherRows))
         }
         let signals = learnedSignals(query: query, scope: LauncherUsageStore.rootScope)
         let foldedQuery = FuzzyMatcher.fold(query)
         var scored: [(LauncherSearchResult, Int)] = []
+
+        // Ask AI is always in the list. Its base score follows the shape of
+        // the text; pins, aliases, and learning add to it like any other row.
+        let ask = askAIItem(query: query)
+        var askScore = AskAIRanker.baseScore(for: query)
+        let askAlias = launcherItemAlias(for: ask)
+        if !askAlias.isEmpty, FuzzyMatcher.fold(askAlias) == foldedQuery { askScore += 12_000 }
+        askScore += LauncherRanker.boost(for: signals[ask.id]) + pinBoost(ask)
+        scored.append((.item(ask), askScore))
 
         for root in roots {
             guard case .catalog(let scope, _) = root else { continue }
@@ -692,22 +815,65 @@ import Observation
         for (application, score) in scoredApplications(foldedQuery: foldedQuery, signals: signals) {
             scored.append((.application(application), score))
         }
-        for item in systemCommands + snippets + quickLinks {
+        for item in systemCommands + folderItems + snippets + quickLinks {
             guard let score = matchScore(
                 foldedQuery: foldedQuery,
                 title: item.title,
-                alias: launcherItemAlias(for: item)
+                alias: launcherItemAlias(for: item),
+                keywords: item.kind == .command || item.kind == .folder ? item.keywords : ""
             ) else { continue }
             scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item)))
         }
-        return Array(scored
+        // A web address typed in full opens in the Quick Link browser.
+        if let url = TypedURLDetector.url(from: query) {
+            let item = LauncherCatalogItem(
+                kind: .quickLink,
+                itemID: "typed:" + url.absoluteString,
+                title: "Open " + (url.host ?? url.absoluteString),
+                detail: url.absoluteString,
+                value: url.absoluteString
+            )
+            scored.append((.item(item), 13_000))
+        }
+        // Math, conversions, dates, and system facts answer inline, above everything.
+        if let answer = localAnswer(for: query) {
+            let item = LauncherCatalogItem(
+                kind: .answer,
+                itemID: "answer",
+                title: answer,
+                detail: query,
+                value: answer,
+                keywords: "answer result"
+            )
+            scored.append((.item(item), 14_000))
+        }
+        var ranked = scored
             .sorted { lhs, rhs in
                 lhs.1 == rhs.1
                     ? Self.displayTitle(lhs.0).localizedCaseInsensitiveCompare(Self.displayTitle(rhs.0)) == .orderedAscending
                     : lhs.1 > rhs.1
             }
-            .prefix(Self.maxLauncherRows)
-            .map(\.0))
+            .map(\.0)
+        if ranked.count > Self.maxLauncherRows {
+            let askID = LauncherSearchResult.item(ask).id
+            if let position = ranked.firstIndex(where: { $0.id == askID }), position >= Self.maxLauncherRows {
+                // Keep the row reachable: it takes the last visible slot.
+                ranked.remove(at: position)
+                ranked.insert(.item(ask), at: Self.maxLauncherRows - 1)
+            }
+            ranked = Array(ranked.prefix(Self.maxLauncherRows))
+        }
+        return ranked
+    }
+
+    /// Deterministic answers computed as you type. None of these touch a model.
+    func localAnswer(for query: String) -> String? {
+        if MathExpressionDetector.isMathExpression(query),
+           let value = try? MathCalculator.evaluate(query) {
+            return MathCalculator.format(value)
+        }
+        if let converted = LocalConversionResolver.answer(query) { return converted }
+        return SystemFactsResolver.answer(query)
     }
 
     private func pinBoost(_ item: LauncherCatalogItem) -> Int {
@@ -729,12 +895,15 @@ import Observation
     }
 
     private func rootResult(id: String) -> LauncherSearchResult? {
+        if id == LauncherCatalogItem(kind: .askAI, itemID: Self.askAIItemID, title: "", detail: "", value: "").id {
+            return .item(askAIItem(query: ""))
+        }
         if let application = applications.first(where: {
             LauncherSearchResult.application($0).id == id
         }) {
             return .application(application)
         }
-        if let item = (systemCommands + snippets + quickLinks).first(where: { $0.id == id }) {
+        if let item = (systemCommands + folderItems + snippets + quickLinks).first(where: { $0.id == id }) {
             return .item(item)
         }
         return nil
@@ -770,6 +939,7 @@ import Observation
         switch inputMode {
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
+        case .askAI: return "Ask AI · \(activeModelDisplay)"
         case nil: break
         }
         if let pendingQuickLink { return pendingQuickLink.title }
@@ -803,6 +973,14 @@ import Observation
                     FooterHint(label: "Save", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
+            case .askAI:
+                var hints = [FooterHint(label: "Ask", keys: ["↩"])]
+                if let direction = translationDirection {
+                    hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
+                }
+                hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
+                hints.append(FooterHint(label: "Back", keys: ["⌫"]))
+                return hints
             }
         }
         if pendingQuickLink != nil {
@@ -945,6 +1123,7 @@ import Observation
         switch inputMode {
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
+        case .askAI: return "Ask \(activeModelDisplay)…"
         case nil: break
         }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
@@ -1091,6 +1270,34 @@ import Observation
         noteInteraction()
     }
 
+    /// Tab, the Ask AI row, or its hotkey: keep what was typed, hide the
+    /// launcher rows, and send the next Return to the model.
+    func enterAskAIMode() {
+        let preserved = input
+        inputMode = .askAI
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        closeItemActionPane()
+        input = preserved
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        requestInputFocus()
+    }
+
+    /// Tab in the launcher: complete a `/alias` when one matches, otherwise
+    /// switch the typed text to the AI. Returns `false` when Tab should be
+    /// left to the text field.
+    func handleTab() -> Bool {
+        if !savedPromptMatches.isEmpty {
+            completeFirstFuzzyAlias()
+            return true
+        }
+        guard !isStreaming, !hasPendingAttachment, !isItemActionPanePresented,
+              !isActionPalettePresented, inputMode == nil, !isAnswerActive else { return false }
+        enterAskAIMode()
+        return true
+    }
+
     func leaveInputMode() {
         inputMode = nil
         input = ""
@@ -1102,6 +1309,11 @@ import Observation
     func submitInputMode() async -> Bool {
         guard let inputMode else { return false }
         switch inputMode {
+        case .askAI:
+            guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+            learn(.item(askAIItem(query: input)))
+            self.inputMode = nil
+            await submit()
         case .renameChat(let id):
             renameConversation(id: id, title: input)
             leaveInputMode()
@@ -1194,6 +1406,7 @@ import Observation
         case .caffeinate: caffeinateItems.count
         case .chats: history.count
         case .commands: systemCommands.count
+        case .folders: folderItems.count
         }
     }
 
@@ -1275,6 +1488,35 @@ import Observation
             }
         case .conversation:
             continueConversation(itemID: item.itemID)
+        case .folder:
+            guard let location = folderLocation(for: item) else {
+                errorMessage = "That folder is no longer available."
+                requestInputFocus()
+                return
+            }
+            input = ""
+            prepareForExternalAction?()
+            if await FolderLocationService.open(location) {
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            } else {
+                recoverFromExternalActionFailure?()
+                errorMessage = "Could not open \(location.title)."
+                requestInputFocus()
+            }
+        case .answer:
+            copyLauncherItem(item)
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        case .askAI:
+            if item.value.isEmpty {
+                // Empty root row or global hotkey: capture the next typing for the AI.
+                enterAskAIMode()
+                NotificationCenter.default.post(name: .presentOverlay, object: nil)
+            } else {
+                input = item.value
+                inputMode = nil
+                await submit()
+            }
         case .application:
             return
         case .command:
@@ -1712,6 +1954,70 @@ import Observation
     }
 
     func performSystemCommand(_ item: LauncherCatalogItem) {
+        if item.value.hasPrefix("toggle."),
+           let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count))) {
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            Task { @MainActor [weak self] in
+                if let failure = await QuickToggleService.run(toggle) {
+                    guard let self else { return }
+                    self.errorMessage = failure
+                    self.recoverFromExternalActionFailure?()
+                    self.requestInputFocus()
+                }
+            }
+            return
+        }
+
+        if item.value.hasPrefix("settingspane."),
+           let pane = SystemSettingsPaneCatalog.panes.first(where: { $0.id == String(item.value.dropFirst("settingspane.".count)) }) {
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            NSWorkspace.shared.open(pane.url)
+            return
+        }
+
+        if item.value == "ocr.area" {
+            Task { await copyTextFromScreenArea() }
+            return
+        }
+
+        if item.value == "paste.plain" {
+            guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+                errorMessage = "The clipboard has no text."
+                requestInputFocus()
+                return
+            }
+            let plain = LauncherCatalogItem(kind: .clipboard, itemID: "plain", title: "Plain text", detail: "", value: text)
+            input = ""
+            Task {
+                if await pasteLauncherItem(plain) {
+                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                }
+            }
+            return
+        }
+
+        if item.value == "clipboard.cleanLink" {
+            guard let text = NSPasteboard.general.string(forType: .string),
+                  let cleaned = URLCleaner.clean(text) else {
+                errorMessage = "The clipboard does not hold a web link."
+                requestInputFocus()
+                return
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(cleaned, forType: .string)
+            markJustCopied()
+            output = cleaned
+            lastQuestion = cleaned == text.trimmingCharacters(in: .whitespacesAndNewlines)
+                ? "Link had no tracking parameters"
+                : "Clean link copied"
+            errorMessage = nil
+            input = ""
+            requestInputFocus()
+            return
+        }
+
         if item.value == "settings.open" {
             input = ""
             NotificationCenter.default.post(name: .dismissOverlay, object: nil)
@@ -1820,6 +2126,99 @@ import Observation
         input = ""
     }
 
+    /// Copy Text from Screen Area: the system selector, Vision OCR on this
+    /// Mac, the result on the clipboard and in the panel. No model involved.
+    func copyTextFromScreenArea() async {
+        guard let screenAwareness else {
+            errorMessage = "Screen capture is not available in this build."
+            requestInputFocus()
+            return
+        }
+        input = ""
+        prepareForExternalAction?()
+        guard let attachment = await screenAwareness.captureArea() else {
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return
+        }
+        let text = await ScreenshotTextIndex.recognizeText(in: attachment.data)
+        NotificationCenter.default.post(name: .presentOverlay, object: nil)
+        guard !text.isEmpty else {
+            errorMessage = "No text was found in that area."
+            requestInputFocus()
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        markJustCopied()
+        output = text
+        lastQuestion = "Text from screen, copied"
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    func runningApplication(for application: LaunchableApplication) -> NSRunningApplication? {
+        if let bundleID = application.bundleIdentifier,
+           let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            return running
+        }
+        return NSWorkspace.shared.runningApplications.first { $0.bundleURL == application.url }
+    }
+
+    /// ⌘K on a running app: Hide, Quit, Force Quit, Relaunch.
+    private func controlRunningApplication(_ application: LaunchableApplication, action: ItemActionKind) {
+        guard let running = runningApplication(for: application) else {
+            errorMessage = "\(application.name) is not running."
+            requestInputFocus()
+            return
+        }
+        closeItemActionPane()
+        input = ""
+        switch action {
+        case .hide:
+            running.hide()
+        case .quit:
+            running.terminate()
+        case .forceQuit:
+            running.forceTerminate()
+        case .relaunch:
+            running.terminate()
+            let catalog = applicationCatalog
+            Task { @MainActor in
+                for _ in 0..<50 where !running.isTerminated {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                _ = catalog?.launch(application)
+            }
+        default:
+            return
+        }
+        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+    }
+
+    func addCustomFolder(_ url: URL) {
+        let location = FolderLocationService.custom(from: url)
+        guard !settings.customFolders.contains(where: { $0.id == location.id }) else { return }
+        settings.customFolders.append(location)
+        persistSettings(settings)
+        invalidateLauncherRanking()
+    }
+
+    func removeCustomFolder(_ item: LauncherCatalogItem) {
+        settings.customFolders.removeAll { $0.id == item.itemID }
+        removeLauncherItemConfiguration(for: item)
+        persistSettings(settings)
+        invalidateLauncherRanking()
+    }
+
+    func addCustomApplication(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        guard !settings.customApplicationPaths.contains(path) else { return }
+        settings.customApplicationPaths.append(path)
+        persistSettings(settings)
+        applicationCatalog?.setExtraApplicationPaths(settings.customApplicationPaths)
+    }
+
     private func openQuickLink(_ item: LauncherCatalogItem, input: String) {
         let allowed = CharacterSet.urlQueryAllowed.subtracting(
             CharacterSet(charactersIn: "&=+#?")
@@ -1914,7 +2313,11 @@ import Observation
 
     var focusedItemActions: [ItemAction] {
         guard let result = focusedLauncherResult else { return [] }
-        var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName)
+        var isRunning = false
+        if case .application(let application) = result {
+            isRunning = runningApplication(for: application) != nil
+        }
+        var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName, isRunning: isRunning)
         if deleteArmedItemID == result.id,
            let index = actions.firstIndex(where: { $0.kind == .delete }) {
             actions[index] = ItemAction(
@@ -2063,10 +2466,30 @@ import Observation
         switch action.kind {
         case .primary, .copyAndPaste:
             return false
+        case .quit, .forceQuit, .hide, .relaunch:
+            guard case .application(let application) = result else { return true }
+            controlRunningApplication(application, action: action.kind)
+        case .copyCleanLink:
+            guard case .item(let item) = result, let cleaned = URLCleaner.clean(item.value) else { return true }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(cleaned, forType: .string)
+            markJustCopied()
+            closeItemActionPane()
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
         case .secondary:
             switch result {
             case .application(let application):
                 revealInFinder(application)
+            case .item(let item) where item.kind == .folder:
+                guard let location = folderLocation(for: item) else { return true }
+                closeItemActionPane()
+                input = ""
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                FolderLocationService.reveal(location)
+            case .item(let item) where item.kind == .answer:
+                closeItemActionPane()
+                Task { _ = await pasteLauncherItem(item) }
             case .item(let item) where item.kind == .screenshot:
                 if ScreenshotLibrary.copyImage(at: URL(fileURLWithPath: item.value)) {
                     markJustCopied()
@@ -2093,7 +2516,7 @@ import Observation
                 togglePinConversation(id: id)
             case .clipboard:
                 clipboardHistory?.togglePin(item)
-            case .snippet, .quickLink, .screenshot:
+            case .snippet, .quickLink, .screenshot, .askAI, .folder:
                 togglePinLauncherItem(item)
             default:
                 return true
@@ -2130,7 +2553,7 @@ import Observation
             let path: String
             switch result {
             case .application(let application): path = application.url.path
-            case .item(let item) where item.kind == .screenshot: path = item.value
+            case .item(let item) where item.kind == .screenshot || item.kind == .folder: path = item.value
             default: return true
             }
             NSPasteboard.general.clearContents()
@@ -2151,6 +2574,10 @@ import Observation
                 case .conversation:
                     if let id = UUID(uuidString: item.itemID) { deleteConversation(id: id) }
                     closeItemActionPane()
+                case .folder:
+                    removeCustomFolder(item)
+                    closeItemActionPane()
+                    applicationSelectionIndex = 0
                 case .screenshot:
                     let url = URL(fileURLWithPath: item.value)
                     do {
@@ -2372,7 +2799,9 @@ import Observation
     }
 
     func catalogItem(kind: LauncherItemKind, itemID: String) -> LauncherCatalogItem? {
-        (configurableCatalogItems + clipboardEntries + systemCommands).first {
+        if kind == .askAI { return askAIItem(query: "") }
+        if kind == .folder { return folderItems.first { $0.itemID == itemID } }
+        return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.kind == kind && $0.itemID == itemID
         }
     }
@@ -2578,6 +3007,18 @@ import Observation
             return
         }
 
+        // Unit conversions, date arithmetic, city times: local and deterministic.
+        if action == nil, let result = LocalConversionResolver.answer(effectivePrompt) {
+            errorMessage = nil
+            output = result
+            if settings.autoCopy {
+                copyOutput()
+                markJustCopied()
+            }
+            requestInputFocus()
+            return
+        }
+
         // Trusted system facts should stay fast and work without a provider.
         if let result = SystemFactsResolver.answer(effectivePrompt) {
             errorMessage = nil
@@ -2703,9 +3144,10 @@ import Observation
                 for try await delta in stream {
                     if Task.isCancelled { break }
                     if let text = delta.text {
-                        output += text
+                        appendStreamText(text)
                     }
                 }
+                flushStreamBuffer()
                 // Stream completed normally
                 isStreaming = false
                 if !output.isEmpty {
@@ -2732,11 +3174,13 @@ import Observation
                 requestInputFocus()
             } catch is CancellationError {
                 // Cancelled — do not set errorMessage
+                discardStreamBuffer()
                 isStreaming = false
                 output = ""
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             } catch {
+                discardStreamBuffer()
                 errorMessage = error.localizedDescription
                 isStreaming = false
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
@@ -3010,8 +3454,41 @@ import Observation
     func cancel() {
         streamTask?.cancel()
         streamTask = nil
+        discardStreamBuffer()
         isStreaming = false
         output = ""
+    }
+
+    // MARK: - Stream buffering
+
+    private func appendStreamText(_ text: String) {
+        streamBuffer += text
+        if output.isEmpty || ContinuousClock.now - lastStreamFlush >= Self.streamFlushInterval {
+            flushStreamBuffer()
+        } else if streamFlushTask == nil {
+            // A pause between tokens must not hide the last few: flush on a timer.
+            streamFlushTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.streamFlushInterval)
+                guard !Task.isCancelled else { return }
+                self?.streamFlushTask = nil
+                self?.flushStreamBuffer()
+            }
+        }
+    }
+
+    private func flushStreamBuffer() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        guard !streamBuffer.isEmpty else { return }
+        output += streamBuffer
+        streamBuffer = ""
+        lastStreamFlush = .now
+    }
+
+    private func discardStreamBuffer() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        streamBuffer = ""
     }
 
     // MARK: - Copy

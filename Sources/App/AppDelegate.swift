@@ -191,6 +191,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         viewModel.syncCaffeinateState()
         viewModel.settings.save()
+        if !settings.customApplicationPaths.isEmpty {
+            applicationCatalog.setExtraApplicationPaths(settings.customApplicationPaths)
+        }
         viewModel.loadHistory()
         configureClipboardHistory()
 
@@ -319,6 +322,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Provider and network work remain dormant until the user runs an
         // action or explicitly refreshes/checks from Settings.
+
+        // Warm what the first keystrokes will need, off the hotkey path.
+        AppIconCache.prewarm(paths: applicationCatalog.applications.map(\.url.path))
+        applicationCatalog.loadAlternateNames()
     }
 
     // MARK: - Panel construction
@@ -395,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
             viewModel?.captureImageFromClipboard()
         }
+        applicationCatalog.refreshIfNeeded()
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
             let origin = ScreenPlacement.panelOrigin(

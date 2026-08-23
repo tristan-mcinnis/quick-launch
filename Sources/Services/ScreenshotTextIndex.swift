@@ -141,6 +141,17 @@ final class ScreenshotTextIndex {
     /// Runs off the main actor; only plain text crosses back.
     nonisolated static func recognizeText(atPath path: String) async -> String {
         guard let image = downsampledImage(atPath: path, maximumPixels: maximumPixels) else { return "" }
+        return await recognizeText(in: image)
+    }
+
+    /// OCR over in-memory image bytes (a fresh screen-area capture).
+    nonisolated static func recognizeText(in data: Data) async -> String {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return "" }
+        return await recognizeText(in: image)
+    }
+
+    nonisolated static func recognizeText(in image: CGImage) async -> String {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true

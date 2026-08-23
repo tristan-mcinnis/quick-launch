@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 14
+    var configurationVersion: Int = 15
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -35,11 +35,15 @@ struct QuickSettings: Codable, Sendable {
     // Saved prompts (aliases)
     var savedPromptPrefix: String = "/"
     var savedPrompts: [SavedPrompt] = SavedPrompt.defaults
-    var launcherItemConfigurations: [LauncherItemConfiguration] = Self.defaultWindowConfigurations
+    var launcherItemConfigurations: [LauncherItemConfiguration] = Self.defaultWindowConfigurations + Self.defaultFolderConfigurations
     /// Rank launcher results by what was chosen before (local only).
     var launcherLearningEnabled: Bool = true
     /// Bundle identifier of the browser that opens Quick Links; nil = system default.
     var quickLinkBrowserBundleID: String?
+    /// Folders added in Settings › Items beside the built-in user folders.
+    var customFolders: [FolderLocation] = []
+    /// `.app` bundles outside the scanned Applications folders.
+    var customApplicationPaths: [String] = []
 
     // Clipboard history
     var clipboardHistoryEnabled: Bool = true
@@ -83,7 +87,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 14
+        configurationVersion = 15
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -98,12 +102,14 @@ struct QuickSettings: Codable, Sendable {
         launcherItemConfigurations = try c.decodeIfPresent(
             [LauncherItemConfiguration].self,
             forKey: .launcherItemConfigurations
-        ) ?? Self.defaultWindowConfigurations
+        ) ?? (Self.defaultWindowConfigurations + Self.defaultFolderConfigurations)
         launcherLearningEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .launcherLearningEnabled
         ) ?? true
         quickLinkBrowserBundleID = try c.decodeIfPresent(String.self, forKey: .quickLinkBrowserBundleID)
+        customFolders = try c.decodeIfPresent([FolderLocation].self, forKey: .customFolders) ?? []
+        customApplicationPaths = try c.decodeIfPresent([String].self, forKey: .customApplicationPaths) ?? []
         caffeinateUntil = try c.decodeIfPresent(Date.self, forKey: .caffeinateUntil)
         caffeinateAgentWatch = try c.decodeIfPresent(Bool.self, forKey: .caffeinateAgentWatch) ?? true
         caffeinateBatteryCutoff = try c.decodeIfPresent(Int.self, forKey: .caffeinateBatteryCutoff) ?? 20
@@ -193,6 +199,12 @@ struct QuickSettings: Codable, Sendable {
                 launcherItemConfigurations.append(configuration)
             }
         }
+        if decodedConfigurationVersion < 15 {
+            for configuration in Self.defaultFolderConfigurations where
+                !launcherItemConfigurations.contains(where: { $0.id == configuration.id }) {
+                launcherItemConfigurations.append(configuration)
+            }
+        }
         if decodedConfigurationVersion < 11,
            let index = providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }),
            !providers[index].models.contains(InferenceProvider.deepSeekVisionModel) {
@@ -243,6 +255,12 @@ struct QuickSettings: Codable, Sendable {
 }
 
 extension QuickSettings {
+    /// `dl` opens Downloads and `dk` the Desktop, from the first run.
+    static let defaultFolderConfigurations: [LauncherItemConfiguration] = [
+        LauncherItemConfiguration(kind: .folder, itemID: "downloads", alias: "dl"),
+        LauncherItemConfiguration(kind: .folder, itemID: "desktop", alias: "dk"),
+    ]
+
     static let defaultWindowConfigurations: [LauncherItemConfiguration] = [
         LauncherItemConfiguration(
             kind: .command,

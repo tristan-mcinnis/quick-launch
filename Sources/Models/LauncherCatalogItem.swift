@@ -25,6 +25,9 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .command: "Run"
         case .screenshot: "Paste"
         case .conversation: "Continue"
+        case .askAI: "Ask"
+        case .folder: "Open"
+        case .answer: "Copy"
         }
     }
 
@@ -38,6 +41,9 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .emoji: "face.smiling"
         case .screenshot: "photo"
         case .conversation: "bubble.left.and.text.bubble.right"
+        case .askAI: "sparkles"
+        case .folder: "folder"
+        case .answer: "equal.circle"
         }
     }
 }
@@ -51,6 +57,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case caffeinate
     case chats
     case commands
+    case folders
 
     var id: String { rawValue }
     var title: String {
@@ -63,6 +70,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .caffeinate: "Caffeinate"
         case .chats: "Quick AI Chats"
         case .commands: "Commands"
+        case .folders: "Folders"
         }
     }
     var aliases: [String] {
@@ -74,7 +82,8 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .screenshots: ["screenshots", "screenshot", "shots", "capture", "photos"]
         case .caffeinate: ["caffeinate", "caffeine", "awake", "keep awake", "decaffeinate", "sleep"]
         case .chats: ["chats", "quick ai", "ai chats", "history", "conversations", "recent chats"]
-        case .commands: ["commands", "window management", "windows"]
+        case .commands: ["commands", "window management", "windows", "toggles", "settings panes"]
+        case .folders: ["folders", "folder", "places", "locations", "finder"]
         }
     }
     var systemImage: String {
@@ -87,6 +96,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .caffeinate: "cup.and.saucer"
         case .chats: "bubble.left.and.text.bubble.right"
         case .commands: "command"
+        case .folders: "folder"
         }
     }
 }

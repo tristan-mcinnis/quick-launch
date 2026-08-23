@@ -5,6 +5,18 @@ import Markdown
 /// Converts a markdown string to an NSAttributedString using swift-markdown's AST.
 enum MarkdownRenderer {
 
+    /// The overlay re-evaluates its body for every state change, not only
+    /// when the answer text changes; one entry is enough to make a repeat
+    /// render free.
+    @MainActor private static var cache: (source: String, rendered: NSAttributedString)?
+
+    @MainActor static func cachedRender(_ markdown: String) -> NSAttributedString {
+        if let cache, cache.source == markdown { return cache.rendered }
+        let rendered = render(markdown)
+        cache = (markdown, rendered)
+        return rendered
+    }
+
     static func render(_ markdown: String) -> NSAttributedString {
         guard !markdown.isEmpty else { return NSAttributedString() }
         let document = Document(parsing: markdown)

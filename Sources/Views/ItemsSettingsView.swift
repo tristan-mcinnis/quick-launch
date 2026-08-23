@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Every item that can carry an alias or a global hotkey, in one table you
 /// can read at a glance and edit in place: apps, snippets, quick links,
@@ -10,12 +11,13 @@ struct ItemsSettingsView: View {
     @State private var query = ""
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all, apps, snippets, quickLinks, windows, commands
+        case all, apps, folders, snippets, quickLinks, windows, commands
         var id: String { rawValue }
         var title: String {
             switch self {
             case .all: "All"
             case .apps: "Apps"
+            case .folders: "Folders"
             case .snippets: "Snippets"
             case .quickLinks: "Quick Links"
             case .windows: "Windows"
@@ -55,6 +57,9 @@ struct ItemsSettingsView: View {
                 case .emoji: "Emoji"
                 case .screenshot: "Screenshot"
                 case .conversation: "Chat"
+                case .askAI: "AI"
+                case .folder: "Folder"
+                case .answer: "Answer"
                 case .application: "App"
                 }
             }
@@ -66,6 +71,9 @@ struct ItemsSettingsView: View {
         if filter == .all || filter == .apps {
             all += viewModel.applications.map(Row.application)
         }
+        if filter == .all || filter == .folders {
+            all += viewModel.folderItems.map(Row.item)
+        }
         if filter == .all || filter == .snippets {
             all += viewModel.snippets.map(Row.item)
         }
@@ -76,6 +84,7 @@ struct ItemsSettingsView: View {
             all += viewModel.systemCommands.filter { $0.value.hasPrefix("window.") }.map(Row.item)
         }
         if filter == .all || filter == .commands {
+            all += [Row.item(viewModel.askAIItem(query: ""))]
             all += viewModel.systemCommands.filter { !$0.value.hasPrefix("window.") }.map(Row.item)
         }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -97,8 +106,17 @@ struct ItemsSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 520)
                 Spacer()
+                Menu {
+                    Button("Add Folder…") { addFolder() }
+                    Button("Add App…") { addApplication() }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Add a folder or an app that is not in the list")
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search", text: $query)
@@ -126,6 +144,32 @@ struct ItemsSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(AQDesign.Space.window)
+    }
+
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add Folder"
+        panel.message = "Choose folders to open from Quick Launch. Give each an alias or hotkey below."
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { viewModel.addCustomFolder(url) }
+        filter = .folders
+    }
+
+    private func addApplication() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Add App"
+        panel.message = "Choose apps that live outside the Applications folders."
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { viewModel.addCustomApplication(url) }
+        filter = .apps
     }
 
     private var header: some View {
@@ -178,7 +222,7 @@ struct ItemsSettingsView: View {
     private func icon(for row: Row) -> some View {
         switch row {
         case .application(let application):
-            Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+            Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         case .item(let item):
             Image(systemName: item.systemImage).foregroundStyle(.secondary)

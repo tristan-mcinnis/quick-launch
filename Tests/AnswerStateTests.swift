@@ -36,7 +36,7 @@ struct AnswerStateTests {
         vm.startNewConversation()
         #expect(!vm.isAnswerActive)
         #expect(vm.lastQuestion == nil)
-        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count)
+        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
     }
 
     @Test func copyShortcutCopiesTheAnswerAndCloses() async {

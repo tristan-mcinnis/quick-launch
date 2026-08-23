@@ -9,6 +9,12 @@ enum LauncherItemKind: String, Codable, Sendable {
     case emoji
     case screenshot
     case conversation
+    /// The one row that sends the typed text to the AI.
+    case askAI
+    /// A folder opened in Finder: built-in user folders and ones added in Settings.
+    case folder
+    /// A local answer computed as you type (math, a conversion, a date).
+    case answer
 }
 
 /// User-owned configuration shared by searchable launcher items.

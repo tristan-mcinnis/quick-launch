@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 final class ClipboardHistoryStore: ClipboardHistoryServicing {
-    private struct StoredEntry: Codable {
+    private struct StoredEntry: Codable, Sendable {
         var id: String
         var value: String
         var capturedAt: Date
@@ -16,6 +16,12 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private let fileURL: URL
+    /// Every copy rewrites the whole file; that work leaves the main thread
+    /// and stays ordered on one serial queue.
+    nonisolated private static let writeQueue = DispatchQueue(
+        label: "com.tristanmcinnis.quick-launch.clipboard-history",
+        qos: .utility
+    )
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
@@ -81,7 +87,8 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         storedEntries.removeAll()
         entries.removeAll()
         guard fileURL.path.hasSuffix("/clipboard-history.json") else { return }
-        try? FileManager.default.removeItem(at: fileURL)
+        let url = fileURL
+        Self.writeQueue.async { try? FileManager.default.removeItem(at: url) }
     }
 
     private func capturePasteboard(limit: Int) {
@@ -124,16 +131,21 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(storedEntries) else { return }
-        do {
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
+        let snapshot = storedEntries
+        let url = fileURL
+        Self.writeQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            return
+            try? data.write(to: url, options: .atomic)
         }
+    }
+
+    /// Tests: block until queued writes are on disk.
+    func waitForPendingWrites() {
+        Self.writeQueue.sync {}
     }
 
     private static func defaultFileURL() -> URL {

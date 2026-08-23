@@ -16,6 +16,13 @@ struct KeyShortcut: Equatable, Sendable {
         KeyShortcut(key: .character(character), modifiers: NSEvent.ModifierFlags.command.rawValue)
     }
 
+    static func commandOption(_ character: Character) -> KeyShortcut {
+        KeyShortcut(
+            key: .character(character),
+            modifiers: NSEvent.ModifierFlags([.command, .option]).rawValue
+        )
+    }
+
     static func commandShift(_ character: Character) -> KeyShortcut {
         KeyShortcut(
             key: .character(character),
@@ -79,6 +86,11 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case saveAsQuickLink
     case revealInFinder
     case quickLook
+    case quit
+    case forceQuit
+    case hide
+    case relaunch
+    case copyCleanLink
 }
 
 /// One row in the ⌘K pane. The same table drives direct shortcuts from the
@@ -96,18 +108,33 @@ struct ItemAction: Identifiable, Equatable, Sendable {
 /// Raycast conventions: Return is the primary action, ⌘↩ the secondary,
 /// ⌘E edits, ⌃X deletes, ⌘⇧A and ⌘⇧H configure alias and hotkey.
 enum ItemActionCatalog {
-    static func actions(for result: LauncherSearchResult, pasteTarget: String?) -> [ItemAction] {
+    static func actions(
+        for result: LauncherSearchResult,
+        pasteTarget: String?,
+        isRunning: Bool = false
+    ) -> [ItemAction] {
         switch result {
         case .catalog:
             return [ItemAction(kind: .primary, title: "Browse", systemImage: "folder", shortcut: .returnKey)]
         case .application:
-            return [
-                ItemAction(kind: .primary, title: "Open", systemImage: "arrow.up.forward.app", shortcut: .returnKey),
+            var actions = [
+                ItemAction(kind: .primary, title: isRunning ? "Switch To" : "Open", systemImage: "arrow.up.forward.app", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Show in Finder", systemImage: "folder", shortcut: .commandReturn),
+            ]
+            if isRunning {
+                actions += [
+                    ItemAction(kind: .hide, title: "Hide", systemImage: "eye.slash", shortcut: .commandOption("h")),
+                    ItemAction(kind: .quit, title: "Quit", systemImage: "xmark.circle", shortcut: .commandShift("q")),
+                    ItemAction(kind: .relaunch, title: "Relaunch", systemImage: "arrow.clockwise.circle", shortcut: .commandShift("r")),
+                    ItemAction(kind: .forceQuit, title: "Force Quit", systemImage: "exclamationmark.octagon", shortcut: .commandOption("q"), isDestructive: true),
+                ]
+            }
+            actions += [
                 ItemAction(kind: .copyPath, title: "Copy Path", systemImage: "doc.on.doc", shortcut: .commandShift("c")),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
+            return actions
         case .item(let item):
             return actions(for: item, pasteTarget: pasteTarget)
         }
@@ -137,6 +164,9 @@ enum ItemActionCatalog {
             ]
             if looksLikeURL(item.value) {
                 actions.append(ItemAction(kind: .saveAsQuickLink, title: "Save as Quick Link", systemImage: "link.badge.plus", shortcut: .commandShift("l")))
+                if URLCleaner.hasTrackingParameters(item.value) {
+                    actions.append(cleanLinkAction)
+                }
             }
             actions.append(ItemAction(kind: .delete, title: "Delete Entry", systemImage: "trash", shortcut: .control("x"), isDestructive: true))
             return actions
@@ -157,7 +187,7 @@ enum ItemActionCatalog {
                 ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
             ]
         case .quickLink:
-            return [
+            var actions = [
                 ItemAction(
                     kind: .primary,
                     title: item.requiresInput ? "Enter Input" : "Open Link",
@@ -165,10 +195,17 @@ enum ItemActionCatalog {
                     shortcut: .returnKey
                 ),
                 ItemAction(kind: .secondary, title: "Copy Link", systemImage: "doc.on.doc", shortcut: .commandReturn),
+            ]
+            if !item.requiresInput, URLCleaner.hasTrackingParameters(item.value) {
+                actions.append(cleanLinkAction)
+            }
+            if item.itemID.hasPrefix("typed:") { return actions }
+            actions += [
                 pinAction(for: item),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
+            return actions
         case .command:
             return [
                 ItemAction(kind: .primary, title: "Run", systemImage: "play", shortcut: .returnKey),
@@ -183,10 +220,43 @@ enum ItemActionCatalog {
                 pinAction(for: item),
                 ItemAction(kind: .delete, title: "Delete Chat", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
             ]
+        case .folder:
+            var actions = [
+                ItemAction(kind: .primary, title: "Open in Finder", systemImage: "folder", shortcut: .returnKey),
+                ItemAction(kind: .secondary, title: "Reveal in Finder", systemImage: "folder.badge.gearshape", shortcut: .commandReturn),
+                ItemAction(kind: .copyPath, title: "Copy Path", systemImage: "doc.on.doc", shortcut: .commandShift("c")),
+                pinAction(for: item),
+                ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
+                ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
+            ]
+            if !FolderLocationService.builtIn.contains(where: { $0.id == item.itemID }) {
+                actions.append(ItemAction(kind: .delete, title: "Remove Folder", systemImage: "trash", shortcut: .control("x"), isDestructive: true))
+            }
+            return actions
+        case .answer:
+            return [
+                ItemAction(kind: .primary, title: "Copy Answer", systemImage: "doc.on.doc", shortcut: .returnKey),
+                ItemAction(kind: .secondary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .commandReturn),
+                ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
+            ]
+        case .askAI:
+            return [
+                ItemAction(kind: .primary, title: "Ask AI", systemImage: "sparkles", shortcut: .returnKey),
+                pinAction(for: item),
+                ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
+                ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
+            ]
         case .application:
             return []
         }
     }
+
+    static let cleanLinkAction = ItemAction(
+        kind: .copyCleanLink,
+        title: "Copy Clean Link",
+        systemImage: "link.badge.plus",
+        shortcut: .commandShift("u")
+    )
 
     /// The same pin on every pinnable kind: `⌘⇧P` toggles it.
     private static func pinAction(for item: LauncherCatalogItem) -> ItemAction {

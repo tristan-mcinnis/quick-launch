@@ -77,7 +77,7 @@ struct PanelSizingTests {
             output: "", isStreaming: false, errorMessage: nil, suggestionCount: 20
         )
         #expect(three == 186)
-        let expectedMany: CGFloat = 60 + 9 * 42
+        let expectedMany: CGFloat = 60 + 12 * 42
         #expect(many == expectedMany)
     }
 

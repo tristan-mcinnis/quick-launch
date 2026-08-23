@@ -64,6 +64,7 @@ struct InputModeTests {
         for index in 0..<12 { store.record("entry \(index)", limit: 10) }
         #expect(store.entries.first?.value == "keep me")
         #expect(store.entries.count == 11)
+        store.waitForPendingWrites()
 
         let reloaded = ClipboardHistoryStore(fileURL: folder.appendingPathComponent("clipboard-history.json"))
         #expect(reloaded.entries.first?.isPinned == true)

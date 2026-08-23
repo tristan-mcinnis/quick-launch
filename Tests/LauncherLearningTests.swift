@@ -140,7 +140,7 @@ struct LauncherLearningTests {
     @Test func learnedFavouritesAppearBeforeCatalogRootsOnEmptyInput() async {
         let (vm, _) = makeViewModel()
         vm.input = ""
-        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count)
+        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
 
         vm.input = "cla"
         vm.applicationSelectionIndex = vm.launcherMatches.firstIndex(of: .application(Self.claude)) ?? 0
@@ -149,7 +149,8 @@ struct LauncherLearningTests {
         vm.input = ""
         let matches = vm.launcherMatches
         #expect(matches.first == .application(Self.claude))
-        #expect(matches.count == LauncherCatalogScope.allCases.count + 1)
+        // The favourite, Ask AI, and every catalog root.
+        #expect(matches.count == LauncherCatalogScope.allCases.count + 2)
         #expect(matches.count <= QuickViewModel.maxLauncherRows)
     }
 

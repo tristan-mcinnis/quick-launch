@@ -12,13 +12,20 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   └── Mode ◄───┘           └── Answer (AI thread)
 ```
 
-- **Root.** The empty launcher. Shows learned favourites first, then the
-  catalogs. Typing searches everything reachable in one ranked list: apps,
-  commands, snippets, quick links, catalog names. Learned picks outrank text
-  matches; an exact name still wins over a related abbreviation.
+- **Root.** The empty launcher. Shows learned favourites first, then Ask AI,
+  then the catalogs. Typing searches everything reachable in one ranked
+  list: apps, folders, commands, snippets, quick links, catalog names, and
+  the Ask AI row. Learned picks outrank text matches; an exact name still
+  wins over a related abbreviation. Ask AI's place follows the shape of the
+  text: one word keeps it last (a pin or heavy use lifts it above weak
+  letters-in-order matches, never above a prefix or exact name); two or
+  more words, a question mark, or a leading verb put it just under a title
+  prefix, so it beats every weak match. Local answers (math, conversions,
+  dates, a typed address) sit above everything.
 - **Catalog.** A named list of items of one kind: Snippets, Quick Links,
-  Clipboard History, Emoji & Symbols, Screenshots, Windows, Caffeinate,
-  Commands. Return on a catalog row enters it. Inside, typing filters that
+  Clipboard History, Emoji & Symbols, Screenshots, Folders, Caffeinate,
+  Quick AI Chats, Commands (windows, screenshots, toggles, System Settings
+  panes, clipboard and screen helpers). Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
   value, and optionally an alias, a global hotkey, search keywords, and a
@@ -27,9 +34,9 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
 - **Action.** What Return and the other keys do to the item. The action
   table is the single source of truth for the ⌘K pane, the footer hints,
   the key-cap badges, and direct shortcuts. One table, four surfaces.
-- **Mode.** A state that captures typing for one purpose: Quick Link input,
-  Caffeinate Until, Rename Chat, or an attached screenshot waiting for a
-  question. Modes show their name on the left of the footer and leave on
+- **Mode.** A state that captures typing for one purpose: Ask AI (`⇥`),
+  Quick Link input, Caffeinate Until, Rename Chat, or an attached screenshot
+  waiting for a question. Modes show their name on the left of the footer and leave on
   Backspace.
 - **Tool window.** A second panel for a two-pane job: the Translator
   (`⇧⌘T`). Same tokens, same footer, same key meanings; Escape closes it.
@@ -53,6 +60,9 @@ The same key means the same thing on every layer.
 | `⎋` | Close the overlay from anywhere (a ⌘K form steps back first; a stream stops first) |
 | `⌫` on empty | Pop one layer: catalog → root, mode → root, answer → root, attachment → removed |
 | `⇧↩` | Translate the typed text (direction from the script) |
+| `⇥` | Complete a `/alias`; otherwise switch the typed text to Ask AI |
+| `⌘⇧Q` / `⌘⌥Q` / `⌘⌥H` / `⌘⇧R` | Quit / force quit / hide / relaunch a running app |
+| `⌘⇧U` | Copy a link without its tracking parameters |
 | `⌘N` / `⌘R` | New chat / regenerate the last answer |
 | `⌘[` / `⌘]` or `↑ ↓` on an answer | Previous / next recent chat |
 | `⌘⇧S` / `⌘⇧D` | Send the focused window / this screen to AI (screenshot plus context) |
@@ -94,7 +104,11 @@ overlay.
 
 - Hotkey to visible panel: no animation, no Accessibility read, no file I/O.
 - One ranking pass per keystroke, cached and shared by the list, the footer,
-  and the panel sizer. 1.5 to 2.7 ms for 250 apps plus catalogs.
+  and the panel sizer. 1.3 to 1.9 ms for 250 apps plus catalogs.
+- Streamed tokens are published at most every 33 ms; the answer is parsed
+  and laid out only when its text changed.
+- The clipboard image is decoded once per pasteboard change. App icons are
+  cached and warmed after launch. Clipboard History writes off the main thread.
 - Catalog data is read once at launch (apps) or lazily on first open
   (emoji). Nothing polls except the 1-second clipboard change-count check.
 - No helper processes, no HTTP server, one package dependency.

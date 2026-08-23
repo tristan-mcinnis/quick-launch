@@ -48,10 +48,12 @@ struct LauncherCatalogTests {
         store.record("second", limit: 2)
         store.record("first", limit: 2)
         #expect(store.entries.map(\.value) == ["first", "second"])
+        store.waitForPendingWrites()
 
         let loaded = ClipboardHistoryStore(fileURL: file)
         #expect(loaded.entries.map(\.value) == ["first", "second"])
         loaded.clear()
+        loaded.waitForPendingWrites()
         #expect(loaded.entries.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
@@ -59,7 +61,8 @@ struct LauncherCatalogTests {
     @Test func emptyLauncherShowsCatalogsAndScopeFiltersItems() {
         let service = FakeLauncherCatalog()
         let vm = QuickViewModel(launcherCatalog: service)
-        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count)
+        // Ask AI plus every catalog root.
+        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
         #expect(vm.launcherMatches.contains(.catalog(.commands, count: vm.systemCommands.count)))
         vm.enterCatalog(.snippets)
         vm.input = "greet"

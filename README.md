@@ -17,7 +17,12 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Global, configurable hotkey and small floating panel
 - Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
 - Learns from your choices: the text you typed when you picked an item ranks that item first next time (`cla` → Claude), with a 14-day decay so old favourites fade; most-used items show on an empty search; local only, one toggle and a Forget button
-- One ranked root search across apps, commands, snippets, quick links, and catalog roots
+- One ranked root search across apps, folders, commands, snippets, quick links, catalog roots, and the Ask AI row
+- Return runs the highlighted row. Ask AI is a row: one word keeps the launcher first (`weather` opens Weather), two or more words or a question put Ask AI first, and an exact name, prefix, alias, or learned abbreviation still wins. `Tab` sends whatever you typed to the AI from any search. Ask AI learns from use and takes a pin, alias, or hotkey like any row
+- Answers as you type: math, unit conversions (`12 km in miles`, `72f to c`), dates (`3 days from now`, `days until 2026-12-25`), and city times (`time in tokyo`) are the top row; Return copies, `⌘↩` pastes. A typed address (`apple.com`) gets an Open row
+- Folders catalog: the user folders plus any you add in Settings, opened in Finder (or the existing window fronted); `dl` → Downloads, `dk` → Desktop out of the box; alias, hotkey, pin, `⌘↩` reveal, `⌘⇧C` copy path
+- `⌘K` on a running app: Hide, Quit, Relaunch, Force Quit
+- Commands also hold quick toggles (dark mode, lock screen, empty trash, eject all, hidden files, desktop icons), 45 System Settings panes, Copy Text from Screen Area (local OCR to clipboard), Paste as Plain Text, and Clean Link (`⌘⇧U` on tracked links)
 - Raycast-style footer with the keys that work right now, and Sol-style hotkey badges on rows that have a global hotkey
 - Escape closes the launcher from anywhere; Backspace on an empty field returns to the root; reopening starts at the root
 - Finder indexing through the macOS CoreServices application catalog
@@ -151,7 +156,9 @@ Summarize directly. macOS asks for Accessibility access the first time a
 selected-text action needs it.
 
 Slash aliases are fuzzy. `/eml` finds `/email`. Press `Tab` to complete the
-alias or `Return` to run the best match.
+alias or `Return` to run the best match. With no alias match, `Tab` switches
+the typed text to Ask AI, so `hi` then `Tab` then `Return` asks the model
+instead of opening the first app.
 
 Pure math such as `sqrt(2)^2` bypasses every model and runs locally. Common date, time, day, and time-zone questions also use trusted macOS data instead of a model.
 

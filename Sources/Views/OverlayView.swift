@@ -37,9 +37,7 @@ struct OverlayView: View {
                     .submitLabel(.send)
                     .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
                     .onKeyPress(.tab) {
-                        guard !viewModel.savedPromptMatches.isEmpty else { return .ignored }
-                        viewModel.completeFirstFuzzyAlias()
-                        return .handled
+                        viewModel.handleTab() ? .handled : .ignored
                     }
                     .onKeyPress(.downArrow) {
                         if viewModel.isAnswerActive, viewModel.input.isEmpty {
@@ -242,7 +240,7 @@ struct OverlayView: View {
                         .frame(height: 28)
                     } else {
                         MarkdownTextView(
-                            attributedString: MarkdownRenderer.render(viewModel.output),
+                            markdown: viewModel.output,
                             isStreaming: viewModel.isStreaming
                         )
                         .frame(maxHeight: PanelSizing.maxBodyHeight)
@@ -524,7 +522,7 @@ private struct LauncherResultRow: View {
     @ViewBuilder private var icon: some View {
         switch result {
         case .application(let application):
-            Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+            Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         case .catalog(let scope, _):
             Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
@@ -644,7 +642,7 @@ private struct ItemActionPane: View {
 
     @ViewBuilder private var icon: some View {
         if let application {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+            Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         } else if let item, item.kind == .emoji {
             Text(item.value).font(.system(size: 18))
@@ -668,6 +666,9 @@ private struct ItemActionPane: View {
         case .emoji: return "Emoji"
         case .screenshot: return item.detail
         case .conversation: return item.detail
+        case .askAI: return item.detail
+        case .folder: return item.detail
+        case .answer: return item.detail
         case .application: return "Application"
         }
     }

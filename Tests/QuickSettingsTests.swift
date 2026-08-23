@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 14)
+        #expect(settings.configurationVersion == 15)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)

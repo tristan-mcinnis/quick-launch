@@ -4,8 +4,17 @@ import AppKit
 /// Displays an NSAttributedString in a non-editable, selectable NSTextView.
 /// Used for markdown-rendered output in the overlay.
 struct MarkdownTextView: NSViewRepresentable {
-    let attributedString: NSAttributedString
+    let markdown: String
     let isStreaming: Bool
+
+    /// Remembers what the text view already shows, so an unrelated state
+    /// change does not re-layout the whole answer.
+    final class Coordinator {
+        var shownMarkdown: String?
+        var shownStreaming = false
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = NSTextView()
@@ -26,7 +35,11 @@ struct MarkdownTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
-        let newAttr = NSMutableAttributedString(attributedString: attributedString)
+        let coordinator = context.coordinator
+        guard coordinator.shownMarkdown != markdown || coordinator.shownStreaming != isStreaming else { return }
+        coordinator.shownMarkdown = markdown
+        coordinator.shownStreaming = isStreaming
+        let newAttr = NSMutableAttributedString(attributedString: MarkdownRenderer.cachedRender(markdown))
         if isStreaming {
             let cursor = NSAttributedString(string: "\u{258B}", attributes: [
                 .font: NSFont.systemFont(ofSize: 14),
@@ -34,8 +47,6 @@ struct MarkdownTextView: NSViewRepresentable {
             ])
             newAttr.append(cursor)
         }
-        if textView.attributedString() != newAttr {
-            textView.textStorage?.setAttributedString(newAttr)
-        }
+        textView.textStorage?.setAttributedString(newAttr)
     }
 }

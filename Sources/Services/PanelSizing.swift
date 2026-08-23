@@ -39,7 +39,7 @@ enum PanelSizing {
         if gridRows > 0 {
             total += CGFloat(gridRows) * 52 + CGFloat(gridSections) * 24 + launcherListInset
         } else if actionCount == 0, suggestionCount > 0 {
-            var block = min(CGFloat(suggestionCount), 9) * 42
+            var block = min(CGFloat(suggestionCount), 12) * 42
             if launcherRowCount > 0 { block += launcherListInset }
             if showsDetailPane { block = max(block, detailPaneMinimumHeight) }
             total += block
