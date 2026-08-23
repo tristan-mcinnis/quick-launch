@@ -104,6 +104,24 @@ struct QuickAITests {
         #expect(!vm.isAnswerActive)
     }
 
+    @Test func chatArrowsStepBackwardsThroughRecency() async {
+        let mock = MockQuickService()
+        let vm = QuickViewModel(service: mock)
+        vm.settings.autoCopy = false
+        vm.settings.newConversationAfterMinutes = 60
+        await ask(vm, mock, "older question", reply: "Older answer")
+        vm.startNewConversation()
+        await ask(vm, mock, "newer question", reply: "Newer answer")
+        #expect(vm.currentConversation?.title == "newer question")
+
+        // Previous Chat (⌘[) goes back in time from the newest chat...
+        await vm.performResultAction(.previousChat)
+        #expect(vm.output == "Older answer")
+        // ...and Next Chat (⌘]) comes forward again.
+        await vm.performResultAction(.nextChat)
+        #expect(vm.output == "Newer answer")
+    }
+
     @Test func pinnedChatsSurviveTheHistoryLimitAndTitlesRoundTrip() throws {
         var pinned = QuickConversation(providerID: UUID(), model: "m", customTitle: "Keep", isPinned: true)
         pinned.updatedAt = Date(timeIntervalSince1970: 1)

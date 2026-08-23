@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launcherCatalog = TunaCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = SearXNGSearchService()
+    private let pageReader = WebPageReader()
     private let windowManager = WindowManager()
     private let agentSessions = AgentSessionWatcher(folders: AgentSessionWatcher.defaultFolders())
     private let powerSources = PowerSourceMonitor()
@@ -130,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
             webSearchService: webSearchService,
+            pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
             launcherUsage: launcherUsage,
