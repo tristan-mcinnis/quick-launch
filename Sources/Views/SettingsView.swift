@@ -14,7 +14,7 @@ struct SettingsView: View {
     }
 
     enum SettingsTab: String, CaseIterable, Identifiable {
-        case general, items, models, clipboard, prompts, about
+        case general, items, models, clipboard, screenHistory, prompts, about
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -22,6 +22,7 @@ struct SettingsView: View {
             case .items: "Items"
             case .models: "Models"
             case .clipboard: "Clipboard & Links"
+            case .screenHistory: "Screen History"
             case .prompts: "Prompts"
             case .about: "About"
             }
@@ -32,6 +33,7 @@ struct SettingsView: View {
             case .items: "square.grid.2x2"
             case .models: "cpu"
             case .clipboard: "clipboard"
+            case .screenHistory: "clock.arrow.circlepath"
             case .prompts: "text.quote"
             case .about: "info.circle"
             }
@@ -50,6 +52,7 @@ struct SettingsView: View {
                 case .items: ItemsSettingsView(viewModel: viewModel)
                 case .models: ProviderSettingsView(viewModel: viewModel)
                 case .clipboard: ClipboardLinksSettingsView(viewModel: viewModel)
+                case .screenHistory: ScreenHistorySettingsView(viewModel: viewModel)
                 case .prompts: SavedPromptsTab(viewModel: viewModel)
                 case .about: AboutTab(viewModel: viewModel)
                 }
@@ -60,7 +63,7 @@ struct SettingsView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
         .background {
-            // ⌘1…⌘6 switch tabs, like Raycast.
+            // ⌘1…⌘7 switch tabs, like Raycast.
             ForEach(Array(SettingsTab.allCases.enumerated()), id: \.element.id) { index, item in
                 Button("") { tab = item }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command])
@@ -137,6 +140,12 @@ private struct GeneralTab: View {
 
                 Toggle("Show menu bar icon", isOn: $viewModel.settings.showMenuBar)
                     .onChange(of: viewModel.settings.showMenuBar) { _, _ in viewModel.settings.save() }
+                    .disabled(!viewModel.screenHistoryMenuBarCanBeHidden)
+                if !viewModel.screenHistoryMenuBarCanBeHidden {
+                    Text("The menu bar status stays visible while Screen History capture is on.")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(.secondary)
+                }
 
                 Toggle("Learn from my choices", isOn: $viewModel.settings.launcherLearningEnabled)
                     .onChange(of: viewModel.settings.launcherLearningEnabled) { _, _ in
@@ -257,6 +266,342 @@ private struct GeneralTab: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+// MARK: - Screen History
+
+private struct ScreenHistorySettingsView: View {
+    @Bindable var viewModel: QuickViewModel
+    @ScaledMetric(relativeTo: .body) private var exclusionEditorMinHeight: CGFloat = 110
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Screen History").font(.headline)
+                Text("Search stays on this Mac. Captured text and images do not go to AI, the VPS, or Neon. Save to Vault writes only the selected moment's bounded text and metadata to local triage.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                Text("A later capture release will use this encrypted local store only when FileVault is on. Retention and exclusions are visible now so the release gate can be reviewed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Search existing Coast history", isOn: $viewModel.settings.searchLegacyCoastHistory)
+                    .onChange(of: viewModel.settings.searchLegacyCoastHistory) { _, _ in
+                        viewModel.settings.save()
+                    }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Import from Coast")
+                        .font(.body.weight(.semibold))
+                    Text("Preview Coast metadata with the current exclusions first. Preview writes nothing and does not open media. After you review the counts, a separate Import action copies allowed text and verified media. Coast files stay unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Freeze Coast source") {
+                            Task { await viewModel.freezeCoastSourceForImport() }
+                        }
+                        .disabled(
+                            viewModel.screenHistoryCoastFreezeIsRunning
+                                || viewModel.screenHistoryCoastImportIsRunning
+                        )
+                        Button("Preview Coast import") {
+                            Task { await viewModel.previewCoastHistoryImport() }
+                        }
+                        .disabled(
+                            viewModel.screenHistoryCoastImportIsRunning
+                                || viewModel.screenHistoryCoastImportState == .unavailable
+                        )
+                        Button("Import reviewed Coast history") {
+                            Task { await viewModel.importCoastHistory() }
+                        }
+                        .disabled(
+                            viewModel.screenHistoryCoastImportIsRunning
+                                || !viewModel.screenHistoryCoastImportCanImport
+                        )
+                        if viewModel.screenHistoryCoastImportIsRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("Coast preview or import in progress")
+                        }
+                        Spacer()
+                    }
+                    if let message = viewModel.screenHistoryCoastFreezeMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Coast freeze status")
+                    }
+                    if let message = viewModel.screenHistoryCoastImportMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Coast import status")
+                    }
+                    HStack {
+                        Button("Review imported moments") {
+                            Task { await viewModel.openScreenHistoryRetirementReview() }
+                        }
+                        .disabled(
+                            viewModel.screenHistoryRetirementReviewSnapshot?.moments.isEmpty != false
+                        )
+                        Spacer()
+                    }
+                    if let message = viewModel.screenHistoryRetirementReviewMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Coast review status")
+                    }
+                }
+
+                Divider()
+
+                Toggle("Enable owned screen capture", isOn: $viewModel.settings.screenHistoryCaptureEnabled)
+                    .onChange(of: viewModel.settings.screenHistoryCaptureEnabled) { _, enabled in
+                        if !enabled { viewModel.settings.screenHistoryCaptureConfirmed = false }
+                        viewModel.settings.save()
+                        Task { await viewModel.applyScreenHistoryCaptureSettings() }
+                    }
+                    .disabled(!ScreenHistoryReleasePolicy.allowsOwnedCapture)
+
+                Text("Owned capture is locked in this search-only beta. Its live privacy and seven-day soak gates must pass before release. Browser capture will remain blocked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Status")
+                    Spacer()
+                    Label(captureStatus, systemImage: captureStatusIcon)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("FileVault")
+                    Spacer()
+                    Label(fileVaultStatus, systemImage: fileVaultStatusIcon)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let blocker = viewModel.screenHistoryCaptureStartBlocker {
+                    Label(blocker, systemImage: "lock.shield")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if viewModel.screenHistoryCaptureStatus?.lastSkipReason == .screenRecordingNotAuthorized {
+                    Button("Allow Screen Recording") {
+                        Task { await viewModel.requestScreenHistoryScreenRecordingAuthorization() }
+                    }
+                }
+
+                Toggle(
+                    "I accept that other software running as my Mac user could read stored OCR",
+                    isOn: $viewModel.settings.screenHistorySameUserAccessRiskAccepted
+                )
+                .onChange(of: viewModel.settings.screenHistorySameUserAccessRiskAccepted) { _, accepted in
+                    if !accepted {
+                        viewModel.settings.screenHistoryCaptureConfirmed = false
+                    }
+                    viewModel.settings.save()
+                    Task { await viewModel.applyScreenHistoryCaptureSettings() }
+                }
+                Text("FileVault and owner-only files protect the disk and other user accounts. This build does not use SQLCipher, so software already running as your Mac user can still read the local database.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let message = viewModel.screenHistorySoakMessage {
+                    Label(message, systemImage: "calendar.badge.clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Screen History soak status. \(message)")
+                }
+
+                Divider()
+
+                HStack {
+                    Text("Keep history for")
+                    Spacer()
+                    Picker("Keep history for", selection: Binding(
+                        get: { viewModel.screenHistoryRetentionDaysSelection },
+                        set: { viewModel.screenHistoryRetentionDaysSelection = $0 }
+                    )) {
+                        Text("7 days").tag(7)
+                        Text("14 days").tag(14)
+                        Text("30 days").tag(30)
+                        Text("60 days").tag(60)
+                        Text("90 days").tag(90)
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                }
+
+                HStack {
+                    Text("Storage limit")
+                    Spacer()
+                    Picker("Storage limit", selection: Binding(
+                        get: { viewModel.screenHistoryStorageCapGBSelection },
+                        set: { viewModel.screenHistoryStorageCapGBSelection = $0 }
+                    )) {
+                        Text("5 GB").tag(5)
+                        Text("10 GB").tag(10)
+                        Text("20 GB").tag(20)
+                        Text("50 GB").tag(50)
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                }
+                if let message = viewModel.screenHistoryRetentionMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Apply reviewed retention limits") {
+                    Task { await viewModel.applyReviewedScreenHistoryRetention() }
+                }
+                .disabled(viewModel.screenHistoryPendingRetentionPolicy == nil)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Excluded applications")
+                        .font(.body.weight(.semibold))
+                    Text("Enter one bundle identifier per line. Password, system, meeting, and screen-sharing apps stay excluded even if removed here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: exclusionBinding)
+                        .font(.body.monospaced())
+                        .frame(minHeight: exclusionEditorMinHeight)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius).fill(AQDesign.ColorToken.keyCapFill))
+                        .accessibilityLabel("Excluded application bundle identifiers")
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Excluded websites")
+                        .font(.body.weight(.semibold))
+                    Text("Enter one domain per line. These rules filter existing history and legacy migration. Browser capture remains unavailable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: domainExclusionBinding)
+                        .font(.body.monospaced())
+                        .frame(minHeight: exclusionEditorMinHeight)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius).fill(AQDesign.ColorToken.keyCapFill))
+                        .accessibilityLabel("Excluded website domains")
+                }
+
+                Divider()
+
+                if ScreenHistoryReleasePolicy.allowsOwnedCapture {
+                    Text("Start only after you review the retention and exclusion rules above. Quick Launch asks again after every launch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Button("Start capture") {
+                            Task { await viewModel.confirmAndStartScreenHistoryCapture() }
+                        }
+                        .disabled(
+                            !viewModel.settings.screenHistoryCaptureEnabled
+                                || viewModel.screenHistoryCaptureStartBlocker != nil
+                        )
+                        Button("Stop capture") {
+                            Task { await viewModel.stopScreenHistoryCapture() }
+                        }
+                        .disabled(!viewModel.screenHistoryCaptureIsActive)
+                        Spacer()
+                    }
+                } else {
+                    Text("Start and Stop controls will appear only after the live privacy and soak gates pass in a later release.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task {
+            viewModel.noteScreenHistorySettingsPresented()
+            await viewModel.applyScreenHistoryCaptureSettings()
+            await viewModel.refreshScreenHistoryCoastImportAvailability()
+            await viewModel.refreshCoastFreezeReceipt()
+            await viewModel.refreshScreenHistoryRetirementReview()
+        }
+    }
+
+    private var captureStatus: String {
+        viewModel.screenHistoryCaptureStatusLabel
+    }
+
+    private var fileVaultStatus: String {
+        switch viewModel.screenHistoryCaptureStatus?.fileVaultStatus {
+        case .on: return "On"
+        case .off: return "Off"
+        case .unknown, nil: return "Not verified"
+        }
+    }
+
+    private var fileVaultStatusIcon: String {
+        switch viewModel.screenHistoryCaptureStatus?.fileVaultStatus {
+        case .on: return "checkmark.shield"
+        case .off: return "xmark.shield"
+        case .unknown, nil: return "questionmark.diamond"
+        }
+    }
+
+    private var captureStatusIcon: String {
+        switch viewModel.screenHistoryCaptureStatus?.state {
+        case .running: "record.circle"
+        case .pausedForInactivity: "pause.circle"
+        case .stopped, .disabled, nil: "stop.circle"
+        }
+    }
+
+    private var exclusionBinding: Binding<String> {
+        Binding(
+            get: { viewModel.settings.screenHistoryExcludedBundleIDs.sorted().joined(separator: "\n") },
+            set: { value in
+                let ids = value.split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
+                let normalized = Array(Set(ids)).sorted()
+                if normalized != viewModel.settings.screenHistoryExcludedBundleIDs {
+                    viewModel.invalidateScreenHistoryCoastImportPreview()
+                }
+                viewModel.settings.screenHistoryExcludedBundleIDs = normalized
+                viewModel.settings.save()
+                Task { await viewModel.applyScreenHistoryCaptureSettings() }
+            }
+        )
+    }
+
+    private var domainExclusionBinding: Binding<String> {
+        Binding(
+            get: { viewModel.settings.screenHistoryExcludedDomains.sorted().joined(separator: "\n") },
+            set: { value in
+                let domains = value
+                    .split(whereSeparator: \.isWhitespace)
+                    .compactMap { ScreenHistoryCaptureConfiguration.normalizedDomain(String($0)) }
+                let normalized = Array(Set(domains)).sorted()
+                if normalized != viewModel.settings.screenHistoryExcludedDomains {
+                    viewModel.invalidateScreenHistoryCoastImportPreview()
+                }
+                viewModel.settings.screenHistoryExcludedDomains = normalized
+                viewModel.settings.save()
+                Task { await viewModel.applyScreenHistoryCaptureSettings() }
+            }
+        )
     }
 }
 

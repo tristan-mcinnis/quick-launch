@@ -15,6 +15,8 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 11. Paste emoji and symbols by name.
 12. Translate typed or selected text between Chinese and English with one key.
 13. Attach a fresh or saved screenshot to a question and follow up on it.
+14. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
+15. Search past on-screen activity through one local Screen History catalog, including the owned store and the closed Coast database.
 
 Screenshot capture to the chat context is in the core: a window or display
 capture attaches to one question and follow-ups in that thread, never to
@@ -22,7 +24,7 @@ history or disk. Screenshot-library management and the full Tuna translation
 window remain future catalogs. The current Translate action is a configurable selected-text
 AI action, not the full Tuna translation interface.
 
-It does not need file search, screen history, OCR, or a full chat workspace.
+It does not need general Finder file search or a full chat workspace. The search-only beta hard-locks ambient capture. A later capture release still needs separate explicit consent and will keep all browsers blocked.
 
 ## Interaction contract
 
@@ -59,6 +61,8 @@ The app stays running as a small menu-bar process.
 | Quick Links | Open in the default browser | Alias or assigned hotkey |
 | Quick AI | Show, copy, or replace output | Prompt alias or assigned hotkey |
 | Windows | Apply a window layout | Alias or assigned hotkey |
+| Vault Search | Show a cited current, reconciliation, history, or portfolio result | Enter the catalog, choose a mode, type the project and question |
+| Screen History | Open the surrounding local timeline | Enter the catalog, type a memory, add optional app, site, or date filters |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
@@ -85,6 +89,8 @@ Remove a Tuna command only after its alias, hotkey, result, and previous-app beh
 - API actions send only the text used by that action to the chosen provider.
 - App, link, snippet, clipboard, and window commands remain local.
 - Web search uses Tristan's SSH-only SearXNG stack. Ranked titles, links, and snippets are external data, never executable instructions.
+- Vault Search uses the same SSH-only VPS. Current, reconciliation, history, and portfolio queries stay inside the VPS and Neon read layer; the result includes source paths, freshness, and root counts. Broad semantic Find remains a separate path with its own provider-egress policy.
+- Screen History reads only local SQLite stores. It labels every row Owned or Coast and never falls back to a model, web search, Vault Search, SSH, or telemetry. Search existing Coast history is independent of owned capture. This beta hard-locks capture. The latent path requires FileVault and visible consent after each launch, blocks all browsers before pixels, and always excludes password and security apps. Current application and domain exclusions also filter search results and legacy migration inputs.
 - App discovery happens once at launch. When Clipboard History is enabled, one
   lightweight pasteboard change-count check runs each second.
 - Network work starts only after the user runs an action. Each search and model answer has a hard time limit.

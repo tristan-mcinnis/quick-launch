@@ -24,7 +24,7 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   dates, a typed address) sit above everything.
 - **Catalog.** A named list of items of one kind: Snippets, Quick Links,
   Clipboard History, Emoji & Symbols, Screenshots, Folders, Caffeinate,
-  Quick AI Chats, Commands (windows, screenshots, toggles, System Settings
+  Quick AI Chats, Vault Search, Screen History, Commands (windows, screenshots, toggles, System Settings
   panes, clipboard and screen helpers). Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
@@ -91,7 +91,7 @@ overlay.
   with section headers (Frequently Used, All). Arrows move the highlight;
   the same actions apply.
 - **Detail pane.** Catalogs of things worth previewing (Screenshots,
-  Clipboard History) show the list on the left and a preview plus an
+  Clipboard History, Screen History) show the list on the left and a preview plus an
   Information block on the right; the panel widens to fit.
 - **Answer.** Earlier turns compact and scrollable above, the latest question
   and answer in full, footer hints. Copy and paste are keys, not buttons.
@@ -124,6 +124,7 @@ one toggle, one Forget button.
 
 - Screenshots and capture bundles live in memory for one thread; never in
   history or on disk.
+- Screen History frames and OCR remain in owner-only local stores. The search-only beta hard-locks capture. The latent capture path requires FileVault and visible consent after each launch, and all browsers are refused before pixels are read. The editable application and domain exclusions govern capture, search, and migration. A result proves only that something was visible at that time. It never reports current project truth.
 - The screenshot text index is on-device OCR (Vision), one local JSON file,
   switchable off in Settings › General.
 - Snippet and clipboard values never reach logs or diagnostics.

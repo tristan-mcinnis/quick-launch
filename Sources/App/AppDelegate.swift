@@ -107,6 +107,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launcherCatalog = TunaCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = SearXNGSearchService()
+    private let vaultSearchService = SSHVaultSearchService()
+    private let screenHistoryStore = try? SQLiteScreenHistoryStore()
+    private let coastLegacyReader = CoastLegacyReader()
+    private lazy var screenHistoryCoastImporter: ScreenHistoryCoastImportService? = {
+        guard let screenHistoryStore else { return nil }
+        return ScreenHistoryCoastImportService(
+            reader: coastLegacyReader,
+            store: screenHistoryStore,
+            legacyContentRootURL: coastLegacyReader.contentRootURL
+        )
+    }()
+    private lazy var screenHistoryRetirementReviewer: ScreenHistoryRetirementReviewService? = {
+        guard let screenHistoryStore else { return nil }
+        return ScreenHistoryRetirementReviewService(sampler: screenHistoryStore)
+    }()
+    private let screenHistorySoakReceipt = try? ScreenHistorySoakReceiptService()
+    private let screenHistoryCoastFreezeReceipt = try? ScreenHistoryCoastFreezeReceiptService()
+    private let screenHistoryVaultSaver = ScreenHistoryVaultSaveService()
+    private let screenHistorySecurityChecker = FileVaultScreenHistorySecurityChecker()
+    private lazy var screenHistoryCaptureSink: ScreenHistorySegmentedCaptureSink? = {
+        guard let screenHistoryStore,
+              let writer = try? AVFoundationScreenHistoryMediaSegmentWriter(
+                  mediaRootURL: SQLiteScreenHistoryStore.defaultMediaDirectoryURL()
+              )
+        else { return nil }
+        return ScreenHistorySegmentedCaptureSink(
+            store: screenHistoryStore,
+            writer: writer
+        )
+    }()
+    private lazy var screenHistoryCaptureService: ScreenHistoryCaptureService? = {
+        guard let screenHistoryCaptureSink else { return nil }
+        return ScreenHistoryCaptureService(
+            frameSource: ScreenCaptureKitHistoryFrameSource(),
+            activityReader: SystemScreenHistoryActivityReader(),
+            textRecognizer: VisionScreenHistoryTextRecognizer(),
+            sink: screenHistoryCaptureSink,
+            securityChecker: screenHistorySecurityChecker
+        )
+    }()
     private let pageReader = WebPageReader()
     private let windowManager = WindowManager()
     private let agentSessions = AgentSessionWatcher(folders: AgentSessionWatcher.defaultFolders())
@@ -131,6 +171,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
             webSearchService: webSearchService,
+            vaultSearchService: vaultSearchService,
+            screenHistoryStore: screenHistoryStore,
+            coastLegacyReader: coastLegacyReader,
+            screenHistoryCaptureService: screenHistoryCaptureService,
+            screenHistoryVaultSaver: screenHistoryVaultSaver,
+            screenHistoryCoastImporter: screenHistoryCoastImporter,
+            screenHistoryRetirementReviewer: screenHistoryRetirementReviewer,
+            screenHistorySoakReceipt: screenHistorySoakReceipt,
+            screenHistoryCoastFreezeReceipt: screenHistoryCoastFreezeReceipt,
             pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
@@ -160,14 +209,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         caffeinateManager.releaseForQuit()
+        Task { await screenHistoryCaptureService?.stop() }
     }
 
     // MARK: - Bootstrap
 
     private func bootstrap(viewModel: QuickViewModel) async {
         // a. Load settings from UserDefaults
-        let settings = QuickSettings.load()
+        var settings = QuickSettings.load()
+        // Ambient capture needs one explicit Start in the visible Screen
+        // History settings on every launch. A persisted value is not consent
+        // to restart recording in the background.
+        settings.screenHistoryCaptureConfirmed = false
         viewModel.settings = settings
+        await viewModel.prepareScreenHistoryCaptureForBootstrap()
+        await viewModel.applyScreenHistoryRetention()
         caffeinateManager.onChange = { [weak viewModel] in
             viewModel?.syncCaffeinateState()
         }
@@ -217,10 +273,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // d. Register local mouse monitor for click-outside dismissal
         registerMouseDismissMonitor()
 
-        // e. Setup status bar item if settings.showMenuBar
-        if settings.showMenuBar {
-            setupStatusItem()
-        }
+        // e. Screen capture forces an always-visible, stateful status item.
+        // Otherwise the normal menu-bar preference applies.
+        syncStatusItemVisibilityAndPresentation(viewModel: viewModel)
 
         // Listen for Escape / dismiss notifications from OverlayView
         NotificationCenter.default.addObserver(
@@ -805,17 +860,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status bar
 
     private func setupStatusItem() {
+        guard statusItem == nil else { return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            button.image = NSImage(
-                systemSymbolName: "bolt.fill",
-                accessibilityDescription: "Quick Launch"
-            )
             button.imagePosition = .imageOnly
             button.action = #selector(handleStatusItemClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.target = self
         }
+    }
+
+    private func syncStatusItemVisibilityAndPresentation(viewModel: QuickViewModel) {
+        let presentation = ScreenHistoryMenuBarPresentation.make(
+            status: viewModel.screenHistoryCaptureStatus
+        )
+        let shouldShow = viewModel.settings.showMenuBar || presentation.forcesVisibility
+        if shouldShow {
+            setupStatusItem()
+        } else if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+            return
+        }
+
+        guard let button = statusItem?.button else { return }
+        button.image = NSImage(
+            systemSymbolName: presentation.symbolName,
+            accessibilityDescription: presentation.accessibilityName
+        )
+        button.setAccessibilityLabel(presentation.accessibilityName)
     }
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
@@ -859,6 +932,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caffeinate.state = viewModel?.isCaffeinating == true ? .on : .off
         caffeinate.target = self
         menu.addItem(caffeinate)
+
+        menu.addItem(.separator())
+
+        let screenHistory = ScreenHistoryStatusPresentation.make(
+            status: viewModel?.screenHistoryCaptureStatus
+        )
+        let screenHistoryStatus = NSMenuItem(
+            title: screenHistory.statusTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        screenHistoryStatus.isEnabled = false
+        menu.addItem(screenHistoryStatus)
+
+        let screenHistoryControl = NSMenuItem(
+            title: screenHistory.controlTitle,
+            action: #selector(stopScreenHistoryFromMenu),
+            keyEquivalent: ""
+        )
+        screenHistoryControl.isEnabled = screenHistory.controlIsEnabled
+        screenHistoryControl.target = self
+        menu.addItem(screenHistoryControl)
 
         let welcome = NSMenuItem(
             title: "Show Welcome Again",
@@ -930,9 +1025,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.applicationSelectionIndex
             _ = viewModel.screenshotIndexProgress
             _ = viewModel.applicationSelectionIndex
+            _ = viewModel.screenHistoryCaptureStatus
+            _ = viewModel.settings.showMenuBar
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
                 guard let self, let viewModel else { return }
+                self.syncStatusItemVisibilityAndPresentation(viewModel: viewModel)
                 self.resizePanelForContent()
                 self.armPanelSizeObserver(viewModel: viewModel)
             }
@@ -944,7 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let visibleBody = vm.conversationMessages.count > 2
             ? vm.conversationTranscriptText
             : vm.output
-        let total = PanelSizing.panelHeight(
+        var total = PanelSizing.panelHeight(
             output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
@@ -970,6 +1068,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             gridSections: vm.isGridCatalog ? vm.gridSections.count : 0,
             showsDetailPane: vm.showsDetailPane
         )
+        if vm.activeItemActionForm == .screenHistorySave {
+            total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
+        }
         let width = vm.currentPanelWidth
         var frame = panel.frame
         if abs(frame.height - total) > 1 || abs(frame.width - width) > 1 {
@@ -1006,6 +1107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   $0.itemID == "caffeinate.toggle"
               }) else { return }
         viewModel.performSystemCommand(item)
+    }
+
+    @objc private func stopScreenHistoryFromMenu() {
+        Task { @MainActor [weak viewModel] in
+            await viewModel?.pauseScreenHistoryCapture()
+        }
     }
 
     @objc private func openWebsite() {

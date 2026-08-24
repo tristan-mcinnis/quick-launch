@@ -97,6 +97,7 @@ struct FoldersAndCommandsTests {
         #expect(ids.contains("ocr.area"))
         #expect(ids.contains("paste.plain"))
         #expect(ids.contains("clipboard.cleanLink"))
+        #expect(!ids.contains("screenHistory.toggleCapture"), "capture control stays hidden until it can run safely")
         #expect(ids.contains { $0.hasPrefix("settingspane.") })
         #expect(Set(ids).count == ids.count, "command ids stay unique")
         vm.input = "dark mode"
@@ -128,7 +129,7 @@ struct FoldersAndCommandsTests {
         let data = try JSONEncoder().encode(old)
         let decoded = try JSONDecoder().decode(QuickSettings.self, from: data)
         #expect(decoded.launcherItemConfigurations.contains { $0.kind == .folder && $0.alias == "dl" })
-        #expect(decoded.configurationVersion == 15)
+        #expect(decoded.configurationVersion == 17)
         let again = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(decoded))
         #expect(again.launcherItemConfigurations.filter { $0.kind == .folder }.count == 2)
     }

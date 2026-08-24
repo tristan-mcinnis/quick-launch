@@ -19,6 +19,7 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("ServiceManagement"),
+                .linkedLibrary("sqlite3"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
@@ -33,7 +34,10 @@ let package = Package(
                 "QuickLaunch",
                 .product(name: "Markdown", package: "swift-markdown"),
             ],
-            path: "Tests"
+            path: "Tests",
+            resources: [
+                .process("Fixtures")
+            ]
         ),
     ]
 )

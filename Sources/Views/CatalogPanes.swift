@@ -72,44 +72,54 @@ struct EmojiGridView: View {
 struct CatalogDetailPane: View {
     @Bindable var viewModel: QuickViewModel
     let item: LauncherCatalogItem
+    @ScaledMetric(relativeTo: .body) private var screenHistoryTextMaxHeight: CGFloat = 150
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             preview
-            Text("Information")
-                .font(AQDesign.TypeToken.label)
-                .foregroundStyle(.secondary)
-            VStack(spacing: 6) {
-                ForEach(rows, id: \.0) { row in
-                    HStack(alignment: .top) {
-                        Text(row.0)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 12)
-                        Text(row.1)
-                            .font(AQDesign.TypeToken.caption)
-                            .multilineTextAlignment(.trailing)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Information")
+                    .font(item.kind == .screenHistory ? .caption.weight(.semibold) : AQDesign.TypeToken.label)
+                    .foregroundStyle(.secondary)
+                VStack(spacing: 6) {
+                    ForEach(rows, id: \.0) { row in
+                        HStack(alignment: .top) {
+                            Text(row.0)
+                                .font(item.kind == .screenHistory ? .caption : AQDesign.TypeToken.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Text(row.1)
+                                .font(item.kind == .screenHistory ? .caption : AQDesign.TypeToken.caption)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(item.kind == .screenHistory ? 3 : 2)
+                                .truncationMode(.middle)
+                        }
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(ScreenHistoryAccessibilityPresentation.informationGroupName)
             if let text = longText {
                 Text(textTitle)
-                    .font(AQDesign.TypeToken.label)
+                    .font(item.kind == .screenHistory ? .caption.weight(.semibold) : AQDesign.TypeToken.label)
                     .foregroundStyle(.secondary)
                 ScrollView {
                     Text(text)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(item.kind == .screenHistory ? .body.monospaced() : .system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 120)
+                .frame(maxHeight: item.kind == .screenHistory ? screenHistoryTextMaxHeight : 120)
             }
             Spacer(minLength: 0)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: item.id) {
+            guard item.kind == .screenHistory,
+                  let frame = viewModel.screenHistoryFrame(for: item) else { return }
+            await viewModel.loadScreenHistoryOCRBoxes(for: frame)
+        }
     }
 
     @ViewBuilder private var preview: some View {
@@ -138,6 +148,27 @@ struct CatalogDetailPane: View {
             .frame(maxHeight: 200)
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
+        case .screenHistory:
+            if let frame = viewModel.screenHistoryFrame(for: item) {
+                ScreenHistoryMomentPreview(
+                    frame: frame,
+                    boxes: viewModel.screenHistoryOCRBoxes(for: frame),
+                    accessibilityLabel: screenHistoryPreviewLabel(frame)
+                )
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(AQDesign.ColorToken.keyCapFill)
+                    .frame(height: 120)
+                    .overlay(
+                        VStack(spacing: 6) {
+                            Image(systemName: "film")
+                            Text("Image preview unavailable")
+                        }
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                    )
+                    .accessibilityLabel("Screen moment preview unavailable")
+            }
         default:
             EmptyView()
         }
@@ -166,18 +197,154 @@ struct CatalogDetailPane: View {
             if item.isPinned { list.append(("Pinned", "Yes")) }
             if ItemActionCatalog.looksLikeURL(item.value) { list.append(("Type", "Link")) }
             return list
+        case .screenHistory:
+            guard let frame = viewModel.screenHistoryFrame(for: item) else { return [] }
+            var list: [(String, String)] = [
+                ("Seen", frame.capturedAt.formatted(date: .abbreviated, time: .shortened)),
+                ("Application", frame.application ?? "Unknown"),
+                ("Source", frame.source == .owned ? "Owned" : "Coast"),
+            ]
+            if let title = frame.windowTitle { list.append(("Window", title)) }
+            if let domain = frame.domain { list.append(("Site", domain)) }
+            return list
         default:
             return []
         }
     }
 
-    private var textTitle: String { item.kind == .screenshot ? "Text in image" : "" }
+    private var textTitle: String {
+        switch item.kind {
+        case .screenshot: "Text in image"
+        case .screenHistory: "Text seen"
+        default: ""
+        }
+    }
 
     private var longText: String? {
+        if item.kind == .screenHistory {
+            guard let frame = viewModel.screenHistoryFrame(for: item) else { return nil }
+            let text = frame.ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? "No text found" : String(text.prefix(4_000))
+        }
         guard item.kind == .screenshot else { return nil }
         if let text = viewModel.screenshotText(for: item) {
             return text.isEmpty ? "No text found" : text
         }
         return viewModel.screenshotIndexProgress.isRunning ? "Reading text…" : "Not read yet"
+    }
+
+    private func screenHistoryPreviewLabel(_ frame: ScreenHistoryFrame) -> String {
+        let app = frame.application ?? "unknown application"
+        let text = frame.ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alternative = text.isEmpty ? "No text was recognized" : String(text.prefix(500))
+        return "Screen moment from \(app). \(alternative)"
+    }
+}
+
+private struct ScreenHistoryMomentPreview: View {
+    let frame: ScreenHistoryFrame
+    let boxes: [ScreenHistoryOCRBox]
+    let accessibilityLabel: String
+    @State private var image: NSImage?
+    @State private var finished = false
+
+    var body: some View {
+        Group {
+            if let image {
+                ZStack {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                    ScreenHistoryOCRBoxOverlay(
+                        imageSize: image.size,
+                        displayGeometry: frame.displayGeometry,
+                        boxes: boxes
+                    )
+                }
+                    .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AQDesign.ColorToken.panelStroke))
+                    .accessibilityLabel(accessibilityLabel)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(AQDesign.ColorToken.keyCapFill)
+                    .frame(height: 120)
+                    .overlay(
+                        VStack(spacing: 6) {
+                            if !finished { ProgressView().controlSize(.small) }
+                            Image(systemName: finished ? "film" : "clock")
+                            Text(finished ? "Image preview unavailable" : "Loading local preview…")
+                        }
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                    )
+                    .accessibilityLabel(
+                        finished ? "Screen moment preview unavailable" : "Loading screen moment preview"
+                    )
+            }
+        }
+        .task(id: "\(frame.source.rawValue):\(frame.sourceIdentifier):\(frame.contentHash)") {
+            image = await ScreenHistoryMediaPreviewService.image(for: frame)
+            finished = true
+        }
+    }
+}
+
+private struct ScreenHistoryOCRBoxOverlay: View {
+    let imageSize: NSSize
+    let displayGeometry: ScreenHistoryDisplayGeometry?
+    let boxes: [ScreenHistoryOCRBox]
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(boxes.prefix(300))) { box in
+                    let rect = ScreenHistoryOCRBoxLayout.rect(
+                        for: box,
+                        imageSize: imageSize,
+                        displayGeometry: displayGeometry,
+                        containerSize: geometry.size
+                    )
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(AQDesign.ColorToken.accent.opacity(0.55), lineWidth: 1)
+                        .frame(
+                            width: rect.width,
+                            height: rect.height
+                        )
+                        .offset(
+                            x: rect.minX,
+                            y: rect.minY
+                        )
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+enum ScreenHistoryOCRBoxLayout {
+    static func rect(
+        for box: ScreenHistoryOCRBox,
+        imageSize: CGSize,
+        displayGeometry: ScreenHistoryDisplayGeometry?,
+        containerSize: CGSize
+    ) -> CGRect {
+        let sourceWidth = max(1, displayGeometry?.width ?? imageSize.width)
+        let sourceHeight = max(1, displayGeometry?.height ?? imageSize.height)
+        let scale = min(
+            containerSize.width / sourceWidth,
+            containerSize.height / sourceHeight
+        )
+        let fittedWidth = sourceWidth * scale
+        let fittedHeight = sourceHeight * scale
+        let xOffset = (containerSize.width - fittedWidth) / 2
+        let yOffset = (containerSize.height - fittedHeight) / 2
+        return CGRect(
+            x: xOffset + (box.x - (displayGeometry?.x ?? 0)) * scale,
+            y: yOffset + (box.y - (displayGeometry?.y ?? 0)) * scale,
+            width: max(1, box.width * scale),
+            height: max(1, box.height * scale)
+        )
     }
 }

@@ -48,6 +48,8 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
 - Two-control overlay toolbar: Send and one menu for actions, models, history, and settings
 - Direct SearXNG web search for explicit searches and time-sensitive questions
+- Vault Search catalog backed by the VPS and Neon: Current Project, Reconcile Changes, Project History, and Across Projects. Structured modes make one read-only product call with no model-provider egress, show freshness and source paths, refuse future evidence, and ask for project scope when a name is ambiguous
+- Local Screen History catalog over the owned SQLite FTS store and the closed Coast database, with time, app, and site filters, stable source-labelled rows, image and OCR previews, surrounding timelines, and no AI or VPS fallback. This search-only beta hard-locks owned capture. Browser capture remains unavailable in the later capture path.
 - Provider and model switcher inside the compact overlay menu
 - Any OpenAI-compatible endpoint through a custom base URL
 - Built-in setup for LM Studio, DeepSeek, Moonshot/Kimi, and OpenAI
@@ -107,6 +109,30 @@ survive code changes. The generated `build` directory is excluded from
 Spotlight so it does not appear as a second Quick Launch installation.
 
 The build has no helper binaries and one package dependency (`swift-markdown`).
+
+### Screen History evaluation receipts
+
+The Screen History product and security tests append one JSON object per case to
+`.build/screen-history-evaluation-receipts/screen-history-evaluation-<run-id>.jsonl`.
+Set `SCREEN_HISTORY_EVALUATION_RECEIPT_DIRECTORY` to put the files in another
+local directory. Each process uses a new file, so concurrent test runs do not
+share an append target.
+
+Receipt schema 1 records the current Screen History store schema version, run
+and case IDs, suite, completion result, elapsed milliseconds, measured local
+file, statement, tool, and helper counts, a typed network observation, and the
+source-root count. A missing count means that the test did not measure it.
+`completed` means that the test reached its receipt boundary. Swift Testing is
+still the authority for assertion pass or failure. `aborted` means that the
+test left scope before that boundary.
+
+The format has no free-form payload fields. It cannot store OCR text, window
+titles, domains, file paths, search terms, or queries. The receipt directory and
+file use owner-only permissions.
+
+```json
+{"case_id":"SH-R01","elapsed_milliseconds":12,"measurements":{"helper_call_count":1,"local_file_count":3,"network":{"mode":"not_measured"},"source_root_count":1,"tool_call_count":0},"recorded_at":"2026-08-25T00:00:00Z","result":"completed","run_id":"00000000-0000-0000-0000-000000000001","schema_version":1,"store_schema_version":7,"suite":"product"}
+```
 
 ## Use
 

@@ -24,7 +24,8 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 15)
+        #expect(settings.configurationVersion == 17)
+        #expect(!settings.screenHistorySameUserAccessRiskAccepted)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)
@@ -37,6 +38,22 @@ struct QuickSettingsTests {
                 && $0.alias == "left"
                 && $0.hotkey == ActionHotkey(keyCode: 123, modifiers: 1_572_864)
         })
+    }
+
+    @Test func screenHistorySameUserRiskAcceptanceRoundTripsAndDefaultsClosed() throws {
+        let defaults = freshDefaults()
+        var settings = QuickSettings()
+        #expect(!settings.screenHistorySameUserAccessRiskAccepted)
+        settings.screenHistorySameUserAccessRiskAccepted = true
+        settings.save(to: defaults)
+        #expect(QuickSettings.load(from: defaults).screenHistorySameUserAccessRiskAccepted)
+
+        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        let legacy = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: JSONEncoder().encode(LegacySettings())
+        )
+        #expect(!legacy.screenHistorySameUserAccessRiskAccepted)
     }
 
     @Test func testLauncherItemConfigurationRoundTrips() {
@@ -55,6 +72,32 @@ struct QuickSettingsTests {
         let loaded = QuickSettings.load(from: defaults)
 
         #expect(loaded.launcherItemConfigurations == settings.launcherItemConfigurations)
+    }
+
+    @Test func screenHistoryDomainExclusionsRoundTrip() {
+        let defaults = freshDefaults()
+        var settings = QuickSettings()
+        settings.screenHistoryExcludedDomains = ["private.example.com", "example.org"]
+
+        settings.save(to: defaults)
+        let loaded = QuickSettings.load(from: defaults)
+
+        #expect(loaded.screenHistoryExcludedDomains == settings.screenHistoryExcludedDomains)
+    }
+
+    @Test func legacySettingsGainSafeScreenHistoryDomainDefaults() throws {
+        struct LegacySettings: Encodable {
+            var configurationVersion = 16
+            var screenHistoryExcludedBundleIDs = ["com.example.private"]
+        }
+        let decoded = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: JSONEncoder().encode(LegacySettings())
+        )
+
+        #expect(decoded.configurationVersion == 17)
+        #expect(decoded.screenHistoryExcludedBundleIDs == ["com.example.private"])
+        #expect(decoded.screenHistoryExcludedDomains == ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted())
     }
 
     @Test func testLegacySettingsGainPiSearchActionOnce() throws {

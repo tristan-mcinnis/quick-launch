@@ -15,6 +15,9 @@ enum PanelSizing {
     static let launcherListInset: CGFloat = 12
     /// A preview plus its Information block needs this much room.
     static let detailPaneMinimumHeight: CGFloat = 360
+    /// Keeps the exact payload preview and its primary action visible. The
+    /// payload body scrolls within this fixed production budget.
+    static let screenHistorySaveMinimumHeight: CGFloat = 620
 
     static func panelHeight(
         output: String,

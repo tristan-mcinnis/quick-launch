@@ -133,4 +133,14 @@ struct PanelSizingTests {
         let expected: CGFloat = 60 + 76 + 5 * 42
         #expect(h == expected)
     }
+
+    @Test func screenHistorySaveHasAProductionVisibilityBudget() {
+        #expect(PanelSizing.screenHistorySaveMinimumHeight >= 620)
+        #expect(PanelSizing.screenHistorySaveMinimumHeight > PanelSizing.panelHeight(
+            output: "",
+            isStreaming: false,
+            errorMessage: nil,
+            actionCount: 2
+        ))
+    }
 }

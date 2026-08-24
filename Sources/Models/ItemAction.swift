@@ -94,6 +94,11 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case hide
     case relaunch
     case copyCleanLink
+    case showTimeline
+    case openMoment
+    case saveToVault
+    case acceptScreenHistoryReview
+    case flagScreenHistoryReview
 }
 
 /// One row in the ⌘K pane. The same table drives direct shortcuts from the
@@ -213,7 +218,12 @@ enum ItemActionCatalog {
             return actions
         case .command:
             return [
-                ItemAction(kind: .primary, title: "Run", systemImage: "play", shortcut: .returnKey),
+                ItemAction(
+                    kind: .primary,
+                    title: item.value.hasPrefix("vault.") ? "Search" : "Run",
+                    systemImage: item.value.hasPrefix("vault.") ? "magnifyingglass" : "play",
+                    shortcut: .returnKey
+                ),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
@@ -244,6 +254,17 @@ enum ItemActionCatalog {
                 ItemAction(kind: .secondary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
             ]
+        case .screenHistory:
+            var actions = [
+                ItemAction(kind: .openMoment, title: "Open moment", systemImage: "clock", shortcut: .returnKey),
+                ItemAction(kind: .showTimeline, title: "Show timeline", systemImage: "clock.arrow.circlepath", shortcut: .command("y")),
+                ItemAction(kind: .secondary, title: "Copy text", systemImage: "doc.on.doc", shortcut: .commandReturn),
+            ]
+            if item.keywords.contains("has-local-file") {
+                actions.append(ItemAction(kind: .revealInFinder, title: "Show in Finder", systemImage: "folder", shortcut: .commandShift("r")))
+            }
+            actions.append(ItemAction(kind: .saveToVault, title: "Save to Vault", systemImage: "tray.and.arrow.down", shortcut: nil))
+            return actions
         case .askAI:
             return [
                 ItemAction(kind: .primary, title: "Ask AI", systemImage: "sparkles", shortcut: .returnKey),
@@ -290,6 +311,7 @@ enum ItemActionForm: Equatable, Sendable {
     case edit
     case alias
     case hotkey
+    case screenHistorySave
 }
 
 /// Actions on an AI answer. One table drives the footer, the ⌘K palette,

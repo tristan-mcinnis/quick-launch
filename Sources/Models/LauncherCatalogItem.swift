@@ -22,12 +22,13 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .application: "Open"
         case .snippet, .clipboard, .emoji: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
-        case .command: "Run"
+        case .command: value.hasPrefix("vault.") ? "Search" : "Run"
         case .screenshot: "Paste"
         case .conversation: "Continue"
         case .askAI: "Ask"
         case .folder: "Open"
         case .answer: "Copy"
+        case .screenHistory: "Open moment"
         }
     }
 
@@ -37,13 +38,14 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .snippet: "text.quote"
         case .quickLink: "link"
         case .clipboard: "clipboard"
-        case .command: "rectangle.3.group"
+        case .command: value.hasPrefix("vault.") ? "magnifyingglass" : "rectangle.3.group"
         case .emoji: "face.smiling"
         case .screenshot: "photo"
         case .conversation: "bubble.left.and.text.bubble.right"
         case .askAI: "sparkles"
         case .folder: "folder"
         case .answer: "equal.circle"
+        case .screenHistory: "clock.arrow.circlepath"
         }
     }
 }
@@ -58,6 +60,8 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case chats
     case commands
     case folders
+    case vaultSearch
+    case screenHistory
 
     var id: String { rawValue }
     var title: String {
@@ -71,6 +75,8 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: "Quick AI Chats"
         case .commands: "Commands"
         case .folders: "Folders"
+        case .vaultSearch: "Vault Search"
+        case .screenHistory: "Screen History"
         }
     }
     var aliases: [String] {
@@ -84,6 +90,8 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: ["chats", "quick ai", "ai chats", "history", "conversations", "recent chats"]
         case .commands: ["commands", "window management", "windows", "toggles", "settings panes"]
         case .folders: ["folders", "folder", "places", "locations", "finder"]
+        case .vaultSearch: ["vault search", "vault", "projects", "project search"]
+        case .screenHistory: ["screen history", "screen memory", "what i saw", "coast", "rewind"]
         }
     }
     var systemImage: String {
@@ -97,6 +105,8 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: "bubble.left.and.text.bubble.right"
         case .commands: "command"
         case .folders: "folder"
+        case .vaultSearch: "magnifyingglass"
+        case .screenHistory: "clock.arrow.circlepath"
         }
     }
 }

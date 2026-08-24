@@ -60,6 +60,7 @@ struct ItemsSettingsView: View {
                 case .askAI: "AI"
                 case .folder: "Folder"
                 case .answer: "Answer"
+                case .screenHistory: "Screen History"
                 case .application: "App"
                 }
             }

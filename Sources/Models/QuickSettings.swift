@@ -3,7 +3,7 @@ import AppKit  // for NSEvent.ModifierFlags
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 15
+    var configurationVersion: Int = 17
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -24,6 +24,19 @@ struct QuickSettings: Codable, Sendable {
     var screenAwarenessDoubleTap: Bool = true
     /// Read text inside screenshots with on-device OCR for search.
     var screenshotTextSearch: Bool = true
+
+    // Screen History. Search and capture are separate permissions.
+    var searchLegacyCoastHistory: Bool = true
+    var screenHistoryCaptureEnabled: Bool = false
+    /// Set only by the explicit Start Capture control after the toggle is on.
+    var screenHistoryCaptureConfirmed: Bool = false
+    /// Explicit acknowledgement that FileVault and owner-only permissions do
+    /// not protect plaintext OCR from another process running as this user.
+    var screenHistorySameUserAccessRiskAccepted: Bool = false
+    var screenHistoryRetentionDays: Int = 30
+    var screenHistoryStorageCapGB: Int = 20
+    var screenHistoryExcludedBundleIDs: [String] = ScreenHistoryCaptureConfiguration.safeDefaultExcludedBundleIdentifiers.sorted()
+    var screenHistoryExcludedDomains: [String] = ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted()
 
     // Updates
     var checkForUpdatesOnLaunch: Bool = false
@@ -87,7 +100,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 15
+        configurationVersion = 17
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -119,6 +132,23 @@ struct QuickSettings: Codable, Sendable {
             ?? ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
+        searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true
+        screenHistoryCaptureEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenHistoryCaptureEnabled) ?? false
+        screenHistoryCaptureConfirmed = try c.decodeIfPresent(Bool.self, forKey: .screenHistoryCaptureConfirmed) ?? false
+        screenHistorySameUserAccessRiskAccepted = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .screenHistorySameUserAccessRiskAccepted
+        ) ?? false
+        screenHistoryRetentionDays = max(1, try c.decodeIfPresent(Int.self, forKey: .screenHistoryRetentionDays) ?? 30)
+        screenHistoryStorageCapGB = max(1, try c.decodeIfPresent(Int.self, forKey: .screenHistoryStorageCapGB) ?? 20)
+        screenHistoryExcludedBundleIDs = try c.decodeIfPresent(
+            [String].self,
+            forKey: .screenHistoryExcludedBundleIDs
+        ) ?? ScreenHistoryCaptureConfiguration.safeDefaultExcludedBundleIdentifiers.sorted()
+        screenHistoryExcludedDomains = try c.decodeIfPresent(
+            [String].self,
+            forKey: .screenHistoryExcludedDomains
+        ) ?? ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted()
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .clipboardHistoryEnabled
@@ -255,6 +285,15 @@ struct QuickSettings: Codable, Sendable {
 }
 
 extension QuickSettings {
+    /// Applies the same editable exclusions to legacy migration that capture
+    /// and search use. Hard defaults are added again by the policy itself.
+    var screenHistoryMigrationPolicy: ScreenHistoryMigrationPolicy {
+        ScreenHistoryMigrationPolicy(
+            excludedBundleIdentifiers: Set(screenHistoryExcludedBundleIDs),
+            excludedDomains: Set(screenHistoryExcludedDomains)
+        )
+    }
+
     /// `dl` opens Downloads and `dk` the Desktop, from the first run.
     static let defaultFolderConfigurations: [LauncherItemConfiguration] = [
         LauncherItemConfiguration(kind: .folder, itemID: "downloads", alias: "dl"),

@@ -15,6 +15,8 @@ enum LauncherItemKind: String, Codable, Sendable {
     case folder
     /// A local answer computed as you type (math, a conversion, a date).
     case answer
+    /// A local, time-stamped moment from the owned or legacy screen-history store.
+    case screenHistory
 }
 
 /// User-owned configuration shared by searchable launcher items.
