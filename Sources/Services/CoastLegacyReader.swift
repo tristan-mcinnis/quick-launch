@@ -3,7 +3,10 @@ import SQLite3
 import CryptoKit
 
 actor CoastLegacyReader: CoastLegacyReading {
-    nonisolated static let maximumImportRows = 500
+    /// Must not exceed `ScreenHistorySearchQuery`'s hard limit. Keeping the
+    /// batch bounds aligned prevents a full preview from treating a clamped
+    /// page as the final page.
+    nonisolated static let maximumImportRows = 200
     nonisolated static let maximumOCRCharacters = 20_000
 
     nonisolated let databaseURL: URL

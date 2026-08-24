@@ -54,6 +54,27 @@ struct CoastLegacyReaderTests {
         #expect(Set(familyBatch.memberships.flatMap(\.mediaIdentifiers)).count == 2)
     }
 
+    @Test func migrationPreviewScansPastTheSearchQueryLimit() async throws {
+        let fixture = try LegacyFixture(createSchema: true)
+        try fixture.insertBulkRows(count: 401)
+        let reader = CoastLegacyReader(databaseURL: fixture.databaseURL, contentRootURL: fixture.directory)
+        let store = try SQLiteScreenHistoryStore(
+            databaseURL: fixture.directory.appendingPathComponent("owned.sqlite3"),
+            mediaDirectoryURL: fixture.directory.appendingPathComponent("owned-media"),
+            ownedMediaRootURLs: [fixture.directory]
+        )
+        let service = ScreenHistoryMigrationService(reader: reader, store: store)
+
+        let preview = try await service.preview()
+
+        #expect(preview.source == 401)
+        #expect(preview.imported == 401)
+        #expect(preview.excluded == 0)
+        #expect(preview.invalid == 0)
+        #expect(preview.lastLegacyFrameID == 401)
+        #expect(preview.reconciles)
+    }
+
     @Test func legacyFiltersAndSearchValuesCannotInjectSQL() async throws {
         let fixture = try LegacyFixture(createSchema: true)
         try fixture.insertSyntheticRows()
@@ -189,6 +210,22 @@ private final class LegacyFixture {
                 0, 0, 1728, 1117
             );
             """)
+    }
+
+    func insertBulkRows(count: Int) throws {
+        try execute("""
+            INSERT INTO application VALUES (1, 'test.synthetic.editor', 'Synthetic Editor');
+            INSERT INTO segment VALUES (1, 1, NULL);
+            """)
+        for identifier in 1...count {
+            try execute("""
+                INSERT INTO frame VALUES (
+                    \(identifier), \(1_700_000_000_000 + identifier * 2_000), NULL, NULL, NULL,
+                    'bulk preview \(identifier)', '', 'Bulk \(identifier)', 1,
+                    0, 0, 1728, 1117
+                );
+                """)
+        }
     }
 
     private func execute(_ sql: String) throws {
