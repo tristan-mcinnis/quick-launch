@@ -21,7 +21,7 @@ actor MockQuickService: QuickService {
     ) -> AsyncThrowingStream<StreamDelta, Error> {
         // Capture needed state before entering actor context
         AsyncThrowingStream { continuation in
-            Task {
+            let producer = Task {
                 let responses = await self.responses
                 let shouldThrow = await self.shouldThrow
                 let delay = await self.delay
@@ -32,12 +32,20 @@ actor MockQuickService: QuickService {
                 }
                 for delta in responses {
                     if delay != .zero {
-                        try? await Task.sleep(for: delay)
+                        do {
+                            try await Task.sleep(for: delay)
+                        } catch {
+                            // Consumer cancelled: stop delivering, like a
+                            // real HTTP stream torn down mid-flight.
+                            continuation.finish()
+                            return
+                        }
                     }
                     continuation.yield(delta)
                 }
                 continuation.finish()
             }
+            continuation.onTermination = { _ in producer.cancel() }
         }
     }
 

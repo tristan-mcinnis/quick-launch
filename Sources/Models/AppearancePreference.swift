@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -14,6 +15,17 @@ enum AppearancePreference: String, Codable, Sendable, CaseIterable {
         case .system: return nil
         case .light: return .light
         case .dark: return .dark
+        }
+    }
+
+    /// Window-level appearance, so the title bar matches the forced content
+    /// scheme instead of staying on the system look (a white title bar over
+    /// a dark settings pane). `nil` follows the system.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
         }
     }
 

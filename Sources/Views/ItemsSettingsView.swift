@@ -124,7 +124,10 @@ struct ItemsSettingsView: View {
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 8)
-                .frame(width: 200, height: 26)
+                // Flexible: a fixed width made the toolbar wider than the
+                // window minimum and cropped the pane at both edges.
+                .frame(minWidth: 120, idealWidth: 200, maxWidth: 200)
+                .frame(height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6).fill(AQDesign.ColorToken.keyCapFill)
                 )

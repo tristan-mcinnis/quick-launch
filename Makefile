@@ -1,5 +1,12 @@
 .PHONY: build build-app test install clean run
 
+# Stable code signature: Keychain items only survive rebuilds when every
+# build carries the same verifiable identity. Ad-hoc ("-") signatures change
+# every build, so the app loses access to its own saved API keys. Falls back
+# to ad-hoc when no signing identity is installed.
+SIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Apple Development|Developer ID Application/ {print $$2; exit}')
+export SIGN_IDENTITY
+
 build:
 	swift build -c release
 

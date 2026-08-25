@@ -1268,7 +1268,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 2)
         panel.isReleasedWhenClosed = false
         panel.minSize = SettingsView.minimumWindowSize
+        // Title bar follows the app's appearance; without this a forced-dark
+        // pane sat under a white system title bar.
+        panel.appearance = vm.settings.appearance.nsAppearance
         panel.setFrameAutosaveName("QuickLaunch.SettingsWindow")
+        // An autosaved frame from an older, narrower layout squeezes the
+        // pane until the sidebar and content crop at both window edges.
+        let restored = panel.contentRect(forFrameRect: panel.frame).size
+        if restored.width < SettingsView.minimumWindowSize.width
+            || restored.height < SettingsView.minimumWindowSize.height {
+            panel.setContentSize(SettingsView.windowSize)
+        }
         panel.center()
 
         let hostingController = NSHostingController(

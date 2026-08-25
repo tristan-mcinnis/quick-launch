@@ -42,7 +42,10 @@ struct SettingsView: View {
     }
 
     static let windowSize = NSSize(width: 1_040, height: 680)
-    static let minimumWindowSize = NSSize(width: 900, height: 560)
+    /// Wide enough for the widest tab's fixed chrome (the Items filter
+    /// strip). A smaller window makes the HStack overflow and crop the
+    /// sidebar and content at both edges.
+    static let minimumWindowSize = NSSize(width: 980, height: 600)
 
     var body: some View {
         HStack(spacing: 0) {

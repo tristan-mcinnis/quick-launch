@@ -49,7 +49,11 @@ struct WebSearchWorkflowTests {
         Snippet: Official game schedule.
         """)
         let ai = MockQuickService()
-        await ai.setDelay(.seconds(1))
+        // Far beyond the 10ms timeout so scheduler starvation under a full
+        // parallel test run can never deliver the answer before the
+        // watchdog fires (this raced twice at 1s). Cancellation tears the
+        // mock stream down, so the test still finishes in milliseconds.
+        await ai.setDelay(.seconds(30))
         await ai.setResponses([StreamDelta(text: "Too late", finishReason: "stop")])
         var settings = QuickSettings()
         settings.autoCopy = false
