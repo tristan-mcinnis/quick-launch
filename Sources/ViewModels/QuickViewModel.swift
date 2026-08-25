@@ -3783,19 +3783,38 @@ import Observation
         return actions
     }
 
-    /// The pane's rows after the search filter — the view renders exactly
-    /// this list and the window sizes to it.
+    /// The pane's rows after the search filter, best match first — typing
+    /// "un" puts "Unpin" above a scattered match like "Attach to Question".
+    /// The view renders exactly this list and the window sizes to it.
     var filteredFocusedItemActions: [ItemAction] {
         let all = focusedItemActions
         guard !actionQuery.isEmpty else { return all }
-        return all.filter { FuzzyMatcher.score(query: actionQuery, candidate: $0.title) != nil }
+        return Self.rankByQuery(all, query: actionQuery, title: \.title)
     }
 
-    /// Result actions after the palette's search filter.
+    /// Result actions after the palette's search filter, best match first.
     var paletteResultActions: [ResultAction] {
-        resultActions.filter { action in
-            actionQuery.isEmpty || FuzzyMatcher.score(query: actionQuery, candidate: action.title) != nil
-        }
+        guard !actionQuery.isEmpty else { return resultActions }
+        return Self.rankByQuery(resultActions, query: actionQuery, title: \.title)
+    }
+
+    /// Fuzzy-filters and orders by match score; ties keep the list order.
+    private static func rankByQuery<T>(
+        _ items: [T],
+        query: String,
+        title: KeyPath<T, String>
+    ) -> [T] {
+        let folded = FuzzyMatcher.fold(query)
+        return items.enumerated()
+            .compactMap { index, item -> (item: T, score: Int, index: Int)? in
+                guard let score = FuzzyMatcher.score(
+                    foldedQuery: folded,
+                    foldedCandidate: FuzzyMatcher.fold(item[keyPath: title])
+                ) else { return nil }
+                return (item, score, index)
+            }
+            .sorted { $0.score == $1.score ? $0.index < $1.index : $0.score > $1.score }
+            .map(\.item)
     }
 
     /// Row count the prompt palette will render, for window sizing.

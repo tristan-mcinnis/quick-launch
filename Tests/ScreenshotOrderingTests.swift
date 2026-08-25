@@ -84,6 +84,12 @@ struct ScreenshotOrderingTests {
         #expect(paneTitles.contains("Unpin"), "the ⌘K pane on a pinned row offers Unpin")
         #expect(!paneTitles.contains("Pin to Top"))
 
+        // Typing in the pane ranks by match quality: "un" puts the prefix
+        // match Unpin first, not a scattered match like Attach to Question.
+        vm.actionQuery = "un"
+        #expect(vm.filteredFocusedItemActions.first?.title == "Unpin")
+        vm.actionQuery = ""
+
         // Unpin from the pane restores the pure date order.
         vm.togglePinLauncherItem(vm.contextualCatalogItem!)
         #expect(vm.focusedItemActions.map(\.title).contains("Pin to Top"))
