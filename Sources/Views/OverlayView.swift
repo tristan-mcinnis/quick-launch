@@ -331,11 +331,9 @@ struct OverlayView: View {
             }
         }
         .frame(width: min(520, viewModel.currentPanelWidth - 24))
-        .frame(
-            maxHeight: viewModel.activeItemActionForm == .screenHistorySave
-                ? PanelSizing.screenHistorySaveMinimumHeight - PanelSizing.inputHeight - 12
-                : 460
-        )
+        // Chrome hugs the content: a `.frame(maxHeight:)` adopts the window's
+        // proposal, so background applied outside it stretched into an empty
+        // dark sheet whenever the window was tall.
         .background {
             ZStack {
                 Rectangle().fill(.regularMaterial)
@@ -348,6 +346,13 @@ struct OverlayView: View {
                 .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
+        .frame(
+            maxHeight: viewModel.activeItemActionForm == .screenHistorySave
+                ? PanelSizing.screenHistorySaveMinimumHeight - PanelSizing.inputHeight
+                    - PanelSizing.paneBottomMargin
+                : 460,
+            alignment: .top
+        )
         .padding(.top, PanelSizing.inputHeight)
         .padding(.trailing, 12)
     }
@@ -910,10 +915,7 @@ private struct ItemActionPane: View {
     }
 
     private var actions: [ItemAction] {
-        let all = viewModel.focusedItemActions
-        let query = viewModel.actionQuery
-        guard !query.isEmpty else { return all }
-        return all.filter { FuzzyMatcher.score(query: query, candidate: $0.title) != nil }
+        viewModel.filteredFocusedItemActions
     }
 
     private var item: LauncherCatalogItem? {
@@ -1027,7 +1029,14 @@ private struct ItemActionPane: View {
 
     private var list: some View {
         ScrollView {
-            LazyVStack(spacing: 2) {
+            LazyVStack(spacing: PanelSizing.actionRowSpacing) {
+                if actions.isEmpty {
+                    Text("No matching actions")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: PanelSizing.actionRowHeight)
+                }
                 ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                     Button {
                         Task { await viewModel.perform(action, on: result) }
@@ -1070,7 +1079,9 @@ private struct ItemActionPane: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
         }
-        .frame(maxHeight: 6 * 42 + 12)
+        // Exactly as tall as its rows (capped at six): the pane hugs its
+        // content instead of stretching into an empty dark sheet.
+        .frame(height: PanelSizing.actionListHeight(rows: actions.count))
     }
 
     private var searchField: some View {
@@ -1361,15 +1372,8 @@ private struct QuickActionPalette: View {
         }
     }
 
-    private var resultActions: [ResultAction] {
-        let query = viewModel.actionQuery
-        return viewModel.resultActions.filter { action in
-            query.isEmpty || FuzzyMatcher.score(query: query, candidate: action.title) != nil
-        }
-    }
-
     private var entries: [Entry] {
-        resultActions.map(Entry.result) + viewModel.actionMatches.map(Entry.prompt)
+        viewModel.paletteResultActions.map(Entry.result) + viewModel.actionMatches.map(Entry.prompt)
     }
 
     var body: some View {
@@ -1393,7 +1397,14 @@ private struct QuickActionPalette: View {
             .padding(.vertical, 10)
 
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: PanelSizing.actionRowSpacing) {
+                    if entries.isEmpty {
+                        Text("No actions here yet")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: PanelSizing.actionRowHeight)
+                    }
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                         Button { run(entry) } label: {
                             row(for: entry, isSelected: index == selectedIndex)
@@ -1416,7 +1427,9 @@ private struct QuickActionPalette: View {
                 }
                 .padding(.horizontal, 6)
             }
-            .frame(maxHeight: 252)
+            // Hug the rows (capped at six); an empty palette shows one quiet
+            // placeholder row instead of a stretched dark sheet.
+            .frame(height: PanelSizing.actionListHeight(rows: entries.count, padded: false))
 
             HStack(spacing: 12) {
                 Text("↑↓ Navigate")

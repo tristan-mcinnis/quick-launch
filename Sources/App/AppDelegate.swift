@@ -1121,24 +1121,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let visibleBody = vm.conversationMessages.count > 2
             ? vm.conversationTranscriptText
             : vm.output
-        var total = PanelSizing.panelHeight(
+        // Base height as if no pane were floating: the launcher list stays
+        // fully visible behind the ⌘K pane, so opening or closing a pane
+        // does not move the window unless the pane itself needs more room.
+        let base = PanelSizing.panelHeight(
             output: visibleBody,
             isStreaming: vm.isStreaming,
             errorMessage: vm.errorMessage,
-            actionCount: vm.isItemActionPanePresented
-                ? (vm.activeItemActionForm == .edit
-                    ? 5
-                    : (vm.activeItemActionForm != nil ? 2 : max(1, vm.focusedItemActions.count)))
-                : (vm.isActionPalettePresented ? vm.actionMatches.count : 0),
-            suggestionCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
-                ? 0
-                : max(vm.launcherMatches.count, vm.savedPromptMatches.count),
+            suggestionCount: max(vm.launcherMatches.count, vm.savedPromptMatches.count),
             showsResultActions: false,
             hasAttachment: vm.hasPendingAttachment,
             showsFooter: vm.showsLauncherFooter,
-            launcherRowCount: (vm.isActionPalettePresented || vm.isApplicationActionPanePresented || vm.isCatalogActionPanePresented)
-                ? 0
-                : vm.launcherMatches.count,
+            launcherRowCount: vm.launcherMatches.count,
             showsQuestion: (vm.lastQuestion?.isEmpty == false) && !vm.isConversationHistoryPresented,
             gridRows: vm.isGridCatalog
                 ? Int((Double(vm.launcherMatches.count) / Double(QuickViewModel.gridColumns)).rounded(.up))
@@ -1147,6 +1141,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             gridSections: vm.isGridCatalog ? vm.gridSections.count : 0,
             showsDetailPane: vm.showsDetailPane
         )
+        var pane: CGFloat?
+        if vm.isItemActionPanePresented {
+            pane = vm.activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
+                ?? PanelSizing.itemActionPaneHeight(rows: vm.filteredFocusedItemActions.count)
+        } else if vm.isActionPalettePresented {
+            pane = PanelSizing.actionPaletteHeight(rows: vm.actionPaletteEntryCount)
+        }
+        var total = PanelSizing.windowHeight(base: base, paneHeight: pane)
         if vm.activeItemActionForm == .screenHistorySave {
             total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
         }

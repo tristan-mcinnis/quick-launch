@@ -292,7 +292,11 @@ struct ScreenAwarenessTests {
         #expect(vm.showsDetailPane)
         #expect(vm.detailItem?.value == "some text")
         vm.handleCommandK()
-        #expect(!vm.showsDetailPane)
+        // The preview and the wide layout stay put while ⌘K floats over
+        // them; collapsing them made the whole window jump.
+        #expect(vm.showsDetailPane)
+        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthWithDetail)
+        vm.closeItemActionPane()
         vm.leaveCatalog()
         #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
     }

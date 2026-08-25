@@ -56,17 +56,32 @@ struct PanelSizingTests {
         #expect(a == b)
     }
 
-    @Test func testActionPickerAddsBoundedHeight() {
-        let three = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, actionCount: 3
-        )
-        let many = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, actionCount: 20
-        )
-        let threeExpected: CGFloat = 262
-        let manyExpected: CGFloat = 388
-        #expect(three == threeExpected)
-        #expect(many == manyExpected)
+    @Test func testItemActionPaneHugsItsRowsAndCapsAtSix() {
+        // header 44 + divider 1 + list (3*42 + 2*2 + 12) + divider 1 + search 40
+        let threeRows: CGFloat = 44 + 1 + 142 + 1 + 40
+        #expect(PanelSizing.itemActionPaneHeight(rows: 3) == threeRows)
+        // 20 rows scroll behind a six-row viewport.
+        let six = PanelSizing.itemActionPaneHeight(rows: 6)
+        #expect(PanelSizing.itemActionPaneHeight(rows: 20) == six)
+        // Zero rows keep one placeholder row; the pane never collapses to chrome.
+        #expect(PanelSizing.itemActionPaneHeight(rows: 0) == PanelSizing.itemActionPaneHeight(rows: 1))
+    }
+
+    @Test func testPaletteHugsItsRows() {
+        // search 42 + spacing 8 + list (2*42 + 2) + spacing 8 + hints 26
+        let twoRows: CGFloat = 42 + 8 + 86 + 8 + 26
+        #expect(PanelSizing.actionPaletteHeight(rows: 2) == twoRows)
+        #expect(PanelSizing.actionPaletteHeight(rows: 0) == PanelSizing.actionPaletteHeight(rows: 1))
+    }
+
+    @Test func testWindowKeepsBaseHeightWhileAPaneFloats() {
+        // Tall list behind a small pane: no jump when the pane opens.
+        #expect(PanelSizing.windowHeight(base: 600, paneHeight: 300) == 600)
+        // Short window under a tall pane: grow to fit input + pane + margin.
+        let grown = PanelSizing.windowHeight(base: 120, paneHeight: 300)
+        #expect(grown == PanelSizing.inputHeight + 300 + PanelSizing.paneBottomMargin)
+        // No pane: base passes through untouched.
+        #expect(PanelSizing.windowHeight(base: 480, paneHeight: nil) == 480)
     }
 
     @Test func testLauncherSuggestionsAddBoundedHeight() {
@@ -125,22 +140,11 @@ struct PanelSizingTests {
         #expect(launcher == expectedLauncher)
     }
 
-    @Test func testFooterIsNotCountedBehindActionPanes() {
-        // Action panes carry their own hint row; the caller passes showsFooter: false.
-        let h = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, actionCount: 5, showsFooter: false
-        )
-        let expected: CGFloat = 60 + 76 + 5 * 42
-        #expect(h == expected)
-    }
-
     @Test func screenHistorySaveHasAProductionVisibilityBudget() {
         #expect(PanelSizing.screenHistorySaveMinimumHeight >= 620)
-        #expect(PanelSizing.screenHistorySaveMinimumHeight > PanelSizing.panelHeight(
-            output: "",
-            isStreaming: false,
-            errorMessage: nil,
-            actionCount: 2
+        #expect(PanelSizing.screenHistorySaveMinimumHeight > PanelSizing.windowHeight(
+            base: PanelSizing.inputHeight,
+            paneHeight: PanelSizing.itemActionPaneHeight(rows: 2)
         ))
     }
 }

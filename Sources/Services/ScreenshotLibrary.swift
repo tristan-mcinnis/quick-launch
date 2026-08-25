@@ -15,16 +15,18 @@ enum ScreenshotLibrary {
     static func items(in folder: URL, fileManager: FileManager = .default, now: Date = Date()) -> [LauncherCatalogItem] {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: folder,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
         let files: [(url: URL, date: Date, size: Int)] = urls.compactMap { url in
             let name = url.lastPathComponent.lowercased()
             guard LatestScreenshotFinder.imageExtensions.contains(url.pathExtension.lowercased()),
                   namePrefixes.contains(where: { name.hasPrefix($0) }),
-                  let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                  let values = try? url.resourceValues(forKeys: [.fileSizeKey])
             else { return nil }
-            return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
+            // Capture date, not modification date: a later touch (tagging,
+            // OCR, sync) must not float an old shot to the top of the list.
+            return (url, LatestScreenshotFinder.captureDate(for: url), values.fileSize ?? 0)
         }
         return files
             .sorted { lhs, rhs in

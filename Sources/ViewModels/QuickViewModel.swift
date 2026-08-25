@@ -852,13 +852,16 @@ import Observation
     static let panelWidth: CGFloat = 720
     static let panelWidthWithDetail: CGFloat = 960
 
-    /// Emoji & Symbols is a grid, everything else a list.
-    var isGridCatalog: Bool { catalogScope == .emoji && !isItemActionPanePresented }
+    /// Emoji & Symbols is a grid, everything else a list. The grid stays put
+    /// while the ⌘K pane floats over it; swapping layouts under a popover
+    /// made the whole window shift.
+    var isGridCatalog: Bool { catalogScope == .emoji }
 
-    /// Preview-worthy local catalogs share one stable two-pane layout.
+    /// Preview-worthy local catalogs share one stable two-pane layout. The
+    /// pane stays visible (and the window keeps its width) while ⌘K floats
+    /// over it.
     var showsDetailPane: Bool {
         guard catalogScope == .screenshots || catalogScope == .clipboard || catalogScope == .screenHistory,
-              !isItemActionPanePresented, !isActionPalettePresented,
               inputMode == nil, pendingImage == nil
         else { return false }
         return detailItem != nil
@@ -1205,12 +1208,10 @@ import Observation
         let keys: [String]
     }
 
-    /// The footer hides while a pane with its own hints (⌘K) is open.
-    var showsLauncherFooter: Bool {
-        !isActionPalettePresented
-            && !isApplicationActionPanePresented
-            && !isCatalogActionPanePresented
-    }
+    /// The footer stays visible while a ⌘K pane floats above it, like
+    /// Raycast's bottom bar; hiding it made the window jump on every
+    /// pane open and close.
+    var showsLauncherFooter: Bool { true }
 
     /// Left side of the footer: where the user is, or which model answers.
     var footerContext: String {
@@ -3772,6 +3773,26 @@ import Observation
         return actions
     }
 
+    /// The pane's rows after the search filter — the view renders exactly
+    /// this list and the window sizes to it.
+    var filteredFocusedItemActions: [ItemAction] {
+        let all = focusedItemActions
+        guard !actionQuery.isEmpty else { return all }
+        return all.filter { FuzzyMatcher.score(query: actionQuery, candidate: $0.title) != nil }
+    }
+
+    /// Result actions after the palette's search filter.
+    var paletteResultActions: [ResultAction] {
+        resultActions.filter { action in
+            actionQuery.isEmpty || FuzzyMatcher.score(query: actionQuery, candidate: action.title) != nil
+        }
+    }
+
+    /// Row count the prompt palette will render, for window sizing.
+    var actionPaletteEntryCount: Int {
+        paletteResultActions.count + actionMatches.count
+    }
+
     func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
         switch result {
         case .application(let application):
@@ -5084,14 +5105,16 @@ import Observation
         vaultSearchAnchor = nil
     }
 
+    /// Overlay open: offer a clipboard image once per copy. A clipboard the
+    /// user already saw (or dismissed) is not re-attached, and a non-image
+    /// clipboard never clears an attachment retained for follow-ups.
     func captureImageFromClipboard() {
-        pendingImage = ClipboardImageReader.attachment()
-        if pendingImage != nil {
-            errorMessage = nil
-            catalogScope = nil
-            pendingQuickLinkID = nil
-            applicationSelectionIndex = 0
-        }
+        guard let fresh = ClipboardImageReader.attachmentIfFresh() else { return }
+        pendingImage = fresh
+        errorMessage = nil
+        catalogScope = nil
+        pendingQuickLinkID = nil
+        applicationSelectionIndex = 0
     }
 
     /// Backspace: drop the newest attachment; the × button clears all.

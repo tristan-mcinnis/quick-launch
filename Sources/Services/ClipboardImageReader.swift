@@ -9,6 +9,27 @@ enum ClipboardImageReader {
     /// until the pasteboard's change count moves.
     @MainActor private static var cache: (changeCount: Int, attachment: QuickImageAttachment?)?
 
+    /// The pasteboard state last auto-offered on overlay open. One clipboard
+    /// image is offered once; reopening the overlay with the same clipboard
+    /// contents must not re-attach it.
+    @MainActor private static var lastAutoOffered: (name: NSPasteboard.Name, changeCount: Int)?
+
+    /// Auto-attach path for overlay open: returns the clipboard image only
+    /// if the pasteboard changed since the last offer. Explicit paste keeps
+    /// using `attachment(from:)` and is never suppressed.
+    @MainActor static func attachmentIfFresh(
+        from pasteboard: NSPasteboard = .general
+    ) -> QuickImageAttachment? {
+        let name = pasteboard.name
+        let changeCount = pasteboard.changeCount
+        if let last = lastAutoOffered, last.name == name, last.changeCount == changeCount {
+            return nil
+        }
+        guard let result = attachment(from: pasteboard) else { return nil }
+        lastAutoOffered = (name, changeCount)
+        return result
+    }
+
     @MainActor static func attachment(
         from pasteboard: NSPasteboard = .general
     ) -> QuickImageAttachment? {

@@ -9,6 +9,14 @@ enum PanelSizing {
     static let maxBodyHeight: CGFloat = 560
     static let errorBannerHeight: CGFloat = 40
     static let attachmentHeight: CGFloat = 58
+    /// One row in the ⌘K pane and the prompt palette.
+    static let actionRowHeight: CGFloat = 42
+    /// LazyVStack spacing between action rows.
+    static let actionRowSpacing: CGFloat = 2
+    /// Rows shown before the action list scrolls.
+    static let actionVisibleRows = 6
+    /// Gap between the floating pane's bottom edge and the window edge.
+    static let paneBottomMargin: CGFloat = 12
     /// Footer row plus its divider.
     static let footerHeight: CGFloat = AQDesign.footerHeight + 1
     /// Vertical inset around the launcher rows.
@@ -21,11 +29,51 @@ enum PanelSizing {
     /// payload body scrolls within this fixed production budget.
     static let screenHistorySaveMinimumHeight: CGFloat = 620
 
+    // MARK: - Floating ⌘K pane / prompt palette
+    //
+    // OverlayView renders these panes with the same constants, so the window
+    // estimate and the drawn pane cannot drift apart. The pane hugs its rows;
+    // it never stretches to fill leftover window height.
+
+    /// The scrolling row list inside a pane. `padded` covers the item pane's
+    /// 6pt vertical insets; the palette list has none.
+    static func actionListHeight(rows: Int, padded: Bool = true) -> CGFloat {
+        let visible = max(1, min(rows, actionVisibleRows))
+        return CGFloat(visible) * actionRowHeight
+            + CGFloat(visible - 1) * actionRowSpacing
+            + (padded ? 12 : 0)
+    }
+
+    /// ⌘K item pane: header 44 + divider + list + divider + search row 40.
+    static func itemActionPaneHeight(rows: Int) -> CGFloat {
+        44 + 1 + actionListHeight(rows: rows) + 1 + 40
+    }
+
+    /// ⌘K pane showing a form instead of the list: header 44 + divider + body.
+    static func itemActionFormPaneHeight(form: ItemActionForm) -> CGFloat {
+        switch form {
+        case .edit: 44 + 1 + 240
+        case .alias, .hotkey: 44 + 1 + 130
+        case .screenHistorySave: screenHistorySaveMinimumHeight - inputHeight - paneBottomMargin
+        }
+    }
+
+    /// Prompt palette: search row 42 + spacing + list + spacing + hint row 26.
+    static func actionPaletteHeight(rows: Int) -> CGFloat {
+        42 + 8 + actionListHeight(rows: rows, padded: false) + 8 + 26
+    }
+
+    /// The window keeps its base height while a pane floats over it; it only
+    /// grows when the pane (input row + pane + margin) needs more room.
+    static func windowHeight(base: CGFloat, paneHeight: CGFloat?) -> CGFloat {
+        guard let paneHeight else { return base }
+        return max(base, inputHeight + paneHeight + paneBottomMargin)
+    }
+
     static func panelHeight(
         output: String,
         isStreaming: Bool,
         errorMessage: String?,
-        actionCount: Int = 0,
         suggestionCount: Int = 0,
         showsResultActions: Bool = false,
         hasAttachment: Bool = false,
@@ -38,12 +86,9 @@ enum PanelSizing {
     ) -> CGFloat {
         var total = inputHeight
         if hasAttachment { total += attachmentHeight }
-        if actionCount > 0 {
-            total += 76 + min(CGFloat(actionCount), 6) * 42
-        }
         if gridRows > 0 {
             total += CGFloat(gridRows) * 52 + CGFloat(gridSections) * 24 + launcherListInset
-        } else if actionCount == 0, suggestionCount > 0 {
+        } else if suggestionCount > 0 {
             var block = min(CGFloat(suggestionCount), 12) * 42
             if launcherRowCount > 0 { block += launcherListInset }
             if showsDetailPane { block = max(block, detailPaneMinimumHeight) }

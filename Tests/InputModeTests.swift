@@ -104,11 +104,17 @@ struct InputModeTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-        let old = folder.appendingPathComponent("Screenshot 2026-08-11 at 14.32.07.png")
-        let recent = folder.appendingPathComponent("CleanShot 2026-08-22 at 09.00.00.png")
+        // The catalog orders by capture date, which the filename timestamp
+        // carries; fixture names are built from the clock so date words
+        // ("today", "7d") keep meaning what they say.
+        let calendar = Calendar.current
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let oldDate = calendar.date(byAdding: .day, value: -10, to: Date())!
+        let oldStamp = dayFormatter.string(from: oldDate)
+        let old = folder.appendingPathComponent("Screenshot \(oldStamp) at 14.32.07.png")
+        let recent = folder.appendingPathComponent("CleanShot \(dayFormatter.string(from: Date())) at 0.00.01.png")
         try png.write(to: old); try png.write(to: recent)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -10 * 86_400)], ofItemAtPath: old.path)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: recent.path)
         try png.write(to: folder.appendingPathComponent("unrelated.png"))
 
         let vm = QuickViewModel()
@@ -122,13 +128,16 @@ struct InputModeTests {
         // Temp paths come back through /private; compare file names.
         func names(_ list: [LauncherCatalogItem]) -> [String] { list.map { ($0.value as NSString).lastPathComponent } }
         #expect(names(items.filter { $0.kind == .screenshot }).first == recent.lastPathComponent)
-        #expect(items.first { ($0.value as NSString).lastPathComponent == old.lastPathComponent }?.title == "Aug 11, 14:32:07")
+        let oldParts = calendar.dateComponents([.month, .day], from: oldDate)
+        let oldTitle = "\(calendar.shortMonthSymbols[oldParts.month! - 1]) \(oldParts.day!), 14:32:07"
+        #expect(items.first { ($0.value as NSString).lastPathComponent == old.lastPathComponent }?.title == oldTitle)
 
         vm.input = "today"
         #expect(names(vm.catalogMatches) == [recent.lastPathComponent])
         vm.input = "7d"
         #expect(names(vm.catalogMatches) == [recent.lastPathComponent])
-        vm.input = "last 30 days 11"
+        // A bare ISO date narrows "last 30 days" to that single day.
+        vm.input = "last 30 days \(oldStamp)"
         #expect(names(vm.catalogMatches) == [old.lastPathComponent])
         let parsed = ScreenshotQuery.parse("yesterday acme")
         #expect(parsed.needle == "acme" && parsed.interval != nil)
@@ -144,11 +153,15 @@ struct InputModeTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-        let old = folder.appendingPathComponent("Screenshot 2026-08-11 at 14.32.07.png")
-        let recent = folder.appendingPathComponent("Screenshot 2026-08-22 at 09.00.00.png")
+        // Filenames carry the capture date the catalog sorts and filters by.
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let oldStamp = dayFormatter.string(
+            from: Calendar.current.date(byAdding: .day, value: -10, to: Date())!
+        )
+        let old = folder.appendingPathComponent("Screenshot \(oldStamp) at 14.32.07.png")
+        let recent = folder.appendingPathComponent("Screenshot \(dayFormatter.string(from: Date())) at 0.00.01.png")
         try png.write(to: old); try png.write(to: recent)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -10 * 86_400)], ofItemAtPath: old.path)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: recent.path)
 
         let vm = QuickViewModel()
         vm.settings.screenshotTextSearch = false
@@ -167,7 +180,7 @@ struct InputModeTests {
         #expect(vm.catalogMatches.count == 2, "every file answers the singular too")
 
         // Date words work after the search words too.
-        vm.input = "09 today"
+        vm.input = "0.00.01 today"
         #expect(vm.catalogMatches.map { ($0.value as NSString).lastPathComponent } == [recent.lastPathComponent])
         let after = ScreenshotQuery.parse("acme today")
         #expect(after.needle == "acme" && after.interval != nil)
