@@ -21,6 +21,10 @@ enum PanelSizing {
     static let footerHeight: CGFloat = AQDesign.footerHeight + 1
     /// Vertical inset around the launcher rows.
     static let launcherListInset: CGFloat = 12
+    /// The launcher list's chrome above and below the rows: the section
+    /// header ("Results") plus the bottom inset, as measured from the
+    /// rendered view. Counting only the rows left the last one clipped.
+    static let launcherListChrome: CGFloat = 26
     /// The search row and footer stay pinned while long result sets scroll.
     static let launcherListMaximumHeight: CGFloat = 504
     /// A preview plus its Information block needs this much room.
@@ -95,7 +99,10 @@ enum PanelSizing {
             total += CGFloat(gridRows) * 52 + CGFloat(gridSections) * 24 + launcherListInset
         } else if suggestionCount > 0 {
             var block = min(CGFloat(suggestionCount), 12) * 42
-            if launcherRowCount > 0 { block += launcherListInset }
+            if launcherRowCount > 0 {
+                // Header + inset, capped exactly like the rendered list.
+                block = min(block + launcherListChrome, launcherListMaximumHeight)
+            }
             if showsDetailPane { block = max(block, detailPaneMinimumHeight) }
             total += block
         }

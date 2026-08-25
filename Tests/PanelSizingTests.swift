@@ -1,5 +1,7 @@
-import Testing
+import AppKit
 import Foundation
+import SwiftUI
+import Testing
 @testable import QuickLaunch
 
 @Suite("PanelSizing")
@@ -126,7 +128,7 @@ struct PanelSizingTests {
         #expect(h == expected)
     }
 
-    @Test func testLauncherRowsIncludeListInset() {
+    @Test func testLauncherRowsIncludeHeaderChrome() {
         let plain = PanelSizing.panelHeight(
             output: "", isStreaming: false, errorMessage: nil, suggestionCount: 3
         )
@@ -136,8 +138,37 @@ struct PanelSizingTests {
         )
         let expectedPlain: CGFloat = 60 + 3 * 42
         #expect(plain == expectedPlain)
-        let expectedLauncher: CGFloat = plain + PanelSizing.launcherListInset
+        let expectedLauncher: CGFloat = plain + PanelSizing.launcherListChrome
         #expect(launcher == expectedLauncher)
+        // A full list caps exactly where the rendered view caps.
+        let full = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil,
+            suggestionCount: 20, launcherRowCount: 20
+        )
+        let expectedFull: CGFloat = 60 + PanelSizing.launcherListMaximumHeight
+        #expect(full == expectedFull)
+    }
+
+    /// The estimate must cover the rendered list: a too-short window clips
+    /// the last row against the footer (the "one result" case).
+    @MainActor @Test func estimateCoversTheRenderedSingleResultWindow() {
+        var settings = QuickSettings()
+        settings.appearance = .dark
+        let vm = QuickViewModel(settings: settings)
+        vm.input = "this is an ai chat"
+        let host = NSHostingView(
+            rootView: OverlayView(viewModel: vm).frame(width: vm.currentPanelWidth)
+        )
+        host.appearance = NSAppearance(named: .darkAqua)
+        let fitting = host.fittingSize.height
+        let estimate = PanelSizing.panelHeight(
+            output: "", isStreaming: false, errorMessage: nil,
+            suggestionCount: max(vm.launcherMatches.count, vm.savedPromptMatches.count),
+            showsFooter: vm.showsLauncherFooter,
+            launcherRowCount: vm.launcherMatches.count
+        )
+        #expect(estimate >= fitting, "a short estimate clips the last row")
+        #expect(estimate <= fitting + 16, "a tall estimate leaves dead space")
     }
 
     @Test func screenHistorySaveHasAProductionVisibilityBudget() {
