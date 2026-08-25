@@ -61,6 +61,19 @@ struct ProviderSettingsView: View {
 
                 Divider()
 
+                Toggle(
+                    "Let the model search the web (SearXNG)",
+                    isOn: $viewModel.settings.modelWebSearchEnabled
+                )
+                .onChange(of: viewModel.settings.modelWebSearchEnabled) { _, _ in
+                    viewModel.settings.save()
+                }
+                Text("The model gets a search_web tool and decides when to use it: news, scores, prices, anything after its training. Works in follow-ups too.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
                 Text("Quick-action instruction")
                     .font(.subheadline.weight(.medium))
                 TextEditor(text: $viewModel.settings.systemPrompt)

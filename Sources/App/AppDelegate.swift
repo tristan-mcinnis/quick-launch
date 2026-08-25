@@ -579,18 +579,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel?.contextualCatalogItemID = nil
         viewModel?.actionQuery = ""
         viewModel?.rememberSelectionTarget(nil)
-        // Next open starts at the root, like Raycast.
-        if viewModel?.catalogScope != nil || viewModel?.pendingQuickLinkID != nil || viewModel?.inputMode != nil {
-            viewModel?.leaveCatalog()
-        }
 
         overlayClearTask?.cancel()
         guard let viewModel else { return }
         let seconds = max(0, viewModel.settings.reopenRetentionSeconds)
         guard seconds > 0 else {
-            viewModel.clearTransientDisplay()
+            Self.resetOverlaySurface(viewModel)
             return
         }
+        // The whole surface — catalog, query, selection, answer — survives
+        // for the retention window, so a quick reopen lands exactly where
+        // the user left off and repeated actions chain without re-typing.
         let retentionID = UUID()
         overlayRetentionID = retentionID
         overlayClearTask = Task { @MainActor [weak self, weak viewModel] in
@@ -602,10 +601,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self,
                   let viewModel,
                   self.overlayRetentionID == retentionID else { return }
-            viewModel.clearTransientDisplay()
+            Self.resetOverlaySurface(viewModel)
             self.overlayClearTask = nil
             self.overlayRetentionID = nil
         }
+    }
+
+    /// Back to the root, like a fresh Raycast open.
+    private static func resetOverlaySurface(_ viewModel: QuickViewModel) {
+        if viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil || viewModel.inputMode != nil {
+            viewModel.leaveCatalog()
+        }
+        viewModel.clearTransientDisplay()
     }
 
     func toggleOverlay() {

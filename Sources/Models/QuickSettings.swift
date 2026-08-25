@@ -88,6 +88,9 @@ struct QuickSettings: Codable, Sendable {
     var historyLimit: Int = 20
     var newConversationAfterMinutes: Int = 15
     var reopenRetentionSeconds: Int = 10
+    /// Offer the model a `search_web` tool (backed by SearXNG) so it can
+    /// look things up mid-answer instead of guessing from training data.
+    var modelWebSearchEnabled: Bool = true
 
     // Persistence key
     static let defaultsKey = "QuickSettings"
@@ -181,6 +184,10 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .reopenRetentionSeconds
         ) ?? 10
+        modelWebSearchEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .modelWebSearchEnabled
+        ) ?? true
         if decodedConfigurationVersion < 1,
            !savedPrompts.contains(where: { $0.alias == "search" }),
            let search = SavedPrompt.defaults.first(where: { $0.alias == "search" }) {

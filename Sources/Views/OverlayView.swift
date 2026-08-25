@@ -227,7 +227,7 @@ struct OverlayView: View {
                         HStack(spacing: 8) {
                             ThinkingIndicator()
                                 .frame(width: 18, height: 18)
-                            Text("Thinking…")
+                            Text(viewModel.streamingStatus ?? "Thinking…")
                                 .font(AQDesign.TypeToken.label)
                                 .foregroundStyle(.secondary)
                         }

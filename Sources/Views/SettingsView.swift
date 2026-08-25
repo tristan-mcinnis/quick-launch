@@ -270,13 +270,14 @@ private struct GeneralTab: View {
                 }
 
                 HStack {
-                    Text("Keep the last result after closing")
+                    Text("Keep my place after closing")
                     Spacer()
                     Picker("", selection: $viewModel.settings.reopenRetentionSeconds) {
                         Text("Do not keep").tag(0)
                         Text("10 seconds").tag(10)
                         Text("30 seconds").tag(30)
                         Text("1 minute").tag(60)
+                        Text("5 minutes").tag(300)
                     }
                     .labelsHidden()
                     .frame(width: 140)

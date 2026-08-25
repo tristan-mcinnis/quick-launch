@@ -9,6 +9,9 @@ import Observation
     var input: String = ""
     var output: String = ""
     var isStreaming: Bool = false
+    /// Short progress note from the service while streaming ("Searching
+    /// the web…"); shown in place of "Thinking…" until answer text lands.
+    var streamingStatus: String?
     var errorMessage: String? = nil
     var settings: QuickSettings
     var updateState: UpdateState = .idle
@@ -4707,12 +4710,17 @@ import Observation
             do {
                 for try await delta in stream {
                     if Task.isCancelled { break }
+                    if let status = delta.status {
+                        streamingStatus = status
+                    }
                     if let text = delta.text {
+                        if !text.isEmpty { streamingStatus = nil }
                         appendStreamText(text)
                     }
                 }
                 flushStreamBuffer()
                 // Stream completed normally
+                streamingStatus = nil
                 isStreaming = false
                 if !output.isEmpty {
                     currentConversation?.messages.append(
@@ -4739,12 +4747,14 @@ import Observation
             } catch is CancellationError {
                 // Cancelled — do not set errorMessage
                 discardStreamBuffer()
+                streamingStatus = nil
                 isStreaming = false
                 output = ""
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             } catch {
                 discardStreamBuffer()
+                streamingStatus = nil
                 errorMessage = error.localizedDescription
                 isStreaming = false
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
@@ -5008,11 +5018,18 @@ import Observation
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
+            // The model gets a search_web tool so it can look things up
+            // mid-answer; SearXNG stays the single search backend.
+            var webSearch: (@Sendable (String) async throws -> String)?
+            if settings.modelWebSearchEnabled, let webSearchService {
+                webSearch = { query in try await webSearchService.search(query) }
+            }
             return OpenAICompatibleService(
                 baseURL: url,
                 modelName: model,
                 apiKey: apiKeyProvider(provider.id),
-                systemPrompt: settings.systemPrompt
+                systemPrompt: settings.systemPrompt,
+                webSearch: webSearch
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
