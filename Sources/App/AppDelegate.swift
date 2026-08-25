@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 
 // Borderless panel that can still become key — needed so the TextField
@@ -165,6 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let maintenance = ScreenHistoryMaintenanceCommand.parse(CommandLine.arguments) {
+            runMaintenanceCommand(maintenance)
+            return
+        }
         let vm = QuickViewModel(
             selectedTextService: selectedTextService,
             applicationCatalog: applicationCatalog,
@@ -193,6 +198,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)
+        }
+    }
+
+    private func runMaintenanceCommand(_ command: ScreenHistoryMaintenanceCommand) {
+        Task { [weak self] in
+            guard let self,
+                  let store = screenHistoryStore,
+                  let importer = screenHistoryCoastImporter,
+                  let freezeReceipt = screenHistoryCoastFreezeReceipt,
+                  let reviewer = screenHistoryRetirementReviewer
+            else {
+                FileHandle.standardError.write(Data("Screen History maintenance is unavailable.\n".utf8))
+                Darwin.exit(1)
+            }
+            do {
+                let runner = ScreenHistoryMaintenanceRunner(
+                    store: store,
+                    importer: importer,
+                    freezeReceipt: freezeReceipt,
+                    reviewer: reviewer
+                )
+                let receipt: ScreenHistoryMaintenanceReceipt
+                switch command {
+                case .prepareImport:
+                    receipt = try await runner.prepareImport(
+                        policy: QuickSettings.load().screenHistoryMigrationPolicy
+                    )
+                }
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                var data = try encoder.encode(receipt)
+                data.append(0x0A)
+                FileHandle.standardOutput.write(data)
+                Darwin.exit(0)
+            } catch {
+                FileHandle.standardError.write(
+                    Data("Screen History maintenance failed: \(String(describing: error))\n".utf8)
+                )
+                Darwin.exit(1)
+            }
         }
     }
 
