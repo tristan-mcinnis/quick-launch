@@ -234,9 +234,16 @@ final class SelectedTextService: SelectedTextServicing {
         }
 
         // The text lands on the clipboard first, so whatever happens next the
-        // content is one manual Command-V away and never silently lost.
+        // content is one manual Command-V away and never silently lost. The
+        // transient marker tells clipboard managers (ours included) that this
+        // is paste plumbing, not a deliberate copy: without it every paste
+        // reshuffled the history and stamped the entry with a fresh time.
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
+        pasteboard.declareTypes(
+            [.string, NSPasteboard.PasteboardType("org.nspasteboard.TransientType")],
+            owner: nil
+        )
         pasteboard.setString(text, forType: .string)
 
         for _ in 0..<40 {
