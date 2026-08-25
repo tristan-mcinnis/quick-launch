@@ -50,13 +50,13 @@ struct ClipboardLinksSettingsView: View {
                             viewModel.clearClipboardHistory()
                         }
                     }
-                    Text("In the list: ⌘⇧P pins an entry to the top, ⌘⇧N saves it as a snippet, ⌘⇧L saves it as a Quick Link, ⌃X deletes it.")
+                    Text("In the list: ⌘⇧P pins an entry, ⌘⇧N saves a snippet, ⌘⇧L creates a Quicklink, and ⌃X deletes it.")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                section("Quick Links") {
+                section("Quicklinks") {
                     HStack {
                         Text("Open links in")
                         Spacer()
@@ -69,7 +69,7 @@ struct ClipboardLinksSettingsView: View {
                         .labelsHidden()
                         .frame(width: 240)
                     }
-                    Text("Applies to every Quick Link. Links with {{input}} ask for text first.")
+                    Text("Applies to every Quicklink. Links with {{input}} ask for text first.")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -77,12 +77,12 @@ struct ClipboardLinksSettingsView: View {
                 section("Tuna stores") {
                     HStack {
                         Label("\(viewModel.snippets.count) snippets", systemImage: "text.quote")
-                        Label("\(viewModel.quickLinks.count) Quick Links", systemImage: "link")
+                        Label("\(viewModel.quickLinks.count) Quicklinks", systemImage: "link")
                         Spacer()
                         Button("Reload") { viewModel.reloadTunaCatalogs() }
                     }
                     .font(AQDesign.TypeToken.label)
-                    Text("Snippets and Quick Links are read live from Tuna's files. Edits, new snippets, and new links are written back there with a backup.")
+                    Text("Snippets and Quicklinks are read live from Tuna. Edits are written back with a backup.")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

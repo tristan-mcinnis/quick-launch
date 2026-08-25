@@ -71,5 +71,16 @@ struct ScreenPlacementTests {
         let tall = CGRect(x: 410, y: 100, width: 620, height: 900)
         let pinned = ScreenPlacement.clamped(frame: tall, within: visible)
         #expect(pinned.minY == 12)
+        #expect(pinned.height == 851)
+        #expect(pinned.maxY == 863)
+    }
+
+    @Test func oversizedPanelsShrinkAndStayInsideEveryEdge() {
+        let visible = CGRect(x: -1_200, y: 50, width: 700, height: 500)
+        let oversized = CGRect(x: -1_400, y: -200, width: 900, height: 800)
+
+        let result = ScreenPlacement.clamped(frame: oversized, within: visible)
+
+        #expect(result == CGRect(x: -1_188, y: 62, width: 676, height: 476))
     }
 }

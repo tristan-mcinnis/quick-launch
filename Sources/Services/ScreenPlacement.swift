@@ -15,15 +15,24 @@ enum ScreenPlacement {
         )
     }
 
-    /// Keeps a panel inside the visible frame: shifts up when it would run off
-    /// the bottom, never above the top. `margin` keeps a little air.
+    /// Keeps the whole panel inside the visible frame. Oversized panels shrink
+    /// before they move, so their scrollable content and pinned footer remain
+    /// reachable on short or narrow displays. `margin` keeps a little air.
     static func clamped(frame: CGRect, within visibleFrame: CGRect, margin: CGFloat = 12) -> CGRect {
         var result = frame
+        let availableWidth = max(1, visibleFrame.width - margin * 2)
+        let availableHeight = max(1, visibleFrame.height - margin * 2)
+        result.size.width = min(result.width, availableWidth)
+        result.size.height = min(result.height, availableHeight)
+
+        let minX = visibleFrame.minX + margin
+        let maxX = visibleFrame.maxX - margin
         let minY = visibleFrame.minY + margin
         let maxY = visibleFrame.maxY - margin
+        if result.minX < minX { result.origin.x = minX }
+        if result.maxX > maxX { result.origin.x = maxX - result.width }
         if result.minY < minY { result.origin.y = minY }
         if result.maxY > maxY { result.origin.y = maxY - result.height }
-        if result.minY < minY { result.origin.y = minY }   // taller than the screen: pin to the bottom margin
         return result
     }
 

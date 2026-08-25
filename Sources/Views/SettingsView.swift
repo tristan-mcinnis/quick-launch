@@ -7,6 +7,7 @@ import AppKit
 struct SettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var tab: SettingsTab
+    @State private var settingsQuery = ""
 
     init(viewModel: QuickViewModel, initialTab: SettingsTab = .general) {
         self.viewModel = viewModel
@@ -23,7 +24,7 @@ struct SettingsView: View {
             case .models: "Models"
             case .clipboard: "Clipboard & Links"
             case .screenHistory: "Screen History"
-            case .prompts: "Prompts"
+            case .prompts: "AI Commands"
             case .about: "About"
             }
         }
@@ -40,11 +41,12 @@ struct SettingsView: View {
         }
     }
 
-    static let windowSize = NSSize(width: 860, height: 620)
+    static let windowSize = NSSize(width: 1_040, height: 680)
+    static let minimumWindowSize = NSSize(width: 900, height: 560)
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabStrip
+        HStack(spacing: 0) {
+            sidebar
             Divider()
             Group {
                 switch tab {
@@ -59,7 +61,12 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: Self.windowSize.width, height: Self.windowSize.height)
+        .frame(
+            minWidth: Self.minimumWindowSize.width,
+            idealWidth: Self.windowSize.width,
+            minHeight: Self.minimumWindowSize.height,
+            idealHeight: Self.windowSize.height
+        )
         .background(Color(NSColor.windowBackgroundColor))
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
         .background {
@@ -72,21 +79,50 @@ struct SettingsView: View {
         }
     }
 
-    private var tabStrip: some View {
-        HStack(spacing: 4) {
-            ForEach(SettingsTab.allCases) { item in
+    private var filteredTabs: [SettingsTab] {
+        let query = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return SettingsTab.allCases }
+        return SettingsTab.allCases.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search settings…", text: $settingsQuery)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
+                    .fill(AQDesign.ColorToken.surfaceFill)
+            )
+
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    ForEach(filteredTabs) { item in
                 Button {
                     tab = item
                 } label: {
-                    VStack(spacing: 4) {
+                            HStack(spacing: 10) {
                         Image(systemName: item.systemImage)
-                            .font(.system(size: 16, weight: .medium))
+                                    .font(.system(size: 14, weight: .medium))
+                                    .frame(width: 18)
                         Text(item.title)
                             .font(AQDesign.TypeToken.label)
+                                Spacer()
+                                if let index = SettingsTab.allCases.firstIndex(of: item) {
+                                    Text("⌘\(index + 1)")
+                                        .font(AQDesign.TypeToken.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
                     }
-                    .frame(minWidth: 92)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 6)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
                     .foregroundStyle(tab == item ? AQDesign.ColorToken.accent : .secondary)
                     .background(
                         RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
@@ -97,10 +133,17 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(tab == item ? [.isSelected] : [])
             }
-            Spacer()
+                }
+            }
+
+            Spacer(minLength: 0)
+            Text("Quick Launch")
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(12)
+        .frame(width: 220)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
     }
 }
 
@@ -279,10 +322,10 @@ private struct ScreenHistorySettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Screen History").font(.headline)
-                Text("Search stays on this Mac. Captured text and images do not go to AI, the VPS, or Neon. Save to Vault writes only the selected moment's bounded text and metadata to local triage.")
+                Text("Screen History stays on this Mac. Only moments you save to Vault are copied out.")
                     .font(.body)
                     .foregroundStyle(.secondary)
-                Text("A later capture release will use this encrypted local store only when FileVault is on. Retention and exclusions are visible now so the release gate can be reviewed.")
+                Text("Capture is locked until the privacy review and seven-day test pass.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -294,7 +337,7 @@ private struct ScreenHistorySettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Import from Coast")
                         .font(.body.weight(.semibold))
-                    Text("Preview Coast metadata with the current exclusions first. Preview writes nothing and does not open media. After you review the counts, a separate Import action copies allowed text and verified media. Coast files stay unchanged.")
+                    Text("Review the counts before importing. Quick Launch copies only allowed text and verified media. Coast stays unchanged.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -369,7 +412,7 @@ private struct ScreenHistorySettingsView: View {
                     }
                     .disabled(!ScreenHistoryReleasePolicy.allowsOwnedCapture)
 
-                Text("Owned capture is locked in this search-only beta. Its live privacy and seven-day soak gates must pass before release. Browser capture will remain blocked.")
+                Text("Browser capture remains blocked.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -414,7 +457,7 @@ private struct ScreenHistorySettingsView: View {
                     viewModel.settings.save()
                     Task { await viewModel.applyScreenHistoryCaptureSettings() }
                 }
-                Text("FileVault and owner-only files protect the disk and other user accounts. This build does not use SQLCipher, so software already running as your Mac user can still read the local database.")
+                Text("Screen History files are private to your macOS account, but they are not app-encrypted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -476,7 +519,7 @@ private struct ScreenHistorySettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Excluded applications")
                         .font(.body.weight(.semibold))
-                    Text("Enter one bundle identifier per line. Password, system, meeting, and screen-sharing apps stay excluded even if removed here.")
+                    Text("Add one app bundle ID per line, such as com.apple.Safari. Protected apps stay excluded.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TextEditor(text: exclusionBinding)

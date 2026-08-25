@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import QuickLaunch
 
 @Suite("Launcher interface contract")
 struct InterfaceContractTests {
@@ -11,6 +12,27 @@ struct InterfaceContractTests {
             contentsOf: root.appendingPathComponent(relativePath),
             encoding: .utf8
         )
+    }
+
+    @MainActor
+    @Test("Arrow navigation announces the launcher selection")
+    func launcherSelectionAnnouncement() {
+        let viewModel = QuickViewModel()
+        let count = viewModel.launcherMatches.count
+        #expect(count > 1)
+
+        viewModel.moveApplicationSelection(1)
+
+        #expect(viewModel.launcherSelectionAnnouncementRevision == 1)
+        #expect(viewModel.launcherSelectionAnnouncement.contains("selected, 2 of \(count)"))
+        #expect(viewModel.launcherSelectionAnnouncement.contains("with Return"))
+    }
+
+    @Test("Actions expose selected state and announcements")
+    func actionSelectionAccessibilityContract() throws {
+        let overlay = try Self.source("Sources/Views/OverlayView.swift")
+        #expect(overlay.contains("accessibilityAddTraits(index == selectedIndex ? .isSelected : [])"))
+        #expect(overlay.contains("private func announceSelected()"))
     }
 
     @Test("Command-comma routes to the real settings interface")

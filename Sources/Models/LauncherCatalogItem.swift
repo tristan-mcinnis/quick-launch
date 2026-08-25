@@ -34,18 +34,30 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
 
     var systemImage: String {
         switch kind {
-        case .application: "app"
-        case .snippet: "text.quote"
-        case .quickLink: "link"
-        case .clipboard: "clipboard"
-        case .command: value.hasPrefix("vault.") ? "magnifyingglass" : "rectangle.3.group"
-        case .emoji: "face.smiling"
-        case .screenshot: "photo"
-        case .conversation: "bubble.left.and.text.bubble.right"
-        case .askAI: "sparkles"
-        case .folder: "folder"
-        case .answer: "equal.circle"
-        case .screenHistory: "clock.arrow.circlepath"
+        case .application: return "app"
+        case .snippet: return "text.quote"
+        case .quickLink: return "link"
+        case .clipboard: return "clipboard"
+        case .command:
+            if value.hasPrefix("vault.") { return "magnifyingglass" }
+            if value.hasPrefix("settingspane."),
+               let pane = SystemSettingsPaneCatalog.panes.first(where: {
+                   $0.id == String(value.dropFirst("settingspane.".count))
+               }) {
+                return pane.systemImage
+            }
+            if value.hasPrefix("toggle."),
+               let toggle = QuickToggle(rawValue: String(value.dropFirst("toggle.".count))) {
+                return toggle.systemImage
+            }
+            return "rectangle.3.group"
+        case .emoji: return "face.smiling"
+        case .screenshot: return "photo"
+        case .conversation: return "bubble.left.and.text.bubble.right"
+        case .askAI: return "sparkles"
+        case .folder: return "folder"
+        case .answer: return "equal.circle"
+        case .screenHistory: return "clock.arrow.circlepath"
         }
     }
 }
@@ -67,7 +79,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .snippets: "Snippets"
-        case .quickLinks: "Quick Links"
+        case .quickLinks: "Quicklinks"
         case .clipboard: "Clipboard History"
         case .emoji: "Emoji & Symbols"
         case .screenshots: "Screenshots"

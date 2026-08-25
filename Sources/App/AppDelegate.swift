@@ -391,7 +391,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makePanel(viewModel: QuickViewModel) -> NSPanel {
         let panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 60),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: QuickViewModel.panelWidth,
+                height: PanelSizing.inputHeight
+            ),
             styleMask: [.borderless, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -433,7 +438,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(
             rootView: OverlayView(viewModel: viewModel)
         )
-        hostingController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 60)
+        hostingController.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: QuickViewModel.panelWidth,
+            height: PanelSizing.inputHeight
+        )
         panel.contentViewController = hostingController
 
         // Center on the display that contains the pointer.
@@ -441,10 +451,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: 620,
+                panelWidth: QuickViewModel.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
-            panel.setFrame(NSRect(x: origin.x, y: origin.y, width: 620, height: 60), display: false)
+            panel.setFrame(
+                NSRect(
+                    x: origin.x,
+                    y: origin.y,
+                    width: QuickViewModel.panelWidth,
+                    height: PanelSizing.inputHeight
+                ),
+                display: false
+            )
         }
 
         return panel
@@ -470,7 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: 620,
+                panelWidth: QuickViewModel.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
             // Keep the input row on the centre line whatever the panel's
@@ -1134,13 +1152,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let vm = viewModel else { return }
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: SettingsView.windowSize),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Quick Launch Settings"
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 2)
         panel.isReleasedWhenClosed = false
+        panel.minSize = SettingsView.minimumWindowSize
+        panel.setFrameAutosaveName("QuickLaunch.SettingsWindow")
         panel.center()
 
         let hostingController = NSHostingController(

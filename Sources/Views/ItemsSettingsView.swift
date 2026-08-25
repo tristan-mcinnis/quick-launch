@@ -19,7 +19,7 @@ struct ItemsSettingsView: View {
             case .apps: "Apps"
             case .folders: "Folders"
             case .snippets: "Snippets"
-            case .quickLinks: "Quick Links"
+            case .quickLinks: "Quicklinks"
             case .windows: "Windows"
             case .commands: "Commands"
             }
@@ -51,7 +51,7 @@ struct ItemsSettingsView: View {
             case .item(let item):
                 switch item.kind {
                 case .snippet: "Snippet"
-                case .quickLink: "Quick Link"
+                case .quickLink: "Quicklink"
                 case .command: item.value.hasPrefix("window.") ? "Window" : "Command"
                 case .clipboard: "Clipboard"
                 case .emoji: "Emoji"

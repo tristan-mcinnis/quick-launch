@@ -13,6 +13,8 @@ enum PanelSizing {
     static let footerHeight: CGFloat = AQDesign.footerHeight + 1
     /// Vertical inset around the launcher rows.
     static let launcherListInset: CGFloat = 12
+    /// The search row and footer stay pinned while long result sets scroll.
+    static let launcherListMaximumHeight: CGFloat = 504
     /// A preview plus its Information block needs this much room.
     static let detailPaneMinimumHeight: CGFloat = 360
     /// Keeps the exact payload preview and its primary action visible. The

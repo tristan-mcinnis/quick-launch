@@ -70,6 +70,8 @@ import Observation
     var screenHistoryShowsTimeline = false
     var screenHistoryQueryBeforeTimeline = ""
     var screenHistoryLoadState: ScreenHistoryLoadState = .idle
+    private(set) var launcherSelectionAnnouncement = ""
+    private(set) var launcherSelectionAnnouncementRevision = 0
     private(set) var screenHistoryResultAnnouncement = ""
     private(set) var screenHistoryAnnouncementRevision = 0
     private(set) var screenHistorySaveError: String?
@@ -451,7 +453,7 @@ import Observation
                 kind: .command,
                 itemID: "settingspane.\(pane.id)",
                 title: "\(pane.title) Settings",
-                detail: "Open this pane in System Settings",
+                detail: "System Settings",
                 value: "settingspane.\(pane.id)",
                 keywords: pane.keywords + " system preferences pane"
             )
@@ -845,8 +847,10 @@ import Observation
     /// The emoji grid shows more: 9 columns by 7 rows.
     static let maxGridCells = 63
     static let gridColumns = 9
-    static let panelWidth: CGFloat = 620
-    static let panelWidthWithDetail: CGFloat = 860
+    /// Raycast Beta uses a calmer, wider search canvas. Keep enough room for
+    /// title, metadata, and two visible actions without crowding.
+    static let panelWidth: CGFloat = 720
+    static let panelWidthWithDetail: CGFloat = 960
 
     /// Emoji & Symbols is a grid, everything else a list.
     var isGridCatalog: Bool { catalogScope == .emoji && !isItemActionPanePresented }
@@ -1186,6 +1190,14 @@ import Observation
         }
     }
 
+    private static func displayDetail(_ result: LauncherSearchResult) -> String {
+        switch result {
+        case .application: "Application"
+        case .catalog(let scope, let count): "\(scope.title), \(count) items"
+        case .item(let item): item.detail
+        }
+    }
+
     // MARK: - Footer and badges
 
     struct FooterHint: Equatable, Sendable {
@@ -1419,13 +1431,13 @@ import Observation
         switch inputMode {
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
-        case .askAI: return "Ask \(activeModelDisplay)…"
+        case .askAI: return "Ask anything…"
         case .vaultSearch(let mode): return mode.placeholder
         case nil: break
         }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
         if let catalogScope { return "Search \(catalogScope.title.lowercased())…" }
-        return isFollowUp ? "Ask a follow-up…" : "Search apps, snippets, links, or ask anything…"
+        return isFollowUp ? "Ask a follow-up…" : "Search for apps and commands…"
     }
 
     var activeProvider: InferenceProvider? { settings.selectedProvider }
@@ -1511,13 +1523,22 @@ import Observation
         applicationSelectionIndex = (
             applicationSelectionIndex + delta + matches.count
         ) % matches.count
-        if catalogScope == .screenHistory,
-           case .item(let item) = matches[applicationSelectionIndex] {
-            setScreenHistoryAnnouncement(
-                "\(item.title), selected, \(applicationSelectionIndex + 1) of \(matches.count). \(item.defaultActionTitle) with Return."
-            )
+        announceCurrentLauncherSelection()
+        if catalogScope == .screenHistory {
+            setScreenHistoryAnnouncement(launcherSelectionAnnouncement)
         }
         noteInteraction()
+    }
+
+    func announceCurrentLauncherSelection() {
+        let matches = launcherMatches
+        guard !matches.isEmpty else { return }
+        let index = min(applicationSelectionIndex, matches.count - 1)
+        let result = matches[index]
+        let detail = Self.displayDetail(result)
+        let detailPhrase = detail.isEmpty ? "" : ", \(detail)"
+        launcherSelectionAnnouncement = "\(Self.displayTitle(result))\(detailPhrase), selected, \(index + 1) of \(matches.count). \(primaryActionTitle(for: result)) with Return."
+        launcherSelectionAnnouncementRevision &+= 1
     }
 
     @discardableResult

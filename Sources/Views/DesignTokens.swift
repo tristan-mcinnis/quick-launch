@@ -39,6 +39,16 @@ enum AQDesign {
             light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.10),
             dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.12)
         )
+        /// Quiet grouped surfaces in Settings and footer action capsules.
+        static let surfaceFill = adaptive(
+            light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.035),
+            dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.055)
+        )
+        /// Hover and pressed feedback for compact icon controls.
+        static let interactiveFill = adaptive(
+            light: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.075),
+            dark: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10)
+        )
 
         /// One colour that resolves per appearance, so the overlay follows
         /// the user's appearance setting without separate view code.
@@ -50,12 +60,15 @@ enum AQDesign {
     }
 
     enum TypeToken {
-        static let input = Font.system(size: 17)
-        static let body = Font.system(size: 13)
-        static let label = Font.system(size: 11, weight: .medium)
-        static let caption = Font.system(size: 10)
+        /// Semantic styles scale with macOS text-size settings.
+        static let input = Font.title3
+        static let body = Font.body
+        static let label = Font.callout.weight(.medium)
+        static let metadata = Font.caption
+        static let section = Font.caption.weight(.semibold)
+        static let caption = Font.caption
         /// Key caps in hotkey badges and the footer.
-        static let keyCap = Font.system(size: 10, weight: .medium, design: .rounded)
+        static let keyCap = Font.caption2.weight(.medium).monospaced()
     }
 
     enum Space {
@@ -65,10 +78,11 @@ enum AQDesign {
         static let window: CGFloat = 24
     }
 
-    static let cornerRadius: CGFloat = 14
-    static let itemCornerRadius: CGFloat = 7
-    static let keyCapCornerRadius: CGFloat = 4
+    static let cornerRadius: CGFloat = 16
+    static let itemCornerRadius: CGFloat = 8
+    static let cardCornerRadius: CGFloat = 12
+    static let keyCapCornerRadius: CGFloat = 5
     static let controlHeight: CGFloat = 44
-    static let footerHeight: CGFloat = 30
+    static let footerHeight: CGFloat = 38
     static let motionDuration: TimeInterval = 0.10
 }

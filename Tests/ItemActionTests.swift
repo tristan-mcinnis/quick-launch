@@ -34,7 +34,7 @@ struct ItemActionTests {
             == ["Paste to Active App", "Copy to Clipboard", "Copy & Paste", "Pin to Top", "Save as Snippet", "Delete Entry"])
         let pinnedLink = LauncherCatalogItem(kind: .clipboard, itemID: "u", title: "t", detail: "", value: "https://example.com/x", isPinned: true)
         #expect(ItemActionCatalog.actions(for: .item(pinnedLink), pasteTarget: nil).map(\.title)
-            == ["Paste to Active App", "Copy to Clipboard", "Copy & Paste", "Unpin", "Save as Snippet", "Save as Quick Link", "Delete Entry"])
+            == ["Paste to Active App", "Copy to Clipboard", "Copy & Paste", "Unpin", "Save as Snippet", "Create Quicklink", "Delete Entry"])
         let link = LauncherCatalogItem(kind: .quickLink, itemID: "l", title: "Docs", detail: "", value: "https://x", requiresInput: true)
         #expect(ItemActionCatalog.actions(for: .item(link), pasteTarget: nil).first?.title == "Enter Input")
         let command = LauncherCatalogItem(kind: .command, itemID: "w", title: "Left Half", detail: "", value: "window.leftHalf")

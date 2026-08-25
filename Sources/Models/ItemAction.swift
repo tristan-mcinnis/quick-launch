@@ -173,7 +173,7 @@ enum ItemActionCatalog {
                 ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")),
             ]
             if looksLikeURL(item.value) {
-                actions.append(ItemAction(kind: .saveAsQuickLink, title: "Save as Quick Link", systemImage: "link.badge.plus", shortcut: .commandShift("l")))
+                actions.append(ItemAction(kind: .saveAsQuickLink, title: "Create Quicklink", systemImage: "link.badge.plus", shortcut: .commandShift("l")))
                 if URLCleaner.hasTrackingParameters(item.value) {
                     actions.append(cleanLinkAction)
                 }

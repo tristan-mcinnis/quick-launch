@@ -160,6 +160,10 @@ struct OverlayRenderProofTests {
                 height: PanelSizing.screenHistorySaveMinimumHeight,
                 accessibilitySize: true
             )
+            try Self.saveOpaque(
+                largeTextSave,
+                name: "overlay-screen-history-save-large-text-dark.png"
+            )
             #expect(productionSave.tiffRepresentation != largeTextSave.tiffRepresentation)
             #expect(try Self.brightPixelCount(
                 in: largeTextSave,
@@ -171,12 +175,8 @@ struct OverlayRenderProofTests {
             ) > 120, "accessibility proof must keep the selected-moment header visible")
             #expect(try Self.brightPixelCount(
                 in: largeTextSave,
-                region: CGRect(x: 20, y: 555, width: 900, height: 55)
+                region: CGRect(x: 260, y: 20, width: 680, height: 90)
             ) > 120, "accessibility proof must keep the pinned action footer visible")
-            try Self.saveOpaque(
-                largeTextSave,
-                name: "overlay-screen-history-save-large-text-dark.png"
-            )
             vm.closeItemActionPane()
         }
         try Self.save(

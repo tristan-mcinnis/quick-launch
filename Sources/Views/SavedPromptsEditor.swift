@@ -8,7 +8,7 @@ struct SavedPromptsEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Quick Actions")
+                Text("AI Commands")
                     .font(.headline)
                 Spacer()
             }
