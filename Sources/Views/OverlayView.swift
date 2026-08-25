@@ -305,6 +305,11 @@ struct OverlayView: View {
                 viewModel.cancel()
             } else if viewModel.isItemActionPanePresented {
                 viewModel.dismissItemActionLayer()
+            } else if viewModel.isActionPalettePresented {
+                // One layer at a time, wherever focus sits: the palette's
+                // own field handles Escape, but with focus elsewhere this
+                // used to close the whole window instead of the palette.
+                viewModel.closeActionPalette()
             } else {
                 // Raycast convention: Escape closes the window from anywhere.
                 // Backspace on an empty field is the way back to the root.
@@ -354,7 +359,13 @@ struct OverlayView: View {
                 : 460,
             alignment: .top
         )
-        .padding(.top, PanelSizing.inputHeight)
+        // Below the input row and, when present, the attachment strip:
+        // without the offset the pane covered the attachment preview.
+        .padding(
+            .top,
+            PanelSizing.inputHeight
+                + (viewModel.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
+        )
         .padding(.trailing, 12)
     }
 

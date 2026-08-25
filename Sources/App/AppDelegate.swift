@@ -1105,8 +1105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.pendingContext
             _ = viewModel.applicationSelectionIndex
             _ = viewModel.screenshotIndexProgress
-            _ = viewModel.applicationSelectionIndex
             _ = viewModel.screenHistoryCaptureStatus
+            // Screen History loads frames asynchronously and can flip into
+            // the timeline; both change the row count the window must fit.
+            _ = viewModel.screenHistoryShowsTimeline
+            _ = viewModel.screenHistoryFrames.count
             _ = viewModel.settings.showMenuBar
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
@@ -1198,7 +1201,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if vm.isActionPalettePresented {
             pane = PanelSizing.actionPaletteHeight(rows: vm.actionPaletteEntryCount)
         }
-        var total = PanelSizing.windowHeight(base: base, paneHeight: pane)
+        var total = PanelSizing.windowHeight(
+            base: base,
+            paneHeight: pane,
+            paneTop: PanelSizing.inputHeight
+                + (vm.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
+        )
         if vm.activeItemActionForm == .screenHistorySave {
             total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
         }

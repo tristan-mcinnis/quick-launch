@@ -64,10 +64,15 @@ enum PanelSizing {
     }
 
     /// The window keeps its base height while a pane floats over it; it only
-    /// grows when the pane (input row + pane + margin) needs more room.
-    static func windowHeight(base: CGFloat, paneHeight: CGFloat?) -> CGFloat {
+    /// grows when the pane (everything above it + pane + margin) needs more
+    /// room. `paneTop` is the input row plus, when shown, the attachment strip.
+    static func windowHeight(
+        base: CGFloat,
+        paneHeight: CGFloat?,
+        paneTop: CGFloat = PanelSizing.inputHeight
+    ) -> CGFloat {
         guard let paneHeight else { return base }
-        return max(base, inputHeight + paneHeight + paneBottomMargin)
+        return max(base, paneTop + paneHeight + paneBottomMargin)
     }
 
     static func panelHeight(
