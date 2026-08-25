@@ -53,6 +53,7 @@ struct ScreenHistoryMediaMigrationServiceTests {
         #expect(videoLedger.byteCount == Int64(Data("shared-video".utf8).count))
         #expect(videoLedger.contentHash == sha256(Data("shared-video".utf8)))
         #expect(videoLedger.destinationLocator == videos.first?.mediaLocator)
+        #expect(try await store.normalizedStructureDriftCount() == 0)
 
         let repeated = try await service.migrate()
         #expect(repeated.copiedFileDelta == 0)

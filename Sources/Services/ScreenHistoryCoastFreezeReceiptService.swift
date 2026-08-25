@@ -21,7 +21,7 @@ enum ScreenHistoryCoastFreezeReceiptError: Error, Equatable, Sendable {
     case secondCheckRequired
     case secondCheckMismatch
     case staleReceipt
-    case integrityKeyUnavailable
+    case integrityKeyUnavailable(OSStatus)
 }
 
 /// Makes a content-free, read-only inventory of Coast before retirement.
@@ -38,6 +38,7 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
     nonisolated let receiptURL: URL
     nonisolated let primaryCheckpointURL: URL
     nonisolated let secondCheckCheckpointURL: URL
+    nonisolated let integrityKeyFileURL: URL
 
     private let databaseRelativePath: String
     private let rollbackHoldDays: Int
@@ -75,6 +76,7 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
         receiptURL = receiptDirectoryURL.appendingPathComponent("coast-freeze-receipt.json")
         primaryCheckpointURL = receiptDirectoryURL.appendingPathComponent("primary-checkpoint.json")
         secondCheckCheckpointURL = receiptDirectoryURL.appendingPathComponent("second-check-checkpoint.json")
+        integrityKeyFileURL = receiptDirectoryURL.appendingPathComponent(".integrity-key")
         self.databaseRelativePath = databaseRelativePath
         self.rollbackHoldDays = max(1, rollbackHoldDays)
         self.clock = clock
@@ -88,10 +90,13 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
         try Self.prepareReceiptStorage(
             self.receiptDirectoryURL,
             sourceRoot: self.coastRootURL,
-            protectedFiles: [receiptURL, primaryCheckpointURL, secondCheckCheckpointURL]
+            protectedFiles: [receiptURL, primaryCheckpointURL, secondCheckCheckpointURL, integrityKeyFileURL]
         )
         integrityKey = try integrityKeyData.map(SymmetricKey.init(data:))
-            ?? Self.loadOrCreateIntegrityKey(receiptDirectoryURL: self.receiptDirectoryURL)
+            ?? Self.loadOrCreateIntegrityKey(
+                receiptDirectoryURL: self.receiptDirectoryURL,
+                fallbackFileURL: integrityKeyFileURL
+            )
         _ = try Self.loadReceiptIfPresent(receiptURL, key: integrityKey)
     }
 
@@ -279,6 +284,10 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
         payload.approvalRecordedAt = clock()
         payload.approvalState = .revoked
         return try Self.writeReceipt(payload, to: receiptURL, key: integrityKey).publicReceipt
+    }
+
+    static func loadOrCreateOwnerOnlyIntegrityKeyForTesting(at url: URL) throws -> SymmetricKey {
+        try loadOrCreateOwnerOnlyIntegrityKey(at: url)
     }
 }
 
@@ -1357,7 +1366,10 @@ private extension ScreenHistoryCoastFreezeReceiptService {
         return hex(HMAC<SHA256>.authenticationCode(for: data, using: key))
     }
 
-    static func loadOrCreateIntegrityKey(receiptDirectoryURL: URL) throws -> SymmetricKey {
+    static func loadOrCreateIntegrityKey(
+        receiptDirectoryURL: URL,
+        fallbackFileURL: URL
+    ) throws -> SymmetricKey {
         let account = hex(SHA256.hash(data: Data(
             receiptDirectoryURL.standardizedFileURL.path.utf8
         )))
@@ -1376,14 +1388,19 @@ private extension ScreenHistoryCoastFreezeReceiptService {
             guard status == errSecSuccess,
                   let data = result as? Data,
                   data.count == 32
-            else { throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable }
+            else {
+                if status == errSecAuthFailed || status == errSecInteractionNotAllowed {
+                    return try loadOrCreateOwnerOnlyIntegrityKey(at: fallbackFileURL)
+                }
+                throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(status)
+            }
             return SymmetricKey(data: data)
         }
         if let key = try existingKey() { return key }
 
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable
+            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(errSecInternalError)
         }
         let data = Data(bytes)
         var add = baseQuery
@@ -1391,8 +1408,102 @@ private extension ScreenHistoryCoastFreezeReceiptService {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let status = SecItemAdd(add as CFDictionary, nil)
         if status == errSecDuplicateItem, let key = try existingKey() { return key }
+        if status == errSecAuthFailed || status == errSecInteractionNotAllowed {
+            return try loadOrCreateOwnerOnlyIntegrityKey(at: fallbackFileURL, candidate: data)
+        }
         guard status == errSecSuccess else {
-            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable
+            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(status)
+        }
+        return SymmetricKey(data: data)
+    }
+
+    /// FileVault and owner-only permissions are the local fallback when an
+    /// ad-hoc development build cannot write to macOS Keychain. The receipt
+    /// remains authenticated and no source content enters this file.
+    static func loadOrCreateOwnerOnlyIntegrityKey(
+        at url: URL,
+        candidate: Data? = nil
+    ) throws -> SymmetricKey {
+        let manager = FileManager.default
+        let directory = url.deletingLastPathComponent()
+        do {
+            try validateNoSymlinkComponents(directory, allowMissingTail: false)
+        } catch {
+            throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
+        }
+        guard manager.fileExists(atPath: directory.path),
+              try !isSymbolicLink(directory)
+        else { throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage }
+
+        func readExisting() throws -> SymmetricKey? {
+            guard manager.fileExists(atPath: url.path) else { return nil }
+            let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            guard descriptor >= 0 else {
+                throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
+            }
+            defer { close(descriptor) }
+            var metadata = stat()
+            guard fstat(descriptor, &metadata) == 0,
+                  metadata.st_mode & S_IFMT == S_IFREG,
+                  metadata.st_uid == geteuid(),
+                  metadata.st_mode & 0o077 == 0,
+                  metadata.st_size == 32
+            else { throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage }
+            var bytes = [UInt8](repeating: 0, count: 32)
+            var offset = 0
+            while offset < bytes.count {
+                let count = bytes.withUnsafeMutableBytes { buffer in
+                    read(
+                        descriptor,
+                        buffer.baseAddress?.advanced(by: offset),
+                        buffer.count - offset
+                    )
+                }
+                guard count > 0 else {
+                    throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
+                }
+                offset += count
+            }
+            return SymmetricKey(data: Data(bytes))
+        }
+        if let key = try readExisting() { return key }
+
+        let data: Data
+        if let candidate, candidate.count == 32 {
+            data = candidate
+        } else {
+            var bytes = [UInt8](repeating: 0, count: 32)
+            guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+                throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(errSecInternalError)
+            }
+            data = Data(bytes)
+        }
+        let descriptor = open(
+            url.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        if descriptor < 0 {
+            if errno == EEXIST, let key = try readExisting() { return key }
+            throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
+        }
+        defer { close(descriptor) }
+        var offset = 0
+        try data.withUnsafeBytes { buffer in
+            while offset < buffer.count {
+                let written = write(
+                    descriptor,
+                    buffer.baseAddress?.advanced(by: offset),
+                    buffer.count - offset
+                )
+                guard written > 0 else {
+                    throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
+                }
+                offset += written
+            }
+        }
+        guard fsync(descriptor) == 0 else {
+            throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage
         }
         return SymmetricKey(data: data)
     }

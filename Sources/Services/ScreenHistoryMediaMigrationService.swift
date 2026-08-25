@@ -156,6 +156,7 @@ actor ScreenHistoryMediaMigrationService {
             if rows.count < requestCount { break }
         }
 
+        updatedRowDelta += try await store.repairNormalizedMediaReferences()
         return ScreenHistoryMediaMigrationResult(
             sourceRows: sourceRows,
             uniqueLocators: uniqueLocators.count,

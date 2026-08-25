@@ -363,6 +363,41 @@ struct ScreenHistoryCoastFreezeReceiptServiceTests {
         #expect(invalidated.receiptHMACSHA256 != approved.receiptHMACSHA256)
     }
 
+    @Test("owner-only integrity fallback is stable and fails closed on weak permissions")
+    func ownerOnlyIntegrityFallback() throws {
+        let fixture = try CoastFreezeFixture()
+        let directory = fixture.directory.appendingPathComponent("fallback-key", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let url = directory.appendingPathComponent(".integrity-key")
+
+        let first = try ScreenHistoryCoastFreezeReceiptService
+            .loadOrCreateOwnerOnlyIntegrityKeyForTesting(at: url)
+        let second = try ScreenHistoryCoastFreezeReceiptService
+            .loadOrCreateOwnerOnlyIntegrityKeyForTesting(at: url)
+        let firstData = first.withUnsafeBytes {
+            Data(bytes: $0.baseAddress!, count: $0.count)
+        }
+        let secondData = second.withUnsafeBytes {
+            Data(bytes: $0.baseAddress!, count: $0.count)
+        }
+        #expect(firstData.count == 32)
+        #expect(firstData == secondData)
+        #expect(try fixture.permissions(url) == 0o600)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: url.path
+        )
+        #expect(throws: ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage) {
+            _ = try ScreenHistoryCoastFreezeReceiptService
+                .loadOrCreateOwnerOnlyIntegrityKeyForTesting(at: url)
+        }
+    }
+
     @Test("synthetic workspaces remove themselves after their fixture is released")
     func fixtureCleanup() throws {
         var fixture: CoastFreezeFixture? = try CoastFreezeFixture()

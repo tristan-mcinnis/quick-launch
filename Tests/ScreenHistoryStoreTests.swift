@@ -352,6 +352,12 @@ struct ScreenHistoryStoreTests {
             url: fixture.databaseURL,
             flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         )
+        try external.execute("UPDATE screen_history_frame SET media_ref_id = NULL;")
+        #expect(try await store.normalizedStructureDriftCount() == 1)
+        #expect(try await store.repairNormalizedMediaReferences() == 1)
+        #expect(try await store.repairNormalizedMediaReferences() == 0)
+        #expect(try await store.normalizedStructureDriftCount() == 0)
+
         try external.execute("UPDATE screen_history_frame SET domain_ref_id = NULL;")
         #expect(try await store.normalizedStructureDriftCount() == 1)
     }

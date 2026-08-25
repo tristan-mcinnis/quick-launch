@@ -621,11 +621,48 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
             } else {
                 frameIndexCondition = ""
             }
+            let wasAlreadyMigrated = try importedMediaLocatorMatches(
+                reference,
+                locator: destinationLocator
+            )
+            let media = try database.prepare("""
+                INSERT INTO screen_history_media(
+                    locator, kind, frame_count, first_seen_at, last_seen_at
+                )
+                SELECT ?, ?, media_frame_count, captured_at, captured_at
+                FROM screen_history_frame
+                WHERE id = ? AND source = 'coast' AND source_identifier = ?
+                  AND (\(locatorColumn) = ? OR \(locatorColumn) = ?)
+                  \(frameIndexCondition)
+                LIMIT 1
+                ON CONFLICT(locator) DO UPDATE SET
+                    frame_count=COALESCE(excluded.frame_count, frame_count),
+                    first_seen_at=min(first_seen_at, excluded.first_seen_at),
+                    last_seen_at=max(last_seen_at, excluded.last_seen_at)
+                RETURNING id;
+                """)
+            defer { sqlite3_finalize(media) }
+            try SQLiteValue.bind(destinationLocator, to: media, at: 1)
+            try SQLiteValue.bind(reference.kind.rawValue, to: media, at: 2)
+            try SQLiteValue.bind(reference.frameID, to: media, at: 3)
+            try SQLiteValue.bind(reference.sourceIdentifier, to: media, at: 4)
+            try SQLiteValue.bind(reference.legacyLocator, to: media, at: 5)
+            try SQLiteValue.bind(destinationLocator, to: media, at: 6)
+            if reference.kind == .video, let frameIndex = reference.mediaFrameIndex {
+                try SQLiteValue.bind(Int64(frameIndex), to: media, at: 7)
+            }
+            guard sqlite3_step(media) == SQLITE_ROW else {
+                throw LocalSQLiteError.step("imported media row no longer matches its verified source locator")
+            }
+            let mediaReferenceID = sqlite3_column_int64(media, 0)
+            guard sqlite3_step(media) == SQLITE_DONE else {
+                throw LocalSQLiteError.step(database.message())
+            }
             let statement = try database.prepare("""
                 UPDATE screen_history_frame
-                SET \(locatorColumn) = ?
+                SET \(locatorColumn) = ?, media_ref_id = ?
                 WHERE id = ? AND source = 'coast' AND source_identifier = ?
-                  AND \(locatorColumn) = ?
+                  AND (\(locatorColumn) = ? OR \(locatorColumn) = ?)
                   \(frameIndexCondition)
                   AND EXISTS (
                       SELECT 1 FROM screen_history_migration_ledger m
@@ -638,22 +675,21 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
                 """)
             defer { sqlite3_finalize(statement) }
             try SQLiteValue.bind(destinationLocator, to: statement, at: 1)
-            try SQLiteValue.bind(reference.frameID, to: statement, at: 2)
-            try SQLiteValue.bind(reference.sourceIdentifier, to: statement, at: 3)
-            try SQLiteValue.bind(reference.legacyLocator, to: statement, at: 4)
+            try SQLiteValue.bind(mediaReferenceID, to: statement, at: 2)
+            try SQLiteValue.bind(reference.frameID, to: statement, at: 3)
+            try SQLiteValue.bind(reference.sourceIdentifier, to: statement, at: 4)
+            try SQLiteValue.bind(reference.legacyLocator, to: statement, at: 5)
+            try SQLiteValue.bind(destinationLocator, to: statement, at: 6)
             if reference.kind == .video, let frameIndex = reference.mediaFrameIndex {
-                try SQLiteValue.bind(Int64(frameIndex), to: statement, at: 5)
+                try SQLiteValue.bind(Int64(frameIndex), to: statement, at: 7)
             }
             let result = sqlite3_step(statement)
             let updatedRowDelta: Int
             if result == SQLITE_ROW {
-                updatedRowDelta = 1
+                updatedRowDelta = wasAlreadyMigrated ? 0 : 1
                 guard sqlite3_step(statement) == SQLITE_DONE else {
                     throw LocalSQLiteError.step(database.message())
                 }
-            } else if result == SQLITE_DONE,
-                      try importedMediaLocatorMatches(reference, locator: destinationLocator) {
-                updatedRowDelta = 0
             } else if result == SQLITE_DONE {
                 throw LocalSQLiteError.step("imported media row no longer matches its verified source locator")
             } else {
@@ -1532,6 +1568,65 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
             throw LocalSQLiteError.step(database.message())
         }
         return Int(sqlite3_column_int64(statement, 0))
+    }
+
+    /// Rebuilds the normalized media identity for locators that already point
+    /// at owned verified copies. This is idempotent and never opens or removes
+    /// a media file.
+    func repairNormalizedMediaReferences() throws -> Int {
+        try database.execute("BEGIN IMMEDIATE TRANSACTION;")
+        do {
+            try database.execute("""
+                INSERT INTO screen_history_media(
+                    locator, kind, frame_count, first_seen_at, last_seen_at
+                )
+                SELECT locator, kind, max(frame_count), min(captured_at), max(captured_at)
+                FROM (
+                    SELECT COALESCE(image_locator, media_locator) AS locator,
+                           CASE WHEN image_locator IS NOT NULL THEN 'image' ELSE 'video' END AS kind,
+                           media_frame_count AS frame_count,
+                           captured_at
+                    FROM screen_history_frame
+                    WHERE image_locator IS NOT NULL OR media_locator IS NOT NULL
+                ) candidates
+                GROUP BY locator, kind
+                ON CONFLICT(locator) DO UPDATE SET
+                    kind=excluded.kind,
+                    frame_count=COALESCE(excluded.frame_count, frame_count),
+                    first_seen_at=min(first_seen_at, excluded.first_seen_at),
+                    last_seen_at=max(last_seen_at, excluded.last_seen_at);
+                """)
+            try database.execute("""
+                UPDATE screen_history_frame
+                SET media_ref_id = (
+                    SELECT id FROM screen_history_media
+                    WHERE locator = COALESCE(
+                        screen_history_frame.image_locator,
+                        screen_history_frame.media_locator
+                    )
+                )
+                WHERE (image_locator IS NOT NULL OR media_locator IS NOT NULL)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM screen_history_media current
+                      WHERE current.id = screen_history_frame.media_ref_id
+                        AND current.locator = COALESCE(
+                            screen_history_frame.image_locator,
+                            screen_history_frame.media_locator
+                        )
+                  );
+                """)
+            let changes = try database.prepare("SELECT changes();")
+            defer { sqlite3_finalize(changes) }
+            guard sqlite3_step(changes) == SQLITE_ROW else {
+                throw LocalSQLiteError.step(database.message())
+            }
+            let repaired = Int(sqlite3_column_int64(changes, 0))
+            try database.execute("COMMIT;")
+            return repaired
+        } catch {
+            try? database.execute("ROLLBACK;")
+            throw error
+        }
     }
 
     private nonisolated static func sha256(_ data: Data) -> String {

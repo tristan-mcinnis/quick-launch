@@ -288,8 +288,8 @@ actor CoastLegacyReader: CoastLegacyReading {
             let domain = SQLiteValue.text(statement, 4)
             let windowTitle = SQLiteValue.text(statement, 5)
             let ocrText = SQLiteValue.text(statement, 6) ?? ""
-            let imageLocator = resolve(SQLiteValue.text(statement, 7))
-            let mediaLocator = resolve(SQLiteValue.text(statement, 8))
+            let imageLocator = resolve(SQLiteValue.text(statement, 7), familyDirectory: "frames")
+            let mediaLocator = resolve(SQLiteValue.text(statement, 8), familyDirectory: "videos")
             let mediaFrameIndex = sqlite3_column_type(statement, 9) == SQLITE_NULL
                 ? nil : Int(sqlite3_column_int64(statement, 9))
             let byteCount = max(0, sqlite3_column_int64(statement, 10))
@@ -350,12 +350,21 @@ actor CoastLegacyReader: CoastLegacyReading {
         }
     }
 
-    private func resolve(_ path: String?) -> String? {
+    private func resolve(_ path: String?, familyDirectory: String) -> String? {
         guard let path, !path.isEmpty else { return nil }
         let root = contentRootURL.standardizedFileURL.resolvingSymlinksInPath()
-        let candidate = (path.hasPrefix("/")
-            ? URL(fileURLWithPath: path)
-            : contentRootURL.appendingPathComponent(path))
+        let relativeURL: URL
+        if path.contains("/") {
+            relativeURL = contentRootURL.appendingPathComponent(path)
+        } else {
+            // Current Coast stores leaf names while the bytes live in the
+            // frames/ and videos/ family directories. Older exports already
+            // include the family prefix, so preserve that path unchanged.
+            relativeURL = contentRootURL
+                .appendingPathComponent(familyDirectory, isDirectory: true)
+                .appendingPathComponent(path)
+        }
+        let candidate = (path.hasPrefix("/") ? URL(fileURLWithPath: path) : relativeURL)
             .standardizedFileURL
             .resolvingSymlinksInPath()
         guard candidate.path != root.path,

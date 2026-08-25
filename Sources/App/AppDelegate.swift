@@ -203,13 +203,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runMaintenanceCommand(_ command: ScreenHistoryMaintenanceCommand) {
         Task { [weak self] in
-            guard let self,
+            guard let self else { Darwin.exit(1) }
+            var missing: [String] = []
+            if screenHistoryStore == nil { missing.append("store") }
+            if screenHistoryCoastImporter == nil { missing.append("importer") }
+            if screenHistoryRetirementReviewer == nil { missing.append("reviewer") }
+            guard missing.isEmpty,
                   let store = screenHistoryStore,
                   let importer = screenHistoryCoastImporter,
-                  let freezeReceipt = screenHistoryCoastFreezeReceipt,
-                  let reviewer = screenHistoryRetirementReviewer
-            else {
-                FileHandle.standardError.write(Data("Screen History maintenance is unavailable.\n".utf8))
+                  let reviewer = screenHistoryRetirementReviewer else {
+                FileHandle.standardError.write(
+                    Data("Screen History maintenance is unavailable: \(missing.joined(separator: ", ")).\n".utf8)
+                )
+                Darwin.exit(1)
+            }
+            let freezeReceipt: ScreenHistoryCoastFreezeReceiptService
+            do {
+                freezeReceipt = try screenHistoryCoastFreezeReceipt
+                    ?? ScreenHistoryCoastFreezeReceiptService()
+            } catch {
+                FileHandle.standardError.write(
+                    Data("Screen History freeze receipt failed to initialize: \(String(describing: error)).\n".utf8)
+                )
                 Darwin.exit(1)
             }
             do {

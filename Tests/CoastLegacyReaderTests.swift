@@ -103,6 +103,19 @@ struct CoastLegacyReaderTests {
         #expect(row.mediaLocator == nil)
     }
 
+    @Test func leafMediaNamesResolveInsideTheirCoastFamilyDirectories() async throws {
+        let fixture = try LegacyFixture(createSchema: true)
+        try fixture.insertLeafMediaRow()
+        let reader = CoastLegacyReader(
+            databaseURL: fixture.databaseURL,
+            contentRootURL: fixture.directory
+        )
+
+        let row = try #require(try await reader.page(offset: 0, limit: 1).first)
+        #expect(row.imageLocator == fixture.directory.appendingPathComponent("frames/still.heic").path)
+        #expect(row.mediaLocator == fixture.directory.appendingPathComponent("videos/segment.mp4").path)
+    }
+
     @Test func coastOCRBoxesPreserveTextGeometryAndDisplayCoordinates() async throws {
         let fixture = try LegacyFixture(createSchema: true)
         try fixture.insertSyntheticRows()
@@ -207,6 +220,19 @@ private final class LegacyFixture {
             INSERT INTO frame VALUES (
                 1, 1700000000000, 1, 0, '/etc/passwd',
                 'escape probe', '', 'Escape Probe', 1,
+                0, 0, 1728, 1117
+            );
+        """)
+    }
+
+    func insertLeafMediaRow() throws {
+        try execute("""
+            INSERT INTO application VALUES (1, 'test.synthetic.editor', 'Synthetic Editor');
+            INSERT INTO segment VALUES (1, 1, NULL);
+            INSERT INTO video VALUES (1, 'segment.mp4', 1, 100);
+            INSERT INTO frame VALUES (
+                1, 1700000000000, 1, 0, 'still.heic',
+                'leaf media probe', '', 'Leaf Media', 1,
                 0, 0, 1728, 1117
             );
             """)
