@@ -318,6 +318,24 @@ private struct ScreenHistorySettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @ScaledMetric(relativeTo: .body) private var exclusionEditorMinHeight: CGFloat = 110
 
+    private struct CommunicationSource: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let systemImage: String
+        var bundleIdentifiers: [String] = []
+        var domains: [String] = []
+    }
+
+    private static let communicationSources = [
+        CommunicationSource(id: "wechat", title: "WeChat", detail: "App activity", systemImage: "message.fill", bundleIdentifiers: ["com.tencent.xinwechat"]),
+        CommunicationSource(id: "messages", title: "Messages", detail: "App activity", systemImage: "message", bundleIdentifiers: ["com.apple.mobilesms"]),
+        CommunicationSource(id: "telegram", title: "Telegram", detail: "App activity", systemImage: "paperplane", bundleIdentifiers: ["ru.keepcoder.telegram"]),
+        CommunicationSource(id: "whatsapp", title: "WhatsApp", detail: "App and web activity", systemImage: "phone.bubble", bundleIdentifiers: ["net.whatsapp.whatsapp"], domains: ["web.whatsapp.com"]),
+        CommunicationSource(id: "slack", title: "Slack", detail: "Work messages", systemImage: "number", bundleIdentifiers: ["com.tinyspeck.slackmacgap"]),
+        CommunicationSource(id: "outlook", title: "Outlook", detail: "Work email", systemImage: "envelope", bundleIdentifiers: ["com.microsoft.outlook"]),
+    ]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -333,6 +351,46 @@ private struct ScreenHistorySettingsView: View {
                     .onChange(of: viewModel.settings.searchLegacyCoastHistory) { _, _ in
                         viewModel.settings.save()
                     }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Communication history")
+                        .font(.body.weight(.semibold))
+                    Text("Choose which sources can appear in Screen History search and Coast import.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        ForEach(Self.communicationSources) { source in
+                            HStack(spacing: 10) {
+                                Image(systemName: source.systemImage)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(source.title)
+                                        .font(AQDesign.TypeToken.body.weight(.medium))
+                                    Text(source.detail)
+                                        .font(AQDesign.TypeToken.metadata)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Toggle(
+                                    "Include \(source.title)",
+                                    isOn: communicationBinding(source)
+                                )
+                                .labelsHidden()
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            if source.id != Self.communicationSources.last?.id {
+                                Divider().padding(.leading, 42)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius)
+                            .fill(AQDesign.ColorToken.surfaceFill)
+                    )
+                }
+
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Import from Coast")
@@ -587,6 +645,27 @@ private struct ScreenHistorySettingsView: View {
 
     private var captureStatus: String {
         viewModel.screenHistoryCaptureStatusLabel
+    }
+
+    private func communicationBinding(_ source: CommunicationSource) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.settings.screenHistoryIncludes(
+                    bundleIdentifiers: source.bundleIdentifiers,
+                    domains: source.domains
+                )
+            },
+            set: { included in
+                viewModel.invalidateScreenHistoryCoastImportPreview()
+                viewModel.settings.setScreenHistoryIncluded(
+                    included,
+                    bundleIdentifiers: source.bundleIdentifiers,
+                    domains: source.domains
+                )
+                viewModel.settings.save()
+                Task { await viewModel.applyScreenHistoryCaptureSettings() }
+            }
+        )
     }
 
     private var fileVaultStatus: String {

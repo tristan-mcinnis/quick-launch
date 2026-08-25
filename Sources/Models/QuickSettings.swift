@@ -285,6 +285,52 @@ struct QuickSettings: Codable, Sendable {
 }
 
 extension QuickSettings {
+    func screenHistoryIncludes(
+        bundleIdentifiers: [String] = [],
+        domains: [String] = []
+    ) -> Bool {
+        let excludedBundles = Set(screenHistoryExcludedBundleIDs.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
+        ))
+        let excludedDomains = Set(screenHistoryExcludedDomains.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedDomain
+        ))
+        return bundleIdentifiers.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
+        ).allSatisfy { !excludedBundles.contains($0) }
+            && domains.compactMap(
+                ScreenHistoryCaptureConfiguration.normalizedDomain
+            ).allSatisfy { !excludedDomains.contains($0) }
+    }
+
+    mutating func setScreenHistoryIncluded(
+        _ included: Bool,
+        bundleIdentifiers: [String] = [],
+        domains: [String] = []
+    ) {
+        let bundles = Set(bundleIdentifiers.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
+        ))
+        let normalizedDomains = Set(domains.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedDomain
+        ))
+        var excludedBundles = Set(screenHistoryExcludedBundleIDs.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
+        ))
+        var excludedDomains = Set(screenHistoryExcludedDomains.compactMap(
+            ScreenHistoryCaptureConfiguration.normalizedDomain
+        ))
+        if included {
+            excludedBundles.subtract(bundles)
+            excludedDomains.subtract(normalizedDomains)
+        } else {
+            excludedBundles.formUnion(bundles)
+            excludedDomains.formUnion(normalizedDomains)
+        }
+        screenHistoryExcludedBundleIDs = excludedBundles.sorted()
+        screenHistoryExcludedDomains = excludedDomains.sorted()
+    }
+
     /// Applies the same editable exclusions to legacy migration that capture
     /// and search use. Hard defaults are added again by the policy itself.
     var screenHistoryMigrationPolicy: ScreenHistoryMigrationPolicy {

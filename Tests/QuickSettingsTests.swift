@@ -85,6 +85,38 @@ struct QuickSettingsTests {
         #expect(loaded.screenHistoryExcludedDomains == settings.screenHistoryExcludedDomains)
     }
 
+    @Test func screenHistoryCommunicationSourcesCanBeIncludedCaseByCase() {
+        var settings = QuickSettings()
+        #expect(settings.screenHistoryIncludes(
+            bundleIdentifiers: ["com.tinyspeck.slackmacgap"]
+        ))
+        #expect(settings.screenHistoryIncludes(domains: ["web.whatsapp.com"]))
+
+        settings.setScreenHistoryIncluded(
+            false,
+            bundleIdentifiers: ["com.tinyspeck.slackmacgap"]
+        )
+        settings.setScreenHistoryIncluded(false, domains: ["web.whatsapp.com"])
+
+        #expect(!settings.screenHistoryIncludes(
+            bundleIdentifiers: ["COM.TINYSPECK.SLACKMACGAP"]
+        ))
+        #expect(!settings.screenHistoryIncludes(domains: ["https://web.whatsapp.com/chat"]))
+        #expect(settings.screenHistoryIncludes(
+            bundleIdentifiers: ["com.microsoft.outlook"]
+        ))
+
+        settings.setScreenHistoryIncluded(
+            true,
+            bundleIdentifiers: ["com.tinyspeck.slackmacgap"],
+            domains: ["web.whatsapp.com"]
+        )
+        #expect(settings.screenHistoryIncludes(
+            bundleIdentifiers: ["com.tinyspeck.slackmacgap"],
+            domains: ["web.whatsapp.com"]
+        ))
+    }
+
     @Test func legacySettingsGainSafeScreenHistoryDomainDefaults() throws {
         struct LegacySettings: Encodable {
             var configurationVersion = 16
