@@ -101,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mouseMonitor: Any?
     private var statusItem: NSStatusItem?
     private var overlayClearTask: Task<Void, Never>?
+    /// Pending delayed shrink of the overlay panel; growth cancels it.
+    private var panelShrinkTask: Task<Void, Never>?
     private var overlayRetentionID: UUID?
 
     private let selectedTextService = SelectedTextService()
@@ -1118,6 +1120,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resizePanelForContent() {
         guard let panel, let vm = viewModel else { return }
+        let total = targetPanelHeight(vm)
+        let width = vm.currentPanelWidth
+        let frame = panel.frame
+        let needsWidthChange = abs(frame.width - width) > 1
+        if total > frame.height + 1 || needsWidthChange {
+            // Growth (and width changes) apply on the spot.
+            panelShrinkTask?.cancel()
+            panelShrinkTask = nil
+            applyPanelFrame(height: total, width: width)
+        } else if total < frame.height - 1 {
+            // Shrinks wait one beat while the panel is visible: transitions
+            // pass through short-lived states (submit clears the list before
+            // streaming starts), and applying those made the window dip and
+            // then grow back. A growth within the beat cancels the shrink.
+            guard panel.isVisible else {
+                applyPanelFrame(height: total, width: width)
+                return
+            }
+            panelShrinkTask?.cancel()
+            panelShrinkTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled, let self, let vm = self.viewModel else { return }
+                self.panelShrinkTask = nil
+                self.applyPanelFrame(
+                    height: self.targetPanelHeight(vm),
+                    width: vm.currentPanelWidth
+                )
+            }
+        }
+    }
+
+    private func applyPanelFrame(height: CGFloat, width: CGFloat) {
+        guard let panel else { return }
+        var frame = panel.frame
+        guard abs(frame.height - height) > 1 || abs(frame.width - width) > 1 else { return }
+        let delta = height - frame.height
+        let centreX = frame.midX
+        frame.size.height = height
+        frame.size.width = width
+        frame.origin.x = (centreX - width / 2).rounded()
+        frame.origin.y -= delta  // grow down from the top
+        if let screen = panel.screen ?? screenContainingMouse() {
+            frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+        }
+        panel.setFrame(frame, display: true, animate: false)
+    }
+
+    private func targetPanelHeight(_ vm: QuickViewModel) -> CGFloat {
         let visibleBody = vm.conversationMessages.count > 2
             ? vm.conversationTranscriptText
             : vm.output
@@ -1152,20 +1202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if vm.activeItemActionForm == .screenHistorySave {
             total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
         }
-        let width = vm.currentPanelWidth
-        var frame = panel.frame
-        if abs(frame.height - total) > 1 || abs(frame.width - width) > 1 {
-            let delta = total - frame.height
-            let centreX = frame.midX
-            frame.size.height = total
-            frame.size.width = width
-            frame.origin.x = (centreX - width / 2).rounded()
-            frame.origin.y -= delta  // grow down from the top
-            if let screen = panel.screen ?? screenContainingMouse() {
-                frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
-            }
-            panel.setFrame(frame, display: true, animate: false)
-        }
+        return total
     }
 
     @objc private func showOverlayFromMenu() {

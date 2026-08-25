@@ -74,6 +74,22 @@ struct ScreenshotOrderingTests {
         let titles = ItemActionCatalog.actions(for: .item(pinnedItem), pasteTarget: nil).map(\.title)
         #expect(titles.contains("Unpin"))
         #expect(!titles.contains("Pin to Top"))
+
+        // The live path: select the pinned row, hit ⌘K. The pane resolves
+        // the item by ID, and that resolution must carry the pin flag too.
+        vm.applicationSelectionIndex = 0
+        vm.handleCommandK()
+        #expect(vm.isCatalogActionPanePresented)
+        let paneTitles = vm.focusedItemActions.map(\.title)
+        #expect(paneTitles.contains("Unpin"), "the ⌘K pane on a pinned row offers Unpin")
+        #expect(!paneTitles.contains("Pin to Top"))
+
+        // Unpin from the pane restores the pure date order.
+        vm.togglePinLauncherItem(vm.contextualCatalogItem!)
+        #expect(vm.focusedItemActions.map(\.title).contains("Pin to Top"))
+        vm.closeItemActionPane()
+        let unpinnedNames = vm.catalogMatches.map { ($0.value as NSString).lastPathComponent }
+        #expect(unpinnedNames == [new, old])
     }
 
     @Test func selfMadePasteBufferIsNeverOfferedBack() throws {

@@ -1406,6 +1406,15 @@ import Observation
     }
 
     var contextualCatalogItem: LauncherCatalogItem? {
+        guard var item = resolveContextualCatalogItem() else { return nil }
+        // Some sources (raw screenshot files, the emoji catalog) carry no
+        // pin flag; without the stamp the ⌘K pane kept offering "Pin to
+        // Top" on an item that was already pinned.
+        if !item.isPinned { item.isPinned = isLauncherItemPinned(item) }
+        return item
+    }
+
+    private func resolveContextualCatalogItem() -> LauncherCatalogItem? {
         guard let contextualCatalogItemID else { return nil }
         if contextualCatalogItemID.hasPrefix("emoji:") {
             return EmojiCatalog.items.first { $0.id == contextualCatalogItemID }
