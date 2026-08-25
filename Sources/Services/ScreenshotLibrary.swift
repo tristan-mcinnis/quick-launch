@@ -72,12 +72,14 @@ enum ScreenshotLibrary {
     }
 
     /// Writes the image to the pasteboard as image data plus a file URL, so
-    /// it pastes inline in chat apps and as a file in Finder.
-    static func copyImage(at url: URL) -> Bool {
+    /// it pastes inline in chat apps and as a file in Finder. The write is
+    /// marked as self-made: the next overlay open must not offer the app's
+    /// own paste buffer back as an attachment.
+    @MainActor static func copyImage(at url: URL, pasteboard: NSPasteboard = .general) -> Bool {
         guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { return false }
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([image, url as NSURL])
+        ClipboardImageReader.suppressAutoOffer(for: pasteboard)
         return true
     }
 

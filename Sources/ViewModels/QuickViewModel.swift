@@ -921,10 +921,11 @@ import Observation
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
         let rows = Self.maxRows(for: catalogScope)
         guard !query.isEmpty else {
-            // Clipboard stays chronological (its store puts pins first).
-            // Other catalogs put pinned items first, then learned favourites,
-            // so Return reaches them without typing.
-            guard catalogScope != .clipboard, settings.launcherLearningEnabled else {
+            // Time-ordered catalogs stay chronological: the clipboard store
+            // and the screenshots list already put pins first, and learned
+            // favourites must never shuffle a dated list.
+            guard catalogScope != .clipboard, catalogScope != .screenshots,
+                  settings.launcherLearningEnabled else {
                 return Array(items.prefix(rows))
             }
             let favouriteLimit = catalogScope == .emoji ? 18 : rows

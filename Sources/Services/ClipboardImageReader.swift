@@ -30,6 +30,13 @@ enum ClipboardImageReader {
         return result
     }
 
+    /// Call after the app itself writes an image to the pasteboard (Paste
+    /// Image, Copy Image). Self-made clipboard content must never come back
+    /// as an auto-attachment on the next overlay open.
+    @MainActor static func suppressAutoOffer(for pasteboard: NSPasteboard = .general) {
+        lastAutoOffered = (pasteboard.name, pasteboard.changeCount)
+    }
+
     @MainActor static func attachment(
         from pasteboard: NSPasteboard = .general
     ) -> QuickImageAttachment? {

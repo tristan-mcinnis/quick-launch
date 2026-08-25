@@ -26,14 +26,15 @@ struct OverlayView: View {
         VStack(spacing: 0) {
             // Input row
             HStack(spacing: AQDesign.Space.standard) {
+                // Single line, scrolling horizontally like Raycast. A
+                // vertical-axis field capped at one line scrolled long text
+                // upward until only the descenders were visible.
                 TextField(
                     viewModel.inputPlaceholder,
-                    text: $viewModel.input,
-                    axis: .vertical
+                    text: $viewModel.input
                 )
                     .textFieldStyle(.plain)
                     .font(AQDesign.TypeToken.input)
-                    .lineLimit(1)
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
