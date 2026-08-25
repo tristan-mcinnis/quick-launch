@@ -98,6 +98,23 @@ struct OverlayRenderProofTests {
         try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-awareness-dark.png")
     }
 
+    @Test func rendersSnippetAndQuickLinkDetailPanes() throws {
+        let vm = Self.makeViewModel(appearance: .dark)
+        vm.enterCatalog(.snippets)
+        vm.input = ""
+        vm.applicationSelectionIndex = 0
+        #expect(vm.showsDetailPane)
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-snippets-dark.png")
+
+        vm.leaveCatalog()
+        vm.enterCatalog(.quickLinks)
+        vm.input = ""
+        vm.applicationSelectionIndex = 1
+        #expect(vm.detailItem?.requiresInput == true)
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-quicklinks-dark.png")
+        try Self.save(try Self.render(viewModel: vm, appearance: .aqua), name: "overlay-quicklinks-light.png")
+    }
+
     @Test func rendersSettingsItemsTab() throws {
         let vm = Self.makeViewModel(appearance: .dark)
         vm.input = ""
@@ -413,9 +430,29 @@ private final class ProofApplicationCatalog: ApplicationCatalogServicing {
 
 private final class ProofLauncherCatalog: LauncherCatalogServicing {
     var snippets = [LauncherCatalogItem(
-        kind: .snippet, itemID: "sig", title: "Signature", detail: "Snippet", value: "Best regards"
+        kind: .snippet,
+        itemID: "sig",
+        title: "Signature",
+        detail: "Snippet",
+        value: "Best regards,\nTristan\nExample Co"
     )]
-    var quickLinks: [LauncherCatalogItem] = []
+    var quickLinks = [
+        LauncherCatalogItem(
+            kind: .quickLink,
+            itemID: "docs",
+            title: "Swift Docs",
+            detail: "swift.org",
+            value: "https://www.swift.org/documentation/"
+        ),
+        LauncherCatalogItem(
+            kind: .quickLink,
+            itemID: "search",
+            title: "Search Swift Forums",
+            detail: "forums.swift.org",
+            value: "https://forums.swift.org/search?q={{input}}",
+            requiresInput: true
+        ),
+    ]
     func reload() {}
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {}
     func deleteSnippet(_ item: LauncherCatalogItem) throws {}

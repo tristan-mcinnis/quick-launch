@@ -138,7 +138,7 @@ struct CatalogDetailPane: View {
                     .frame(height: 120)
                     .overlay(Text("No preview").font(AQDesign.TypeToken.caption).foregroundStyle(.secondary))
             }
-        case .clipboard:
+        case .clipboard, .snippet:
             ScrollView {
                 Text(item.value)
                     .font(.system(size: 12, design: .monospaced))
@@ -146,6 +146,24 @@ struct CatalogDetailPane: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 200)
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
+        case .quickLink:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: item.requiresInput ? "text.cursor" : "link")
+                        .foregroundStyle(AQDesign.ColorToken.accent)
+                    Text(item.title)
+                        .font(AQDesign.TypeToken.body.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text(item.value)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
         case .screenHistory:
@@ -196,6 +214,29 @@ struct CatalogDetailPane: View {
             ]
             if item.isPinned { list.append(("Pinned", "Yes")) }
             if ItemActionCatalog.looksLikeURL(item.value) { list.append(("Type", "Link")) }
+            return list
+        case .snippet:
+            let words = item.value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+            let lines = item.value.split(separator: "\n", omittingEmptySubsequences: false).count
+            var list: [(String, String)] = [
+                ("Characters", "\(item.value.count)"),
+                ("Words", "\(words)"),
+            ]
+            if lines > 1 { list.append(("Lines", "\(lines)")) }
+            if !item.detail.isEmpty { list.append(("Source", item.detail)) }
+            if item.isPinned { list.append(("Pinned", "Yes")) }
+            return list
+        case .quickLink:
+            let host = URLComponents(string: item.value.replacingOccurrences(
+                of: "{{input}}", with: "input"
+            ))?.host
+            var list: [(String, String)] = [("Type", item.requiresInput ? "Smart Link" : "Link")]
+            if let host { list.append(("Site", host)) }
+            list.append(("Characters", "\(item.value.count)"))
+            if item.requiresInput { list.append(("Input", "Required")) }
+            // The row subtitle is usually the host; only show it when it adds something.
+            if !item.detail.isEmpty, item.detail != host { list.append(("Source", item.detail)) }
+            if item.isPinned { list.append(("Pinned", "Yes")) }
             return list
         case .screenHistory:
             guard let frame = viewModel.screenHistoryFrame(for: item) else { return [] }

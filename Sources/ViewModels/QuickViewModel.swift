@@ -860,22 +860,34 @@ import Observation
     /// made the whole window shift.
     var isGridCatalog: Bool { catalogScope == .emoji }
 
+    /// Catalogs that show the detail pane beside their list. Snippets and
+    /// Quicklinks join the preview-worthy set so a row's stored value is
+    /// readable before it is pasted or opened.
+    static let detailPaneScopes: Set<LauncherCatalogScope> = [
+        .screenshots, .clipboard, .screenHistory, .snippets, .quickLinks,
+    ]
+
+    /// Item kinds the detail pane knows how to draw.
+    static let detailPaneKinds: Set<LauncherItemKind> = [
+        .screenshot, .clipboard, .screenHistory, .snippet, .quickLink,
+    ]
+
     /// Preview-worthy local catalogs share one stable two-pane layout. The
     /// pane stays visible (and the window keeps its width) while ⌘K floats
     /// over it.
     var showsDetailPane: Bool {
-        guard catalogScope == .screenshots || catalogScope == .clipboard || catalogScope == .screenHistory,
+        guard let catalogScope, Self.detailPaneScopes.contains(catalogScope),
               inputMode == nil, pendingImage == nil
         else { return false }
         return detailItem != nil
     }
 
     var detailItem: LauncherCatalogItem? {
-        guard catalogScope == .screenshots || catalogScope == .clipboard || catalogScope == .screenHistory else { return nil }
+        guard let catalogScope, Self.detailPaneScopes.contains(catalogScope) else { return nil }
         let matches = launcherMatches
         guard !matches.isEmpty,
               case .item(let item) = matches[min(applicationSelectionIndex, matches.count - 1)],
-              item.kind == .screenshot || item.kind == .clipboard || item.kind == .screenHistory
+              Self.detailPaneKinds.contains(item.kind)
         else { return nil }
         return item
     }

@@ -71,6 +71,28 @@ struct LauncherCatalogTests {
         #expect(vm.isCatalogActionPanePresented)
     }
 
+    @Test func snippetsAndQuickLinksCarryTheDetailPane() {
+        let service = FakeLauncherCatalog()
+        let vm = QuickViewModel(launcherCatalog: service)
+
+        vm.enterCatalog(.snippets)
+        #expect(vm.showsDetailPane, "a selected snippet previews its stored text")
+        #expect(vm.detailItem?.kind == .snippet)
+        #expect(vm.detailItem?.value == "Hello")
+        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthWithDetail)
+
+        vm.leaveCatalog()
+        vm.enterCatalog(.quickLinks)
+        #expect(vm.showsDetailPane, "a selected quick link previews its target")
+        #expect(vm.detailItem?.kind == .quickLink)
+        #expect(vm.detailItem?.value == "https://example.com")
+
+        vm.leaveCatalog()
+        vm.enterCatalog(.commands)
+        #expect(!vm.showsDetailPane, "catalogs without a preview keep the narrow panel")
+        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+    }
+
     @Test func windowAliasesAreSearchableFromTheLauncherRoot() {
         let vm = QuickViewModel()
         let item = vm.windowCommand(for: .bottomHalf)
