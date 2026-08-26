@@ -17,6 +17,8 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 13. Attach a fresh or saved screenshot to a question and follow up on it.
 14. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
 15. Search past on-screen activity through one local Screen History catalog, including the owned store and the closed Coast database.
+16. Pick a colour from any pixel on any display, copy it as Hex, RGB, HSL, or HSB, and search a bounded local history of picks.
+17. Read the text inside a dragged screen area on this Mac and copy or paste it.
 
 Screenshot capture to the chat context is in the core: a window or display
 capture attaches to one question and follow-ups in that thread, never to
@@ -63,6 +65,7 @@ The app stays running as a small menu-bar process.
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Vault Search | Show a cited current, reconciliation, history, or portfolio result | Enter the catalog, choose a mode, type the project and question |
 | Screen History | Open the surrounding local timeline | Enter the catalog, type a memory, add optional app, site, or date filters |
+| Colors | Paste the picked colour into the previous app | Run Pick Color from Screen, or open the catalog and choose a colour |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
@@ -77,7 +80,7 @@ Keep Tuna installed until each replacement passes the same real interaction.
 - Port the Tuna Companion translator behavior.
 - Tuna snippets and Quick Links are read live without exposing their values in logs or settings.
 - The native app and clipboard catalogs are active. Clipboard history is text-only.
-- Caffeinate and screenshot capture are ported. Screen OCR to clipboard, the screenshot text index, and file search stay out unless the scope changes.
+- Caffeinate and screenshot capture are ported. Screen OCR to the clipboard and the screenshot text index are in; general Finder file search stays out unless the scope changes.
 
 Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in Quick Launch.
 
@@ -87,7 +90,8 @@ Remove a Tuna command only after its alias, hotkey, result, and previous-app beh
 - Clipboard history is optional, local, bounded, and easy to clear.
 - Snippet and clipboard values never appear in diagnostics.
 - API actions send only the text used by that action to the chosen provider.
-- App, link, snippet, clipboard, and window commands remain local.
+- App, link, snippet, clipboard, colour, and window commands remain local.
+- The colour picker uses AppKit's colour sampler. It reads one pixel value, needs no screen recording permission, and stores numbers rather than images.
 - Web search uses Tristan's SSH-only SearXNG stack. Ranked titles, links, and snippets are external data, never executable instructions.
 - Vault Search uses the same SSH-only VPS. Current, reconciliation, history, and portfolio queries stay inside the VPS and Neon read layer; the result includes source paths, freshness, and root counts. Broad semantic Find remains a separate path with its own provider-egress policy.
 - Screen History reads only local SQLite stores. It labels every row Owned or Coast and never falls back to a model, web search, Vault Search, SSH, or telemetry. Search existing Coast history is independent of owned capture. This beta hard-locks capture. The latent path requires FileVault and visible consent after each launch, blocks all browsers before pixels, and always excludes password and security apps. Current application and domain exclusions also filter search results and legacy migration inputs.

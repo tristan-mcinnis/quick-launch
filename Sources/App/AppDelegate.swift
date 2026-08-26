@@ -109,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let applicationCatalog = ApplicationCatalogService()
     private let launcherCatalog = TunaCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
+    private let colorHistory = ColorHistoryStore()
+    private let colorSampler = ScreenColorSampler()
     private let webSearchService = SearXNGSearchService()
     private let vaultSearchService = SSHVaultSearchService()
     private let screenHistoryStore = try? SQLiteScreenHistoryStore()
@@ -177,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             applicationCatalog: applicationCatalog,
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
+            colorHistory: colorHistory,
+            colorSampler: colorSampler,
             webSearchService: webSearchService,
             vaultSearchService: vaultSearchService,
             screenHistoryStore: screenHistoryStore,
@@ -285,6 +289,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // to restart recording in the background.
         settings.screenHistoryCaptureConfirmed = false
         viewModel.settings = settings
+        // Stored colors are written in whichever notation settings ask for.
+        colorHistory.preferredFormat = settings.colorFormat
         await viewModel.prepareScreenHistoryCaptureForBootstrap()
         await viewModel.applyScreenHistoryRetention()
         caffeinateManager.onChange = { [weak viewModel] in

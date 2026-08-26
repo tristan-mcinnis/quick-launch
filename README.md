@@ -22,12 +22,13 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Answers as you type: math, unit conversions (`12 km in miles`, `72f to c`), dates (`3 days from now`, `days until 2026-12-25`), and city times (`time in tokyo`) are the top row; Return copies, `⌘↩` pastes. A typed address (`apple.com`) gets an Open row
 - Folders catalog: the user folders plus any you add in Settings, opened in Finder (or the existing window fronted); `dl` → Downloads, `dk` → Desktop out of the box; alias, hotkey, pin, `⌘↩` reveal, `⌘⇧C` copy path
 - `⌘K` on a running app: Hide, Quit, Relaunch, Force Quit
-- Commands also hold quick toggles (dark mode, lock screen, empty trash, eject all, hidden files, desktop icons), 45 System Settings panes, Copy Text from Screen Area (local OCR to clipboard), Paste as Plain Text, and Clean Link (`⌘⇧U` on tracked links)
+- Commands also hold quick toggles (dark mode, lock screen, empty trash, eject all, hidden files, desktop icons), 45 System Settings panes, Pick Color from Screen, Copy Text from Screen Area and Paste Text from Screen Area (local OCR, with a line-break preference), Paste as Plain Text, and Clean Link (`⌘⇧U` on tracked links)
 - Raycast-style footer with the keys that work right now, and Sol-style hotkey badges on rows that have a global hotkey
 - Escape closes the launcher from anywhere; Backspace on an empty field returns to the root; reopening starts at the root
 - Finder indexing through the macOS CoreServices application catalog
 - Live Tuna Snippets and Quick Links, with aliases, optional per-item global hotkeys, and pin to top (`⌘⇧P`)
-- Emoji & Symbols catalog as a grid: Frequently Used first, 1 500+ emoji, flags, arrows, math, currency, punctuation, and key symbols, searched by name or plain words (`fire`, `thumbs up`, `command`), pasted with Return or copied with `⌘↩`
+- Emoji & Symbols catalog as a grid: Frequently Used first, 1 500+ emoji, flags, arrows, math, currency, punctuation, and key symbols, searched by name or plain words (`fire`, `thumbs up`, `command`), pasted with Return or copied with `⌘↩`; one skin tone setting applies to every emoji that takes one
+- Colors: Pick Color from Screen magnifies any pixel on any display with the system loupe (no screen recording permission), copies it in your chosen notation, and keeps it in the local Colors catalog. Pick Color and Paste sends it straight to the app behind the panel. Rows show a swatch with Hex, RGB, HSL, HSB, and a colour name; `⌘1`…`⌘4` copy the other notations, `⌘⇧P` pins, `⌃X` deletes
 - Translator window (`⇧⌘T`, or the Translate item): source above, translation below, retranslates as you type, arrives with the selected text, auto-detects the direction (CJK → English, else your last target), `⌘P` target language, `⌘S` swap, `⌘↩` copy, `⇧⌘↩` paste back, `⇧⌘V` use the clipboard, pinyin under Chinese; committed translations are kept locally (500). `⇧↩` in the launcher still translates one-shot; `/zh` and `/translate` act on selected text
 - Caffeinate catalog: toggle, Caffeinate Until… (`17:30`, `5:30pm`, `90m`, `2h`), presets, Agent Watch (stays awake while Claude Code or Codex is working, from hook files), Status; native power assertions, battery cutoff at 20%
 - Screenshots catalog: captures plus the saved files with a preview pane; search by name, date words (`today`, `7d`), or the text inside the image (on-device OCR, Vision); attach, copy image, paste image, Quick Look, pin to top, reveal, copy path, trash; Paste Latest Screenshot pastes the newest file straight into the previous app
@@ -244,6 +245,12 @@ OpenAI-compatible providers do not have a tool-calling loop.
 - Recent history is local, optional, and limited to 20 threads by default.
 - Text clipboard history is local, optional, deduplicated, and bounded. It is
   stored in `~/Library/Application Support/Quick Launch/clipboard-history.json`.
+- Picked colours are local and bounded, stored as numbers (no pixels, no
+  screenshots) in `~/Library/Application Support/Quick Launch/color-history.json`.
+  The eyedropper uses AppKit's own colour sampler, so it needs no screen
+  recording permission and captures no image.
+- Text read from a screen area is recognised on this Mac with Vision and goes to
+  the clipboard. The captured pixels are not saved.
 - Tuna snippet and Quick Link values are read at runtime and are not logged or
   copied into Quick Launch settings.
 - Selected-text actions use macOS Accessibility only to read or replace the

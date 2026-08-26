@@ -66,6 +66,16 @@ struct QuickSettings: Codable, Sendable {
         modifiers: 1_048_576 | 131_072
     )
 
+    // Colors picked with the screen eyedropper
+    var colorFormat: ColorFormat = .hex
+    var colorHistoryLimit: Int = 50
+
+    /// 0 is the default yellow; 1...5 are the Fitzpatrick skin tone modifiers.
+    var emojiSkinTone: Int = 0
+
+    /// Keep the line breaks Vision found when copying text from the screen.
+    var ocrKeepLineBreaks: Bool = true
+
     // Translator window (⇧⌘T by default)
     var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
     var lastTranslationTarget: String = "zh-Hans"
@@ -164,6 +174,10 @@ struct QuickSettings: Codable, Sendable {
             ActionHotkey.self,
             forKey: .clipboardHistoryHotkey
         ) ?? ActionHotkey(keyCode: 9, modifiers: 1_048_576 | 131_072)
+        colorFormat = try c.decodeIfPresent(ColorFormat.self, forKey: .colorFormat) ?? .hex
+        colorHistoryLimit = try c.decodeIfPresent(Int.self, forKey: .colorHistoryLimit) ?? 50
+        emojiSkinTone = try c.decodeIfPresent(Int.self, forKey: .emojiSkinTone) ?? 0
+        ocrKeepLineBreaks = try c.decodeIfPresent(Bool.self, forKey: .ocrKeepLineBreaks) ?? true
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         visionProviderID = try c.decodeIfPresent(UUID.self, forKey: .visionProviderID)
             ?? InferenceProvider.deepSeekID

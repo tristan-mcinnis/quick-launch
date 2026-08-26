@@ -115,11 +115,70 @@ struct OverlayRenderProofTests {
         try Self.save(try Self.render(viewModel: vm, appearance: .aqua), name: "overlay-quicklinks-light.png")
     }
 
+    @Test func rendersColorsCatalogWithASwatchThatPaintsThePickedColor() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-colors-proof-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = ColorHistoryStore(fileURL: folder.appendingPathComponent("color-history.json"))
+        let picked = PickedColor(red: 1, green: 0.4, blue: 0)
+        store.record(picked, limit: 10)
+        store.record(PickedColor(red: 74 / 255, green: 144 / 255, blue: 217 / 255), limit: 10)
+
+        let vm = Self.makeViewModel(appearance: .dark)
+        vm.colorHistory = store
+        vm.enterCatalog(.colors)
+        vm.input = ""
+        vm.applicationSelectionIndex = 1
+        #expect(vm.showsDetailPane)
+        #expect(vm.detailItem?.value == picked.hexString)
+
+        let image = try Self.render(viewModel: vm, appearance: .darkAqua)
+        try Self.save(image, name: "overlay-colors-dark.png")
+        // The swatch must actually paint the colour that was picked, not a
+        // placeholder: count pixels close to it across the rendered panel.
+        let matches = try Self.pixelCount(in: image, near: picked, tolerance: 0.06)
+        #expect(matches > 500, "the swatch should fill the preview, matched \(matches) pixels")
+
+        vm.handleCommandK()
+        #expect(vm.isItemActionPanePresented)
+        try Self.save(
+            try Self.render(viewModel: vm, appearance: .darkAqua),
+            name: "overlay-colors-actions-dark.png"
+        )
+        vm.closeItemActionPane()
+        try Self.save(
+            try Self.render(viewModel: vm, appearance: .aqua),
+            name: "overlay-colors-light.png"
+        )
+    }
+
+    /// Pixels within `tolerance` of a colour, sampled every other row and
+    /// column like `averageColor`.
+    private static func pixelCount(in image: NSImage, near color: PickedColor, tolerance: Double) throws -> Int {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff)
+        else { throw ProofError.noBitmap }
+        var matches = 0
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                guard let pixel = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if abs(Double(pixel.redComponent) - color.red) < tolerance,
+                   abs(Double(pixel.greenComponent) - color.green) < tolerance,
+                   abs(Double(pixel.blueComponent) - color.blue) < tolerance {
+                    matches += 1
+                }
+            }
+        }
+        return matches
+    }
+
     @Test func rendersSettingsItemsTab() throws {
         let vm = Self.makeViewModel(appearance: .dark)
         vm.input = ""
         try Self.saveSettings(vm, tab: .general, name: "settings-dark.png")
         try Self.saveSettings(vm, tab: .items, name: "settings-items-dark.png")
+        // Colors, Emoji & Symbols, and Text from Screen live on this tab.
+        try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-dark.png")
     }
 
     @Test func rendersScreenHistoryResultsPreviewEmptyAndSettings() async throws {

@@ -61,6 +61,7 @@ struct ItemsSettingsView: View {
                 case .folder: "Folder"
                 case .answer: "Answer"
                 case .screenHistory: "Screen History"
+                case .color: "Color"
                 case .application: "App"
                 }
             }

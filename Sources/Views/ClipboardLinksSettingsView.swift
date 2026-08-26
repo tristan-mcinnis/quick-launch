@@ -56,6 +56,67 @@ struct ClipboardLinksSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                section("Colors") {
+                    HStack {
+                        Text("Copy picked colors as")
+                        Spacer()
+                        Picker("", selection: colorFormatSelection) {
+                            ForEach(ColorFormat.allCases) { format in
+                                Text("\(format.title)  ·  \(format.sample)").tag(format)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 260)
+                    }
+                    Stepper(
+                        "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)",
+                        value: $viewModel.settings.colorHistoryLimit,
+                        in: 10...200,
+                        step: 10
+                    )
+                    .onChange(of: viewModel.settings.colorHistoryLimit) { _, _ in viewModel.settings.save() }
+                    HStack {
+                        Text("\(viewModel.colorItems.count) saved colors")
+                            .font(AQDesign.TypeToken.label)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Clear Colors", role: .destructive) {
+                            viewModel.clearColorHistory()
+                        }
+                    }
+                    Text("Run \u{201C}Pick Color from Screen\u{201D} to magnify any pixel on any display. In the Colors list: ⌘1…⌘4 copy the other notations, ⌘⇧P pins, and ⌃X deletes.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                section("Emoji & Symbols") {
+                    HStack {
+                        Text("Skin tone")
+                        Spacer()
+                        Picker("", selection: skinToneSelection) {
+                            ForEach(Array(EmojiCatalog.skinToneTitles.enumerated()), id: \.offset) { index, title in
+                                Text("\(EmojiCatalog.applyingSkinTone(index, to: "\u{1F44D}"))  \(title)").tag(index)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                    Text("Applies to the emoji that accept a tone. Symbols, flags, and objects are unchanged.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                section("Text from Screen") {
+                    Toggle("Keep line breaks in text read from the screen", isOn: $viewModel.settings.ocrKeepLineBreaks)
+                        .onChange(of: viewModel.settings.ocrKeepLineBreaks) { _, _ in viewModel.settings.save() }
+                    Text("Off joins the recognized lines into one paragraph, which suits prose. On keeps code and lists as they were laid out.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 section("Quicklinks") {
                     HStack {
                         Text("Open links in")
@@ -92,6 +153,24 @@ struct ClipboardLinksSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { browsers = QuickViewModel.installedBrowsers }
+    }
+
+    private var colorFormatSelection: Binding<ColorFormat> {
+        Binding(
+            get: { viewModel.settings.colorFormat },
+            set: { viewModel.applyColorFormat($0) }
+        )
+    }
+
+    private var skinToneSelection: Binding<Int> {
+        Binding(
+            get: { viewModel.settings.emojiSkinTone },
+            set: { tone in
+                viewModel.settings.emojiSkinTone = tone
+                viewModel.settings.save()
+                viewModel.invalidateLauncherRanking()
+            }
+        )
     }
 
     private var browserSelection: Binding<String> {

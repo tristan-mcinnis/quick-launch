@@ -17,6 +17,16 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
+    /// Icons for the helper commands that are neither toggles nor panes.
+    static let helperCommandIcons = [
+        "color.pick": "eyedropper",
+        "color.pickPaste": "eyedropper.halffull",
+        "ocr.area": "text.viewfinder",
+        "ocr.areaPaste": "text.viewfinder",
+        "paste.plain": "doc.on.clipboard",
+        "clipboard.cleanLink": "link.badge.plus",
+    ]
+
     var defaultActionTitle: String {
         switch kind {
         case .application: "Open"
@@ -29,6 +39,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .folder: "Open"
         case .answer: "Copy"
         case .screenHistory: "Open moment"
+        case .color: "Paste"
         }
     }
 
@@ -39,6 +50,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .quickLink: return "link"
         case .clipboard: return "clipboard"
         case .command:
+            if let icon = Self.helperCommandIcons[value] { return icon }
             if value.hasPrefix("vault.") { return "magnifyingglass" }
             if value.hasPrefix("settingspane."),
                let pane = SystemSettingsPaneCatalog.panes.first(where: {
@@ -58,6 +70,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .folder: return "folder"
         case .answer: return "equal.circle"
         case .screenHistory: return "clock.arrow.circlepath"
+        case .color: return "eyedropper"
         }
     }
 }
@@ -74,6 +87,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case folders
     case vaultSearch
     case screenHistory
+    case colors
 
     var id: String { rawValue }
     var title: String {
@@ -89,6 +103,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .folders: "Folders"
         case .vaultSearch: "Vault Search"
         case .screenHistory: "Screen History"
+        case .colors: "Colors"
         }
     }
     var aliases: [String] {
@@ -104,6 +119,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .folders: ["folders", "folder", "places", "locations", "finder"]
         case .vaultSearch: ["vault search", "vault", "projects", "project search"]
         case .screenHistory: ["screen history", "screen memory", "what i saw", "coast", "rewind"]
+        case .colors: ["colors", "colours", "color picker", "colour picker", "pick color", "eyedropper", "hex", "swatches"]
         }
     }
     var systemImage: String {
@@ -119,6 +135,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .folders: "folder"
         case .vaultSearch: "magnifyingglass"
         case .screenHistory: "clock.arrow.circlepath"
+        case .colors: "eyedropper"
         }
     }
 }

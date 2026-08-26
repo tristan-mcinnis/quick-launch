@@ -84,6 +84,9 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case setHotkey
     case delete
     case copyPath
+    /// Copy a picked color in one specific notation; `commandValue` holds the
+    /// `ColorFormat` raw value.
+    case copyAs
     case pin
     case saveAsSnippet
     case saveAsQuickLink
@@ -196,6 +199,31 @@ enum ItemActionCatalog {
                 ItemAction(kind: .primary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
             ]
+        case .color:
+            var actions = [
+                ItemAction(kind: .primary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .returnKey),
+                ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
+                ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
+            ]
+            // One row per notation, so a color picked as hex is still one
+            // keystroke away from `rgb(...)`. ⌘1…⌘4 follow the menu order.
+            if let color = PickedColor(hexString: item.itemID) {
+                for (index, entry) in color.allStrings.enumerated() {
+                    actions.append(ItemAction(
+                        kind: .copyAs,
+                        title: "Copy \(entry.0.title) · \(entry.1)",
+                        systemImage: "number",
+                        shortcut: .command(Character("\(index + 1)")),
+                        commandValue: entry.0.rawValue
+                    ))
+                }
+            }
+            actions += [
+                pinAction(for: item),
+                ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")),
+                ItemAction(kind: .delete, title: "Delete Color", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
+            ]
+            return actions
         case .quickLink:
             var actions = [
                 ItemAction(

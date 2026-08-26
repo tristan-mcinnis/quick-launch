@@ -7,6 +7,47 @@ import Foundation
 enum EmojiCatalog {
     static let items: [LauncherCatalogItem] = parse(table)
 
+    /// Fitzpatrick skin tone modifiers, in the order the pickers show them.
+    /// Index 0 means "leave the emoji as it is".
+    static let skinToneModifiers: [Unicode.Scalar] = [
+        "\u{1F3FB}", "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}",
+    ]
+
+    static let skinToneTitles = [
+        "Default", "Light", "Medium Light", "Medium", "Medium Dark", "Dark",
+    ]
+
+    /// Applies a skin tone to the emoji that accept one. Everything else
+    /// (symbols, flags, objects) is returned untouched, and an existing
+    /// modifier is replaced rather than doubled.
+    static func applyingSkinTone(_ tone: Int, to glyph: String) -> String {
+        var scalars = Array(glyph.unicodeScalars)
+        scalars.removeAll { $0.properties.isEmojiModifier }
+        guard scalars.contains(where: { $0.properties.isEmojiModifierBase }) else { return glyph }
+        guard tone >= 1, tone <= skinToneModifiers.count else {
+            return String(String.UnicodeScalarView(scalars))
+        }
+        let modifier = skinToneModifiers[tone - 1]
+        var result = String.UnicodeScalarView()
+        for scalar in scalars {
+            result.append(scalar)
+            // The modifier follows its base directly, ahead of any joiner.
+            if scalar.properties.isEmojiModifierBase { result.append(modifier) }
+        }
+        return String(result)
+    }
+
+    /// The catalog with the chosen skin tone applied. Item ids do not change,
+    /// so pins and learned favourites survive a tone change.
+    static func items(skinTone: Int) -> [LauncherCatalogItem] {
+        guard skinTone > 0 else { return items }
+        return items.map { item in
+            var toned = item
+            toned.value = applyingSkinTone(skinTone, to: item.value)
+            return toned
+        }
+    }
+
     static func parse(_ table: String) -> [LauncherCatalogItem] {
         table.split(separator: "\n").compactMap { line in
             let columns = line.split(separator: "\t", omittingEmptySubsequences: false)

@@ -17,6 +17,8 @@ enum LauncherItemKind: String, Codable, Sendable {
     case answer
     /// A local, time-stamped moment from the owned or legacy screen-history store.
     case screenHistory
+    /// A color sampled from the screen with the eyedropper.
+    case color
 }
 
 /// User-owned configuration shared by searchable launcher items.

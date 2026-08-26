@@ -742,6 +742,7 @@ private struct LauncherResultRow: View {
             case .folder: "Folder"
             case .answer: "Answer"
             case .screenHistory: "Screen History"
+            case .color: "Color"
             case .command: "Command"
             }
         }
@@ -1023,6 +1024,7 @@ private struct ItemActionPane: View {
         case .folder: return item.detail
         case .answer: return item.detail
         case .screenHistory: return item.detail
+        case .color: return item.detail
         case .application: return "Application"
         }
     }

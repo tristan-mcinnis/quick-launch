@@ -122,6 +122,10 @@ import Observation
     var applicationCatalog: (any ApplicationCatalogServicing)?
     var launcherCatalog: (any LauncherCatalogServicing)?
     var clipboardHistory: (any ClipboardHistoryServicing)?
+    /// Colors picked with the screen eyedropper, newest first.
+    var colorHistory: (any ColorHistoryServicing)?
+    /// The eyedropper itself. Nil in tests that never pick.
+    var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
     var screenHistoryStore: (any ScreenHistoryStoring)?
@@ -186,6 +190,8 @@ import Observation
         applicationCatalog: (any ApplicationCatalogServicing)? = nil,
         launcherCatalog: (any LauncherCatalogServicing)? = nil,
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
+        colorHistory: (any ColorHistoryServicing)? = nil,
+        colorSampler: (any ScreenColorSampling)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
         vaultSearchService: (any VaultSearchServicing)? = nil,
         screenHistoryStore: (any ScreenHistoryStoring)? = nil,
@@ -211,6 +217,8 @@ import Observation
         self.applicationCatalog = applicationCatalog
         self.launcherCatalog = launcherCatalog
         self.clipboardHistory = clipboardHistory
+        self.colorHistory = colorHistory
+        self.colorSampler = colorSampler
         self.webSearchService = webSearchService
         self.vaultSearchService = vaultSearchService
         self.screenHistoryStore = screenHistoryStore
@@ -229,6 +237,7 @@ import Observation
         self.screenAwareness = screenAwareness
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
         self.currentVersion = currentVersion
+        self.colorHistory?.preferredFormat = settings.colorFormat
         self.screenshotTextIndex.onProgress = { [weak self] progress in
             self?.screenshotIndexProgress = progress
             // Newly recognized text changes what queries match; drop cached
@@ -371,6 +380,26 @@ import Observation
     var snippets: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.snippets ?? []) }
     var quickLinks: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.quickLinks ?? []) }
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
+
+    /// Picked colors, pinned first, as launcher items.
+    var colorItems: [LauncherCatalogItem] { colorHistory?.entries ?? [] }
+
+    /// The stored color behind a row, for the swatch and the "Copy As" rows.
+    func color(for item: LauncherCatalogItem) -> PickedColor? {
+        guard item.kind == .color else { return nil }
+        return colorHistory?.color(for: item) ?? PickedColor(hexString: item.itemID)
+    }
+
+    /// The emoji catalog with the chosen skin tone applied, computed once per
+    /// tone. Ids never change, so pins and favourites survive a tone change.
+    var emojiItems: [LauncherCatalogItem] {
+        let tone = settings.emojiSkinTone
+        guard tone > 0 else { return EmojiCatalog.items }
+        if let cached = emojiTonedItems, cached.tone == tone { return cached.items }
+        let toned = EmojiCatalog.items(skinTone: tone)
+        emojiTonedItems = (tone, toned)
+        return toned
+    }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
     var vaultSearchItems: [LauncherCatalogItem] {
@@ -464,11 +493,35 @@ import Observation
         let helpers = [
             LauncherCatalogItem(
                 kind: .command,
+                itemID: "color.pick",
+                title: "Pick Color from Screen",
+                detail: "Magnify any pixel on any display, then copy it as \(settings.colorFormat.title)",
+                value: "color.pick",
+                keywords: "color colour picker eyedropper hex rgb hsl swatch pixel"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "color.pickPaste",
+                title: "Pick Color and Paste",
+                detail: "Pick a pixel, then paste it into the app behind Quick Launch",
+                value: "color.pickPaste",
+                keywords: "color colour picker eyedropper paste hex css"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
                 itemID: "ocr.area",
                 title: "Copy Text from Screen Area",
                 detail: "Drag out an area; the text in it is read on this Mac and copied",
                 value: "ocr.area",
                 keywords: "ocr read recognize text screenshot copy"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "ocr.areaPaste",
+                title: "Paste Text from Screen Area",
+                detail: "Drag out an area; its text is read on this Mac and pasted behind Quick Launch",
+                value: "ocr.areaPaste",
+                keywords: "ocr read recognize text screenshot paste"
             ),
             LauncherCatalogItem(
                 kind: .command,
@@ -657,7 +710,7 @@ import Observation
         case .snippets: return snippets
         case .quickLinks: return quickLinks
         case .clipboard: return clipboardEntries
-        case .emoji: return EmojiCatalog.items
+        case .emoji: return emojiItems
         case .screenshots: return screenshotItems
         case .caffeinate: return caffeinateItems
         case .chats: return conversationItems
@@ -665,6 +718,7 @@ import Observation
         case .folders: return folderItems
         case .vaultSearch: return vaultSearchItems
         case .screenHistory: return screenHistoryItems
+        case .colors: return colorItems
         }
     }
 
@@ -802,6 +856,7 @@ import Observation
         "screenshot.pasteLatest": "arrow.turn.down.right",
     ]
 
+
     var screenAwarenessActions: [ItemAction] {
         Self.screenAwarenessCommandValues.compactMap { value in
             guard let command = systemCommands.first(where: { $0.value == value }) else { return nil }
@@ -836,6 +891,9 @@ import Observation
     /// Files are listed when the catalog is entered, so typing never hits the disk.
     private(set) var screenshotFiles: [LauncherCatalogItem] = []
 
+    /// Memoized skin-toned emoji, rebuilt only when the tone changes.
+    @ObservationIgnored private var emojiTonedItems: (tone: Int, items: [LauncherCatalogItem])?
+
     func reloadScreenshotFiles() {
         screenshotFiles = ScreenshotLibrary.items(in: screenshotsFolder)
         lastScreenshotScanAt = Date()
@@ -845,8 +903,10 @@ import Observation
         invalidateLauncherRanking()
     }
 
-    /// Maximum rows the launcher list shows at once.
-    static let maxLauncherRows = 14
+    /// Maximum rows the launcher list shows at once. The empty-query root
+    /// must fit two learned favourites, Ask AI, and every catalog root, so
+    /// this tracks the number of catalogs; the list scrolls past 12 rows.
+    static let maxLauncherRows = LauncherCatalogScope.allCases.count + 3
     /// The emoji grid shows more: 9 columns by 7 rows.
     static let maxGridCells = 63
     static let gridColumns = 9
@@ -864,12 +924,12 @@ import Observation
     /// Quicklinks join the preview-worthy set so a row's stored value is
     /// readable before it is pasted or opened.
     static let detailPaneScopes: Set<LauncherCatalogScope> = [
-        .screenshots, .clipboard, .screenHistory, .snippets, .quickLinks,
+        .screenshots, .clipboard, .screenHistory, .snippets, .quickLinks, .colors,
     ]
 
     /// Item kinds the detail pane knows how to draw.
     static let detailPaneKinds: Set<LauncherItemKind> = [
-        .screenshot, .clipboard, .screenHistory, .snippet, .quickLink,
+        .screenshot, .clipboard, .screenHistory, .snippet, .quickLink, .color,
     ]
 
     /// Preview-worthy local catalogs share one stable two-pane layout. The
@@ -1432,13 +1492,16 @@ import Observation
     private func resolveContextualCatalogItem() -> LauncherCatalogItem? {
         guard let contextualCatalogItemID else { return nil }
         if contextualCatalogItemID.hasPrefix("emoji:") {
-            return EmojiCatalog.items.first { $0.id == contextualCatalogItemID }
+            return emojiItems.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("screenshot:") {
             return screenshotFiles.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("conversation:") {
             return conversationItems.first { $0.id == contextualCatalogItemID }
+        }
+        if contextualCatalogItemID.hasPrefix("color:") {
+            return colorItems.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("screenHistory:") {
             return screenHistoryItems.first { $0.id == contextualCatalogItemID }
@@ -2739,6 +2802,7 @@ import Observation
         case .quickLinks: quickLinks.count
         case .clipboard: clipboardEntries.count
         case .emoji: EmojiCatalog.items.count
+        case .colors: colorItems.count
         case .screenshots: screenshotItems.count
         case .caffeinate: caffeinateItems.count
         case .chats: history.count
@@ -2834,7 +2898,7 @@ import Observation
             } else {
                 openQuickLink(item, input: "")
             }
-        case .snippet, .clipboard, .emoji:
+        case .snippet, .clipboard, .emoji, .color:
             _ = await pasteLauncherItem(item)
         case .screenshot:
             if await pasteImageFile(URL(fileURLWithPath: item.value)) {
@@ -3415,6 +3479,21 @@ import Observation
             return
         }
 
+        if item.value == "ocr.areaPaste" {
+            Task { await copyTextFromScreenArea(thenPaste: true) }
+            return
+        }
+
+        if item.value == "color.pick" {
+            Task { await pickColorFromScreen() }
+            return
+        }
+
+        if item.value == "color.pickPaste" {
+            Task { await pickColorFromScreen(thenPaste: true) }
+            return
+        }
+
         if item.value == "paste.plain" {
             guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
                 errorMessage = "The clipboard has no text."
@@ -3561,7 +3640,9 @@ import Observation
 
     /// Copy Text from Screen Area: the system selector, Vision OCR on this
     /// Mac, the result on the clipboard and in the panel. No model involved.
-    func copyTextFromScreenArea() async {
+    /// Drag out an area, read it with on-device Vision, and copy the text.
+    /// `thenPaste` sends the text straight to the app behind the overlay.
+    func copyTextFromScreenArea(thenPaste: Bool = false) async {
         guard let screenAwareness else {
             errorMessage = "Screen capture is not available in this build."
             requestInputFocus()
@@ -3574,20 +3655,109 @@ import Observation
             requestInputFocus()
             return
         }
-        let text = await ScreenshotTextIndex.recognizeText(in: attachment.data)
-        NotificationCenter.default.post(name: .presentOverlay, object: nil)
+        let recognized = await ScreenshotTextIndex.recognizeText(in: attachment.data)
+        let text = Self.flattenRecognizedText(recognized, keepLineBreaks: settings.ocrKeepLineBreaks)
         guard !text.isEmpty else {
+            NotificationCenter.default.post(name: .presentOverlay, object: nil)
             errorMessage = "No text was found in that area."
             requestInputFocus()
+            return
+        }
+        let item = LauncherCatalogItem(
+            kind: .clipboard,
+            itemID: "ocr",
+            title: "Text from screen",
+            detail: "",
+            value: text
+        )
+        if thenPaste, await pasteLauncherItem(item) {
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
             return
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         markJustCopied()
+        NotificationCenter.default.post(name: .presentOverlay, object: nil)
         output = text
-        lastQuestion = "Text from screen, copied"
+        lastQuestion = thenPaste ? "Text from screen" : "Text from screen, copied"
         errorMessage = nil
         requestInputFocus()
+    }
+
+    /// Vision returns one line per observation. Joining them into a paragraph
+    /// is what most pasted text wants; keeping the breaks suits code and lists.
+    nonisolated static func flattenRecognizedText(_ text: String, keepLineBreaks: Bool) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keepLineBreaks else { return trimmed }
+        return trimmed
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    // MARK: - Color picker
+
+    /// Shows the system loupe over every display, stores the pick, and copies
+    /// it in the preferred notation. `thenPaste` sends it to the app behind
+    /// Quick Launch instead of leaving it on the clipboard only.
+    func pickColorFromScreen(thenPaste: Bool = false) async {
+        guard let colorSampler else {
+            errorMessage = "The color picker is not available in this build."
+            requestInputFocus()
+            return
+        }
+        input = ""
+        prepareForExternalAction?()
+        guard let color = await colorSampler.sample() else {
+            // Escape closes the loupe: nothing picked, nothing copied.
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return
+        }
+        let item = recordPickedColor(color)
+        if thenPaste, await pasteLauncherItem(item) {
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            return
+        }
+        copyLauncherItem(item)
+        NotificationCenter.default.post(name: .presentOverlay, object: nil)
+        output = item.value
+        lastQuestion = "\(color.name) picked from screen"
+        errorMessage = nil
+        invalidateLauncherRanking()
+        requestInputFocus()
+    }
+
+    /// Adds a pick to the local history and returns the row it became.
+    @discardableResult
+    func recordPickedColor(_ color: PickedColor) -> LauncherCatalogItem {
+        colorHistory?.preferredFormat = settings.colorFormat
+        if let recorded = colorHistory?.record(color, limit: settings.colorHistoryLimit) {
+            return recorded
+        }
+        let text = color.string(in: settings.colorFormat)
+        return LauncherCatalogItem(
+            kind: .color,
+            itemID: color.storageID,
+            title: text,
+            detail: color.name,
+            value: text
+        )
+    }
+
+    /// Settings changed the notation: rewrite the stored rows to match.
+    func applyColorFormat(_ format: ColorFormat) {
+        settings.colorFormat = format
+        persistSettings(settings)
+        colorHistory?.preferredFormat = format
+        invalidateLauncherRanking()
+    }
+
+    func clearColorHistory() {
+        colorHistory?.clear()
+        applicationSelectionIndex = 0
+        invalidateLauncherRanking()
     }
 
     func runningApplication(for application: LaunchableApplication) -> NSRunningApplication? {
@@ -4063,6 +4233,8 @@ import Observation
                 togglePinConversation(id: id)
             case .clipboard:
                 clipboardHistory?.togglePin(item)
+            case .color:
+                colorHistory?.togglePin(item)
             case .snippet, .quickLink, .screenshot, .askAI, .folder:
                 togglePinLauncherItem(item)
             default:
@@ -4102,6 +4274,19 @@ import Observation
             openActionPane(for: result, form: .alias)
         case .setHotkey:
             openActionPane(for: result, form: .hotkey)
+        case .copyAs:
+            guard case .item(let item) = result,
+                  let raw = action.commandValue,
+                  let format = ColorFormat(rawValue: raw),
+                  let color = color(for: item)
+            else { return true }
+            let text = color.string(in: format)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            markJustCopied()
+            closeItemActionPane()
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
         case .copyPath:
             let path: String
             switch result {
@@ -4122,6 +4307,10 @@ import Observation
                     _ = deleteSnippet(item)
                 case .clipboard:
                     clipboardHistory?.remove(item)
+                    closeItemActionPane()
+                    applicationSelectionIndex = 0
+                case .color:
+                    colorHistory?.remove(item)
                     closeItemActionPane()
                     applicationSelectionIndex = 0
                 case .conversation:

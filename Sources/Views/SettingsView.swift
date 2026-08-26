@@ -22,7 +22,7 @@ struct SettingsView: View {
             case .general: "General"
             case .items: "Items"
             case .models: "Models"
-            case .clipboard: "Clipboard & Links"
+            case .clipboard: "Clipboard & Capture"
             case .screenHistory: "Screen History"
             case .prompts: "AI Commands"
             case .about: "About"

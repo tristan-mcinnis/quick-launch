@@ -148,6 +148,23 @@ struct CatalogDetailPane: View {
             .frame(maxHeight: 200)
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
+        case .color:
+            if let color = viewModel.color(for: item) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(
+                        .sRGB,
+                        red: color.red,
+                        green: color.green,
+                        blue: color.blue,
+                        opacity: color.alpha
+                    ))
+                    .frame(height: 120)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(AQDesign.ColorToken.panelStroke)
+                    )
+                    .accessibilityLabel("\(color.name) swatch, \(color.hexString)")
+            }
         case .quickLink:
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -224,6 +241,15 @@ struct CatalogDetailPane: View {
             ]
             if lines > 1 { list.append(("Lines", "\(lines)")) }
             if !item.detail.isEmpty { list.append(("Source", item.detail)) }
+            if item.isPinned { list.append(("Pinned", "Yes")) }
+            return list
+        case .color:
+            guard let color = viewModel.color(for: item) else { return [] }
+            var list: [(String, String)] = color.allStrings.map { ($0.0.title, $0.1) }
+            list.append(("Name", color.name))
+            if let date = item.capturedAt {
+                list.append(("Picked", date.formatted(date: .abbreviated, time: .shortened)))
+            }
             if item.isPinned { list.append(("Pinned", "Yes")) }
             return list
         case .quickLink:
