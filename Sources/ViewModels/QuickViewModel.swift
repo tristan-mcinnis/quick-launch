@@ -3699,8 +3699,9 @@ import Observation
     // MARK: - Color picker
 
     /// Shows the system loupe over every display, stores the pick, and copies
-    /// it in the preferred notation. `thenPaste` sends it to the app behind
-    /// Quick Launch instead of leaving it on the clipboard only.
+    /// it in the preferred notation. The overlay does not come back: the
+    /// colour is on the clipboard and the picker is finished. `thenPaste`
+    /// sends it to the app behind Quick Launch as well.
     func pickColorFromScreen(thenPaste: Bool = false) async {
         guard let colorSampler else {
             errorMessage = "The color picker is not available in this build."
@@ -3716,17 +3717,21 @@ import Observation
             return
         }
         let item = recordPickedColor(color)
-        if thenPaste, await pasteLauncherItem(item) {
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        if thenPaste {
+            if await pasteLauncherItem(item) {
+                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            } else {
+                // The paste failed. It was copied instead, and the reason
+                // needs the panel back to be readable.
+                NotificationCenter.default.post(name: .presentOverlay, object: nil)
+            }
+            invalidateLauncherRanking()
             return
         }
         copyLauncherItem(item)
-        NotificationCenter.default.post(name: .presentOverlay, object: nil)
-        output = item.value
-        lastQuestion = "\(color.name) picked from screen"
         errorMessage = nil
         invalidateLauncherRanking()
-        requestInputFocus()
+        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
     }
 
     /// Adds a pick to the local history and returns the row it became.

@@ -236,10 +236,38 @@ struct ColorPickerTests {
         await vm.pickColorFromScreen()
 
         #expect(sampler.sampleCount == 1)
-        #expect(vm.output == "#FF0000")
+        #expect(NSPasteboard.general.string(forType: .string) == "#FF0000")
         #expect(vm.colorItems.count == 1)
         #expect(vm.errorMessage == nil)
-        #expect(NSPasteboard.general.string(forType: .string) == "#FF0000")
+        // Picking is finished when the colour is on the clipboard: no answer
+        // pane, nothing to read, nothing to dismiss by hand.
+        #expect(vm.output.isEmpty)
+        #expect(vm.lastQuestion == nil)
+    }
+
+    @Test func pickingClosesTheOverlayInsteadOfShowingAnAnswer() async {
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let sampler = StubColorSampler(next: PickedColor(red: 0, green: 1, blue: 0))
+        let vm = makeViewModel(sampler: sampler, store: store)
+
+        var dismissals = 0
+        var presentations = 0
+        let dismissToken = NotificationCenter.default.addObserver(
+            forName: .dismissOverlay, object: nil, queue: .main
+        ) { _ in dismissals += 1 }
+        let presentToken = NotificationCenter.default.addObserver(
+            forName: .presentOverlay, object: nil, queue: .main
+        ) { _ in presentations += 1 }
+        defer {
+            NotificationCenter.default.removeObserver(dismissToken)
+            NotificationCenter.default.removeObserver(presentToken)
+        }
+
+        await vm.pickColorFromScreen()
+
+        #expect(dismissals == 1, "the panel closes as soon as the colour is copied")
+        #expect(presentations == 0, "the panel never comes back to show the value")
     }
 
     @Test func theStoredNotationFollowsTheSetting() async {
@@ -251,7 +279,7 @@ struct ColorPickerTests {
 
         await vm.pickColorFromScreen()
 
-        #expect(vm.output == "rgb(0, 0, 255)")
+        #expect(NSPasteboard.general.string(forType: .string) == "rgb(0, 0, 255)")
         #expect(vm.colorItems[0].value == "rgb(0, 0, 255)")
     }
 
@@ -305,7 +333,6 @@ struct ColorPickerTests {
         let vm = makeViewModel(sampler: sampler, store: store)
         await vm.pickColorFromScreen()
 
-        vm.output = ""
         vm.enterCatalog(.colors)
         #expect(vm.catalogCount(.colors) == 1)
         #expect(vm.catalogItems.count == 1)
