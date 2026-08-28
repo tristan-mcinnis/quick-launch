@@ -30,6 +30,9 @@ struct QuickSettingsTests {
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)
         #expect(settings.clipboardHistoryHotkey.keyCode == 9)
+        #expect(settings.typeToClickHotkey == ActionHotkey(
+            keyCode: 8, modifiers: 262_144 | 524_288
+        ))
         #expect(settings.reopenRetentionSeconds == 10)
         #expect(settings.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(!settings.systemPrompt.isEmpty)
@@ -54,6 +57,28 @@ struct QuickSettingsTests {
             from: JSONEncoder().encode(LegacySettings())
         )
         #expect(!legacy.screenHistorySameUserAccessRiskAccepted)
+    }
+
+    @Test func typeToClickHotkeyCanChangeAndBeCleared() throws {
+        let defaults = freshDefaults()
+        var settings = QuickSettings()
+        settings.typeToClickHotkey = ActionHotkey(keyCode: 0, modifiers: 1_048_576)
+        settings.save(to: defaults)
+        #expect(QuickSettings.load(from: defaults).typeToClickHotkey == settings.typeToClickHotkey)
+
+        settings.typeToClickHotkeyEnabled = false
+        settings.save(to: defaults)
+        #expect(!QuickSettings.load(from: defaults).typeToClickHotkeyEnabled)
+
+        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        let legacy = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: JSONEncoder().encode(LegacySettings())
+        )
+        #expect(legacy.typeToClickHotkey == ActionHotkey(
+            keyCode: 8, modifiers: 262_144 | 524_288
+        ))
+        #expect(legacy.typeToClickHotkeyEnabled)
     }
 
     @Test func testLauncherItemConfigurationRoundTrips() {

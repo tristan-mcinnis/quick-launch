@@ -72,6 +72,77 @@ struct ItemActionTests {
         #expect(!vm.isItemActionPanePresented)
     }
 
+    @Test func escapeClosesCommandKLayersBeforeAnythingBehindThem() {
+        let (vm, _) = makeSnippetViewModel()
+        vm.handleCommandK()
+        #expect(vm.isItemActionPanePresented)
+        #expect(vm.handleEscapeKey())
+        #expect(!vm.isItemActionPanePresented)
+
+        vm.isActionPalettePresented = true
+        #expect(vm.handleEscapeKey())
+        #expect(!vm.isActionPalettePresented)
+    }
+
+    @Test func typeToClickCommandUsesTheCanonicalEditableHotkey() throws {
+        let vm = QuickViewModel()
+        let item = try #require(vm.systemCommands.first {
+            $0.itemID == "type-to-click.mode"
+        })
+        #expect(vm.launcherItemHotkey(for: item) == vm.settings.typeToClickHotkey)
+
+        vm.settings.launcherItemConfigurations.append(LauncherItemConfiguration(
+            kind: .command,
+            itemID: "type-to-click.mode",
+            alias: "click",
+            hotkey: ActionHotkey(keyCode: 1, modifiers: 524_288)
+        ))
+        let custom = ActionHotkey(keyCode: 0, modifiers: 1_048_576)
+        vm.setLauncherItemHotkey(custom, for: item)
+        #expect(vm.settings.typeToClickHotkey == custom)
+        #expect(vm.launcherItemHotkey(for: item) == custom)
+        let preserved = vm.settings.launcherItemConfigurations.first {
+            $0.itemID == "type-to-click.mode"
+        }
+        #expect(preserved?.alias == "click")
+        #expect(preserved?.hotkey == nil)
+
+        vm.setLauncherItemHotkey(nil, for: item)
+        #expect(!vm.settings.typeToClickHotkeyEnabled)
+        #expect(vm.launcherItemHotkey(for: item) == nil)
+    }
+
+    @Test func panelCapturesEscapeBeforeFirstResponderDispatch() throws {
+        _ = NSApplication.shared
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        var escapes = 0
+        panel.escapeHandler = {
+            escapes += 1
+            return true
+        }
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: 53
+        ))
+
+        panel.sendEvent(event)
+
+        #expect(escapes == 1)
+    }
+
     @Test func commandEOpensTheEditorAndEscapeGoesBackThenCloses() {
         let (vm, _) = makeSnippetViewModel()
         #expect(vm.performShortcut(characters: "e", keyCode: 14, modifiers: [.command]))

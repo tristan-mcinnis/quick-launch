@@ -208,7 +208,7 @@ struct OverlayView: View {
                     if viewModel.conversationMessages.count > 2 {
                         // Earlier turns, compact; the latest answer follows in full.
                         ConversationTranscript(messages: Array(viewModel.conversationMessages.dropLast(2)))
-                            .frame(maxHeight: 240)
+                            .frame(maxHeight: PanelSizing.transcriptHeight)
                         Divider()
                     }
                     if let question = viewModel.lastQuestion, !question.isEmpty {
@@ -301,20 +301,7 @@ struct OverlayView: View {
             postAccessibilityAnnouncement("Error. \(error)", priority: .high)
         }
         .onKeyPress(.escape) {
-            if viewModel.isStreaming {
-                viewModel.cancel()
-            } else if viewModel.isItemActionPanePresented {
-                viewModel.dismissItemActionLayer()
-            } else if viewModel.isActionPalettePresented {
-                // One layer at a time, wherever focus sits: the palette's
-                // own field handles Escape, but with focus elsewhere this
-                // used to close the whole window instead of the palette.
-                viewModel.closeActionPalette()
-            } else {
-                // Raycast convention: Escape closes the window from anywhere.
-                // Backspace on an empty field is the way back to the root.
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-            }
+            _ = viewModel.handleEscapeKey()
             return .handled
         }
     }
@@ -608,7 +595,8 @@ private struct ConversationTranscript: View {
                         .id(message.id)
                     }
                 }
-                .padding(.horizontal, 4)
+                // No horizontal inset: earlier turns line up with the
+                // question row and the answer below them.
                 .padding(.vertical, 8)
             }
             .onAppear {
@@ -1376,18 +1364,22 @@ private struct QuickActionPalette: View {
 
     enum Entry: Identifiable {
         case result(ResultAction)
+        case command(LauncherCatalogItem)
         case prompt(SavedPrompt)
 
         var id: String {
             switch self {
             case .result(let action): "result:" + action.id
+            case .command(let item): "command:" + item.itemID
             case .prompt(let prompt): "prompt:" + prompt.id.uuidString
             }
         }
     }
 
     private var entries: [Entry] {
-        viewModel.paletteResultActions.map(Entry.result) + viewModel.actionMatches.map(Entry.prompt)
+        viewModel.paletteResultActions.map(Entry.result)
+            + viewModel.paletteCommandMatches.map(Entry.command)
+            + viewModel.actionMatches.map(Entry.prompt)
     }
 
     var body: some View {
@@ -1485,6 +1477,22 @@ private struct QuickActionPalette: View {
                 Spacer()
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
+        case .command(let item):
+            HStack(spacing: 10) {
+                Image(systemName: item.systemImage)
+                    .frame(width: 18)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(AQDesign.TypeToken.body.weight(.medium))
+                    Text(item.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+            }
         case .prompt(let action):
             HStack(spacing: 10) {
                 Image(systemName: action.outputBehavior == .replaceSelection
@@ -1526,6 +1534,7 @@ private struct QuickActionPalette: View {
         let title: String
         switch current[selectedIndex] {
         case .result(let action): title = action.title
+        case .command(let item): title = item.title
         case .prompt(let prompt): title = prompt.name
         }
         NSAccessibility.post(
@@ -1548,6 +1557,8 @@ private struct QuickActionPalette: View {
         switch entry {
         case .result(let action):
             Task { await viewModel.performResultAction(action) }
+        case .command(let item):
+            Task { await viewModel.runPaletteCommand(item) }
         case .prompt(let action):
             Task { await viewModel.perform(action: action) }
         }

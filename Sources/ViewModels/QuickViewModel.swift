@@ -923,6 +923,9 @@ import Observation
     /// title, metadata, and two visible actions without crowding.
     static let panelWidth: CGFloat = 720
     static let panelWidthWithDetail: CGFloat = 960
+    /// A Quick AI thread gets a little more room so answers read like a
+    /// document rather than a strip.
+    static let panelWidthForAnswer: CGFloat = 800
 
     /// Emoji & Symbols is a grid, everything else a list. The grid stays put
     /// while the ⌘K pane floats over it; swapping layouts under a popover
@@ -961,7 +964,63 @@ import Observation
         return item
     }
 
-    var currentPanelWidth: CGFloat { showsDetailPane ? Self.panelWidthWithDetail : Self.panelWidth }
+    var currentPanelWidth: CGFloat {
+        if showsDetailPane { return Self.panelWidthWithDetail }
+        if isAnswerActive { return Self.panelWidthForAnswer }
+        return Self.panelWidth
+    }
+
+    /// Window height for the current surface. The AppDelegate applies this
+    /// and the pane render-proof tests assert against the same math, so the
+    /// drawn view and the window cannot drift apart. The answer body is
+    /// measured from the markdown actually rendered, not guessed from
+    /// character counts — the guess left long answers clipped at the bottom.
+    var estimatedWindowHeight: CGFloat {
+        let measuredBody: CGFloat? = (!output.isEmpty || isStreaming)
+            ? MarkdownRenderer.measuredHeight(
+                markdown: output,
+                width: currentPanelWidth - PanelSizing.answerHorizontalPadding
+            )
+            : nil
+        let base = PanelSizing.panelHeight(
+            output: output,
+            isStreaming: isStreaming,
+            errorMessage: errorMessage,
+            suggestionCount: max(launcherMatches.count, savedPromptMatches.count),
+            showsResultActions: false,
+            hasAttachment: hasPendingAttachment,
+            showsFooter: showsLauncherFooter,
+            launcherRowCount: launcherMatches.count,
+            showsQuestion: (lastQuestion?.isEmpty == false) && !isConversationHistoryPresented,
+            gridRows: isGridCatalog
+                ? Int((Double(launcherMatches.count) / Double(Self.gridColumns)).rounded(.up))
+                    + max(0, gridSections.count - 1)
+                : 0,
+            gridSections: isGridCatalog ? gridSections.count : 0,
+            showsDetailPane: showsDetailPane,
+            measuredBodyHeight: measuredBody,
+            transcriptHeight: PanelSizing.transcriptBlockHeight(
+                messageCount: conversationMessages.count
+            )
+        )
+        var pane: CGFloat?
+        if isItemActionPanePresented {
+            pane = activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
+                ?? PanelSizing.itemActionPaneHeight(rows: filteredFocusedItemActions.count)
+        } else if isActionPalettePresented {
+            pane = PanelSizing.actionPaletteHeight(rows: actionPaletteEntryCount)
+        }
+        var total = PanelSizing.windowHeight(
+            base: base,
+            paneHeight: pane,
+            paneTop: PanelSizing.inputHeight
+                + (hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
+        )
+        if activeItemActionForm == .screenHistorySave {
+            total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
+        }
+        return total
+    }
 
     struct GridSection: Equatable {
         let title: String
@@ -3047,6 +3106,7 @@ import Observation
     var resultActions: [ResultAction] {
         guard !output.isEmpty, !isStreaming else { return [] }
         var actions: [ResultAction] = [.pasteBack, .copy, .saveSnippet, .searchWeb, .regenerate, .newChat]
+        if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
         }
@@ -3072,6 +3132,8 @@ import Observation
         case .newChat:
             isActionPalettePresented = false
             startNewConversation()
+        case .chatHistory:
+            openChatHistory()
         case .previousChat:
             // History is ordered newest first, so going back in time means
             // moving forward through the array.
@@ -4004,6 +4066,38 @@ import Observation
         return Self.rankByQuery(resultActions, query: actionQuery, title: \.title)
     }
 
+    /// Attach commands offered in the ⌘K palette, at the root and on an
+    /// answer alike, so a screenshot or a selection can join the question
+    /// without abandoning the typed text to reach the root search.
+    var paletteAttachCommands: [LauncherCatalogItem] {
+        let ids = [
+            LatestScreenshotFinder.commandID,
+            ScreenshotKind.window.commandID,
+            ScreenshotKind.display.commandID,
+            "awareness.area",
+            "awareness.selection",
+        ]
+        let commands = systemCommands
+        return ids.compactMap { id in commands.first { $0.itemID == id } }
+    }
+
+    /// Palette attach commands after the search filter, best match first.
+    var paletteCommandMatches: [LauncherCatalogItem] {
+        guard !actionQuery.isEmpty else { return paletteAttachCommands }
+        return Self.rankByQuery(paletteAttachCommands, query: actionQuery, title: \.title)
+    }
+
+    /// Run a command row from the ⌘K palette. The typed-command path clears
+    /// the input because there the input *is* the command; here the
+    /// half-typed question survives the attach.
+    func runPaletteCommand(_ item: LauncherCatalogItem) async {
+        isActionPalettePresented = false
+        actionQuery = ""
+        let typed = input
+        await performLauncherItem(item)
+        if input.isEmpty, !typed.isEmpty { input = typed }
+    }
+
     /// Fuzzy-filters and orders by match score; ties keep the list order.
     private static func rankByQuery<T>(
         _ items: [T],
@@ -4025,7 +4119,7 @@ import Observation
 
     /// Row count the prompt palette will render, for window sizing.
     var actionPaletteEntryCount: Int {
-        paletteResultActions.count + actionMatches.count
+        paletteResultActions.count + paletteCommandMatches.count + actionMatches.count
     }
 
     func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
@@ -4087,6 +4181,25 @@ import Observation
             return true
         }
         return false
+    }
+
+    /// Escape is handled at the NSPanel boundary so it works even when a
+    /// SwiftUI field editor consumes cancelOperation. Returns true because
+    /// every visible launcher state has an Escape action.
+    @discardableResult
+    func handleEscapeKey() -> Bool {
+        // A visible ⌘K layer is the topmost job, even if an answer is still
+        // streaming behind it. Escape always removes that layer first.
+        if isItemActionPanePresented {
+            dismissItemActionLayer()
+        } else if isActionPalettePresented {
+            closeActionPalette()
+        } else if isStreaming {
+            cancel()
+        } else {
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        }
+        return true
     }
 
     /// Escape: a form goes back to the list, the list closes the pane.
@@ -4513,7 +4626,13 @@ import Observation
     }
 
     func launcherItemHotkey(for item: LauncherCatalogItem) -> ActionHotkey? {
-        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.hotkey
+        // Type to Click predates configurable catalog items. Present its one
+        // real global hotkey through the same ⌘K editor instead of creating a
+        // second, unrelated launcher-item shortcut.
+        if item.itemID == "type-to-click.mode" {
+            return settings.typeToClickHotkeyEnabled ? settings.typeToClickHotkey : nil
+        }
+        return settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.hotkey
     }
 
     func setLauncherItemAlias(_ alias: String, for item: LauncherCatalogItem) {
@@ -4541,11 +4660,35 @@ import Observation
     }
 
     func setLauncherItemHotkey(_ hotkey: ActionHotkey?, for item: LauncherCatalogItem) {
+        if item.itemID == "type-to-click.mode" {
+            if let hotkey {
+                settings.typeToClickHotkey = hotkey
+                settings.typeToClickHotkeyEnabled = true
+            } else {
+                settings.typeToClickHotkeyEnabled = false
+            }
+            // Remove only a legacy second shortcut created before this
+            // command's ⌘K editor was unified. Preserve its alias or pin.
+            if let index = settings.launcherItemConfigurations.firstIndex(where: {
+                $0.kind == item.kind && $0.itemID == item.itemID
+            }) {
+                settings.launcherItemConfigurations[index].hotkey = nil
+                if settings.launcherItemConfigurations[index].isEmpty {
+                    settings.launcherItemConfigurations.remove(at: index)
+                }
+            }
+            settings.save()
+            NotificationCenter.default.post(name: .typeToClickSettingsChanged, object: nil)
+            return
+        }
         updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.hotkey = hotkey }
         NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
     }
 
     func launcherItemConfigurationConflict(for item: LauncherCatalogItem) -> String? {
+        if item.itemID == "type-to-click.mode" {
+            return settings.typeToClickHotkeyConflict() ?? typeToClickHotkeyRegistrationError
+        }
         let id = LauncherItemConfiguration(kind: item.kind, itemID: item.itemID).id
         let alias = launcherItemAlias(for: item).trimmingCharacters(in: .whitespacesAndNewlines)
         if !alias.isEmpty, settings.launcherItemConfigurations.contains(where: {
@@ -5449,6 +5592,21 @@ import Observation
         guard !conversationMessages.isEmpty else { return }
         isConversationHistoryPresented.toggle()
         requestInputFocus()
+    }
+
+    /// ⌘H / ⌘K → Browse Chat History: leave the answer surface and open the
+    /// Quick AI Chats catalog. The conversation is already persisted; picking
+    /// a row continues it, Backspace returns to the root.
+    func openChatHistory() {
+        isActionPalettePresented = false
+        actionQuery = ""
+        currentConversation = nil
+        conversationImages = []
+        lastQuestion = nil
+        isConversationHistoryPresented = false
+        output = ""
+        errorMessage = nil
+        enterCatalog(.chats)
     }
 
     private func persistCurrentConversation() {

@@ -24,6 +24,26 @@ enum MarkdownRenderer {
         walker.visit(document)
         return walker.result
     }
+
+    @MainActor private static var heightCache: (source: String, width: CGFloat, height: CGFloat)?
+
+    /// Height the rendered markdown needs at `width`, for window sizing.
+    /// Replaces the old character-count guess, which under-estimated headed
+    /// or code-heavy answers and left the last lines clipped.
+    @MainActor static func measuredHeight(markdown: String, width: CGFloat) -> CGFloat {
+        guard !markdown.isEmpty, width > 0 else { return 0 }
+        if let heightCache, heightCache.source == markdown, heightCache.width == width {
+            return heightCache.height
+        }
+        let rect = cachedRender(markdown).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        // A little slack: NSTextView's layout rounds line fragments up.
+        let height = rect.height.rounded(.up) + 4
+        heightCache = (markdown, width, height)
+        return height
+    }
 }
 
 // MARK: - AST Walker
@@ -39,25 +59,41 @@ private struct AttributedStringWalker: MarkupWalker {
     private var blockQuoteDepth: Int = 0
     private var isStrikethrough = false
     private var isTableHeader = false
+    /// Set after a list-item marker or a blockquote break so the block that
+    /// follows continues the same line instead of opening a new paragraph.
+    /// Without it every bullet rendered as "•", a blank line, then its text.
+    private var suppressBlockBreak = false
 
     var result: NSAttributedString { output }
 
     // MARK: - Block elements
 
+    /// The blank line between blocks, unless the current block belongs to
+    /// the marker that was just drawn.
+    private mutating func blockBreak(_ count: Int) {
+        if suppressBlockBreak {
+            suppressBlockBreak = false
+            return
+        }
+        if output.length > 0 { appendNewlines(count) }
+    }
+
     mutating func visitHeading(_ heading: Heading) {
-        if output.length > 0 { appendNewlines(2) }
+        blockBreak(2)
         headingLevel = heading.level
         descendInto(heading)
         headingLevel = 0
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
-        if output.length > 0 { appendNewlines(2) }
+        // Inside a list a paragraph stays close to its item; only top-level
+        // prose gets the full blank line.
+        blockBreak(listDepth > 0 ? 1 : 2)
         descendInto(paragraph)
     }
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
-        if output.length > 0 { appendNewlines(2) }
+        blockBreak(2)
         let code = codeBlock.code.hasSuffix("\n")
             ? String(codeBlock.code.dropLast())
             : codeBlock.code
@@ -86,6 +122,7 @@ private struct AttributedStringWalker: MarkupWalker {
 
     mutating func visitListItem(_ item: ListItem) {
         if output.length > 0 { appendNewlines(1) }
+        let start = output.length
         let indent = String(repeating: "  ", count: max(0, listDepth - 1))
         if let checkbox = item.checkbox {
             let marker = checkbox == .checked ? "\u{2611} " : "\u{2610} "
@@ -96,18 +133,33 @@ private struct AttributedStringWalker: MarkupWalker {
         } else {
             appendText("\(indent)\u{2022} ")
         }
+        suppressBlockBreak = true
         descendInto(item)
+        // Hanging indent: wrapped lines align under the text, not under the
+        // bullet, with a little air between items. Nested items styled their
+        // own ranges already, so only fill where no style exists yet.
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = 0
+        style.headIndent = CGFloat(listDepth) * 18
+        style.paragraphSpacingBefore = 3
+        let range = NSRange(location: start, length: output.length - start)
+        output.enumerateAttribute(.paragraphStyle, in: range) { value, subRange, _ in
+            if value == nil {
+                output.addAttribute(.paragraphStyle, value: style, range: subRange)
+            }
+        }
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
         blockQuoteDepth += 1
         if output.length > 0 { appendNewlines(1) }
+        suppressBlockBreak = true
         descendInto(blockQuote)
         blockQuoteDepth -= 1
     }
 
     mutating func visitTable(_ table: Table) {
-        if output.length > 0 { appendNewlines(2) }
+        blockBreak(2)
         descendInto(table)
     }
 

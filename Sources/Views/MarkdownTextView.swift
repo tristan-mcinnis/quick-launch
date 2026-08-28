@@ -26,7 +26,10 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
 
         let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = false
+        // A long answer scrolls inside the capped window; without the
+        // scroller nothing hinted that more text sat below the fold.
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
         scrollView.documentView = textView
@@ -48,5 +51,10 @@ struct MarkdownTextView: NSViewRepresentable {
             newAttr.append(cursor)
         }
         textView.textStorage?.setAttributedString(newAttr)
+        if isStreaming {
+            // Follow the stream: new text appears at the bottom edge, not
+            // below it.
+            textView.scrollRangeToVisible(NSRange(location: newAttr.length, length: 0))
+        }
     }
 }

@@ -6,7 +6,12 @@ import CoreFoundation
 enum PanelSizing {
 
     static let inputHeight: CGFloat = 60
-    static let maxBodyHeight: CGFloat = 560
+    static let maxBodyHeight: CGFloat = 640
+    /// Horizontal padding around the answer body (20pt each side); the
+    /// measured markdown width is the panel width minus this.
+    static let answerHorizontalPadding: CGFloat = 40
+    /// Compact earlier-turns transcript shown above the latest answer.
+    static let transcriptHeight: CGFloat = 240
     static let errorBannerHeight: CGFloat = 40
     static let attachmentHeight: CGFloat = 58
     /// One row in the ⌘K pane and the prompt palette.
@@ -79,6 +84,13 @@ enum PanelSizing {
         return max(base, paneTop + paneHeight + paneBottomMargin)
     }
 
+    /// The earlier-turns block above the latest answer: capped transcript
+    /// plus its divider and the surrounding stack spacing. Zero until a
+    /// conversation has more than one exchange on screen.
+    static func transcriptBlockHeight(messageCount: Int) -> CGFloat {
+        messageCount > 2 ? transcriptHeight + 17 : 0
+    }
+
     static func panelHeight(
         output: String,
         isStreaming: Bool,
@@ -91,7 +103,9 @@ enum PanelSizing {
         showsQuestion: Bool = false,
         gridRows: Int = 0,
         gridSections: Int = 0,
-        showsDetailPane: Bool = false
+        showsDetailPane: Bool = false,
+        measuredBodyHeight: CGFloat? = nil,
+        transcriptHeight: CGFloat = 0
     ) -> CGFloat {
         var total = inputHeight
         if hasAttachment { total += attachmentHeight }
@@ -107,8 +121,16 @@ enum PanelSizing {
             total += block
         }
         if !output.isEmpty || isStreaming {
-            let approxLines = max(1, output.count / 60 + 1)
-            let bodyHeight = min(maxBodyHeight, CGFloat(approxLines) * 22 + 40)
+            total += transcriptHeight
+            let bodyHeight: CGFloat
+            if let measuredBodyHeight {
+                // Measured text plus the 20pt vertical padding around the
+                // answer stack; the floor keeps room for the thinking row.
+                bodyHeight = min(maxBodyHeight, max(68, measuredBodyHeight + 40))
+            } else {
+                let approxLines = max(1, output.count / 60 + 1)
+                bodyHeight = min(maxBodyHeight, CGFloat(approxLines) * 22 + 40)
+            }
             total += bodyHeight
             if showsQuestion { total += 24 }
         }

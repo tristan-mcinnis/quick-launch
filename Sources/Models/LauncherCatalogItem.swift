@@ -25,6 +25,12 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "ocr.areaPaste": "text.viewfinder",
         "paste.plain": "doc.on.clipboard",
         "clipboard.cleanLink": "link.badge.plus",
+        "screenshot.latest": "photo.badge.plus",
+        "screenshot.pasteLatest": "photo.on.rectangle",
+        "screenshot.window": "macwindow.on.rectangle",
+        "screenshot.display": "rectangle.dashed.badge.record",
+        "awareness.area": "rectangle.dashed",
+        "awareness.selection": "text.cursor",
     ]
 
     var defaultActionTitle: String {

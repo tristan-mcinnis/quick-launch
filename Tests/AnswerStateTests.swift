@@ -70,4 +70,61 @@ struct AnswerStateTests {
         #expect(!vm.isItemActionPanePresented)
         #expect(vm.resultActions.first == .pasteBack)
     }
+
+    @Test func answerWidensThePanel() async {
+        let (vm, _) = await answered("hello")
+        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthForAnswer)
+        vm.startNewConversation()
+        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+    }
+
+    @Test func chatHistoryActionOpensTheChatsCatalog() async {
+        let (vm, _) = await answered("hello")
+        #expect(vm.resultActions.contains(.chatHistory), "a saved chat means history is browsable")
+        vm.openChatHistory()
+        #expect(vm.catalogScope == .chats)
+        #expect(!vm.isAnswerActive)
+        #expect(vm.output.isEmpty)
+        #expect(vm.currentConversation == nil)
+        #expect(vm.launcherMatches.count == 1, "the saved chat shows as a row")
+    }
+
+    @Test func paletteOffersAttachCommandsEverywhere() async {
+        let (vm, _) = await answered("hello")
+        let titles = vm.paletteAttachCommands.map(\.title)
+        #expect(titles.contains("Attach Latest Screenshot"))
+        #expect(titles.contains("Send Focused Window to AI"))
+        // The filter narrows by title, best match first.
+        vm.actionQuery = "attach"
+        #expect(vm.paletteCommandMatches.first?.title == "Attach Latest Screenshot")
+        #expect(
+            vm.actionPaletteEntryCount
+                >= vm.paletteResultActions.count + vm.paletteCommandMatches.count
+        )
+    }
+
+    @Test func paletteAttachKeepsTheTypedQuestion() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-palette-attach-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try ScreenAwarenessTests.writeImage(
+            to: folder.appendingPathComponent("Screenshot 2026-08-27 at 11.00.00.png"),
+            text: "Palette"
+        )
+        let vm = QuickViewModel(service: MockQuickService())
+        vm.screenshotsFolder = folder
+        vm.isActionPalettePresented = true
+        vm.input = "what is in this shot"
+        guard let latest = vm.paletteAttachCommands.first(where: {
+            $0.itemID == LatestScreenshotFinder.commandID
+        }) else {
+            Issue.record("Attach Latest Screenshot missing from the palette")
+            return
+        }
+        await vm.runPaletteCommand(latest)
+        #expect(vm.pendingImage != nil)
+        #expect(vm.input == "what is in this shot", "the half-typed question survives the attach")
+        #expect(!vm.isActionPalettePresented)
+    }
 }

@@ -17,40 +17,10 @@ import Testing
 struct OverlayPaneStabilityTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")
 
-    /// Mirrors AppDelegate.resizePanelForContent.
+    /// The same math AppDelegate.resizePanelForContent applies — it now
+    /// lives on the view model, so the test and the app cannot drift.
     private static func estimatedWindowHeight(_ vm: QuickViewModel) -> CGFloat {
-        let visibleBody = vm.conversationMessages.count > 2
-            ? vm.conversationTranscriptText
-            : vm.output
-        let base = PanelSizing.panelHeight(
-            output: visibleBody,
-            isStreaming: vm.isStreaming,
-            errorMessage: vm.errorMessage,
-            suggestionCount: max(vm.launcherMatches.count, vm.savedPromptMatches.count),
-            showsResultActions: false,
-            hasAttachment: vm.hasPendingAttachment,
-            showsFooter: vm.showsLauncherFooter,
-            launcherRowCount: vm.launcherMatches.count,
-            showsQuestion: (vm.lastQuestion?.isEmpty == false) && !vm.isConversationHistoryPresented,
-            gridRows: vm.isGridCatalog
-                ? Int((Double(vm.launcherMatches.count) / Double(QuickViewModel.gridColumns)).rounded(.up))
-                    + max(0, vm.gridSections.count - 1)
-                : 0,
-            gridSections: vm.isGridCatalog ? vm.gridSections.count : 0,
-            showsDetailPane: vm.showsDetailPane
-        )
-        var pane: CGFloat?
-        if vm.isItemActionPanePresented {
-            pane = vm.activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
-                ?? PanelSizing.itemActionPaneHeight(rows: vm.filteredFocusedItemActions.count)
-        } else if vm.isActionPalettePresented {
-            pane = PanelSizing.actionPaletteHeight(rows: vm.actionPaletteEntryCount)
-        }
-        var total = PanelSizing.windowHeight(base: base, paneHeight: pane)
-        if vm.activeItemActionForm == .screenHistorySave {
-            total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
-        }
-        return total
+        vm.estimatedWindowHeight
     }
 
     private static func renderAtWindowSize(_ vm: QuickViewModel, name: String) throws {
@@ -119,6 +89,62 @@ struct OverlayPaneStabilityTests {
             + PanelSizing.paneBottomMargin
         #expect(during == max(before, required))
         try Self.renderAtWindowSize(vm, name: "pane-answer-palette.png")
+    }
+
+    @Test func longMarkdownAnswerFillsTheCappedWindowAndScrolls() async throws {
+        let vm = Self.makeViewModel()
+        let mock = MockQuickService()
+        let answer = (1...12).map { section in
+            """
+            ## Section \(section)
+
+            An explanation line that wraps at the panel width and keeps \
+            going for a while so the measured height matters.
+
+            ```swift
+            let code = \(section)
+            ```
+            """
+        }.joined(separator: "\n\n")
+        await mock.setResponses([StreamDelta(text: answer, finishReason: "stop")])
+        vm.service = mock
+        vm.settings.autoCopy = false
+        vm.input = "long answer"
+        await vm.submit()
+        // Far past the cap: the body takes exactly maxBodyHeight and the
+        // text scrolls inside it instead of clipping below the window.
+        #expect(
+            Self.estimatedWindowHeight(vm)
+                >= PanelSizing.inputHeight + PanelSizing.maxBodyHeight
+        )
+        try Self.renderAtWindowSize(vm, name: "pane-answer-long.png")
+    }
+
+    @Test func newsStyleBulletsRenderTightAndAligned() async throws {
+        let vm = Self.makeViewModel()
+        let mock = MockQuickService()
+        let answer = """
+        Here's a quick snapshot of top headlines:
+
+        - **World:** A massive mudslide engulfed a crossing on the \
+        Nepal-China border, with CCTV capturing people fleeing moments \
+        before impact.
+        - **Entertainment:** "Beauty in Black" Season 3 premieres this \
+        week on Netflix.
+        - **US:** Dolly Parton made a visit to a coal-mining town, and the \
+        top dog breeds for 2026 were announced.
+
+        For more detail, the full live coverage is on CNN, Al Jazeera, \
+        USA Today, and Mint.
+
+        Sources: [Al Jazeera](https://aljazeera.com), [CNN](https://cnn.com)
+        """
+        await mock.setResponses([StreamDelta(text: answer, finishReason: "stop")])
+        vm.service = mock
+        vm.settings.autoCopy = false
+        vm.input = "ok whats new?"
+        await vm.submit()
+        try Self.renderAtWindowSize(vm, name: "pane-answer-news.png")
     }
 
     @Test func detailPaneAndWidthSurviveCommandK() throws {

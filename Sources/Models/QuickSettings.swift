@@ -81,8 +81,10 @@ struct QuickSettings: Codable, Sendable {
     var lastTranslationTarget: String = "zh-Hans"
 
     // Type to Click (⌃⌥C by default): overlay hints over the app behind
-    // Quick Launch, type a hint to click the element.
+    // Quick Launch, type a hint to click the element. Disabling its direct
+    // hotkey keeps the launcher command available.
     var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
+    var typeToClickHotkeyEnabled: Bool = true
 
     // Appearance
     var appearance: AppearancePreference = .dark
@@ -149,6 +151,9 @@ struct QuickSettings: Codable, Sendable {
             ?? ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
         typeToClickHotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .typeToClickHotkey)
             ?? ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
+        typeToClickHotkeyEnabled = try c.decodeIfPresent(
+            Bool.self, forKey: .typeToClickHotkeyEnabled
+        ) ?? true
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true
@@ -510,6 +515,9 @@ extension QuickSettings {
         if hotkey == clipboardHistoryHotkey {
             return "This conflicts with the Clipboard History hotkey."
         }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
+            return "This conflicts with the Type to Click hotkey."
+        }
         return nil
     }
 
@@ -541,6 +549,9 @@ extension QuickSettings {
         if hotkey == clipboardHistoryHotkey {
             return "This conflicts with the Clipboard History hotkey."
         }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
+            return "This conflicts with the Type to Click hotkey."
+        }
         return nil
     }
 
@@ -550,13 +561,14 @@ extension QuickSettings {
             return "This conflicts with the main Quick Launch hotkey."
         }
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
-        if hotkey == typeToClickHotkey { return "This conflicts with the Type to Click hotkey." }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey { return "This conflicts with the Type to Click hotkey." }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
         if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
         return nil
     }
 
     func typeToClickHotkeyConflict() -> String? {
+        guard typeToClickHotkeyEnabled else { return nil }
         let hotkey = typeToClickHotkey
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
             return "This conflicts with the main Quick Launch hotkey."
@@ -564,7 +576,9 @@ extension QuickSettings {
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
         if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
-        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
+        if launcherItemConfigurations.contains(where: {
+            $0.itemID != "type-to-click.mode" && $0.hotkey == hotkey
+        }) { return "This conflicts with a launcher item hotkey." }
         return nil
     }
 

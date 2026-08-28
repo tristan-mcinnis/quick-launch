@@ -353,6 +353,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case searchWeb
     case regenerate
     case newChat
+    case chatHistory
     case previousChat
     case nextChat
     case renameChat
@@ -369,6 +370,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
         case .newChat: "New Chat"
+        case .chatHistory: "Browse Chat History"
         case .previousChat: "Previous Chat"
         case .nextChat: "Next Chat"
         case .renameChat: "Rename Chat"
@@ -385,6 +387,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .searchWeb: "magnifyingglass"
         case .regenerate: "arrow.clockwise"
         case .newChat: "plus.bubble"
+        case .chatHistory: "clock.arrow.circlepath"
         case .previousChat: "chevron.left"
         case .nextChat: "chevron.right"
         case .renameChat: "pencil"
@@ -401,6 +404,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")
         case .newChat: .command("n")
+        case .chatHistory: .command("h")
         case .previousChat: .command("[")
         case .nextChat: .command("]")
         case .renameChat: .command("e")

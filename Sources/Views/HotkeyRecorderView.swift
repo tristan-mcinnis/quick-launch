@@ -145,13 +145,15 @@ struct HotkeyCapture: NSViewRepresentable {
         let view = HotkeyCaptureView()
         view.onCapture = onCapture
         view.onCancel = onCancel
-        // Become first responder on next runloop tick so the view is in the
-        // window hierarchy.
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        view.requestFirstResponder()
         return view
     }
 
-    func updateNSView(_ nsView: HotkeyCaptureView, context: Context) {}
+    func updateNSView(_ nsView: HotkeyCaptureView, context: Context) {
+        nsView.onCapture = onCapture
+        nsView.onCancel = onCancel
+        nsView.requestFirstResponder()
+    }
 }
 
 final class HotkeyCaptureView: NSView {
@@ -159,6 +161,21 @@ final class HotkeyCaptureView: NSView {
     var onCancel: (() -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        requestFirstResponder()
+    }
+
+    /// SwiftUI can create the representable one turn before attaching it to
+    /// the Settings panel. Reassert focus after attachment and updates so the
+    /// next combo cannot fall through and leave the old shortcut unchanged.
+    func requestFirstResponder() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {  // Escape

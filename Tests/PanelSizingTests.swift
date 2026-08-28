@@ -32,10 +32,46 @@ struct PanelSizingTests {
     }
 
     @Test func testLongOutputCapsAtMaxBodyHeight() {
-        // 10 000 chars -> approxLines ~ 167 -> 167*22+40 well past 380, so capped
+        // 10 000 chars -> approxLines ~ 167 -> far past the cap, so capped
         let long = String(repeating: "x", count: 10_000)
         let h = PanelSizing.panelHeight(output: long, isStreaming: false, errorMessage: nil)
-        #expect(h == CGFloat(60 + 560))
+        #expect(h == PanelSizing.inputHeight + PanelSizing.maxBodyHeight)
+    }
+
+    @Test func testMeasuredBodyHeightOverridesTheCharacterGuess() {
+        let measured = PanelSizing.panelHeight(
+            output: "short", isStreaming: false, errorMessage: nil,
+            measuredBodyHeight: 300
+        )
+        #expect(measured == PanelSizing.inputHeight + 300 + 40)
+        // Still capped, and still floored for the thinking row.
+        let tall = PanelSizing.panelHeight(
+            output: "short", isStreaming: false, errorMessage: nil,
+            measuredBodyHeight: 5_000
+        )
+        #expect(tall == PanelSizing.inputHeight + PanelSizing.maxBodyHeight)
+        let thinking = PanelSizing.panelHeight(
+            output: "", isStreaming: true, errorMessage: nil,
+            measuredBodyHeight: 0
+        )
+        #expect(thinking == PanelSizing.inputHeight + 68)
+    }
+
+    @Test func testTranscriptBlockAppearsAfterTwoMessages() {
+        #expect(PanelSizing.transcriptBlockHeight(messageCount: 2) == 0)
+        #expect(
+            PanelSizing.transcriptBlockHeight(messageCount: 4)
+                == PanelSizing.transcriptHeight + 17
+        )
+        let withTranscript = PanelSizing.panelHeight(
+            output: "answer", isStreaming: false, errorMessage: nil,
+            measuredBodyHeight: 100,
+            transcriptHeight: PanelSizing.transcriptBlockHeight(messageCount: 4)
+        )
+        #expect(
+            withTranscript
+                == PanelSizing.inputHeight + PanelSizing.transcriptHeight + 17 + 140
+        )
     }
 
     // MARK: - Error banner adds 40

@@ -232,9 +232,18 @@ private struct GeneralTab: View {
                     Spacer()
                     ActionHotkeyRecorderView(
                         hotkey: Binding(
-                            get: { viewModel.settings.typeToClickHotkey },
+                            get: {
+                                viewModel.settings.typeToClickHotkeyEnabled
+                                    ? viewModel.settings.typeToClickHotkey
+                                    : nil
+                            },
                             set: { value in
-                                viewModel.settings.typeToClickHotkey = value ?? ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
+                                if let value {
+                                    viewModel.settings.typeToClickHotkey = value
+                                    viewModel.settings.typeToClickHotkeyEnabled = true
+                                } else {
+                                    viewModel.settings.typeToClickHotkeyEnabled = false
+                                }
                                 viewModel.settings.save()
                             }
                         ),
@@ -245,6 +254,14 @@ private struct GeneralTab: View {
                 }
                 if let error = viewModel.settings.typeToClickHotkeyConflict() ?? viewModel.typeToClickHotkeyRegistrationError {
                     Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
+                } else if viewModel.settings.typeToClickHotkeyEnabled {
+                    Text("Press \(viewModel.settings.typeToClickHotkey.displayName), type a gold label, and press Esc or the shortcut again to close.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No direct hotkey. Type to Click remains available from Quick Launch.")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Toggle("Double-tap right ⌘ sends the focused window to AI", isOn: $viewModel.settings.screenAwarenessDoubleTap)

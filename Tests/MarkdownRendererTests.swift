@@ -374,6 +374,50 @@ struct MarkdownRendererTests {
         #expect(font!.fontDescriptor.symbolicTraits.contains(.italic))
     }
 
+    // MARK: - List layout (the marker stays on the text's line)
+
+    @Test func testListMarkerAndTextShareOneLine() {
+        let result = MarkdownRenderer.render("- **World:** A mudslide engulfed a crossing")
+        #expect(result.string.contains("\u{2022} World: A mudslide engulfed a crossing"))
+        #expect(!result.string.contains("\u{2022}\n"), "the bullet must not sit alone on its line")
+    }
+
+    @Test func testListItemsAreSingleSpaced() {
+        let result = MarkdownRenderer.render("- One\n- Two\n- Three")
+        #expect(result.string.contains("\u{2022} One\n\u{2022} Two\n\u{2022} Three"))
+    }
+
+    @Test func testOrderedMarkersShareTheLineToo() {
+        let result = MarkdownRenderer.render("1. First\n2. Second")
+        #expect(result.string.contains("1. First\n2. Second"))
+    }
+
+    @Test func testListItemsHangWrappedLinesUnderTheText() {
+        let result = MarkdownRenderer.render("- A long item that will wrap")
+        let range = (result.string as NSString).range(of: "A long item")
+        let attrs = result.attributes(at: range.location, effectiveRange: nil)
+        let style = attrs[.paragraphStyle] as? NSParagraphStyle
+        #expect(style != nil)
+        #expect(style!.headIndent > 0)
+        #expect(style!.firstLineHeadIndent == 0)
+    }
+
+    @Test func testNestedItemsKeepTheirOwnIndent() {
+        let result = MarkdownRenderer.render("- Parent\n  - Child")
+        let child = (result.string as NSString).range(of: "Child")
+        let parent = (result.string as NSString).range(of: "Parent")
+        let childStyle = result.attributes(at: child.location, effectiveRange: nil)[.paragraphStyle] as? NSParagraphStyle
+        let parentStyle = result.attributes(at: parent.location, effectiveRange: nil)[.paragraphStyle] as? NSParagraphStyle
+        #expect(childStyle != nil && parentStyle != nil)
+        #expect(childStyle!.headIndent > parentStyle!.headIndent)
+    }
+
+    @Test func testBlockQuoteTextFollowsWithoutABlankGap() {
+        let result = MarkdownRenderer.render("Intro\n\n> Quoted line")
+        #expect(!result.string.contains("\n\n\n"), "no triple newline around the quote")
+        #expect(result.string.contains("Quoted line"))
+    }
+
     // MARK: - Multiple paragraphs preserve separation
 
     @Test func testMultipleParagraphsSeparated() {

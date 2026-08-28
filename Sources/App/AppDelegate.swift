@@ -20,10 +20,21 @@ final class KeyablePanel: NSPanel {
     var translateHandler: (() -> Bool)?
     /// ⌫ on an empty field pops a layer. Returns true when consumed.
     var backspaceHandler: (() -> Bool)?
+    /// Escape must work even when a SwiftUI TextField's field editor consumes
+    /// cancelOperation before the root view sees `.onKeyPress(.escape)`.
+    var escapeHandler: (() -> Bool)?
 
     /// Unmodified keys never reach `performKeyEquivalent`; the field editor
     /// eats Backspace before SwiftUI sees it. `sendEvent` sees everything.
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown,
+           event.keyCode == 53,
+           event.modifierFlags
+               .intersection(.deviceIndependentFlagsMask)
+               .subtracting([.function, .numericPad, .capsLock]).isEmpty,
+           escapeHandler?() == true {
+            return
+        }
         if event.type == .keyDown,
            event.keyCode == 51,
            event.modifierFlags
@@ -511,6 +522,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backspaceHandler = { [weak viewModel] in
             viewModel?.popLayerForEmptyBackspace() ?? false
         }
+        panel.escapeHandler = { [weak viewModel] in
+            viewModel?.handleEscapeKey() ?? false
+        }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -558,6 +572,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOverlay(captureSelectionTarget: Bool = true) {
         guard let panel else { return }
+        // The main launcher and Type to Click both own keyboard focus. Never
+        // leave the always-on-top hint panels stacked above the launcher.
+        if typeToClickController?.isActive == true { hideTypeToClick() }
         overlayClearTask?.cancel()
         overlayClearTask = nil
         overlayRetentionID = nil
@@ -574,14 +591,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: QuickViewModel.panelWidth,
+                panelWidth: viewModel?.currentPanelWidth ?? QuickViewModel.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
             // Keep the input row on the centre line whatever the panel's
             // current height: the frame's top edge is what the eye reads.
             var frame = panel.frame
             frame.origin = NSPoint(x: origin.x, y: origin.y - (frame.height - PanelSizing.inputHeight))
-            panel.setFrameOrigin(frame.origin)
+            // A retained answer keeps the panel tall; without the clamp the
+            // bottom of the window reopened below the screen edge.
+            frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+            panel.setFrame(frame, display: false)
         }
         // No fade. The panel appears on the same frame as the hotkey, like
         // Raycast; a fade only adds perceived latency.
@@ -740,6 +760,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             vm.typeToClickHotkeyRegistrationError = vm.settings.typeToClickHotkeyConflict()
             return
         }
+        guard vm.settings.typeToClickHotkeyEnabled else {
+            vm.typeToClickHotkeyRegistrationError = nil
+            return
+        }
         let hotkey = vm.settings.typeToClickHotkey
         let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
         typeToClickHotKey = GlobalHotKey(
@@ -793,10 +817,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.dismiss()
             return
         }
-        guard let target = selectedTextService.currentExternalTarget() else { return }
         if panel?.isVisible == true { hideOverlay() }
         let controller = typeToClickController ?? TypeToClickController()
         typeToClickController = controller
+        guard let target = selectedTextService.currentExternalTarget() else {
+            controller.presentMessage("No app window found to control")
+            return
+        }
         controller.start(in: target.processIdentifier)
     }
 
@@ -925,7 +952,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let vm = viewModel else { return }
         vm.launcherItemHotkeyRegistrationErrors.removeAll()
         for configuration in vm.settings.launcherItemConfigurations {
-            guard let hotkey = configuration.hotkey,
+            // Type to Click has one canonical optional hotkey. Ignore legacy
+            // launcher-item records from before its ⌘K editor was unified.
+            guard configuration.itemID != "type-to-click.mode",
+                  let hotkey = configuration.hotkey,
                   vm.settings.launcherItemHotkeyConflict(
                     for: configuration.id
                   ) == nil else { continue }
@@ -1239,46 +1269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func targetPanelHeight(_ vm: QuickViewModel) -> CGFloat {
-        let visibleBody = vm.conversationMessages.count > 2
-            ? vm.conversationTranscriptText
-            : vm.output
         // Base height as if no pane were floating: the launcher list stays
         // fully visible behind the ⌘K pane, so opening or closing a pane
         // does not move the window unless the pane itself needs more room.
-        let base = PanelSizing.panelHeight(
-            output: visibleBody,
-            isStreaming: vm.isStreaming,
-            errorMessage: vm.errorMessage,
-            suggestionCount: max(vm.launcherMatches.count, vm.savedPromptMatches.count),
-            showsResultActions: false,
-            hasAttachment: vm.hasPendingAttachment,
-            showsFooter: vm.showsLauncherFooter,
-            launcherRowCount: vm.launcherMatches.count,
-            showsQuestion: (vm.lastQuestion?.isEmpty == false) && !vm.isConversationHistoryPresented,
-            gridRows: vm.isGridCatalog
-                ? Int((Double(vm.launcherMatches.count) / Double(QuickViewModel.gridColumns)).rounded(.up))
-                    + max(0, vm.gridSections.count - 1)
-                : 0,
-            gridSections: vm.isGridCatalog ? vm.gridSections.count : 0,
-            showsDetailPane: vm.showsDetailPane
-        )
-        var pane: CGFloat?
-        if vm.isItemActionPanePresented {
-            pane = vm.activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
-                ?? PanelSizing.itemActionPaneHeight(rows: vm.filteredFocusedItemActions.count)
-        } else if vm.isActionPalettePresented {
-            pane = PanelSizing.actionPaletteHeight(rows: vm.actionPaletteEntryCount)
-        }
-        var total = PanelSizing.windowHeight(
-            base: base,
-            paneHeight: pane,
-            paneTop: PanelSizing.inputHeight
-                + (vm.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
-        )
-        if vm.activeItemActionForm == .screenHistorySave {
-            total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
-        }
-        return total
+        // The math lives on the view model so the render-proof tests hold
+        // the drawn view and the window to the same numbers.
+        vm.estimatedWindowHeight
     }
 
     @objc private func showOverlayFromMenu() {
