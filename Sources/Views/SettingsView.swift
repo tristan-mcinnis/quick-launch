@@ -227,6 +227,26 @@ private struct GeneralTab: View {
                     Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
                 }
 
+                HStack {
+                    Text("Type to Click")
+                    Spacer()
+                    ActionHotkeyRecorderView(
+                        hotkey: Binding(
+                            get: { viewModel.settings.typeToClickHotkey },
+                            set: { value in
+                                viewModel.settings.typeToClickHotkey = value ?? ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
+                                viewModel.settings.save()
+                            }
+                        ),
+                        label: "",
+                        changeNotification: .typeToClickSettingsChanged
+                    )
+                    .frame(width: 220)
+                }
+                if let error = viewModel.settings.typeToClickHotkeyConflict() ?? viewModel.typeToClickHotkeyRegistrationError {
+                    Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
+                }
+
                 Toggle("Double-tap right ⌘ sends the focused window to AI", isOn: $viewModel.settings.screenAwarenessDoubleTap)
                     .onChange(of: viewModel.settings.screenAwarenessDoubleTap) { _, _ in
                         viewModel.settings.save()

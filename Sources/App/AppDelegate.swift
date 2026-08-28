@@ -95,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translatorHotKey: GlobalHotKey?
     private var translatorPanel: TranslatorPanel?
     private var translatorModel: TranslatorModel?
+    private var typeToClickHotKey: GlobalHotKey?
+    private var typeToClickController: TypeToClickController?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
     private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
     private var localMonitor: Any?
@@ -396,13 +398,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.showTranslator() }
         }
         NotificationCenter.default.addObserver(
+            forName: .openTypeToClick,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.showTypeToClick() }
+        }
+        NotificationCenter.default.addObserver(
             forName: .translatorSettingsChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.registerTranslatorHotkey() }
         }
+        NotificationCenter.default.addObserver(
+            forName: .typeToClickSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.registerTypeToClickHotkey() }
+        }
         registerTranslatorHotkey()
+        registerTypeToClickHotkey()
 
         NotificationCenter.default.addObserver(
             forName: .screenAwarenessSettingsChanged,
@@ -715,6 +732,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : nil
     }
 
+    private func registerTypeToClickHotkey() {
+        typeToClickHotKey?.invalidate()
+        typeToClickHotKey = nil
+        guard let vm = viewModel else { return }
+        guard vm.settings.typeToClickHotkeyConflict() == nil else {
+            vm.typeToClickHotkeyRegistrationError = vm.settings.typeToClickHotkeyConflict()
+            return
+        }
+        let hotkey = vm.settings.typeToClickHotkey
+        let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+        typeToClickHotKey = GlobalHotKey(
+            keyCode: UInt32(hotkey.keyCode),
+            modifiers: GlobalHotKey.carbonModifiers(from: flags)
+        ) { [weak self] in
+            self?.showTypeToClick()
+        }
+        vm.typeToClickHotkeyRegistrationError = typeToClickHotKey == nil
+            ? "That shortcut is already used by macOS or another app."
+            : nil
+    }
+
     /// The Translator window: opened from ⇧⌘T or the Translate item. Arrives
     /// with the selection of the app behind it; toggles closed on repeat.
     func showTranslator() {
@@ -747,6 +785,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func hideTranslator() {
         translatorPanel?.orderOut(nil)
+    }
+
+    func showTypeToClick() {
+        guard let target = selectedTextService.currentExternalTarget() else { return }
+        if panel?.isVisible == true { hideOverlay() }
+        let controller = typeToClickController ?? TypeToClickController()
+        typeToClickController = controller
+        controller.start(in: target.processIdentifier)
+    }
+
+    func hideTypeToClick() {
+        typeToClickController?.dismiss()
     }
 
     private func makeTranslatorModel(for vm: QuickViewModel) -> TranslatorModel {

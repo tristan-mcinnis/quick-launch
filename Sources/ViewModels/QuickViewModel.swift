@@ -21,6 +21,7 @@ import Observation
     var hotkeyRegistrationError: String?
     var clipboardHistoryHotkeyRegistrationError: String?
     var translatorHotkeyRegistrationError: String?
+    var typeToClickHotkeyRegistrationError: String?
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
     var isActionPalettePresented: Bool = false
     var isApplicationActionPanePresented: Bool = false
@@ -632,6 +633,14 @@ import Observation
             value: "translate.mode",
             keywords: "chinese english zh en"
         )
+        let typeToClick = LauncherCatalogItem(
+            kind: .command,
+            itemID: "type-to-click.mode",
+            title: "Type to Click",
+            detail: "Keyboard hints over the app behind Quick Launch; type a hint to click",
+            value: "type-to-click.mode",
+            keywords: "click mouse hint overlay accessibility elements buttons"
+        )
         let settings = LauncherCatalogItem(
             kind: .command,
             itemID: "settings.open",
@@ -656,7 +665,7 @@ import Observation
         var commands: [LauncherCatalogItem] = []
         commands.append(contentsOf: layouts)
         commands.append(contentsOf: screenshots)
-        commands.append(contentsOf: [translate, caffeine, until])
+        commands.append(contentsOf: [translate, typeToClick, caffeine, until])
         commands.append(contentsOf: timed)
         commands.append(contentsOf: [agentWatch, status])
         if let screenHistoryControl { commands.append(screenHistoryControl) }
@@ -3581,6 +3590,13 @@ import Observation
             input = ""
             NotificationCenter.default.post(name: .dismissOverlay, object: nil)
             NotificationCenter.default.post(name: .openTranslator, object: nil)
+            return
+        }
+
+        if item.value == "type-to-click.mode" {
+            input = ""
+            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            NotificationCenter.default.post(name: .openTypeToClick, object: nil)
             return
         }
 

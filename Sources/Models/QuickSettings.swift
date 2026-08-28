@@ -80,6 +80,10 @@ struct QuickSettings: Codable, Sendable {
     var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
     var lastTranslationTarget: String = "zh-Hans"
 
+    // Type to Click (⌃⌥C by default): overlay hints over the app behind
+    // Quick Launch, type a hint to click the element.
+    var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
+
     // Appearance
     var appearance: AppearancePreference = .dark
 
@@ -143,6 +147,8 @@ struct QuickSettings: Codable, Sendable {
         screenAwarenessDoubleTap = try c.decodeIfPresent(Bool.self, forKey: .screenAwarenessDoubleTap) ?? true
         translatorHotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .translatorHotkey)
             ?? ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
+        typeToClickHotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .typeToClickHotkey)
+            ?? ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true
@@ -544,6 +550,19 @@ extension QuickSettings {
             return "This conflicts with the main Quick Launch hotkey."
         }
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
+        if hotkey == typeToClickHotkey { return "This conflicts with the Type to Click hotkey." }
+        if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
+        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
+        return nil
+    }
+
+    func typeToClickHotkeyConflict() -> String? {
+        let hotkey = typeToClickHotkey
+        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+            return "This conflicts with the main Quick Launch hotkey."
+        }
+        if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
+        if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
         if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
         return nil

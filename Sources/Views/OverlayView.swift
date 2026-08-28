@@ -1651,6 +1651,8 @@ extension Notification.Name {
     static let screenAwarenessSettingsChanged = Notification.Name("QuickLaunch.screenAwarenessSettingsChanged")
     static let openTranslator = Notification.Name("QuickLaunch.openTranslator")
     static let translatorSettingsChanged = Notification.Name("QuickLaunch.translatorSettingsChanged")
+    static let openTypeToClick = Notification.Name("QuickLaunch.openTypeToClick")
+    static let typeToClickSettingsChanged = Notification.Name("QuickLaunch.typeToClickSettingsChanged")
     static let openSettings = Notification.Name("QuickLaunch.openSettings")
     static let hotkeyChanged = Notification.Name("QuickLaunch.hotkeyChanged")
     static let actionHotkeysChanged = Notification.Name("QuickLaunch.actionHotkeysChanged")
