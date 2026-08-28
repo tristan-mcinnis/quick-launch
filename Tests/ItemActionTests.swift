@@ -110,6 +110,13 @@ struct ItemActionTests {
         vm.setLauncherItemHotkey(nil, for: item)
         #expect(!vm.settings.typeToClickHotkeyEnabled)
         #expect(vm.launcherItemHotkey(for: item) == nil)
+
+        vm.settings.launcherItemConfigurations.append(LauncherItemConfiguration(
+            kind: .application,
+            itemID: "com.example.other",
+            alias: "CLICK"
+        ))
+        #expect(vm.launcherItemConfigurationConflict(for: item)?.contains("alias") == true)
     }
 
     @Test func panelCapturesEscapeBeforeFirstResponderDispatch() throws {

@@ -587,6 +587,12 @@ extension QuickSettings {
         if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
             return "This conflicts with the main Quick Launch hotkey."
         }
+        if hotkey == translatorHotkey {
+            return "This conflicts with the Translator hotkey."
+        }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
+            return "This conflicts with the Type to Click hotkey."
+        }
         if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
             return "This conflicts with a quick-action hotkey."
         }

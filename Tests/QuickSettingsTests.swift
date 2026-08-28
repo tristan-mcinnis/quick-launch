@@ -186,6 +186,16 @@ struct QuickSettingsTests {
         #expect(settings.actionHotkeyConflict(for: firstID)?.contains(settings.savedPrompts[1].name) == true)
     }
 
+    @Test func clipboardHistoryConflictNamesDedicatedHotkeys() {
+        var settings = QuickSettings()
+        settings.clipboardHistoryHotkey = settings.typeToClickHotkey
+        #expect(settings.clipboardHistoryHotkeyConflict()?.contains("Type to Click") == true)
+
+        settings.typeToClickHotkeyEnabled = false
+        settings.clipboardHistoryHotkey = settings.translatorHotkey
+        #expect(settings.clipboardHistoryHotkeyConflict()?.contains("Translator") == true)
+    }
+
     // MARK: - 2. Hotkey defaults
 
     @Test func testHotkeyDefaults() {

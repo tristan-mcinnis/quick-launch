@@ -4686,9 +4686,6 @@ import Observation
     }
 
     func launcherItemConfigurationConflict(for item: LauncherCatalogItem) -> String? {
-        if item.itemID == "type-to-click.mode" {
-            return settings.typeToClickHotkeyConflict() ?? typeToClickHotkeyRegistrationError
-        }
         let id = LauncherItemConfiguration(kind: item.kind, itemID: item.itemID).id
         let alias = launcherItemAlias(for: item).trimmingCharacters(in: .whitespacesAndNewlines)
         if !alias.isEmpty, settings.launcherItemConfigurations.contains(where: {
@@ -4697,6 +4694,9 @@ import Observation
                     .localizedCaseInsensitiveCompare(alias) == .orderedSame
         }) {
             return "This alias is already used by another launcher item."
+        }
+        if item.itemID == "type-to-click.mode" {
+            return settings.typeToClickHotkeyConflict() ?? typeToClickHotkeyRegistrationError
         }
         return settings.launcherItemHotkeyConflict(for: id)
             ?? launcherItemHotkeyRegistrationErrors[id]
