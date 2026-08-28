@@ -2,10 +2,11 @@ import AppKit
 import ApplicationServices
 
 /// Borderless panel that can still become key, so the overlay receives
-/// keystrokes without activating the app behind it (same trick as KeyablePanel).
+/// keystrokes (same trick as KeyablePanel).
 final class TypeToClickPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
 }
 
 /// Coordinates the type-to-click overlay: full-screen transparent panel,
@@ -17,20 +18,27 @@ final class TypeToClickController {
     private let service: TypeToClickServicing
     private let panel: NSPanel
     private let overlayView = TypeToClickOverlayView()
+    private let primaryTop: CGFloat
 
     private var targets: [TypeToClickTarget] = []
     private var typed = ""
+    private var activePID: pid_t = 0
 
-    /// Called once when the mode dismisses (after a click, Esc, or release).
+    /// Called once when the mode dismisses (after a click or Esc).
     var onDismiss: (() -> Void)?
 
     init(service: TypeToClickServicing = TypeToClickService()) {
         self.service = service
 
-        let frame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        // Span every connected display, not just the primary one. AX frames are
+        // anchored at the primary display's top-left, so the overlay must cover
+        // the full union of screen frames to draw hints on all of them.
+        let screens = NSScreen.screens
+        let union = screens.map(\.frame).reduce(NSRect.null) { $0.union($1) }
+        primaryTop = screens.first?.frame.maxY ?? 0
         panel = TypeToClickPanel(
-            contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            contentRect: union,
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -53,12 +61,27 @@ final class TypeToClickController {
     func start(in pid: pid_t) {
         guard !isActive else { return }
         typed = ""
+        activePID = pid
         targets = service.targets(in: pid, alphabet: Self.defaultAlphabet)
-        targets = targets.filter { panel.frame.intersects(windowRect(for: $0.frame)) }
+
+        // windowRect(for:) returns panel-local coordinates, so intersect against
+        // the panel's local bounds (origin .zero), not its global frame.
+        let panelBounds = NSRect(origin: .zero, size: panel.frame.size)
+        targets = targets.filter { panelBounds.intersects(windowRect(for: $0.frame)) }
         render()
+
+        // The app must be active for the panel to become key and receive
+        // keystrokes. Activation races with makeKey() when triggered from a
+        // global hotkey, so defer the key/first-responder setup one run-loop
+        // turn (the launcher gets the same effect via its SwiftUI focus
+        // request).
+        NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
-        panel.makeKey()
-        panel.makeFirstResponder(overlayView)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.panel.isVisible else { return }
+            self.panel.makeKey()
+            _ = self.panel.makeFirstResponder(self.overlayView)
+        }
     }
 
     func dismiss() {
@@ -66,7 +89,12 @@ final class TypeToClickController {
         panel.orderOut(nil)
         targets = []
         typed = ""
+        let pid = activePID
+        activePID = 0
         onDismiss?()
+        if pid != 0 {
+            NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+        }
     }
 
     // MARK: - Key handling
@@ -112,16 +140,16 @@ final class TypeToClickController {
         }
     }
 
-    /// Converts an AX frame (top-left global origin, y down) to overlay-window
-    /// coordinates (bottom-left origin, y up) on the primary screen.
+    /// Converts an AX frame (global top-left origin, y down) to overlay-panel
+    /// coordinates (bottom-left origin of the union of screens, y up).
     private func windowRect(for axFrame: CGRect) -> NSRect {
-        guard let screen = NSScreen.main else {
-            return NSRect(origin: .zero, size: axFrame.size)
-        }
-        let height = screen.frame.height
+        // AX global -> AppKit global (y flipped around the primary top).
+        let appKitX = axFrame.minX
+        let appKitY = primaryTop - axFrame.minY - axFrame.height
+        // AppKit global -> panel-local.
         return NSRect(
-            x: axFrame.minX - screen.frame.minX,
-            y: height - axFrame.minY - axFrame.height + screen.frame.minY,
+            x: appKitX - panel.frame.minX,
+            y: appKitY - panel.frame.minY,
             width: axFrame.width,
             height: axFrame.height
         )

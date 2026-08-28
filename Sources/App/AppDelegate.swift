@@ -788,6 +788,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showTypeToClick() {
+        // Toggle: a second hotkey press while the overlay is up dismisses it.
+        if let controller = typeToClickController, controller.isActive {
+            controller.dismiss()
+            return
+        }
         guard let target = selectedTextService.currentExternalTarget() else { return }
         if panel?.isVisible == true { hideOverlay() }
         let controller = typeToClickController ?? TypeToClickController()
