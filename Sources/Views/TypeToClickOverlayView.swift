@@ -4,6 +4,7 @@ import AppKit
 struct TypeToClickBox {
     let rect: NSRect        // in the overlay window's coordinate space
     let hint: String
+    let isSelected: Bool
 }
 
 /// Draws the hint boxes and becomes first responder to capture raw key events.
@@ -43,7 +44,9 @@ final class TypeToClickOverlayView: NSView {
     /// click point without washing the app in coloured target outlines.
     private func drawHint(_ box: TypeToClickBox) {
         let fill = NSColor(srgbRed: 0.97, green: 0.77, blue: 0.02, alpha: 1)
-        let stroke = NSColor(srgbRed: 0.43, green: 0.31, blue: 0.01, alpha: 0.72)
+        let stroke = box.isSelected
+            ? NSColor(srgbRed: 0.08, green: 0.07, blue: 0.03, alpha: 0.96)
+            : NSColor(srgbRed: 0.43, green: 0.31, blue: 0.01, alpha: 0.72)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .bold),
             .foregroundColor: NSColor(srgbRed: 0.08, green: 0.07, blue: 0.03, alpha: 1),
@@ -95,9 +98,9 @@ final class TypeToClickOverlayView: NSView {
         tailOutline.line(to: NSPoint(x: tipX, y: chip.minY - tailHeight))
         tailOutline.line(to: NSPoint(x: tipX + tailWidth / 2, y: chip.minY + 0.5))
         stroke.setStroke()
-        tailOutline.lineWidth = 0.75
+        tailOutline.lineWidth = box.isSelected ? 1.5 : 0.75
         tailOutline.stroke()
-        rounded.lineWidth = 0.75
+        rounded.lineWidth = box.isSelected ? 2 : 0.75
         rounded.stroke()
         string.draw(at: NSPoint(
             x: chip.midX - textSize.width / 2,

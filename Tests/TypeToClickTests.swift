@@ -46,20 +46,30 @@ final class TypeToClickTests: XCTestCase {
 
     func testHintKeysAllowLingeringHotkeyModifiersButRejectCommandChords() {
         XCTAssertEqual(
-            TypeToClickKeyPolicy.hintCharacter(
+            TypeToClickKeyPolicy.queryCharacter(
                 charactersIgnoringModifiers: "S",
                 modifiers: [.control, .option, .shift]
             ),
             "s"
         )
-        XCTAssertNil(TypeToClickKeyPolicy.hintCharacter(
+        XCTAssertNil(TypeToClickKeyPolicy.queryCharacter(
             charactersIgnoringModifiers: "q",
             modifiers: [.command]
         ))
-        XCTAssertNil(TypeToClickKeyPolicy.hintCharacter(
-            charactersIgnoringModifiers: "!",
+        XCTAssertEqual(TypeToClickKeyPolicy.queryCharacter(
+            charactersIgnoringModifiers: " ",
             modifiers: []
-        ))
+        ), " ")
+    }
+
+    func testEnterModifiersMapToClickActions() {
+        XCTAssertEqual(TypeToClickKeyPolicy.action(for: []), .activate)
+        XCTAssertEqual(TypeToClickKeyPolicy.action(for: [.control]), .secondaryClick)
+        let modifiers: NSEvent.ModifierFlags = [.command, .shift]
+        XCTAssertEqual(
+            TypeToClickKeyPolicy.action(for: modifiers),
+            .click(modifiers: modifiers.rawValue)
+        )
     }
 
     func testAccessibilityFramesConvertToUnionPanelCoordinates() {
@@ -79,6 +89,25 @@ final class TypeToClickTests: XCTestCase {
             ),
             NSRect(x: 40, y: 750, width: 100, height: 50)
         )
+        // AX uses one global top-left coordinate space anchored to the primary
+        // display. Subtracting the AppKit panel origin correctly handles a
+        // display mounted above or below the primary; a per-screen top would not.
+        XCTAssertEqual(
+            TypeToClickCoordinates.panelRect(
+                for: CGRect(x: 100, y: -800, width: 100, height: 50),
+                primaryTop: 900,
+                panelOrigin: CGPoint(x: 0, y: 900)
+            ),
+            NSRect(x: 100, y: 750, width: 100, height: 50)
+        )
+        XCTAssertEqual(
+            TypeToClickCoordinates.panelRect(
+                for: CGRect(x: 100, y: 1_000, width: 100, height: 50),
+                primaryTop: 900,
+                panelOrigin: CGPoint(x: 0, y: -900)
+            ),
+            NSRect(x: 100, y: 750, width: 100, height: 50)
+        )
     }
 
     func testOnlyVisibleEnabledElementsWithPressActionsAreTargets() {
@@ -91,6 +120,13 @@ final class TypeToClickTests: XCTestCase {
         ))
         XCTAssertFalse(TypeToClickElementPolicy.isActionable(
             actionNames: [], enabled: true, hidden: false, size: size
+        ))
+        XCTAssertTrue(TypeToClickElementPolicy.isActionable(
+            actionNames: [],
+            role: kAXTextFieldRole as String,
+            enabled: true,
+            hidden: false,
+            size: size
         ))
         XCTAssertFalse(TypeToClickElementPolicy.isActionable(
             actionNames: [kAXPressAction as String], enabled: false, hidden: false, size: size
@@ -107,15 +143,53 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
-    func testUntrustedPermissionMessageStaysOpenUntilExplicitDismiss() {
+    func testUntrustedPermissionMessageStaysOpenAndNeverScans() throws {
         _ = NSApplication.shared
-        let controller = TypeToClickController(service: UntrustedTypeToClickService())
+        let service = UntrustedTypeToClickService()
+        let controller = TypeToClickController(service: service)
 
         controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
         XCTAssertTrue(controller.isActive)
+        XCTAssertEqual(service.targetCalls, 0)
         controller.dismiss()
         XCTAssertFalse(controller.isActive)
+    }
+
+    @MainActor
+    func testQueryAndEnterAreBufferedWhileAccessibilityScanFinishes() async throws {
+        _ = NSApplication.shared
+        let performed = expectation(description: "buffered action performed")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let frame = CGRect(
+            x: screen.frame.minX + 100,
+            y: screen.frame.maxY - screen.frame.minY - 130,
+            width: 120,
+            height: 30
+        )
+        let service = BufferedTypeToClickService(frame: frame, performed: performed)
+        let controller = TypeToClickController(service: service)
+        controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+
+        for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
+            panel.sendEvent(try keyEvent(
+                panel: panel,
+                keyCode: UInt16(keyCode),
+                characters: character
+            ))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [performed], timeout: 2)
+        XCTAssertEqual(service.performedAction, .activate)
+        controller.dismiss()
     }
 
     @MainActor
@@ -149,12 +223,76 @@ final class TypeToClickTests: XCTestCase {
 
         XCTAssertEqual(received, "s")
     }
+
+    @MainActor
+    private func keyEvent(
+        panel: TypeToClickPanel,
+        keyCode: UInt16,
+        characters: String,
+        modifiers: NSEvent.ModifierFlags = []
+    ) throws -> NSEvent {
+        let windowNumber = panel.windowNumber
+        let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
+        )
+        return try XCTUnwrap(event)
+    }
 }
 
 private final class UntrustedTypeToClickService: TypeToClickServicing, @unchecked Sendable {
+    private(set) var targetCalls = 0
     func isAccessibilityTrusted(prompt: Bool) -> Bool { false }
     func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
-        TypeToClickScanResult(targets: [], wasTruncated: false)
+        targetCalls += 1
+        return TypeToClickScanResult(targets: [], wasTruncated: false)
     }
-    func press(_ target: TypeToClickTarget) -> Bool { false }
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool { false }
+}
+
+private final class BufferedTypeToClickService: TypeToClickServicing, @unchecked Sendable {
+    private let frame: CGRect
+    private let performed: XCTestExpectation
+    private let lock = NSLock()
+    private var storedAction: TypeToClickAction?
+
+    init(frame: CGRect, performed: XCTestExpectation) {
+        self.frame = frame
+        self.performed = performed
+    }
+
+    var performedAction: TypeToClickAction? {
+        lock.withLock { storedAction }
+    }
+
+    func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
+
+    func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
+        Thread.sleep(forTimeInterval: 0.12)
+        let target = TypeToClickTarget(
+            element: AXUIElementCreateSystemWide(),
+            hint: "sa",
+            frame: frame,
+            label: "Save",
+            searchText: "Save button",
+            role: kAXButtonRole as String,
+            actionNames: [kAXPressAction as String],
+            kind: .element
+        )
+        return TypeToClickScanResult(targets: [target], wasTruncated: false)
+    }
+
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
+        lock.withLock { storedAction = action }
+        performed.fulfill()
+        return true
+    }
 }

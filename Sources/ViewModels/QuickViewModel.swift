@@ -637,9 +637,9 @@ import Observation
             kind: .command,
             itemID: "type-to-click.mode",
             title: "Type to Click",
-            detail: "Keyboard hints over the app behind Quick Launch; type a hint to click",
+            detail: "Search controls and app menus, select a gold hint, then press Return",
             value: "type-to-click.mode",
-            keywords: "click mouse hint overlay accessibility elements buttons"
+            keywords: "click mouse hint overlay accessibility elements buttons menus file edit view window"
         )
         let settings = LauncherCatalogItem(
             kind: .command,

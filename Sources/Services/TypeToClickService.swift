@@ -1,7 +1,24 @@
 import AppKit
 import ApplicationServices
 
-/// A single on-screen, actionable element with its assigned hint key.
+/// A single action that Type to Click can perform on its selected result.
+enum TypeToClickAction: Equatable, Sendable {
+    /// Prefer the element's semantic Accessibility action, then fall back to a
+    /// guarded click at its current midpoint.
+    case activate
+    /// Send a left click carrying the requested AppKit modifier flags.
+    case click(modifiers: UInt)
+    /// Send a right click at the element midpoint.
+    case secondaryClick
+}
+
+enum TypeToClickTargetKind: String, Sendable {
+    case element
+    case menuItem
+}
+
+/// A searchable Accessibility element. Closed application-menu commands have
+/// no on-screen frame or hint, but remain searchable by their complete path.
 ///
 /// `AXUIElement` is an immutable CF handle but the imported C API has no Swift
 /// Sendable annotation. Enumeration finishes before this value is consumed on
@@ -9,28 +26,58 @@ import ApplicationServices
 /// tasks concurrently.
 struct TypeToClickTarget: @unchecked Sendable {
     let element: AXUIElement
-    let hint: String
-    /// Accessibility global frame (top-left origin, y grows down).
-    let frame: CGRect
-    /// Role / title / value — for debugging and future filtering.
+    let hint: String?
+    /// Accessibility global frame (top-left origin, y grows down). Menu items
+    /// in a closed menu intentionally have no frame.
+    let frame: CGRect?
     let label: String
+    let searchText: String
+    let role: String
+    let actionNames: [String]
+    let kind: TypeToClickTargetKind
 }
 
-/// AX roles are not a reliable indication that an element can be clicked.
-/// Buttons in web views can use generic roles, while static text and images
-/// often advertise no action at all. Keep the decision action-based.
+/// Roles and semantic actions are both needed. Web controls often expose a
+/// generic role with AXPress, while text fields and some Electron controls may
+/// expose a useful role but no press action.
 enum TypeToClickElementPolicy {
+    private static let semanticActions: Set<String> = [
+        kAXPressAction as String,
+        kAXShowMenuAction as String,
+        kAXConfirmAction as String,
+    ]
+
+    private static let interactiveRoles: Set<String> = [
+        kAXButtonRole as String,
+        kAXCheckBoxRole as String,
+        kAXRadioButtonRole as String,
+        "AXLink",
+        kAXMenuItemRole as String,
+        kAXPopUpButtonRole as String,
+        kAXComboBoxRole as String,
+        kAXTextFieldRole as String,
+        kAXTextAreaRole as String,
+    ]
+
     static func isActionable(
         actionNames: [String],
+        role: String = "",
         enabled: Bool,
         hidden: Bool,
         size: CGSize
     ) -> Bool {
-        actionNames.contains(kAXPressAction as String)
-            && enabled
+        enabled
             && !hidden
             && size.width > 2
             && size.height > 2
+            && (!semanticActions.isDisjoint(with: actionNames)
+                || interactiveRoles.contains(role))
+    }
+
+    static func canReceiveKeyboardFocus(role: String) -> Bool {
+        role == kAXTextFieldRole as String
+            || role == kAXTextAreaRole as String
+            || role == kAXComboBoxRole as String
     }
 }
 
@@ -70,33 +117,38 @@ enum HintGenerator {
 
 struct TypeToClickScanResult: Sendable {
     let targets: [TypeToClickTarget]
-    /// True when the AX safety budget stopped the walk before its queue emptied.
+    /// True when an AX safety budget stopped either walk before its queue emptied.
     let wasTruncated: Bool
 }
 
 protocol TypeToClickServicing: AnyObject, Sendable {
-    /// Checks Accessibility trust. A user-triggered invocation may ask macOS
-    /// to show its standard permission prompt.
     func isAccessibilityTrusted(prompt: Bool) -> Bool
-    /// Enumerates the actionable elements of `pid`, sorted for reading, each
-    /// paired with a generated hint, and reports an incomplete bounded walk.
+    /// Enumerates visible controls in the focused window plus the active app's
+    /// complete menu hierarchy.
     func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult
-    /// Presses (clicks) a target via its accessibility action.
-    @discardableResult func press(_ target: TypeToClickTarget) -> Bool
+    /// Revalidates and performs the requested action.
+    @discardableResult func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool
 }
 
 /// Walks the accessibility tree of a process and collects actionable elements.
-/// Mirrors the AX patterns already used by `WindowManager`.
 final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
 
     private struct Collected {
         let element: AXUIElement
-        let frame: CGRect
+        let frame: CGRect?
         let label: String
+        let searchText: String
+        let role: String
+        let actionNames: [String]
+        let kind: TypeToClickTargetKind
     }
 
     private static let maxDepth = 60
     private static let maxVisitedElements = 1500
+    private static let maxVisitedMenuElements = 500
+    private static let ignoredMenuBranches: Set<String> = [
+        "bookmarks", "open recent", "recent items",
+    ]
 
     func isAccessibilityTrusted(prompt: Bool) -> Bool {
         AXIsProcessTrustedWithOptions([
@@ -106,60 +158,175 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
 
     func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
         let application = AXUIElementCreateApplication(pid)
-        // One unresponsive AX element must not freeze the launcher indefinitely.
         AXUIElementSetMessagingTimeout(application, 0.25)
 
-        var collected: [Collected] = []
+        var elements: [Collected] = []
         var seen = Set<CFHashCode>()
-        // The feature acts on what the user can currently see. Starting at the
-        // focused window avoids traversing every background browser window and
-        // makes the hotkey respond consistently in large Electron apps.
         let roots = Self.focusedWindow(in: application).map { [$0] }
             ?? Self.windows(in: application)
         var wasTruncated = false
         for root in roots.isEmpty ? [application] : roots {
-            if collect(root, depth: 0, out: &collected, seen: &seen) {
+            if collectElements(root, depth: 0, out: &elements, seen: &seen) {
                 wasTruncated = true
                 break
             }
         }
 
-        collected.sort {
-            let rowA = Int($0.frame.midY / 24)
-            let rowB = Int($1.frame.midY / 24)
+        elements.sort {
+            guard let frameA = $0.frame, let frameB = $1.frame else { return $0.frame != nil }
+            let rowA = Int(frameA.midY / 24)
+            let rowB = Int(frameB.midY / 24)
             if rowA != rowB { return rowA < rowB }
-            return $0.frame.minX < $1.frame.minX
+            return frameA.minX < frameB.minX
         }
 
-        let hints = HintGenerator.hints(count: collected.count, alphabet: alphabet)
-        let targets = zip(collected, hints).map { collected, hint in
+        let hints = HintGenerator.hints(count: elements.count, alphabet: alphabet)
+        // A malformed future alphabet must not erase otherwise searchable
+        // controls. Keep targets hintless if unique hint generation is impossible.
+        var targets = elements.enumerated().map { index, collected in
             TypeToClickTarget(
                 element: collected.element,
-                hint: hint,
+                hint: hints.indices.contains(index) ? hints[index] : nil,
                 frame: collected.frame,
-                label: collected.label
+                label: collected.label,
+                searchText: collected.searchText,
+                role: collected.role,
+                actionNames: collected.actionNames,
+                kind: collected.kind
             )
         }
+
+        if let menuBar = Self.elementAttribute(application, kAXMenuBarAttribute) {
+            var menuItems: [Collected] = []
+            if collectMenuItems(menuBar, out: &menuItems) {
+                wasTruncated = true
+            }
+            targets.append(contentsOf: menuItems.map { item in
+                TypeToClickTarget(
+                    element: item.element,
+                    hint: nil,
+                    frame: item.frame,
+                    label: item.label,
+                    searchText: item.searchText,
+                    role: item.role,
+                    actionNames: item.actionNames,
+                    kind: item.kind
+                )
+            })
+        }
+
         return TypeToClickScanResult(targets: targets, wasTruncated: wasTruncated)
     }
 
     @discardableResult
-    func press(_ target: TypeToClickTarget) -> Bool {
-        AXUIElementPerformAction(target.element, kAXPressAction as CFString) == .success
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
+        AXUIElementSetMessagingTimeout(target.element, 0.25)
+        guard Self.bool(target.element, kAXEnabledAttribute) else { return false }
+
+        // Menu commands remain hidden while their menus are closed. Their AX
+        // semantic action is still valid and must not be rejected by visibility.
+        if target.kind == .menuItem {
+            return performSemanticAction(on: target)
+        }
+
+        guard !(Self.optionalBool(target.element, kAXHiddenAttribute) ?? false) else {
+            return false
+        }
+
+        switch action {
+        case .activate:
+            if performSemanticAction(on: target) { return true }
+            if TypeToClickElementPolicy.canReceiveKeyboardFocus(role: target.role),
+               AXUIElementSetAttributeValue(
+                   target.element,
+                   kAXFocusedAttribute as CFString,
+                   kCFBooleanTrue
+               ) == .success {
+                return true
+            }
+            guard let point = currentMidpoint(of: target.element) else { return false }
+            return postClick(at: point, button: .left, modifiers: 0)
+
+        case .click(let modifiers):
+            guard let point = currentMidpoint(of: target.element) else { return false }
+            return postClick(at: point, button: .left, modifiers: modifiers)
+
+        case .secondaryClick:
+            guard let point = currentMidpoint(of: target.element) else { return false }
+            return postClick(at: point, button: .right, modifiers: 0)
+        }
     }
 
-    // MARK: - Tree walk
+    private func performSemanticAction(on target: TypeToClickTarget) -> Bool {
+        let currentActions = Self.actionNames(target.element)
+        let preferred = [
+            kAXPressAction as String,
+            kAXShowMenuAction as String,
+            kAXConfirmAction as String,
+        ]
+        for action in preferred where currentActions.contains(action) {
+            if AXUIElementPerformAction(target.element, action as CFString) == .success {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func currentMidpoint(of element: AXUIElement) -> CGPoint? {
+        guard let position = Self.point(element, kAXPositionAttribute),
+              let size = Self.size(element, kAXSizeAttribute),
+              TypeToClickElementPolicy.isActionable(
+                  actionNames: Self.actionNames(element),
+                  role: Self.string(element, kAXRoleAttribute),
+                  enabled: Self.bool(element, kAXEnabledAttribute),
+                  hidden: Self.optionalBool(element, kAXHiddenAttribute) ?? false,
+                  size: size
+              )
+        else { return nil }
+        return CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+    }
+
+    private func postClick(
+        at point: CGPoint,
+        button: CGMouseButton,
+        modifiers: UInt
+    ) -> Bool {
+        let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
+        let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+        guard let down = CGEvent(
+            mouseEventSource: nil,
+            mouseType: downType,
+            mouseCursorPosition: point,
+            mouseButton: button
+        ), let up = CGEvent(
+            mouseEventSource: nil,
+            mouseType: upType,
+            mouseCursorPosition: point,
+            mouseButton: button
+        ) else { return false }
+
+        let appKit = NSEvent.ModifierFlags(rawValue: modifiers)
+        var flags: CGEventFlags = []
+        if appKit.contains(.command) { flags.insert(.maskCommand) }
+        if appKit.contains(.shift) { flags.insert(.maskShift) }
+        if appKit.contains(.option) { flags.insert(.maskAlternate) }
+        if appKit.contains(.control) { flags.insert(.maskControl) }
+        down.flags = flags
+        up.flags = flags
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+
+    // MARK: - Tree walks
 
     /// Returns true when the safety budget truncated a non-empty queue.
-    private func collect(
+    private func collectElements(
         _ root: AXUIElement,
         depth: Int,
         out: inout [Collected],
         seen: inout Set<CFHashCode>
     ) -> Bool {
-        // Breadth-first traversal reaches the toolbar, sidebar, content, and
-        // footer before any one complex web/list branch can consume the 1,500
-        // element safety budget. A depth-first walk starved Finder siblings.
         var queue: [(element: AXUIElement, depth: Int)] = [(root, depth)]
         var index = 0
         while index < queue.count,
@@ -173,39 +340,32 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
             let hash = CFHash(element)
             guard !seen.contains(hash) else { continue }
             seen.insert(hash)
-            // Messaging timeouts are attached to individual AX handles and are
-            // not documented as inheriting from the application root. Bound
-            // every descendant before any attribute or action query.
             AXUIElementSetMessagingTimeout(element, 0.25)
 
             let actionNames = Self.actionNames(element)
-            if actionNames.contains(kAXPressAction as String),
-               let position = Self.point(element, kAXPositionAttribute),
+            let role = Self.string(element, kAXRoleAttribute)
+            if let position = Self.point(element, kAXPositionAttribute),
                let size = Self.size(element, kAXSizeAttribute),
                TypeToClickElementPolicy.isActionable(
                    actionNames: actionNames,
+                   role: role,
                    enabled: Self.bool(element, kAXEnabledAttribute),
                    hidden: Self.optionalBool(element, kAXHiddenAttribute) ?? false,
                    size: size
                ) {
-                // Read labels only for the small subset that can actually be
-                // pressed. This avoids AX round-trips for every container.
-                let role = Self.string(element, kAXRoleAttribute)
-                let title = Self.string(element, kAXTitleAttribute)
-                let description = Self.string(element, kAXDescriptionAttribute)
-                let value = Self.string(element, kAXValueAttribute)
-                let label = !title.isEmpty
-                    ? title
-                    : (!description.isEmpty ? description : (!value.isEmpty ? value : role))
+                let strings = Self.searchableStrings(element, role: role)
+                let label = strings.first(where: { !$0.isEmpty }) ?? Self.roleName(role)
                 out.append(Collected(
                     element: element,
                     frame: CGRect(origin: position, size: size),
-                    label: label
+                    label: label,
+                    searchText: strings.joined(separator: " "),
+                    role: role,
+                    actionNames: actionNames,
+                    kind: .element
                 ))
             }
 
-            // Custom AppKit and web controls frequently sit below generic or
-            // unknown roles. Always descend instead of using a role allow-list.
             let childDepth = current.depth + 1
             if childDepth < Self.maxDepth {
                 queue.append(contentsOf: Self.children(element).map { ($0, childDepth) })
@@ -214,7 +374,63 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
         return index < queue.count && seen.count >= Self.maxVisitedElements
     }
 
-    // MARK: - Attribute access (mirrors WindowManager)
+    private func collectMenuItems(
+        _ root: AXUIElement,
+        out: inout [Collected]
+    ) -> Bool {
+        var queue: [(element: AXUIElement, path: [String], depth: Int)] = [(root, [], 0)]
+        var seen = Set<CFHashCode>()
+        var index = 0
+        while index < queue.count,
+              seen.count < Self.maxVisitedMenuElements,
+              !Task<Never, Never>.isCancelled {
+            let current = queue[index]
+            index += 1
+            guard current.depth < Self.maxDepth else { continue }
+            let element = current.element
+            let hash = CFHash(element)
+            guard seen.insert(hash).inserted else { continue }
+            AXUIElementSetMessagingTimeout(element, 0.25)
+
+            let role = Self.string(element, kAXRoleAttribute)
+            let title = Self.string(element, kAXTitleAttribute)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let isMenuResult = role == kAXMenuItemRole as String
+                || role == kAXMenuBarItemRole as String
+            let path = isMenuResult && !title.isEmpty ? current.path + [title] : current.path
+            let normalizedTitle = title.folding(
+                options: [.caseInsensitive, .diacriticInsensitive], locale: .current
+            ).lowercased()
+            if isMenuResult,
+               !title.isEmpty,
+               Self.bool(element, kAXEnabledAttribute),
+               !Self.ignoredMenuBranches.contains(normalizedTitle) {
+                let actionNames = Self.actionNames(element)
+                if actionNames.contains(kAXPressAction as String) {
+                    let shortcut = Self.string(element, kAXMenuItemCmdCharAttribute)
+                    let help = Self.string(element, kAXHelpAttribute)
+                    let label = path.joined(separator: " › ")
+                    out.append(Collected(
+                        element: element,
+                        frame: nil,
+                        label: label,
+                        searchText: [label, help, shortcut, "menu command"].joined(separator: " "),
+                        role: role,
+                        actionNames: actionNames,
+                        kind: .menuItem
+                    ))
+                }
+            }
+
+            if Self.ignoredMenuBranches.contains(normalizedTitle) { continue }
+            queue.append(contentsOf: Self.children(element).map {
+                ($0, path, current.depth + 1)
+            })
+        }
+        return index < queue.count && seen.count >= Self.maxVisitedMenuElements
+    }
+
+    // MARK: - Attribute access
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -224,8 +440,33 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
         return value
     }
 
+    private static func elementAttribute(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+        guard let value = attribute(element, name),
+              CFGetTypeID(value) == AXUIElementGetTypeID()
+        else { return nil }
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
     private static func string(_ element: AXUIElement, _ name: String) -> String {
         (attribute(element, name) as? String) ?? ""
+    }
+
+    private static func searchableStrings(_ element: AXUIElement, role: String) -> [String] {
+        let attributes = [
+            kAXTitleAttribute,
+            kAXDescriptionAttribute,
+            kAXHelpAttribute,
+            kAXValueAttribute,
+            kAXPlaceholderValueAttribute,
+            kAXSubroleAttribute,
+        ]
+        return attributes.map { string(element, $0) }
+            + [roleName(role), role.replacingOccurrences(of: "AX", with: "")]
+    }
+
+    private static func roleName(_ role: String) -> String {
+        role.replacingOccurrences(of: "AX", with: "")
+            .replacingOccurrences(of: "_", with: " ")
     }
 
     private static func bool(_ element: AXUIElement, _ name: String) -> Bool {
@@ -243,10 +484,7 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
     }
 
     private static func focusedWindow(in application: AXUIElement) -> AXUIElement? {
-        guard let value = attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID()
-        else { return nil }
-        return unsafeDowncast(value, to: AXUIElement.self)
+        elementAttribute(application, kAXFocusedWindowAttribute)
     }
 
     private static func windows(in application: AXUIElement) -> [AXUIElement] {

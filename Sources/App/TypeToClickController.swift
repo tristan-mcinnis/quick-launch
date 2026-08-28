@@ -12,9 +12,6 @@ final class TypeToClickPanel: NSPanel {
     var keyHandler: ((NSEvent) -> Bool)?
 
     /// Route keys at the window boundary as well as through first responder.
-    /// A newly activated menu-bar app can briefly have no field editor even
-    /// after the panel is visible; relying only on NSView.keyDown loses those
-    /// first hint characters.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, keyHandler?(event) == true { return }
         super.sendEvent(event)
@@ -22,7 +19,7 @@ final class TypeToClickPanel: NSPanel {
 }
 
 enum TypeToClickKeyPolicy {
-    static func hintCharacter(
+    static func queryCharacter(
         charactersIgnoringModifiers: String?,
         modifiers: NSEvent.ModifierFlags
     ) -> String? {
@@ -30,13 +27,24 @@ enum TypeToClickKeyPolicy {
             .intersection(.deviceIndependentFlagsMask)
             .subtracting([.capsLock, .function, .numericPad])
         // Control and Option may still be held from the global hotkey. Command
-        // is unrelated and must remain available to normal app/menu shortcuts.
+        // remains reserved for refresh and normal app/menu shortcuts.
         guard !normalizedModifiers.contains(.command),
               let character = charactersIgnoringModifiers?.lowercased(),
               character.count == 1,
-              character.first?.isLetter == true || character.first?.isNumber == true
+              let scalar = character.unicodeScalars.first,
+              !CharacterSet.controlCharacters.contains(scalar)
         else { return nil }
         return character
+    }
+
+    static func action(for modifiers: NSEvent.ModifierFlags) -> TypeToClickAction {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        if flags.contains(.control) { return .secondaryClick }
+        let clickModifiers = flags.intersection([.command, .shift, .option])
+        return clickModifiers.isEmpty
+            ? .activate
+            : .click(modifiers: clickModifiers.rawValue)
     }
 }
 
@@ -64,11 +72,14 @@ private struct TypeToClickSurface {
     let view: TypeToClickOverlayView
 }
 
-/// Coordinates the type-to-click overlay: transparent panels, hint filtering
-/// as the user types, and the click on an exact hint match.
+/// Coordinates the Type to Click overlay. Gold hints remain the low-keystroke
+/// path, while the same input also fuzzy-searches labels, roles, and the active
+/// application's menu hierarchy. A selected target is actioned only on Enter,
+/// enabling right-click and modifier-click without ambiguous auto-activation.
 @MainActor
 final class TypeToClickController {
     static let defaultAlphabet = "sadfjklewcmpgh"
+    private static let staleTreeInterval: TimeInterval = 2
 
     private let service: TypeToClickServicing
     private let logger = Logger(
@@ -80,14 +91,25 @@ final class TypeToClickController {
     private var primaryTop: CGFloat = 0
 
     private var targets: [TypeToClickTarget] = []
-    private var typed = ""
+    private var matches: [TypeToClickTarget] = []
+    private var searchIndex = TypeToClickSearch.Index(candidates: [])
+    private var query = ""
+    private var selectedIndex = 0
     private var activePID: pid_t = 0
     private var applicationObservers: [NSObjectProtocol] = []
     private var focusGeneration = UUID()
     private var loadGeneration = UUID()
+    private var actionGeneration = UUID()
     private var scanTask: Task<TypeToClickScanResult, Never>?
     private var loadTask: Task<Void, Never>?
-    private var globalMouseMonitor: Any?
+    private var refreshTask: Task<Void, Never>?
+    private var actionTask: Task<Void, Never>?
+    private var globalEventMonitor: Any?
+    private var lastScanFinishedAt: Date?
+    private var pendingAction: TypeToClickAction?
+    private var wasTruncated = false
+    private var accessibilityTrusted = false
+    private var notice: String?
 
     init(service: TypeToClickServicing = TypeToClickService()) {
         self.service = service
@@ -100,40 +122,17 @@ final class TypeToClickController {
         guard !isActive else { return }
         preparePresentation(pid: pid)
         logger.info("Starting Type to Click for pid \(pid, privacy: .public) on \(self.surfaces.count, privacy: .public) display(s)")
-        setStatus("Finding clickable items…")
+        notice = "Finding controls and menu commands…"
         render()
-        // Ask for Accessibility before activating Quick Launch. System Settings
-        // may come forward for the permission prompt; the overlay must not race
-        // that handoff and disappear before its explanation can be read.
-        guard service.isAccessibilityTrusted(prompt: true) else {
-            targets = []
-            setStatus("Allow Quick Launch in Privacy & Security › Accessibility, then press the shortcut again")
+        accessibilityTrusted = service.isAccessibilityTrusted(prompt: true)
+        guard accessibilityTrusted else {
+            notice = "Allow Quick Launch in Privacy & Security › Accessibility, then press the shortcut again"
             render()
             presentAndCaptureKeyboard()
             return
         }
         presentAndCaptureKeyboard()
-
-        // Accessibility enumeration is IPC-heavy in browsers and Electron
-        // apps. Keep it off the main actor so the loading state, Esc, and the
-        // global-hotkey toggle remain responsive throughout the scan.
-        let generation = UUID()
-        loadGeneration = generation
-        let service = self.service
-        let alphabet = Self.defaultAlphabet
-        let scanTask = Task.detached(priority: .userInitiated) {
-            service.targets(in: pid, alphabet: alphabet)
-        }
-        self.scanTask = scanTask
-        loadTask = Task { @MainActor [weak self] in
-            let scanResult = await scanTask.value
-            guard let self,
-                  !Task.isCancelled,
-                  self.isActive,
-                  self.loadGeneration == generation
-            else { return }
-            self.finishLoading(scanResult)
-        }
+        requestScan(force: true)
     }
 
     /// Gives a failed target lookup a visible, dismissible result instead of
@@ -141,8 +140,7 @@ final class TypeToClickController {
     func presentMessage(_ message: String) {
         guard !isActive else { return }
         preparePresentation(pid: 0)
-        targets = []
-        setStatus(message)
+        notice = message
         render()
         presentAndCaptureKeyboard()
     }
@@ -151,19 +149,32 @@ final class TypeToClickController {
         guard isActive else { return }
         focusGeneration = UUID()
         loadGeneration = UUID()
+        actionGeneration = UUID()
         scanTask?.cancel()
         scanTask = nil
         loadTask?.cancel()
         loadTask = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        actionTask?.cancel()
+        actionTask = nil
         applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
         applicationObservers = []
-        if let globalMouseMonitor {
-            NSEvent.removeMonitor(globalMouseMonitor)
-            self.globalMouseMonitor = nil
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+            self.globalEventMonitor = nil
         }
         surfaces.forEach { $0.panel.orderOut(nil) }
         targets = []
-        typed = ""
+        matches = []
+        searchIndex = TypeToClickSearch.Index(candidates: [])
+        query = ""
+        selectedIndex = 0
+        pendingAction = nil
+        lastScanFinishedAt = nil
+        wasTruncated = false
+        accessibilityTrusted = false
+        notice = nil
         setStatus(nil)
         let pid = activePID
         activePID = 0
@@ -172,36 +183,108 @@ final class TypeToClickController {
         }
     }
 
-    private func finishLoading(_ result: TypeToClickScanResult) {
-        targets = result.targets.filter { target in
-            surfaces.contains { surface in
-                surface.view.bounds.intersects(windowRect(for: target.frame, on: surface.panel))
-            }
-        }
-        logger.info("Type to Click loaded \(result.targets.count, privacy: .public) target(s); \(self.targets.count, privacy: .public) are on a visible display; truncated=\(result.wasTruncated, privacy: .public)")
-        if targets.isEmpty {
-            setStatus("No clickable items found in the front window")
-        } else if result.wasTruncated {
-            setStatus("Large window: some clickable items are not shown")
-        } else {
-            setStatus(nil)
-        }
-        scanTask = nil
-        loadTask = nil
+    // MARK: - Enumeration and freshness
+
+    private func requestScan(force: Bool) {
+        guard accessibilityTrusted, activePID != 0, isActive else { return }
+        if scanTask != nil, !force { return }
+
+        let generation = UUID()
+        loadGeneration = generation
+        scanTask?.cancel()
+        loadTask?.cancel()
+        let service = self.service
+        let pid = activePID
+        let alphabet = Self.defaultAlphabet
+        if targets.isEmpty { notice = "Finding controls and menu commands…" }
         render()
+
+        let task = Task.detached(priority: .userInitiated) {
+            service.targets(in: pid, alphabet: alphabet)
+        }
+        scanTask = task
+        loadTask = Task { @MainActor [weak self] in
+            let result = await task.value
+            guard let self,
+                  !Task.isCancelled,
+                  self.isActive,
+                  self.loadGeneration == generation
+            else { return }
+            self.finishLoading(result)
+        }
     }
 
+    private func finishLoading(_ result: TypeToClickScanResult) {
+        targets = result.targets.filter { target in
+            guard let frame = target.frame else { return true }
+            return surfaces.contains { surface in
+                surface.view.bounds.intersects(windowRect(for: frame, on: surface.panel))
+            }
+        }
+        rebuildSearchIndex()
+        wasTruncated = result.wasTruncated
+        lastScanFinishedAt = Date()
+        scanTask = nil
+        loadTask = nil
+        notice = targets.isEmpty
+            ? "No controls or menu commands found in the active app"
+            : nil
+        updateMatches(resetSelection: true)
+        logger.info("Type to Click loaded \(result.targets.count, privacy: .public) target(s); \(self.targets.count, privacy: .public) are usable; truncated=\(result.wasTruncated, privacy: .public)")
+
+        if let action = pendingAction {
+            pendingAction = nil
+            performSelected(action)
+        } else {
+            render()
+        }
+    }
+
+    private var treeIsStale: Bool {
+        guard let lastScanFinishedAt else { return true }
+        return Date().timeIntervalSince(lastScanFinishedAt) > Self.staleTreeInterval
+    }
+
+    private func refreshIfStale() {
+        if treeIsStale { requestScan(force: false) }
+    }
+
+    private func scheduleRefreshAfterScroll() {
+        guard activePID != 0, isActive else { return }
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, let self, self.isActive else { return }
+            self.requestScan(force: true)
+        }
+    }
+
+    private func reconfigureForDisplayChange() {
+        guard isActive else { return }
+        configureSurfaces()
+        surfaces.forEach { $0.panel.orderFrontRegardless() }
+        assertKeyboardFocus()
+        requestScan(force: true)
+    }
+
+    // MARK: - Presentation
+
     private func preparePresentation(pid: pid_t) {
-        typed = ""
+        query = ""
+        selectedIndex = 0
         activePID = pid
         targets = []
+        matches = []
+        searchIndex = TypeToClickSearch.Index(candidates: [])
+        pendingAction = nil
+        lastScanFinishedAt = nil
+        wasTruncated = false
+        accessibilityTrusted = false
+        notice = nil
         configureSurfaces()
         setStatus(nil)
     }
 
-    /// Rebuild display-local panels on every invocation so connecting,
-    /// disconnecting, scaling, or rearranging a display never leaves stale
-    /// coordinates. Separate panels are required for mixed scale factors.
     private func configureSurfaces() {
         surfaces.forEach { $0.panel.orderOut(nil) }
         let screens = NSScreen.screens
@@ -241,7 +324,15 @@ final class TypeToClickController {
     private func setStatus(_ text: String?) {
         for surface in surfaces {
             surface.view.statusText = surface.panel === keyPanel ? text : nil
-            surface.view.statusAnchor = nil
+            if surface.panel === keyPanel {
+                let local = surface.panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+                surface.view.statusAnchor = NSPoint(
+                    x: min(max(local.x, 180), max(180, surface.view.bounds.maxX - 180)),
+                    y: min(max(local.y - 72, 32), max(32, surface.view.bounds.maxY - 32))
+                )
+            } else {
+                surface.view.statusAnchor = nil
+            }
         }
     }
 
@@ -254,18 +345,26 @@ final class TypeToClickController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.assertKeyboardFocus() }
         })
-        // Do not dismiss on didResignActive. Accessory apps can briefly resign
-        // while activation settles, and permission prompts intentionally bring
-        // System Settings forward. The mode stays open until a click, Esc, or
-        // the same global shortcut, matching Homerow's toggle behaviour.
+        applicationObservers.append(center.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reconfigureForDisplayChange() }
+        })
         NSApp.activate(ignoringOtherApps: true)
         surfaces.forEach { $0.panel.orderFrontRegardless() }
-        // A physical click changes the underlying UI and makes its hints stale.
-        // Let the click pass through, then leave the mode like Homerow.
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.dismiss() }
+
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        ) { [weak self] event in
+            Task { @MainActor [weak self] in
+                if event.type == .scrollWheel {
+                    self?.scheduleRefreshAfterScroll()
+                } else {
+                    self?.dismiss()
+                }
+            }
         }
         let generation = UUID()
         focusGeneration = generation
@@ -280,8 +379,6 @@ final class TypeToClickController {
               generation == nil || generation == focusGeneration else { return }
         keyPanel.makeKey()
         _ = keyPanel.makeFirstResponder(keyPanel.contentView)
-        // Accessory-app activation can take longer than a few run-loop turns
-        // when the previous app is busy. Keep trying for two seconds.
         guard (!NSApp.isActive || !keyPanel.isKeyWindow), attempt < 40 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.assertKeyboardFocus(generation: generation, attempt: attempt + 1)
@@ -291,58 +388,178 @@ final class TypeToClickController {
     // MARK: - Key handling
 
     private func handle(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         switch event.keyCode {
-        case 53:                                   // Esc
+        case 53: // Esc
             dismiss()
             return true
-        case 51:                                   // Delete / Backspace
-            typed = String(typed.dropLast())
+        case 36, 76: // Return / keypad Enter
+            requestAction(TypeToClickKeyPolicy.action(for: modifiers))
+            return true
+        case 51: // Delete / Backspace
+            query = String(query.dropLast())
+            if !targets.isEmpty { notice = nil }
+            updateMatches(resetSelection: true)
+            refreshIfStale()
             render()
             return true
+        case 125: // Down
+            moveSelection(by: 1)
+            return true
+        case 126: // Up
+            moveSelection(by: -1)
+            return true
+        case 48: // Tab / Shift-Tab
+            moveSelection(by: modifiers.contains(.shift) ? -1 : 1)
+            return true
+        case 45 where modifiers.contains(.control): // Ctrl-N
+            moveSelection(by: 1)
+            return true
+        case 35 where modifiers.contains(.control): // Ctrl-P
+            moveSelection(by: -1)
+            return true
+        case 15 where modifiers.contains(.command): // Cmd-R
+            pendingAction = nil
+            notice = "Refreshing controls and menu commands…"
+            requestScan(force: true)
+            return true
         default:
-            guard let character = TypeToClickKeyPolicy.hintCharacter(
+            guard let character = TypeToClickKeyPolicy.queryCharacter(
                 charactersIgnoringModifiers: event.charactersIgnoringModifiers,
-                modifiers: event.modifierFlags
+                modifiers: modifiers
             ) else { return false }
-            type(character)
+            query += character
+            if !targets.isEmpty { notice = nil }
+            updateMatches(resetSelection: true)
+            refreshIfStale()
+            render()
             return true
         }
     }
 
-    private func type(_ character: String) {
-        guard !targets.isEmpty else { return }
-        typed += character
-        setStatus(nil)
+    private func moveSelection(by delta: Int) {
+        guard !matches.isEmpty else { return }
+        selectedIndex = (selectedIndex + delta + matches.count) % matches.count
         render()
-        if let exact = targets.first(where: { $0.hint == typed }) {
-            if service.press(exact) {
-                dismiss()
+    }
+
+    private func requestAction(_ action: TypeToClickAction) {
+        guard actionTask == nil else { return }
+        guard accessibilityTrusted else {
+            render()
+            return
+        }
+        if scanTask != nil {
+            pendingAction = action
+            notice = "Waiting for the active app…"
+            render()
+            return
+        }
+        if treeIsStale {
+            pendingAction = action
+            notice = "Refreshing before acting…"
+            requestScan(force: true)
+            return
+        }
+        performSelected(action)
+    }
+
+    private func performSelected(_ action: TypeToClickAction) {
+        guard !matches.isEmpty else {
+            notice = query.isEmpty
+                ? "Type a gold hint, control name, or menu command"
+                : "No match for “\(query)”"
+            render()
+            return
+        }
+        let target = matches[min(selectedIndex, matches.count - 1)]
+        let effectiveAction = target.kind == .menuItem ? .activate : action
+        let service = self.service
+        let generation = UUID()
+        actionGeneration = generation
+        notice = "Acting on \(target.label)…"
+        render()
+        let task = Task.detached(priority: .userInitiated) {
+            service.perform(effectiveAction, on: target)
+        }
+        actionTask = Task { @MainActor [weak self] in
+            let succeeded = await task.value
+            guard let self,
+                  !Task.isCancelled,
+                  self.isActive,
+                  self.actionGeneration == generation
+            else { return }
+            self.actionTask = nil
+            if succeeded {
+                self.dismiss()
             } else {
-                typed = ""
-                setStatus("That item could not be clicked. Try another hint.")
-                render()
+                self.notice = "That target changed or could not be actioned. Press ⌘R to refresh."
+                self.lastScanFinishedAt = nil
+                self.render()
             }
         }
     }
 
-    // MARK: - Rendering
+    // MARK: - Search and rendering
+
+    private func rebuildSearchIndex() {
+        let candidates = targets.enumerated().map { index, target in
+            TypeToClickSearchCandidate(
+                id: "\(index):\(target.kind.rawValue):\(target.hint ?? ""):\(target.label)",
+                hint: target.hint,
+                label: target.label,
+                searchText: target.searchText,
+                role: target.role,
+                isSpatial: target.frame != nil
+            )
+        }
+        searchIndex = TypeToClickSearch.Index(candidates: candidates)
+    }
+
+    private func updateMatches(resetSelection: Bool) {
+        matches = searchIndex.rankedIndices(query: query).map { targets[$0] }
+        if resetSelection { selectedIndex = 0 }
+        if selectedIndex >= matches.count { selectedIndex = max(0, matches.count - 1) }
+    }
 
     private func render() {
-        // Labels-only mode, like Homerow: typing narrows the visible labels
-        // instead of repainting non-matches in a second attention-grabbing
-        // colour. Backspace restores the previous set.
         var boxes = Array(repeating: [TypeToClickBox](), count: surfaces.count)
-        for target in targets where target.hint.hasPrefix(typed) {
+        let selected = matches.indices.contains(selectedIndex) ? matches[selectedIndex] : nil
+        for target in matches {
+            guard let frame = target.frame, let hint = target.hint else { continue }
             for (index, surface) in surfaces.enumerated() {
-                let rect = windowRect(for: target.frame, on: surface.panel)
+                let rect = windowRect(for: frame, on: surface.panel)
                 if surface.view.bounds.intersects(rect) {
-                    boxes[index].append(TypeToClickBox(rect: rect, hint: target.hint))
+                    boxes[index].append(TypeToClickBox(
+                        rect: rect,
+                        hint: hint,
+                        isSelected: selected.map { CFEqual($0.element, target.element) } ?? false
+                    ))
                 }
             }
         }
         for (index, surface) in surfaces.enumerated() {
             surface.view.boxes = boxes[index]
         }
+        setStatus(interactionStatus(selected: selected))
+    }
+
+    private func interactionStatus(selected: TypeToClickTarget?) -> String? {
+        if let notice { return notice }
+        guard !targets.isEmpty else { return "Finding controls and menu commands…" }
+        guard !matches.isEmpty else {
+            return query.isEmpty
+                ? "No visible controls. Type a menu command or press ⌘R to refresh."
+                : "No match for “\(query)” · Delete to edit · ⌘R refresh"
+        }
+        let warning = wasTruncated ? " · partial scan" : ""
+        if query.isEmpty {
+            let visibleCount = targets.count(where: { $0.frame != nil })
+            return "\(visibleCount) controls · type a gold hint, name, or menu command · Return to act\(warning)"
+        }
+        let label = selected?.label ?? ""
+        let clipped = label.count > 72 ? String(label.prefix(69)) + "…" : label
+        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · \(clipped) · Return to act\(warning)"
     }
 
     /// Converts an AX frame (global top-left origin, y down) to one display
