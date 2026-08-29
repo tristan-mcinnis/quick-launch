@@ -14,11 +14,14 @@ enum TypeToClickAction: Equatable, Sendable {
 
 enum TypeToClickTargetKind: String, Sendable {
     case element
+    case menuBarItem
     case menuItem
+
+    var isMenuTarget: Bool { self != .element }
 }
 
-/// A searchable Accessibility element. Closed application-menu commands have
-/// no on-screen frame or hint, but remain searchable by their complete path.
+/// A searchable Accessibility element. Top-level menu-bar items have frames
+/// and hints; commands inside closed menus remain searchable by complete path.
 ///
 /// `AXUIElement` is an immutable CF handle but the imported C API has no Swift
 /// Sendable annotation. Enumeration finishes before this value is consumed on
@@ -113,6 +116,44 @@ enum HintGenerator {
         }
         return out
     }
+
+    /// Assigns compact hints only to spatial targets. Closed menu commands do
+    /// not consume codes, while visible Apple/app/File/Edit menu-bar items do.
+    static func hints(forSpatialTargets spatialTargets: [Bool], alphabet: String) -> [String?] {
+        let generated = hints(count: spatialTargets.count(where: { $0 }), alphabet: alphabet)
+        var nextHint = 0
+        return spatialTargets.map { isSpatial in
+            guard isSpatial, generated.indices.contains(nextHint) else { return nil }
+            defer { nextHint += 1 }
+            return generated[nextHint]
+        }
+    }
+}
+
+enum TypeToClickMenuPolicy {
+    /// A pathological branch may be too large to walk, but its visible
+    /// top-level menu-bar item must still remain hintable.
+    static func shouldCollectResult(isMenuBarItem: Bool, isIgnoredBranch: Bool) -> Bool {
+        isMenuBarItem || !isIgnoredBranch
+    }
+
+    /// Closed menu commands can report stale coordinates. Only top-level
+    /// menu-bar items are truly visible and should receive a spatial hint.
+    static func topLevelFrame(
+        role: String,
+        position: CGPoint?,
+        size: CGSize?,
+        hidden: Bool
+    ) -> CGRect? {
+        guard role == kAXMenuBarItemRole as String,
+              !hidden,
+              let position,
+              let size,
+              size.width > 2,
+              size.height > 2
+        else { return nil }
+        return CGRect(origin: position, size: size)
+    }
 }
 
 struct TypeToClickScanResult: Sendable {
@@ -180,13 +221,28 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
             return frameA.minX < frameB.minX
         }
 
-        let hints = HintGenerator.hints(count: elements.count, alphabet: alphabet)
+        if let menuBar = Self.elementAttribute(application, kAXMenuBarAttribute) {
+            var menuItems: [Collected] = []
+            if collectMenuItems(menuBar, out: &menuItems) {
+                wasTruncated = true
+            }
+            // Put the visible system/app menu row before window controls. The
+            // remaining closed commands stay searchable but are never hinted.
+            elements = menuItems.filter { $0.frame != nil }
+                + elements
+                + menuItems.filter { $0.frame == nil }
+        }
+
+        let hints = HintGenerator.hints(
+            forSpatialTargets: elements.map { $0.frame != nil },
+            alphabet: alphabet
+        )
         // A malformed future alphabet must not erase otherwise searchable
         // controls. Keep targets hintless if unique hint generation is impossible.
-        var targets = elements.enumerated().map { index, collected in
+        let targets = elements.enumerated().map { index, collected in
             TypeToClickTarget(
                 element: collected.element,
-                hint: hints.indices.contains(index) ? hints[index] : nil,
+                hint: hints[index],
                 frame: collected.frame,
                 label: collected.label,
                 searchText: collected.searchText,
@@ -194,25 +250,6 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
                 actionNames: collected.actionNames,
                 kind: collected.kind
             )
-        }
-
-        if let menuBar = Self.elementAttribute(application, kAXMenuBarAttribute) {
-            var menuItems: [Collected] = []
-            if collectMenuItems(menuBar, out: &menuItems) {
-                wasTruncated = true
-            }
-            targets.append(contentsOf: menuItems.map { item in
-                TypeToClickTarget(
-                    element: item.element,
-                    hint: nil,
-                    frame: item.frame,
-                    label: item.label,
-                    searchText: item.searchText,
-                    role: item.role,
-                    actionNames: item.actionNames,
-                    kind: item.kind
-                )
-            })
         }
 
         return TypeToClickScanResult(targets: targets, wasTruncated: wasTruncated)
@@ -223,9 +260,9 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
         AXUIElementSetMessagingTimeout(target.element, 0.25)
         guard Self.bool(target.element, kAXEnabledAttribute) else { return false }
 
-        // Menu commands remain hidden while their menus are closed. Their AX
-        // semantic action is still valid and must not be rejected by visibility.
-        if target.kind == .menuItem {
+        // Menu commands remain hidden while their menus are closed. Top-level
+        // menu items also need semantic activation so selecting File opens it.
+        if target.kind.isMenuTarget {
             return performSemanticAction(on: target)
         }
 
@@ -367,7 +404,7 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
             }
 
             let childDepth = current.depth + 1
-            if childDepth < Self.maxDepth {
+            if childDepth < Self.maxDepth, role != kAXMenuBarRole as String {
                 queue.append(contentsOf: Self.children(element).map { ($0, childDepth) })
             }
         }
@@ -393,36 +430,56 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
             AXUIElementSetMessagingTimeout(element, 0.25)
 
             let role = Self.string(element, kAXRoleAttribute)
-            let title = Self.string(element, kAXTitleAttribute)
+            let explicitTitle = Self.string(element, kAXTitleAttribute)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let isMenuResult = role == kAXMenuItemRole as String
-                || role == kAXMenuBarItemRole as String
+            let description = Self.string(element, kAXDescriptionAttribute)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // The Apple item can expose its visible name as AXDescription
+            // instead of AXTitle, depending on the macOS/app combination.
+            let title = explicitTitle.isEmpty ? description : explicitTitle
+            let isMenuBarItem = role == kAXMenuBarItemRole as String
+            let isMenuResult = role == kAXMenuItemRole as String || isMenuBarItem
             let path = isMenuResult && !title.isEmpty ? current.path + [title] : current.path
             let normalizedTitle = title.folding(
                 options: [.caseInsensitive, .diacriticInsensitive], locale: .current
             ).lowercased()
+            let isIgnoredBranch = Self.ignoredMenuBranches.contains(normalizedTitle)
             if isMenuResult,
                !title.isEmpty,
                Self.bool(element, kAXEnabledAttribute),
-               !Self.ignoredMenuBranches.contains(normalizedTitle) {
+               TypeToClickMenuPolicy.shouldCollectResult(
+                   isMenuBarItem: isMenuBarItem,
+                   isIgnoredBranch: isIgnoredBranch
+               ) {
                 let actionNames = Self.actionNames(element)
                 if actionNames.contains(kAXPressAction as String) {
                     let shortcut = Self.string(element, kAXMenuItemCmdCharAttribute)
                     let help = Self.string(element, kAXHelpAttribute)
                     let label = path.joined(separator: " › ")
+                    let frame = TypeToClickMenuPolicy.topLevelFrame(
+                        role: role,
+                        position: Self.point(element, kAXPositionAttribute),
+                        size: Self.size(element, kAXSizeAttribute),
+                        hidden: Self.optionalBool(element, kAXHiddenAttribute) ?? false
+                    )
                     out.append(Collected(
                         element: element,
-                        frame: nil,
+                        frame: frame,
                         label: label,
-                        searchText: [label, help, shortcut, "menu command"].joined(separator: " "),
+                        searchText: [
+                            label, description, help, shortcut,
+                            isMenuBarItem ? "menu bar top row" : "menu command",
+                        ].joined(separator: " "),
                         role: role,
                         actionNames: actionNames,
-                        kind: .menuItem
+                        kind: isMenuBarItem ? .menuBarItem : .menuItem
                     ))
                 }
             }
 
-            if Self.ignoredMenuBranches.contains(normalizedTitle) { continue }
+            // Keep a top-level Bookmarks/Recent item itself, but do not walk
+            // the potentially huge user-generated branch beneath it.
+            if isIgnoredBranch { continue }
             queue.append(contentsOf: Self.children(element).map {
                 ($0, path, current.depth + 1)
             })

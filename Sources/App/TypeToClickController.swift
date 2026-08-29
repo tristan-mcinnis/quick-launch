@@ -473,7 +473,7 @@ final class TypeToClickController {
             return
         }
         let target = matches[min(selectedIndex, matches.count - 1)]
-        let effectiveAction = target.kind == .menuItem ? .activate : action
+        let effectiveAction = target.kind.isMenuTarget ? .activate : action
         let service = self.service
         let generation = UUID()
         actionGeneration = generation
@@ -555,7 +555,7 @@ final class TypeToClickController {
         let warning = wasTruncated ? " · partial scan" : ""
         if query.isEmpty {
             let visibleCount = targets.count(where: { $0.frame != nil })
-            return "\(visibleCount) controls · type a gold hint, name, or menu command · Return to act\(warning)"
+            return "\(visibleCount) visible targets · type a gold hint, name, or menu command · Return to act\(warning)"
         }
         let label = selected?.label ?? ""
         let clipped = label.count > 72 ? String(label.prefix(69)) + "…" : label

@@ -44,6 +44,65 @@ final class TypeToClickTests: XCTestCase {
         XCTAssertTrue(hints.allSatisfy { !$0.isEmpty })
     }
 
+    func testVisibleMenuBarItemsReceiveHintsWithoutChargingClosedCommands() {
+        XCTAssertEqual(
+            HintGenerator.hints(
+                forSpatialTargets: [true, true, false, true, false],
+                alphabet: "abc"
+            ),
+            ["a", "b", nil, "c", nil]
+        )
+    }
+
+    func testIgnoredBranchesKeepTheirVisibleTopLevelMenuItem() {
+        XCTAssertTrue(TypeToClickMenuPolicy.shouldCollectResult(
+            isMenuBarItem: true,
+            isIgnoredBranch: true
+        ))
+        XCTAssertFalse(TypeToClickMenuPolicy.shouldCollectResult(
+            isMenuBarItem: false,
+            isIgnoredBranch: true
+        ))
+        XCTAssertTrue(TypeToClickMenuPolicy.shouldCollectResult(
+            isMenuBarItem: false,
+            isIgnoredBranch: false
+        ))
+    }
+
+    func testOnlyTopLevelMenuBarItemsExposeSpatialFrames() {
+        let position = CGPoint(x: 72, y: 0)
+        let size = CGSize(width: 44, height: 24)
+        let expected = CGRect(origin: position, size: size)
+
+        XCTAssertEqual(
+            TypeToClickMenuPolicy.topLevelFrame(
+                role: kAXMenuBarItemRole as String,
+                position: position,
+                size: size,
+                hidden: false
+            ),
+            expected
+        )
+        XCTAssertNil(TypeToClickMenuPolicy.topLevelFrame(
+            role: kAXMenuItemRole as String,
+            position: position,
+            size: size,
+            hidden: false
+        ))
+        XCTAssertNil(TypeToClickMenuPolicy.topLevelFrame(
+            role: kAXMenuBarItemRole as String,
+            position: position,
+            size: size,
+            hidden: true
+        ))
+        XCTAssertNil(TypeToClickMenuPolicy.topLevelFrame(
+            role: kAXMenuBarItemRole as String,
+            position: nil,
+            size: size,
+            hidden: false
+        ))
+    }
+
     func testHintKeysAllowLingeringHotkeyModifiersButRejectCommandChords() {
         XCTAssertEqual(
             TypeToClickKeyPolicy.queryCharacter(

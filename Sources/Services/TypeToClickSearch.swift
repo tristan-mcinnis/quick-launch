@@ -4,21 +4,21 @@ import Foundation
 ///
 /// - `id`: a stable identifier, preserved through ranking for callers that need
 ///   to map a rank back to a specific element / command.
-/// - `hint`: the Vimium-style hint code, when the candidate is an on-screen
-///   element. `nil` for app menu commands, which are never hinted.
+/// - `hint`: the Vimium-style hint code for on-screen controls and top-level
+///   menu-bar items. `nil` for commands inside closed menus.
 /// - `label`: what the user actually sees.
 /// - `searchText`: the broader aggregate text — accessibility description,
 ///   extra keywords, submenu trail. Usually includes `label`, but may add more.
 /// - `role`: the element / command role, e.g. "button", "checkbox", "menu item".
-/// - `isSpatial`: true when the candidate is a spatially-located, on-screen
-///   element; false when it is a static app menu command.
+/// - `isSpatial`: true for an on-screen control or top-level menu-bar item;
+///   false for a command inside a closed app menu.
 struct TypeToClickSearchCandidate: Sendable, Equatable {
     let id: String
     let hint: String?
     let label: String
     let searchText: String
     let role: String
-    /// True for an on-screen element, false for an app menu command.
+    /// True for an on-screen target, false for a closed-menu command.
     let isSpatial: Bool
 
     init(
