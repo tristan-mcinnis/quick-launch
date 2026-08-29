@@ -97,6 +97,14 @@ enum TypeToClickKeyPolicy {
 }
 
 enum TypeToClickCoordinates {
+    /// AppKit places the primary display at the global zero origin. Do not
+    /// depend on NSScreen array order when deriving the AX y-axis flip.
+    static func primaryTop(screenFrames: [CGRect]) -> CGFloat {
+        screenFrames.first(where: { $0.origin == .zero })?.maxY
+            ?? screenFrames.first?.maxY
+            ?? 0
+    }
+
     static func panelRect(
         for accessibilityFrame: CGRect,
         primaryTop: CGFloat,
@@ -145,6 +153,8 @@ private struct PendingTypeToClickAction {
 final class TypeToClickController {
     private static let staleTreeInterval: TimeInterval = 2
     private static let postActionRefreshDelay = Duration.milliseconds(180)
+    private static let openedMenuRetryDelay = Duration.milliseconds(140)
+    private static let openedMenuRetryBudget: TimeInterval = 1.2
     private static let activationPulseLeadDelay = Duration.milliseconds(120)
     private static let activationPulseTailDelay = Duration.milliseconds(500)
     private static let syntheticClickSuppressionInterval: TimeInterval = 0.7
@@ -182,6 +192,9 @@ final class TypeToClickController {
     private var bufferedPostActionQuery = ""
     private var bufferedPostActionAction: TypeToClickAction?
     private var exitHotkey: ActionHotkey?
+    private var continuation: TypeToClickContinuation = .continuous
+    private var awaitingOpenedMenuLabel: String?
+    private var openedMenuRetryDeadline: Date?
     private var wasTruncated = false
     private var accessibilityTrusted = false
     private var notice: String?
@@ -200,6 +213,10 @@ final class TypeToClickController {
 
     func configureExitHotkey(_ hotkey: ActionHotkey?) {
         exitHotkey = hotkey
+    }
+
+    func configureContinuation(_ continuation: TypeToClickContinuation) {
+        self.continuation = continuation
     }
 
     func start(in pid: pid_t) {
@@ -282,6 +299,8 @@ final class TypeToClickController {
         pulsingTarget = nil
         bufferedPostActionQuery = ""
         bufferedPostActionAction = nil
+        awaitingOpenedMenuLabel = nil
+        openedMenuRetryDeadline = nil
         lastScanFinishedAt = nil
         wasTruncated = false
         accessibilityTrusted = false
@@ -351,10 +370,14 @@ final class TypeToClickController {
         }
         logger.info("Type to Click loaded \(result.targets.count, privacy: .public) target(s); \(self.targets.count, privacy: .public) are usable; truncated=\(result.wasTruncated, privacy: .public)")
 
+        if retryOpenedMenuIfNeeded() {
+            render()
+            return
+        }
         if let pending = pendingAction {
             pendingAction = nil
             if pending.target == nil, pending.queryWasEmpty {
-                notice = "Type a control or menu command"
+                if notice == nil { notice = "Type a control or menu command" }
                 render()
             } else {
                 performSelected(pending.action, preferredTarget: pending.target)
@@ -362,6 +385,39 @@ final class TypeToClickController {
         } else {
             render()
         }
+    }
+
+    /// Some apps publish a menu's AX geometry a beat after the native menu
+    /// becomes visible. Retry briefly so an opened dropdown reliably becomes
+    /// the next named target map instead of remaining search-only.
+    private func retryOpenedMenuIfNeeded() -> Bool {
+        guard let menuLabel = awaitingOpenedMenuLabel else { return false }
+        let pathPrefix = "\(menuLabel) › "
+        if targets.contains(where: {
+            $0.kind == .menuItem
+                && $0.frame != nil
+                && $0.label.hasPrefix(pathPrefix)
+        }) {
+            awaitingOpenedMenuLabel = nil
+            openedMenuRetryDeadline = nil
+            return false
+        }
+        guard let deadline = openedMenuRetryDeadline, Date() < deadline else {
+            awaitingOpenedMenuLabel = nil
+            openedMenuRetryDeadline = nil
+            notice = "\(menuLabel) commands are not visible yet · ⌘R refresh"
+            return false
+        }
+
+        notice = "Waiting for \(menuLabel) menu commands…"
+        postActionRefreshTask?.cancel()
+        postActionRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.openedMenuRetryDelay)
+            guard !Task.isCancelled, let self, self.isActive else { return }
+            self.postActionRefreshTask = nil
+            self.requestScan(force: true)
+        }
+        return true
     }
 
     private var treeIsStale: Bool {
@@ -404,6 +460,8 @@ final class TypeToClickController {
         pulsingTarget = nil
         bufferedPostActionQuery = ""
         bufferedPostActionAction = nil
+        awaitingOpenedMenuLabel = nil
+        openedMenuRetryDeadline = nil
         lastScanFinishedAt = nil
         wasTruncated = false
         accessibilityTrusted = false
@@ -417,7 +475,9 @@ final class TypeToClickController {
     private func configureSurfaces() {
         surfaces.forEach { $0.panel.orderOut(nil) }
         let screens = NSScreen.screens
-        primaryTop = screens.first?.frame.maxY ?? 0
+        primaryTop = TypeToClickCoordinates.primaryTop(
+            screenFrames: screens.map(\.frame)
+        )
         surfaces = screens.map { screen in
             let view = TypeToClickOverlayView()
             let panel = TypeToClickPanel(
@@ -747,7 +807,13 @@ final class TypeToClickController {
             self.actionTask = nil
             self.pulsingTarget = nil
             if succeeded {
-                self.continueAfterSuccessfulAction()
+                if self.continuation == .continuous {
+                    self.continueAfterSuccessfulAction(
+                        openedMenuLabel: target.kind == .menuBarItem ? target.label : nil
+                    )
+                } else {
+                    self.dismiss(reactivateTarget: false)
+                }
             } else {
                 self.notice = "That target changed or could not be actioned. Press ⌘R to refresh."
                 self.lastScanFinishedAt = nil
@@ -756,7 +822,7 @@ final class TypeToClickController {
         }
     }
 
-    private func continueAfterSuccessfulAction() {
+    private func continueAfterSuccessfulAction(openedMenuLabel: String?) {
         let nextQuery = bufferedPostActionQuery
         let nextAction = bufferedPostActionAction
         bufferedPostActionQuery = ""
@@ -767,6 +833,10 @@ final class TypeToClickController {
         matches = []
         searchIndex = TypeToClickSearch.Index(candidates: [])
         pulsingTarget = nil
+        awaitingOpenedMenuLabel = openedMenuLabel
+        openedMenuRetryDeadline = openedMenuLabel == nil
+            ? nil
+            : Date().addingTimeInterval(Self.openedMenuRetryBudget)
         if let nextAction {
             pendingAction = PendingTypeToClickAction(
                 action: nextAction,
@@ -866,7 +936,10 @@ final class TypeToClickController {
         let warning = wasTruncated ? " · partial scan" : ""
         let label = selected?.label ?? ""
         let clipped = label.count > 72 ? String(label.prefix(69)) + "…" : label
-        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · Selected: \(clipped) · Return acts and continues\(warning)"
+        let returnHint = continuation == .continuous
+            ? "Return acts and continues"
+            : "Return acts once and closes"
+        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · Selected: \(clipped) · \(returnHint)\(warning)"
     }
 
     /// Converts an AX frame (global top-left origin, y down) to one display

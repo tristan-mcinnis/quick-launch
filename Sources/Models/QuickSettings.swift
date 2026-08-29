@@ -1,6 +1,18 @@
 import Foundation
 import AppKit  // for NSEvent.ModifierFlags
 
+enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
+    case continuous
+    case singleAction
+
+    var displayName: String {
+        switch self {
+        case .continuous: "Stay open and rescan"
+        case .singleAction: "Dismiss after one action"
+        }
+    }
+}
+
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
     var configurationVersion: Int = 17
@@ -81,10 +93,12 @@ struct QuickSettings: Codable, Sendable {
     var lastTranslationTarget: String = "zh-Hans"
 
     // Type to Click (⌃⌥C by default): show named targets, then fuzzy-filter controls and menus in the
-    // app behind Quick Launch, then use Return to act. Disabling its direct
+    // app behind Quick Launch, then use Return to act. It stays open by
+    // default, with an optional single-action dismissal. Disabling its direct
     // hotkey keeps the launcher command available.
     var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
     var typeToClickHotkeyEnabled: Bool = true
+    var typeToClickContinuation: TypeToClickContinuation = .continuous
 
     // Appearance
     var appearance: AppearancePreference = .dark
@@ -154,6 +168,9 @@ struct QuickSettings: Codable, Sendable {
         typeToClickHotkeyEnabled = try c.decodeIfPresent(
             Bool.self, forKey: .typeToClickHotkeyEnabled
         ) ?? true
+        typeToClickContinuation = try c.decodeIfPresent(
+            TypeToClickContinuation.self, forKey: .typeToClickContinuation
+        ) ?? .continuous
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true

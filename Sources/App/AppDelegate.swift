@@ -427,7 +427,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.registerTypeToClickHotkey() }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.registerTypeToClickHotkey()
+                self.typeToClickController?.configureContinuation(
+                    self.viewModel?.settings.typeToClickContinuation ?? .continuous
+                )
+            }
         }
         registerTranslatorHotkey()
         registerTypeToClickHotkey()
@@ -833,6 +839,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ? viewModel?.settings.typeToClickHotkey
             : nil
         controller.configureExitHotkey(exitHotkey)
+        controller.configureContinuation(
+            viewModel?.settings.typeToClickContinuation ?? .continuous
+        )
         typeToClickController = controller
         guard let target = selectedTextService.currentExternalTarget() else {
             controller.presentMessage("No app window found to control")

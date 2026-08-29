@@ -252,10 +252,34 @@ private struct GeneralTab: View {
                     )
                     .frame(width: 220)
                 }
+                HStack {
+                    Text("After Return")
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { viewModel.settings.typeToClickContinuation },
+                        set: { continuation in
+                            viewModel.settings.typeToClickContinuation = continuation
+                            viewModel.settings.save()
+                            NotificationCenter.default.post(
+                                name: .typeToClickSettingsChanged,
+                                object: nil
+                            )
+                        }
+                    )) {
+                        ForEach(TypeToClickContinuation.allCases, id: \.self) { continuation in
+                            Text(continuation.displayName).tag(continuation)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 220)
+                }
                 if let error = viewModel.settings.typeToClickHotkeyConflict() ?? viewModel.typeToClickHotkeyRegistrationError {
                     Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
                 } else if viewModel.settings.typeToClickHotkeyEnabled {
-                    Text("Press \(viewModel.settings.typeToClickHotkey.displayName) to label clickable targets by name. Type to narrow them, then press Return. It pulses the choice, rescans, and stays open for the next step; Esc or the shortcut closes it.")
+                    Text(viewModel.settings.typeToClickContinuation == .continuous
+                        ? "Press \(viewModel.settings.typeToClickHotkey.displayName) to label clickable targets by name. Type to narrow them, then press Return. It pulses the choice, prioritizes an opened menu, and stays open for the next step; Esc or the shortcut closes it."
+                        : "Press \(viewModel.settings.typeToClickHotkey.displayName) to label clickable targets by name. Type to narrow them, then press Return. It acts once and closes; invoke Type to Click again for another action."
+                    )
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                 } else {

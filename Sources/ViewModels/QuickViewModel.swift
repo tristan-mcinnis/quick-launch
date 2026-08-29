@@ -637,7 +637,9 @@ import Observation
             kind: .command,
             itemID: "type-to-click.mode",
             title: "Type to Click",
-            detail: "See named clickable targets, type to narrow, and chain actions",
+            detail: settings.typeToClickContinuation == .continuous
+                ? "See named targets, type to narrow, and chain actions"
+                : "See named targets, type to narrow, and act once",
             value: "type-to-click.mode",
             keywords: "click mouse search overlay accessibility elements buttons menus file edit view window"
         )

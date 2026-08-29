@@ -33,6 +33,7 @@ struct QuickSettingsTests {
         #expect(settings.typeToClickHotkey == ActionHotkey(
             keyCode: 8, modifiers: 262_144 | 524_288
         ))
+        #expect(settings.typeToClickContinuation == .continuous)
         #expect(settings.reopenRetentionSeconds == 10)
         #expect(settings.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(!settings.systemPrompt.isEmpty)
@@ -57,6 +58,21 @@ struct QuickSettingsTests {
             from: JSONEncoder().encode(LegacySettings())
         )
         #expect(!legacy.screenHistorySameUserAccessRiskAccepted)
+    }
+
+    @Test func typeToClickContinuationPersistsAndLegacySettingsStayContinuous() throws {
+        let defaults = freshDefaults()
+        var settings = QuickSettings()
+        settings.typeToClickContinuation = .singleAction
+        settings.save(to: defaults)
+        #expect(QuickSettings.load(from: defaults).typeToClickContinuation == .singleAction)
+
+        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        let legacy = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: JSONEncoder().encode(LegacySettings())
+        )
+        #expect(legacy.typeToClickContinuation == .continuous)
     }
 
     @Test func typeToClickHotkeyCanChangeAndBeCleared() throws {

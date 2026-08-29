@@ -193,6 +193,43 @@ final class TypeToClickTests: XCTestCase {
         )
     }
 
+    func testPrimaryTopUsesTheZeroOriginDisplayRegardlessOfScreenOrder() {
+        let ultrawideAbove = CGRect(x: -932, y: 982, width: 3_440, height: 1_440)
+        let builtInPrimary = CGRect(x: 0, y: 0, width: 1_512, height: 982)
+
+        XCTAssertEqual(
+            TypeToClickCoordinates.primaryTop(
+                screenFrames: [ultrawideAbove, builtInPrimary]
+            ),
+            982
+        )
+    }
+
+    func testAccessibilityFramesMapOntoCurrentStackedMixedScaleDisplayLayout() {
+        // Tristan's ultrawide is above the built-in primary display. AppKit's
+        // screen origin is (-932, 982), while AX reports its menu bar at a
+        // negative global y. Scale does not enter this point-space transform.
+        XCTAssertEqual(
+            TypeToClickCoordinates.panelRect(
+                for: CGRect(x: -826, y: -1_440, width: 42, height: 24),
+                primaryTop: 982,
+                panelOrigin: CGPoint(x: -932, y: 982)
+            ),
+            NSRect(x: 106, y: 1_416, width: 42, height: 24)
+        )
+
+        // A target on the Retina primary remains in that panel's local point
+        // space; WindowServer applies each panel's own backing scale.
+        XCTAssertEqual(
+            TypeToClickCoordinates.panelRect(
+                for: CGRect(x: 100, y: 120, width: 80, height: 30),
+                primaryTop: 982,
+                panelOrigin: .zero
+            ),
+            NSRect(x: 100, y: 832, width: 80, height: 30)
+        )
+    }
+
     func testOnlyVisibleEnabledElementsWithPressActionsAreTargets() {
         let size = CGSize(width: 40, height: 20)
         XCTAssertTrue(TypeToClickElementPolicy.isActionable(
@@ -245,6 +282,39 @@ final class TypeToClickTests: XCTestCase {
         XCTAssertTrue(controller.isAwaitingAccessibilityPermission)
         XCTAssertEqual(service.targetCalls, 0)
         controller.dismiss()
+        XCTAssertFalse(controller.isActive)
+    }
+
+    @MainActor
+    func testOneOverlaySurfacePerScreenSurvivesDisplayReconfiguration() {
+        _ = NSApplication.shared
+        let controller = TypeToClickController(service: UntrustedTypeToClickService())
+        controller.start(in: 123)
+
+        func visibleSurfaceCount() -> Int {
+            NSApp.windows.count { $0 is TypeToClickPanel && $0.isVisible }
+        }
+
+        XCTAssertEqual(visibleSurfaceCount(), NSScreen.screens.count)
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: NSApp
+        )
+        XCTAssertEqual(visibleSurfaceCount(), NSScreen.screens.count)
+        controller.dismiss()
+    }
+
+    @MainActor
+    func testEscapeAlwaysExitsTheOverlay() throws {
+        _ = NSApplication.shared
+        let controller = TypeToClickController(service: UntrustedTypeToClickService())
+        controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 53, characters: "\u{1b}"))
+
         XCTAssertFalse(controller.isActive)
     }
 
@@ -358,6 +428,86 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
+    func testContinuousModeRetriesUntilOpenedMenuCommandsHaveVisibleBadges() async throws {
+        _ = NSApplication.shared
+        let menuOpened = expectation(description: "menu bar action performed")
+        let visibleCommandsReturned = expectation(description: "late menu geometry rescanned")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let service = DelayedOpenMenuTypeToClickService(
+            frame: CGRect(
+                x: screen.frame.minX + 100,
+                y: screen.frame.maxY - screen.frame.minY - 130,
+                width: 160,
+                height: 30
+            ),
+            menuOpened: menuOpened,
+            visibleCommandsReturned: visibleCommandsReturned
+        )
+        let controller = TypeToClickController(service: service)
+        controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+
+        for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
+            panel.sendEvent(try keyEvent(
+                panel: panel,
+                keyCode: UInt16(keyCode),
+                characters: character
+            ))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [menuOpened, visibleCommandsReturned], timeout: 3)
+        let badgeAppeared = await eventually {
+            NSApp.windows
+                .compactMap { $0.contentView as? TypeToClickOverlayView }
+                .flatMap(\.badges)
+                .contains { $0.label == "File › New Window" }
+        }
+        XCTAssertTrue(badgeAppeared)
+        XCTAssertGreaterThanOrEqual(service.targetCalls, 6)
+        XCTAssertTrue(controller.isActive)
+        controller.dismiss()
+    }
+
+    @MainActor
+    func testSingleActionModeDismissesAfterSuccessWithoutRescanning() async throws {
+        _ = NSApplication.shared
+        let performed = expectation(description: "one action performed")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let service = SingleActionTypeToClickService(
+            frame: CGRect(
+                x: screen.frame.minX + 100,
+                y: screen.frame.maxY - screen.frame.minY - 130,
+                width: 120,
+                height: 30
+            ),
+            performed: performed
+        )
+        let controller = TypeToClickController(service: service)
+        controller.configureContinuation(.singleAction)
+        controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+
+        for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
+            panel.sendEvent(try keyEvent(
+                panel: panel,
+                keyCode: UInt16(keyCode),
+                characters: character
+            ))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [performed], timeout: 2)
+        let dismissed = await eventually { !controller.isActive }
+        XCTAssertTrue(dismissed)
+        XCTAssertEqual(service.targetCalls, 1)
+    }
+
+    @MainActor
     func testTypingAndReturnDuringPulseAreBufferedForTheRescannedStep() async throws {
         _ = NSApplication.shared
         let firstPerformed = expectation(description: "first action performed")
@@ -438,6 +588,18 @@ final class TypeToClickTests: XCTestCase {
         panel.sendEvent(event)
 
         XCTAssertEqual(received, "s")
+    }
+
+    @MainActor
+    private func eventually(
+        timeout: TimeInterval = 2,
+        condition: () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 
     @MainActor
@@ -579,6 +741,100 @@ private final class SelectionPreservingTypeToClickService: TypeToClickServicing,
             actionNames: [kAXPressAction as String],
             kind: .element
         )
+    }
+}
+
+private final class DelayedOpenMenuTypeToClickService: TypeToClickServicing, @unchecked Sendable {
+    private let frame: CGRect
+    private let menuOpened: XCTestExpectation
+    private let visibleCommandsReturned: XCTestExpectation
+    private let lock = NSLock()
+    private let fileElement = AXUIElementCreateApplication(310)
+    private let newWindowElement = AXUIElementCreateApplication(311)
+    private var scans = 0
+
+    init(
+        frame: CGRect,
+        menuOpened: XCTestExpectation,
+        visibleCommandsReturned: XCTestExpectation
+    ) {
+        self.frame = frame
+        self.menuOpened = menuOpened
+        self.visibleCommandsReturned = visibleCommandsReturned
+    }
+
+    var targetCalls: Int { lock.withLock { scans } }
+
+    func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
+
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
+        let scan = lock.withLock {
+            scans += 1
+            return scans
+        }
+        var targets = [TypeToClickTarget(
+            element: fileElement,
+            frame: frame,
+            label: "File",
+            searchText: "File menu bar top row",
+            role: kAXMenuBarItemRole as String,
+            actionNames: [kAXPressAction as String],
+            kind: .menuBarItem
+        )]
+        if scan >= 2 {
+            targets.append(TypeToClickTarget(
+                element: newWindowElement,
+                frame: scan >= 6 ? frame.offsetBy(dx: 0, dy: 36) : nil,
+                label: "File › New Window",
+                searchText: "File New Window menu command",
+                role: kAXMenuItemRole as String,
+                actionNames: [kAXPressAction as String],
+                kind: .menuItem
+            ))
+        }
+        if scan == 6 { visibleCommandsReturned.fulfill() }
+        return TypeToClickScanResult(targets: targets, wasTruncated: false)
+    }
+
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
+        menuOpened.fulfill()
+        return true
+    }
+}
+
+private final class SingleActionTypeToClickService: TypeToClickServicing, @unchecked Sendable {
+    private let frame: CGRect
+    private let performed: XCTestExpectation
+    private let lock = NSLock()
+    private var scans = 0
+
+    init(frame: CGRect, performed: XCTestExpectation) {
+        self.frame = frame
+        self.performed = performed
+    }
+
+    var targetCalls: Int { lock.withLock { scans } }
+
+    func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
+
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
+        lock.withLock { scans += 1 }
+        return TypeToClickScanResult(targets: [
+            TypeToClickTarget(
+                element: AXUIElementCreateSystemWide(),
+                frame: frame,
+                label: "File",
+                searchText: "File menu",
+                role: kAXMenuItemRole as String,
+                actionNames: [kAXPressAction as String],
+                kind: .menuItem
+            ),
+        ], wasTruncated: false)
+    }
+
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
+        performed.fulfill()
+        return true
     }
 }
 
