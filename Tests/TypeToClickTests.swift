@@ -230,6 +230,68 @@ final class TypeToClickTests: XCTestCase {
         )
     }
 
+    func testOpenMenuBadgesUseCompactLeafCommandNames() {
+        let element = AXUIElementCreateSystemWide()
+        let menuCommand = TypeToClickTarget(
+            element: element,
+            frame: CGRect(x: 10, y: 10, width: 100, height: 24),
+            label: "Ghostty › Check for Updates…",
+            searchText: "Ghostty Check for Updates",
+            role: kAXMenuItemRole as String,
+            actionNames: [kAXPressAction as String],
+            kind: .menuItem
+        )
+        let control = TypeToClickTarget(
+            element: element,
+            frame: CGRect(x: 10, y: 40, width: 100, height: 24),
+            label: "Terminal content area",
+            searchText: "Terminal content area",
+            role: kAXGroupRole as String,
+            actionNames: [kAXPressAction as String],
+            kind: .element
+        )
+
+        XCTAssertEqual(
+            TypeToClickOverlayPolicy.badgeLabel(for: menuCommand),
+            "Check for Updates…"
+        )
+        XCTAssertEqual(
+            TypeToClickOverlayPolicy.badgeLabel(for: control),
+            "Terminal content area"
+        )
+    }
+
+    func testSelectedAlternateMenuCommandReplacesSameFrameBadge() {
+        let rect = NSRect(x: 10, y: 20, width: 200, height: 24)
+        var badges: [TypeToClickBadge] = []
+        TypeToClickOverlayPolicy.mergeBadge(
+            TypeToClickBadge(
+                rect: rect,
+                label: "Quit Ghostty",
+                isSelected: false,
+                isPulsing: false,
+                placement: .inside
+            ),
+            for: .menuItem,
+            into: &badges
+        )
+        TypeToClickOverlayPolicy.mergeBadge(
+            TypeToClickBadge(
+                rect: rect,
+                label: "Quit and Keep Windows",
+                isSelected: true,
+                isPulsing: false,
+                placement: .inside
+            ),
+            for: .menuItem,
+            into: &badges
+        )
+
+        XCTAssertEqual(badges.count, 1)
+        XCTAssertEqual(badges.first?.label, "Quit and Keep Windows")
+        XCTAssertEqual(badges.first?.isSelected, true)
+    }
+
     func testOnlyVisibleEnabledElementsWithPressActionsAreTargets() {
         let size = CGSize(width: 40, height: 20)
         XCTAssertTrue(TypeToClickElementPolicy.isActionable(
@@ -286,7 +348,7 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
-    func testOneOverlaySurfacePerScreenSurvivesDisplayReconfiguration() {
+    func testOneOverlaySurfacePerScreenSurvivesDisplayReconfiguration() throws {
         _ = NSApplication.shared
         let controller = TypeToClickController(service: UntrustedTypeToClickService())
         controller.start(in: 123)
@@ -296,11 +358,30 @@ final class TypeToClickTests: XCTestCase {
         }
 
         XCTAssertEqual(visibleSurfaceCount(), NSScreen.screens.count)
+        let visiblePanels = NSApp.windows.compactMap { window -> TypeToClickPanel? in
+            guard let panel = window as? TypeToClickPanel, panel.isVisible else { return nil }
+            return panel
+        }
+        XCTAssertTrue(visiblePanels.allSatisfy {
+            $0.level.rawValue > NSWindow.Level.popUpMenu.rawValue
+        })
+        let statusView = try XCTUnwrap(visiblePanels
+            .compactMap { $0.contentView as? TypeToClickOverlayView }
+            .first { $0.statusText != nil })
+        XCTAssertEqual(statusView.statusAnchor?.x, statusView.bounds.midX)
+        XCTAssertEqual(statusView.statusAnchor?.y, 28)
         NotificationCenter.default.post(
             name: NSApplication.didChangeScreenParametersNotification,
             object: NSApp
         )
         XCTAssertEqual(visibleSurfaceCount(), NSScreen.screens.count)
+        let reconfiguredPanels = NSApp.windows.compactMap { window -> TypeToClickPanel? in
+            guard let panel = window as? TypeToClickPanel, panel.isVisible else { return nil }
+            return panel
+        }
+        XCTAssertTrue(reconfiguredPanels.allSatisfy {
+            $0.level.rawValue > NSWindow.Level.popUpMenu.rawValue
+        })
         controller.dismiss()
     }
 
@@ -463,7 +544,9 @@ final class TypeToClickTests: XCTestCase {
             NSApp.windows
                 .compactMap { $0.contentView as? TypeToClickOverlayView }
                 .flatMap(\.badges)
-                .contains { $0.label == "File › New Window" }
+                .contains {
+                    $0.label == "New Window" && $0.placement == .inside
+                }
         }
         XCTAssertTrue(badgeAppeared)
         XCTAssertGreaterThanOrEqual(service.targetCalls, 6)

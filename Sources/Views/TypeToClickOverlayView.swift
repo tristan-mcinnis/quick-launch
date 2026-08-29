@@ -1,11 +1,17 @@
 import AppKit
 
+enum TypeToClickBadgePlacement: Equatable {
+    case above
+    case inside
+}
+
 /// A named callout anchored to one clickable control.
 struct TypeToClickBadge: Equatable {
     let rect: NSRect        // in the overlay window's coordinate space
     let label: String
     let isSelected: Bool
     let isPulsing: Bool
+    var placement: TypeToClickBadgePlacement = .above
 }
 
 /// Draws named target badges and search status, and captures raw key events.
@@ -16,8 +22,8 @@ final class TypeToClickOverlayView: NSView {
     var statusText: String? {
         didSet { needsDisplay = true }
     }
-    /// Panel-local point used for status messages. The controller keeps this
-    /// on the display under the pointer rather than between two displays.
+    /// Panel-local point used for status messages. The controller places it
+    /// near the bottom of the chosen display, away from top-edge app menus.
     var statusAnchor: NSPoint? {
         didSet { needsDisplay = true }
     }
@@ -77,7 +83,9 @@ final class TypeToClickOverlayView: NSView {
             max(bounds.minX + 2, proposedX),
             max(bounds.minX + 2, bounds.maxX - chipSize.width - 2)
         )
-        let proposedY = badge.rect.maxY + tailHeight
+        let proposedY = badge.placement == .inside
+            ? badge.rect.midY - chipSize.height / 2
+            : badge.rect.maxY + tailHeight
         let chipY = min(
             max(bounds.minY + tailHeight + 2, proposedY),
             max(bounds.minY + tailHeight + 2, bounds.maxY - chipSize.height - 2)
@@ -100,7 +108,7 @@ final class TypeToClickOverlayView: NSView {
         shadow.shadowOffset = NSSize(width: 0, height: -1)
         shadow.set()
         fill.setFill()
-        tail.fill()
+        if badge.placement == .above { tail.fill() }
         rounded.fill()
         NSGraphicsContext.restoreGraphicsState()
 
@@ -109,8 +117,10 @@ final class TypeToClickOverlayView: NSView {
         tailOutline.line(to: NSPoint(x: tipX, y: chip.minY - tailHeight))
         tailOutline.line(to: NSPoint(x: tipX + tailWidth / 2, y: chip.minY + 0.5))
         stroke.setStroke()
-        tailOutline.lineWidth = badge.isSelected || badge.isPulsing ? 1.5 : 0.75
-        tailOutline.stroke()
+        if badge.placement == .above {
+            tailOutline.lineWidth = badge.isSelected || badge.isPulsing ? 1.5 : 0.75
+            tailOutline.stroke()
+        }
         rounded.lineWidth = badge.isPulsing ? 3 : (badge.isSelected ? 2 : 0.75)
         rounded.stroke()
         string.draw(at: NSPoint(

@@ -125,6 +125,30 @@ enum TypeToClickOverlayPolicy {
     static func displayedTargets<T>(query: String, all: [T], matches: [T]) -> [T] {
         TypeToClickSearch.normalize(query).isEmpty ? all : matches
     }
+
+    /// An open native menu already supplies its path context. Keep its badge
+    /// compact and aligned with the visible leaf command while search/status
+    /// continue to use the full path.
+    static func badgeLabel(for target: TypeToClickTarget) -> String {
+        guard target.kind == .menuItem else { return target.label }
+        return target.label.components(separatedBy: " › ").last ?? target.label
+    }
+
+    static func mergeBadge(
+        _ badge: TypeToClickBadge,
+        for kind: TypeToClickTargetKind,
+        into badges: inout [TypeToClickBadge]
+    ) {
+        guard kind == .menuItem,
+              let collision = badges.firstIndex(where: { $0.rect == badge.rect })
+        else {
+            badges.append(badge)
+            return
+        }
+        if badge.isSelected || badge.isPulsing {
+            badges[collision] = badge
+        }
+    }
 }
 
 /// One display-local overlay surface. A single window spanning mixed-Retina
@@ -488,7 +512,11 @@ final class TypeToClickController {
             )
             panel.isOpaque = false
             panel.backgroundColor = .clear
-            panel.level = .statusBar
+            // Native macOS dropdown menus sit above `.statusBar`. Badges for
+            // their commands must be one layer higher or the menu hides them.
+            panel.level = NSWindow.Level(
+                rawValue: NSWindow.Level.popUpMenu.rawValue + 1
+            )
             panel.ignoresMouseEvents = true
             panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -514,10 +542,11 @@ final class TypeToClickController {
         for surface in surfaces {
             surface.view.statusText = surface.panel === keyPanel ? text : nil
             if surface.panel === keyPanel {
-                let local = surface.panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+                // Native app and File menus occupy the top edge. Keep status
+                // at the bottom so it never hides the newly exposed commands.
                 surface.view.statusAnchor = NSPoint(
-                    x: min(max(local.x, 180), max(180, surface.view.bounds.maxX - 180)),
-                    y: min(max(local.y - 72, 32), max(32, surface.view.bounds.maxY - 32))
+                    x: surface.view.bounds.midX,
+                    y: 28
                 )
             } else {
                 surface.view.statusAnchor = nil
@@ -904,16 +933,25 @@ final class TypeToClickController {
             for (index, surface) in surfaces.enumerated() {
                 let rect = windowRect(for: frame, on: surface.panel)
                 guard surface.view.bounds.intersects(rect) else { continue }
-                badges[index].append(TypeToClickBadge(
+                let badge = TypeToClickBadge(
                     rect: rect,
-                    label: target.label,
+                    label: TypeToClickOverlayPolicy.badgeLabel(for: target),
                     isSelected: selected.map {
                         CFEqual($0.element, target.element)
                     } ?? false,
                     isPulsing: pulsingTarget.map {
                         CFEqual($0.element, target.element)
-                    } ?? false
-                ))
+                    } ?? false,
+                    placement: target.kind == .menuItem ? .inside : .above
+                )
+                // AppKit may expose alternate Option-key commands at one
+                // frame. Keep one spatial badge, but let the active fuzzy
+                // selection or pulse replace the default visible command.
+                TypeToClickOverlayPolicy.mergeBadge(
+                    badge,
+                    for: target.kind,
+                    into: &badges[index]
+                )
             }
         }
         for (index, surface) in surfaces.enumerated() {
