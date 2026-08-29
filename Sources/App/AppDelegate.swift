@@ -817,6 +817,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let controller = typeToClickController, controller.isActive {
             if controller.isAwaitingAccessibilityPermission {
                 controller.retryAccessibilityPermission()
+            } else if !controller.isCapturingKeyboard {
+                // An AX action can activate the controlled app while the
+                // transparent panels remain visible. Recover the chain instead
+                // of making this press dismiss a mode that is not receiving keys.
+                controller.recaptureKeyboard()
             } else {
                 controller.dismiss()
             }
@@ -824,6 +829,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if panel?.isVisible == true { hideOverlay() }
         let controller = typeToClickController ?? TypeToClickController()
+        let exitHotkey = viewModel?.settings.typeToClickHotkeyEnabled == true
+            ? viewModel?.settings.typeToClickHotkey
+            : nil
+        controller.configureExitHotkey(exitHotkey)
         typeToClickController = controller
         guard let target = selectedTextService.currentExternalTarget() else {
             controller.presentMessage("No app window found to control")

@@ -90,15 +90,16 @@ enum TypeToClickMenuPolicy {
         isMenuBarItem || !isIgnoredBranch
     }
 
-    /// Closed menu commands can report stale coordinates. Only top-level
-    /// menu-bar items are truly visible spatial targets.
-    static func topLevelFrame(
+    /// Open menu commands have real nonzero frames and should join the named
+    /// target map. Closed commands report zero-sized placeholder coordinates,
+    /// so they remain searchable without drawing a misleading badge.
+    static func visibleFrame(
         role: String,
         position: CGPoint?,
         size: CGSize?,
         hidden: Bool
     ) -> CGRect? {
-        guard role == kAXMenuBarItemRole as String,
+        guard role == kAXMenuBarItemRole as String || role == kAXMenuItemRole as String,
               !hidden,
               let position,
               let size,
@@ -208,9 +209,16 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
         AXUIElementSetMessagingTimeout(target.element, 0.25)
         guard Self.bool(target.element, kAXEnabledAttribute) else { return false }
 
-        // Menu commands remain hidden while their menus are closed. Top-level
-        // menu items also need semantic activation so selecting File opens it.
-        if target.kind.isMenuTarget {
+        // Closed-menu commands need semantic activation because they have no
+        // usable coordinates. macOS reports success for AXPress/AXShowMenu on
+        // some top-level menu-bar items without actually opening the menu, so
+        // visible top-level items use the same guarded coordinate click as a
+        // physical menu-bar click.
+        if target.kind == .menuBarItem {
+            guard let point = currentMidpoint(of: target.element) else { return false }
+            return postClick(at: point, button: .left, modifiers: 0)
+        }
+        if target.kind == .menuItem {
             return performSemanticAction(on: target)
         }
 
@@ -404,7 +412,7 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
                     let shortcut = Self.string(element, kAXMenuItemCmdCharAttribute)
                     let help = Self.string(element, kAXHelpAttribute)
                     let label = path.joined(separator: " › ")
-                    let frame = TypeToClickMenuPolicy.topLevelFrame(
+                    let frame = TypeToClickMenuPolicy.visibleFrame(
                         role: role,
                         position: Self.point(element, kAXPositionAttribute),
                         size: Self.size(element, kAXSizeAttribute),
