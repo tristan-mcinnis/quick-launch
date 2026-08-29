@@ -637,9 +637,9 @@ import Observation
             kind: .command,
             itemID: "type-to-click.mode",
             title: "Type to Click",
-            detail: "Search controls and app menus, select a gold hint, then press Return",
+            detail: "Fuzzy-search controls and app menus; Return acts and stays open",
             value: "type-to-click.mode",
-            keywords: "click mouse hint overlay accessibility elements buttons menus file edit view window"
+            keywords: "click mouse search overlay accessibility elements buttons menus file edit view window"
         )
         let settings = LauncherCatalogItem(
             kind: .command,

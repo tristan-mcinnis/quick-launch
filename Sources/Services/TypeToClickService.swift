@@ -20,8 +20,8 @@ enum TypeToClickTargetKind: String, Sendable {
     var isMenuTarget: Bool { self != .element }
 }
 
-/// A searchable Accessibility element. Top-level menu-bar items have frames
-/// and hints; commands inside closed menus remain searchable by complete path.
+/// A searchable Accessibility element. Top-level menu-bar items have frames;
+/// commands inside closed menus remain searchable by their complete path.
 ///
 /// `AXUIElement` is an immutable CF handle but the imported C API has no Swift
 /// Sendable annotation. Enumeration finishes before this value is consumed on
@@ -29,7 +29,6 @@ enum TypeToClickTargetKind: String, Sendable {
 /// tasks concurrently.
 struct TypeToClickTarget: @unchecked Sendable {
     let element: AXUIElement
-    let hint: String?
     /// Accessibility global frame (top-left origin, y grows down). Menu items
     /// in a closed menu intentionally have no frame.
     let frame: CGRect?
@@ -84,61 +83,15 @@ enum TypeToClickElementPolicy {
     }
 }
 
-/// Pure hint-string generation, Vimium-style: all hints share one length so no
-/// hint is ever a prefix of another. Kept free of AppKit so it is unit-testable.
-enum HintGenerator {
-    static func hints(count: Int, alphabet: String) -> [String] {
-        guard count > 0 else { return [] }
-        var seenCharacters = Set<Character>()
-        let chars = Array(alphabet.filter { seenCharacters.insert($0).inserted })
-        guard !chars.isEmpty else { return [] }
-        // More than one unique, non-prefix hint cannot be represented with a
-        // one-character alphabet. Returning no hints is safer than hanging.
-        guard chars.count > 1 || count == 1 else { return [] }
-
-        var length = 1
-        var capacity = chars.count
-        while capacity < count {
-            length += 1
-            capacity *= chars.count
-        }
-
-        var out: [String] = []
-        out.reserveCapacity(count)
-        for i in 0..<count {
-            var n = i
-            var s = ""
-            for _ in 0..<length {
-                s = String(chars[n % chars.count]) + s
-                n /= chars.count
-            }
-            out.append(s)
-        }
-        return out
-    }
-
-    /// Assigns compact hints only to spatial targets. Closed menu commands do
-    /// not consume codes, while visible Apple/app/File/Edit menu-bar items do.
-    static func hints(forSpatialTargets spatialTargets: [Bool], alphabet: String) -> [String?] {
-        let generated = hints(count: spatialTargets.count(where: { $0 }), alphabet: alphabet)
-        var nextHint = 0
-        return spatialTargets.map { isSpatial in
-            guard isSpatial, generated.indices.contains(nextHint) else { return nil }
-            defer { nextHint += 1 }
-            return generated[nextHint]
-        }
-    }
-}
-
 enum TypeToClickMenuPolicy {
     /// A pathological branch may be too large to walk, but its visible
-    /// top-level menu-bar item must still remain hintable.
+    /// top-level menu-bar item must still remain searchable.
     static func shouldCollectResult(isMenuBarItem: Bool, isIgnoredBranch: Bool) -> Bool {
         isMenuBarItem || !isIgnoredBranch
     }
 
     /// Closed menu commands can report stale coordinates. Only top-level
-    /// menu-bar items are truly visible and should receive a spatial hint.
+    /// menu-bar items are truly visible spatial targets.
     static func topLevelFrame(
         role: String,
         position: CGPoint?,
@@ -166,7 +119,7 @@ protocol TypeToClickServicing: AnyObject, Sendable {
     func isAccessibilityTrusted(prompt: Bool) -> Bool
     /// Enumerates visible controls in the focused window plus the active app's
     /// complete menu hierarchy.
-    func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult
+    func targets(in pid: pid_t) -> TypeToClickScanResult
     /// Revalidates and performs the requested action.
     @discardableResult func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool
 }
@@ -197,7 +150,7 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
         ] as CFDictionary)
     }
 
-    func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.25)
 
@@ -227,22 +180,17 @@ final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
                 wasTruncated = true
             }
             // Put the visible system/app menu row before window controls. The
-            // remaining closed commands stay searchable but are never hinted.
+            // remaining closed commands stay searchable without spatial frames.
             elements = menuItems.filter { $0.frame != nil }
                 + elements
                 + menuItems.filter { $0.frame == nil }
         }
 
-        let hints = HintGenerator.hints(
-            forSpatialTargets: elements.map { $0.frame != nil },
-            alphabet: alphabet
-        )
-        // A malformed future alphabet must not erase otherwise searchable
-        // controls. Keep targets hintless if unique hint generation is impossible.
-        let targets = elements.enumerated().map { index, collected in
+        // Type to Click is search-only. Targets intentionally have no arbitrary
+        // generated codes; users reach them through labels, paths, and roles.
+        let targets = elements.map { collected in
             TypeToClickTarget(
                 element: collected.element,
-                hint: hints[index],
                 frame: collected.frame,
                 label: collected.label,
                 searchText: collected.searchText,

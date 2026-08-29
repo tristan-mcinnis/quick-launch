@@ -255,7 +255,7 @@ private struct GeneralTab: View {
                 if let error = viewModel.settings.typeToClickHotkeyConflict() ?? viewModel.typeToClickHotkeyRegistrationError {
                     Text(error).font(AQDesign.TypeToken.caption).foregroundStyle(AQDesign.ColorToken.danger)
                 } else if viewModel.settings.typeToClickHotkeyEnabled {
-                    Text("Press \(viewModel.settings.typeToClickHotkey.displayName), type a gold hint, control name, or menu command, then press Return. Esc or the shortcut closes it.")
+                    Text("Press \(viewModel.settings.typeToClickHotkey.displayName), type a control or menu name, then press Return. It rescans and stays open for the next step; Esc or the shortcut closes it.")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
                 } else {

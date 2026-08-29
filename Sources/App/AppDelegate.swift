@@ -573,7 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showOverlay(captureSelectionTarget: Bool = true) {
         guard let panel else { return }
         // The main launcher and Type to Click both own keyboard focus. Never
-        // leave the always-on-top hint panels stacked above the launcher.
+        // leave the always-on-top search panels stacked above the launcher.
         if typeToClickController?.isActive == true { hideTypeToClick() }
         overlayClearTask?.cancel()
         overlayClearTask = nil
@@ -812,9 +812,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showTypeToClick() {
-        // Toggle: a second hotkey press while the overlay is up dismisses it.
+        // Toggle normally. A permission message instead uses the next press to
+        // recheck access for the same app, as its instructions promise.
         if let controller = typeToClickController, controller.isActive {
-            controller.dismiss()
+            if controller.isAwaitingAccessibilityPermission {
+                controller.retryAccessibilityPermission()
+            } else {
+                controller.dismiss()
+            }
             return
         }
         if panel?.isVisible == true { hideOverlay() }

@@ -5,19 +5,15 @@ import Testing
 
 private func candidate(
     _ id: String,
-    hint: String? = nil,
     label: String,
     searchText: String = "",
-    role: String = "",
-    isSpatial: Bool = true
+    role: String = ""
 ) -> TypeToClickSearchCandidate {
     TypeToClickSearchCandidate(
         id: id,
-        hint: hint,
         label: label,
         searchText: searchText,
-        role: role,
-        isSpatial: isSpatial
+        role: role
     )
 }
 
@@ -32,63 +28,19 @@ private func rank(
     ids(candidates, TypeToClickSearch.rankedIndices(in: candidates, query: query))
 }
 
-@Suite("Type to Click hybrid search")
+@Suite("Type to Click fuzzy search")
 struct TypeToClickSearchTests {
 
     // MARK: - Empty query
 
-    @Test func emptyQueryReturnsOnlySpatialHintTargetsInOriginalOrder() {
+    @Test func emptyQueryReturnsNoMatchesUntilTheUserTypes() {
         let candidates = [
-            candidate("save", hint: "a", label: "Save", role: "button"),
-            candidate("cancel", hint: nil, label: "Cancel", role: "button"),
-            candidate("open", hint: "b", label: "Open", role: "button", isSpatial: false),
-            candidate("delete", hint: "c", label: "Delete", role: "button"),
+            candidate("save", label: "Save", role: "button"),
+            candidate("open", label: "File › Open", role: "menu item"),
         ]
-        // Only on-screen elements that carry a hint, in original order. The
-        // app-menu command with a hint and the hintless element are dropped.
-        #expect(rank(candidates, "") == ["save", "delete"])
-    }
-
-    @Test func emptyQueryWhitespaceBehavesLikeEmpty() {
-        let candidates = [
-            candidate("save", hint: "a", label: "Save"),
-            candidate("open", hint: "b", label: "Open"),
-        ]
-        #expect(rank(candidates, "   ") == ["save", "open"])
-    }
-
-    // MARK: - Hint ranking
-
-    @Test func exactHintRanksHighestForCompactQuery() {
-        let candidates = [
-            candidate("apple", hint: nil, label: "Apple"),
-            candidate("save", hint: "a", label: "Save"),
-            candidate("delete", hint: "b", label: "Delete"),
-        ]
-        // "a" exactly matches the hint of "save", which must beat the label
-        // prefix match on "Apple".
-        #expect(rank(candidates, "a") == ["save", "apple"])
-    }
-
-    @Test func hintPrefixOutranksNoHintAndExactHintTopsIt() {
-        let candidates = [
-            candidate("saveAs", hint: "sad", label: "Save", role: "button"),
-            candidate("save", hint: "sa", label: "Save", role: "button"),
-            candidate("open", hint: nil, label: "Search", role: "button"),
-        ]
-        // Query "sa": "save" has the exact hint (2), "saveAs" has the prefix
-        // hint (1), "open" has no hint match but does match the label word.
-        #expect(rank(candidates, "sa") == ["save", "saveAs", "open"])
-    }
-
-    @Test func stableOrderAmongEqualHintMatches() {
-        let candidates = [
-            candidate("first", hint: "sad", label: "Save", role: "button"),
-            candidate("second", hint: "sap", label: "Save", role: "button"),
-        ]
-        // Both are prefix hints with identical text scores and label lengths;
-        // original order must resolve the tie.
-        #expect(rank(candidates, "sa") == ["first", "second"])
+        #expect(rank(candidates, "").isEmpty)
+        #expect(rank(candidates, "   ").isEmpty)
+        #expect(rank(candidates, "save") == ["save"])
     }
 
     // MARK: - Normalization
@@ -137,17 +89,6 @@ struct TypeToClickSearchTests {
         ]
         // "save file" requires both "save" and "file". Only "both" satisfies it.
         #expect(rank(candidates, "save file") == ["both"])
-    }
-
-    @Test func hintCountsAsARegularMatchSurfaceForTheGate() {
-        let candidates = [
-            candidate("save", hint: "sa", label: "Persist", role: "button"),
-            candidate("other", hint: "zz", label: "Persist", role: "button"),
-        ]
-        // "sa" is not a word in "Persist", but it is the exact hint code, so
-        // it must still be reachable. "other" has the wrong hint and no text
-        // match, so it is dropped.
-        #expect(rank(candidates, "sa") == ["save"])
     }
 
     // MARK: - Alias families
@@ -300,10 +241,10 @@ struct TypeToClickSearchTests {
         #expect(rank(candidates, "rb") == ["redButton"])
     }
 
-    @Test func nonSpatialCommandIsReachableByTextQuery() {
+    @Test func closedMenuCommandIsReachableByTextQuery() {
         let candidates = [
-            candidate("saveDoc", label: "Save Document", role: "menu", isSpatial: false),
-            candidate("closeDoc", label: "Close Document", role: "menu", isSpatial: false),
+            candidate("saveDoc", label: "Save Document", role: "menu"),
+            candidate("closeDoc", label: "Close Document", role: "menu"),
         ]
         #expect(rank(candidates, "save") == ["saveDoc"])
     }
@@ -312,17 +253,17 @@ struct TypeToClickSearchTests {
 
     @Test func rankedCandidatesReturnsTheCandidatesInRankOrder() {
         let candidates = [
-            candidate("save", hint: "a", label: "Save", role: "button"),
+            candidate("save", label: "Save", role: "button"),
             candidate("apple", label: "Apple", role: "button"),
         ]
-        let result = TypeToClickSearch.rankedCandidates(candidates, query: "a")
-        #expect(result.map(\.id) == ["save", "apple"])
+        let result = TypeToClickSearch.rankedCandidates(candidates, query: "save")
+        #expect(result.map(\.id) == ["save"])
     }
 
     @Test func preparedIndexCanBeReusedAcrossQueries() {
         let candidates = [
-            candidate("save", hint: "sa", label: "Save", role: "button"),
-            candidate("open", hint: "op", label: "File › Open", role: "menu", isSpatial: false),
+            candidate("save", label: "Save", role: "button"),
+            candidate("open", label: "File › Open", role: "menu"),
         ]
         let index = TypeToClickSearch.Index(candidates: candidates)
         #expect(ids(candidates, index.rankedIndices(query: "sa")) == ["save"])
@@ -330,7 +271,7 @@ struct TypeToClickSearchTests {
     }
 
     @Test func candidateIsSendable() {
-        let value = candidate("x", hint: "a", label: "Save", role: "button")
+        let value = candidate("x", label: "Save", role: "button")
         func requireSendable<T: Sendable>(_ item: T) -> Bool { true }
         #expect(requireSendable(value))
         #expect(requireSendable([value]))

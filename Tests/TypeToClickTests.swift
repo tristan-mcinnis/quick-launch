@@ -5,55 +5,6 @@ import XCTest
 
 final class TypeToClickTests: XCTestCase {
 
-    func testHintsEmpty() {
-        XCTAssertEqual(HintGenerator.hints(count: 0, alphabet: "abc"), [])
-        XCTAssertEqual(HintGenerator.hints(count: 3, alphabet: ""), [])
-    }
-
-    func testSingleLetterHintsWhenFewEnough() {
-        XCTAssertEqual(HintGenerator.hints(count: 3, alphabet: "abc"), ["a", "b", "c"])
-        XCTAssertEqual(HintGenerator.hints(count: 2, alphabet: "abc"), ["a", "b"])
-    }
-
-    func testSingleCharacterAlphabetCannotHangOrCreateDuplicateHints() {
-        XCTAssertEqual(HintGenerator.hints(count: 1, alphabet: "a"), ["a"])
-        XCTAssertEqual(HintGenerator.hints(count: 2, alphabet: "a"), [])
-        XCTAssertEqual(HintGenerator.hints(count: 2, alphabet: "aaa"), [])
-    }
-
-    func testAllHintsShareLengthForLargerCounts() {
-        // 8 targets over a 3-char alphabet: 3 < 8 <= 9, so 2-char hints throughout.
-        let hints = HintGenerator.hints(count: 8, alphabet: "abc")
-        XCTAssertEqual(hints.count, 8)
-        XCTAssertTrue(hints.allSatisfy { $0.count == 2 })
-    }
-
-    func testHintsAreUniqueAndNonPrefix() {
-        let hints = HintGenerator.hints(count: 40, alphabet: "sadfjklewcmpgh")
-        XCTAssertEqual(Set(hints).count, 40)
-        for hint in hints {
-            // No hint may be a strict prefix of another (unambiguous typing).
-            let prefixes = hints.filter { $0.hasPrefix(hint) }
-            XCTAssertEqual(prefixes, [hint], "\(hint) collides with \(prefixes)")
-        }
-    }
-
-    func testCoverageForLargeCount() {
-        let hints = HintGenerator.hints(count: 200, alphabet: "sadfjklewcmpgh")
-        XCTAssertEqual(hints.count, 200)
-        XCTAssertTrue(hints.allSatisfy { !$0.isEmpty })
-    }
-
-    func testVisibleMenuBarItemsReceiveHintsWithoutChargingClosedCommands() {
-        XCTAssertEqual(
-            HintGenerator.hints(
-                forSpatialTargets: [true, true, false, true, false],
-                alphabet: "abc"
-            ),
-            ["a", "b", nil, "c", nil]
-        )
-    }
-
     func testIgnoredBranchesKeepTheirVisibleTopLevelMenuItem() {
         XCTAssertTrue(TypeToClickMenuPolicy.shouldCollectResult(
             isMenuBarItem: true,
@@ -103,7 +54,7 @@ final class TypeToClickTests: XCTestCase {
         ))
     }
 
-    func testHintKeysAllowLingeringHotkeyModifiersButRejectCommandChords() {
+    func testQueryKeysAllowLingeringHotkeyModifiersButRejectCommandChords() {
         XCTAssertEqual(
             TypeToClickKeyPolicy.queryCharacter(
                 charactersIgnoringModifiers: "S",
@@ -214,6 +165,11 @@ final class TypeToClickTests: XCTestCase {
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
         XCTAssertTrue(controller.isActive)
+        XCTAssertTrue(controller.isAwaitingAccessibilityPermission)
+        XCTAssertEqual(service.targetCalls, 0)
+        controller.retryAccessibilityPermission()
+        XCTAssertTrue(controller.isActive)
+        XCTAssertTrue(controller.isAwaitingAccessibilityPermission)
         XCTAssertEqual(service.targetCalls, 0)
         controller.dismiss()
         XCTAssertFalse(controller.isActive)
@@ -252,7 +208,56 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
-    func testPanelCapturesHintKeyBeforeFirstResponderDispatch() throws {
+    func testSuccessfulActionRescansAndStaysOpenForAnotherStep() async throws {
+        _ = NSApplication.shared
+        let firstPerformed = expectation(description: "first action performed")
+        let secondPerformed = expectation(description: "second action performed")
+        let rescanned = expectation(description: "targets rescanned after action")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let service = ContinuingTypeToClickService(
+            frame: CGRect(
+                x: screen.frame.minX + 100,
+                y: screen.frame.maxY - screen.frame.minY - 130,
+                width: 120,
+                height: 30
+            ),
+            firstPerformed: firstPerformed,
+            secondPerformed: secondPerformed,
+            rescanned: rescanned
+        )
+        let controller = TypeToClickController(service: service)
+        controller.start(in: 123)
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            $0 is TypeToClickPanel && $0.isVisible
+        } as? TypeToClickPanel)
+
+        for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
+            panel.sendEvent(try keyEvent(
+                panel: panel,
+                keyCode: UInt16(keyCode),
+                characters: character
+            ))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [firstPerformed, rescanned], timeout: 2)
+        for (keyCode, character) in [(31, "o"), (35, "p"), (14, "e"), (45, "n")] {
+            panel.sendEvent(try keyEvent(
+                panel: panel,
+                keyCode: UInt16(keyCode),
+                characters: character
+            ))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [secondPerformed], timeout: 2)
+        XCTAssertTrue(controller.isActive)
+        XCTAssertEqual(service.performedLabels, ["File", "Open"])
+        controller.dismiss()
+    }
+
+    @MainActor
+    func testPanelCapturesQueryKeyBeforeFirstResponderDispatch() throws {
         _ = NSApplication.shared
         let panel = TypeToClickPanel(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
@@ -310,7 +315,7 @@ final class TypeToClickTests: XCTestCase {
 private final class UntrustedTypeToClickService: TypeToClickServicing, @unchecked Sendable {
     private(set) var targetCalls = 0
     func isAccessibilityTrusted(prompt: Bool) -> Bool { false }
-    func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
         targetCalls += 1
         return TypeToClickScanResult(targets: [], wasTruncated: false)
     }
@@ -334,11 +339,10 @@ private final class BufferedTypeToClickService: TypeToClickServicing, @unchecked
 
     func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
 
-    func targets(in pid: pid_t, alphabet: String) -> TypeToClickScanResult {
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
         Thread.sleep(forTimeInterval: 0.12)
         let target = TypeToClickTarget(
             element: AXUIElementCreateSystemWide(),
-            hint: "sa",
             frame: frame,
             label: "Save",
             searchText: "Save button",
@@ -352,6 +356,65 @@ private final class BufferedTypeToClickService: TypeToClickServicing, @unchecked
     func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
         lock.withLock { storedAction = action }
         performed.fulfill()
+        return true
+    }
+}
+
+private final class ContinuingTypeToClickService: TypeToClickServicing, @unchecked Sendable {
+    private let frame: CGRect
+    private let firstPerformed: XCTestExpectation
+    private let secondPerformed: XCTestExpectation
+    private let rescanned: XCTestExpectation
+    private let lock = NSLock()
+    private var scans = 0
+    private var labels: [String] = []
+
+    init(
+        frame: CGRect,
+        firstPerformed: XCTestExpectation,
+        secondPerformed: XCTestExpectation,
+        rescanned: XCTestExpectation
+    ) {
+        self.frame = frame
+        self.firstPerformed = firstPerformed
+        self.secondPerformed = secondPerformed
+        self.rescanned = rescanned
+    }
+
+    var performedLabels: [String] { lock.withLock { labels } }
+
+    func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
+
+    func targets(in pid: pid_t) -> TypeToClickScanResult {
+        let shouldFulfillRescan = lock.withLock {
+            scans += 1
+            return scans == 2
+        }
+        if shouldFulfillRescan { rescanned.fulfill() }
+        let label = shouldFulfillRescan ? "Open" : "File"
+        return TypeToClickScanResult(targets: [
+            TypeToClickTarget(
+                element: AXUIElementCreateSystemWide(),
+                frame: frame,
+                label: label,
+                searchText: "\(label) menu command",
+                role: kAXMenuItemRole as String,
+                actionNames: [kAXPressAction as String],
+                kind: .menuItem
+            ),
+        ], wasTruncated: false)
+    }
+
+    func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
+        let actionNumber = lock.withLock {
+            labels.append(target.label)
+            return labels.count
+        }
+        if actionNumber == 1 {
+            firstPerformed.fulfill()
+        } else if actionNumber == 2 {
+            secondPerformed.fulfill()
+        }
         return true
     }
 }

@@ -80,8 +80,8 @@ struct QuickSettings: Codable, Sendable {
     var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
     var lastTranslationTarget: String = "zh-Hans"
 
-    // Type to Click (⌃⌥C by default): overlay hints over the app behind
-    // Quick Launch, type a hint to click the element. Disabling its direct
+    // Type to Click (⌃⌥C by default): fuzzy-search controls and menus in the
+    // app behind Quick Launch, then use Return to act. Disabling its direct
     // hotkey keeps the launcher command available.
     var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
     var typeToClickHotkeyEnabled: Bool = true

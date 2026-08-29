@@ -72,14 +72,14 @@ private struct TypeToClickSurface {
     let view: TypeToClickOverlayView
 }
 
-/// Coordinates the Type to Click overlay. Gold hints remain the low-keystroke
-/// path, while the same input also fuzzy-searches labels, roles, and the active
-/// application's menu hierarchy. A selected target is actioned only on Enter,
-/// enabling right-click and modifier-click without ambiguous auto-activation.
+/// Coordinates the Type to Click search overlay. Input fuzzy-searches labels,
+/// roles, and the active application's menu hierarchy. Return acts on the best
+/// match, then rescans and stays open so several UI steps can be chained.
 @MainActor
 final class TypeToClickController {
-    static let defaultAlphabet = "sadfjklewcmpgh"
     private static let staleTreeInterval: TimeInterval = 2
+    private static let postActionRefreshDelay = Duration.milliseconds(180)
+    private static let syntheticClickSuppressionInterval: TimeInterval = 0.5
 
     private let service: TypeToClickServicing
     private let logger = Logger(
@@ -103,8 +103,10 @@ final class TypeToClickController {
     private var scanTask: Task<TypeToClickScanResult, Never>?
     private var loadTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var postActionRefreshTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var globalEventMonitor: Any?
+    private var ignoreMouseEventsUntil = Date.distantPast
     private var lastScanFinishedAt: Date?
     private var pendingAction: TypeToClickAction?
     private var wasTruncated = false
@@ -117,6 +119,7 @@ final class TypeToClickController {
     }
 
     var isActive: Bool { surfaces.contains { $0.panel.isVisible } }
+    private(set) var isAwaitingAccessibilityPermission = false
 
     func start(in pid: pid_t) {
         guard !isActive else { return }
@@ -126,6 +129,7 @@ final class TypeToClickController {
         render()
         accessibilityTrusted = service.isAccessibilityTrusted(prompt: true)
         guard accessibilityTrusted else {
+            isAwaitingAccessibilityPermission = true
             notice = "Allow Quick Launch in Privacy & Security › Accessibility, then press the shortcut again"
             render()
             presentAndCaptureKeyboard()
@@ -133,6 +137,15 @@ final class TypeToClickController {
         }
         presentAndCaptureKeyboard()
         requestScan(force: true)
+    }
+
+    /// Rechecks Accessibility on the same app when the permission message is
+    /// visible. The hotkey remains a normal toggle in every other state.
+    func retryAccessibilityPermission() {
+        guard isActive, isAwaitingAccessibilityPermission, activePID != 0 else { return }
+        let pid = activePID
+        dismiss()
+        start(in: pid)
     }
 
     /// Gives a failed target lookup a visible, dismissible result instead of
@@ -156,6 +169,8 @@ final class TypeToClickController {
         loadTask = nil
         refreshTask?.cancel()
         refreshTask = nil
+        postActionRefreshTask?.cancel()
+        postActionRefreshTask = nil
         actionTask?.cancel()
         actionTask = nil
         applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
@@ -174,6 +189,8 @@ final class TypeToClickController {
         lastScanFinishedAt = nil
         wasTruncated = false
         accessibilityTrusted = false
+        isAwaitingAccessibilityPermission = false
+        ignoreMouseEventsUntil = .distantPast
         notice = nil
         setStatus(nil)
         let pid = activePID
@@ -195,12 +212,11 @@ final class TypeToClickController {
         loadTask?.cancel()
         let service = self.service
         let pid = activePID
-        let alphabet = Self.defaultAlphabet
-        if targets.isEmpty { notice = "Finding controls and menu commands…" }
+        if targets.isEmpty { notice = findingNotice }
         render()
 
         let task = Task.detached(priority: .userInitiated) {
-            service.targets(in: pid, alphabet: alphabet)
+            service.targets(in: pid)
         }
         scanTask = task
         loadTask = Task { @MainActor [weak self] in
@@ -280,6 +296,8 @@ final class TypeToClickController {
         lastScanFinishedAt = nil
         wasTruncated = false
         accessibilityTrusted = false
+        isAwaitingAccessibilityPermission = false
+        ignoreMouseEventsUntil = .distantPast
         notice = nil
         configureSurfaces()
         setStatus(nil)
@@ -359,10 +377,11 @@ final class TypeToClickController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
         ) { [weak self] event in
             Task { @MainActor [weak self] in
+                guard let self else { return }
                 if event.type == .scrollWheel {
-                    self?.scheduleRefreshAfterScroll()
-                } else {
-                    self?.dismiss()
+                    self.scheduleRefreshAfterScroll()
+                } else if Date() >= self.ignoreMouseEventsUntil {
+                    self.dismiss()
                 }
             }
         }
@@ -398,7 +417,7 @@ final class TypeToClickController {
             return true
         case 51: // Delete / Backspace
             query = String(query.dropLast())
-            if !targets.isEmpty { notice = nil }
+            notice = targets.isEmpty ? findingNotice : nil
             updateMatches(resetSelection: true)
             refreshIfStale()
             render()
@@ -429,7 +448,7 @@ final class TypeToClickController {
                 modifiers: modifiers
             ) else { return false }
             query += character
-            if !targets.isEmpty { notice = nil }
+            notice = targets.isEmpty ? findingNotice : nil
             updateMatches(resetSelection: true)
             refreshIfStale()
             render()
@@ -449,7 +468,7 @@ final class TypeToClickController {
             render()
             return
         }
-        if scanTask != nil {
+        if scanTask != nil || postActionRefreshTask != nil {
             pendingAction = action
             notice = "Waiting for the active app…"
             render()
@@ -467,7 +486,7 @@ final class TypeToClickController {
     private func performSelected(_ action: TypeToClickAction) {
         guard !matches.isEmpty else {
             notice = query.isEmpty
-                ? "Type a gold hint, control name, or menu command"
+                ? "Type a control or menu command"
                 : "No match for “\(query)”"
             render()
             return
@@ -477,6 +496,9 @@ final class TypeToClickController {
         let service = self.service
         let generation = UUID()
         actionGeneration = generation
+        ignoreMouseEventsUntil = Date().addingTimeInterval(
+            Self.syntheticClickSuppressionInterval
+        )
         notice = "Acting on \(target.label)…"
         render()
         let task = Task.detached(priority: .userInitiated) {
@@ -491,7 +513,7 @@ final class TypeToClickController {
             else { return }
             self.actionTask = nil
             if succeeded {
-                self.dismiss()
+                self.continueAfterSuccessfulAction()
             } else {
                 self.notice = "That target changed or could not be actioned. Press ⌘R to refresh."
                 self.lastScanFinishedAt = nil
@@ -500,17 +522,41 @@ final class TypeToClickController {
         }
     }
 
+    private func continueAfterSuccessfulAction() {
+        query = ""
+        selectedIndex = 0
+        targets = []
+        matches = []
+        searchIndex = TypeToClickSearch.Index(candidates: [])
+        lastScanFinishedAt = nil
+        wasTruncated = false
+        notice = "Updating controls and menu commands…"
+        render()
+
+        postActionRefreshTask?.cancel()
+        postActionRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.postActionRefreshDelay)
+            guard !Task.isCancelled, let self, self.isActive else { return }
+            self.postActionRefreshTask = nil
+            self.requestScan(force: true)
+        }
+    }
+
     // MARK: - Search and rendering
+
+    private var findingNotice: String {
+        query.isEmpty
+            ? "Finding controls and menu commands…"
+            : "“\(query)” · finding matches…"
+    }
 
     private func rebuildSearchIndex() {
         let candidates = targets.enumerated().map { index, target in
             TypeToClickSearchCandidate(
-                id: "\(index):\(target.kind.rawValue):\(target.hint ?? ""):\(target.label)",
-                hint: target.hint,
+                id: "\(index):\(target.kind.rawValue):\(target.label)",
                 label: target.label,
                 searchText: target.searchText,
-                role: target.role,
-                isSpatial: target.frame != nil
+                role: target.role
             )
         }
         searchIndex = TypeToClickSearch.Index(candidates: candidates)
@@ -523,24 +569,7 @@ final class TypeToClickController {
     }
 
     private func render() {
-        var boxes = Array(repeating: [TypeToClickBox](), count: surfaces.count)
         let selected = matches.indices.contains(selectedIndex) ? matches[selectedIndex] : nil
-        for target in matches {
-            guard let frame = target.frame, let hint = target.hint else { continue }
-            for (index, surface) in surfaces.enumerated() {
-                let rect = windowRect(for: frame, on: surface.panel)
-                if surface.view.bounds.intersects(rect) {
-                    boxes[index].append(TypeToClickBox(
-                        rect: rect,
-                        hint: hint,
-                        isSelected: selected.map { CFEqual($0.element, target.element) } ?? false
-                    ))
-                }
-            }
-        }
-        for (index, surface) in surfaces.enumerated() {
-            surface.view.boxes = boxes[index]
-        }
         setStatus(interactionStatus(selected: selected))
     }
 
@@ -548,18 +577,15 @@ final class TypeToClickController {
         if let notice { return notice }
         guard !targets.isEmpty else { return "Finding controls and menu commands…" }
         guard !matches.isEmpty else {
+            let warning = wasTruncated ? " · partial scan" : ""
             return query.isEmpty
-                ? "No visible controls. Type a menu command or press ⌘R to refresh."
+                ? "Type a control or menu name · Return acts · Esc exits\(warning)"
                 : "No match for “\(query)” · Delete to edit · ⌘R refresh"
         }
         let warning = wasTruncated ? " · partial scan" : ""
-        if query.isEmpty {
-            let visibleCount = targets.count(where: { $0.frame != nil })
-            return "\(visibleCount) visible targets · type a gold hint, name, or menu command · Return to act\(warning)"
-        }
         let label = selected?.label ?? ""
         let clipped = label.count > 72 ? String(label.prefix(69)) + "…" : label
-        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · \(clipped) · Return to act\(warning)"
+        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · \(clipped) · Return acts and continues\(warning)"
     }
 
     /// Converts an AX frame (global top-left origin, y down) to one display
