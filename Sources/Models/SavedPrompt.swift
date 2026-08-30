@@ -45,6 +45,12 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
     var model: String?
     var outputBehavior: ActionOutputBehavior
     var hotkey: ActionHotkey?
+    /// When set, the action runs this executable directly (never through a
+    /// shell) instead of sending the prompt to a model provider.
+    var commandExecutable: String?
+    /// Argv for `commandExecutable`. `{input}` is replaced within each
+    /// element, so user text stays a single argument.
+    var commandArguments: [String]?
 
     init(
         id: UUID = UUID(),
@@ -54,7 +60,9 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         providerID: UUID? = nil,
         model: String? = nil,
         outputBehavior: ActionOutputBehavior = .showInOverlay,
-        hotkey: ActionHotkey? = nil
+        hotkey: ActionHotkey? = nil,
+        commandExecutable: String? = nil,
+        commandArguments: [String]? = nil
     ) {
         self.id = id
         self.name = name ?? alias.replacingOccurrences(of: "-", with: " ").capitalized
@@ -64,6 +72,8 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.model = model
         self.outputBehavior = outputBehavior
         self.hotkey = hotkey
+        self.commandExecutable = commandExecutable
+        self.commandArguments = commandArguments
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +90,8 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
             forKey: .outputBehavior
         ) ?? .showInOverlay
         hotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .hotkey)
+        commandExecutable = try c.decodeIfPresent(String.self, forKey: .commandExecutable)
+        commandArguments = try c.decodeIfPresent([String].self, forKey: .commandArguments)
     }
 }
 

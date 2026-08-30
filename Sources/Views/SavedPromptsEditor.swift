@@ -66,6 +66,25 @@ struct SavedPromptsEditor: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
 
+                HStack(spacing: 8) {
+                    Text("Command:")
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "Executable, e.g. recall",
+                        text: bindingForCommandExecutable(prompt.id)
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 180)
+                    TextField(
+                        "Arguments, e.g. search {input}",
+                        text: bindingForCommandArguments(prompt.id)
+                    )
+                    .textFieldStyle(.roundedBorder)
+                }
+                Text("Optional. With an executable set, the action runs it directly (no shell) instead of a model. {input} inserts the typed text as one argument.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
                 HStack(spacing: 12) {
                     Picker("Provider", selection: bindingForProvider(prompt.id)) {
                         Text("Current provider").tag(nil as UUID?)
@@ -177,6 +196,38 @@ struct SavedPromptsEditor: View {
             get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.hotkey },
             set: { newValue in
                 update(id) { $0.hotkey = newValue }
+            }
+        )
+    }
+
+    private func bindingForCommandExecutable(_ id: SavedPrompt.ID) -> Binding<String> {
+        Binding(
+            get: {
+                viewModel.settings.savedPrompts.first(where: { $0.id == id })?
+                    .commandExecutable ?? ""
+            },
+            set: { newValue in
+                update(id) {
+                    let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                    $0.commandExecutable = trimmed.isEmpty ? nil : trimmed
+                }
+            }
+        )
+    }
+
+    private func bindingForCommandArguments(_ id: SavedPrompt.ID) -> Binding<String> {
+        Binding(
+            get: {
+                viewModel.settings.savedPrompts.first(where: { $0.id == id })?
+                    .commandArguments?.joined(separator: " ") ?? ""
+            },
+            set: { newValue in
+                update(id) {
+                    let parts = newValue
+                        .split(whereSeparator: { $0.isWhitespace })
+                        .map(String.init)
+                    $0.commandArguments = parts.isEmpty ? nil : parts
+                }
             }
         )
     }

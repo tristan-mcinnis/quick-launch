@@ -4870,6 +4870,21 @@ import Observation
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
+
+        // Command actions run a local executable directly and never reach a
+        // model provider.
+        if let action,
+           let definition = settings.savedPrompts.first(where: { $0.id == action.actionID }),
+           let executable = definition.commandExecutable,
+           !executable.isEmpty {
+            await runCommandAction(
+                definition: definition,
+                executable: executable,
+                context: action.context
+            )
+            return
+        }
+
         var effectivePrompt = action?.prompt ?? input
         if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            submittedImage != nil {
@@ -5140,6 +5155,51 @@ import Observation
         } else {
             await streamTask?.value
         }
+    }
+
+    /// Run a command-lane saved action: execute the configured binary with
+    /// `{input}` substituted per argv element (no shell), then route stdout
+    /// through the action's `outputBehavior`. A non-zero exit surfaces the
+    /// command's stderr as the error and produces no result text.
+    private func runCommandAction(
+        definition: SavedPrompt,
+        executable: String,
+        context: String
+    ) async {
+        let submittedInput = input
+        errorMessage = nil
+        output = ""
+        input = ""
+        isStreaming = true
+        do {
+            let result = try await CommandActionRunner.run(
+                executable: executable,
+                arguments: definition.commandArguments ?? [],
+                input: context
+            )
+            isStreaming = false
+            output = result
+            if definition.outputBehavior == .replaceSelection, !output.isEmpty {
+                if let selectionContext = captureSelectedText(promptForPermission: false),
+                   let selectedTextService,
+                   await selectedTextService.replace(output, in: selectionContext) {
+                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                } else {
+                    copyOutput()
+                    markJustCopied()
+                    errorMessage = "Could not replace the selection. The result was copied instead."
+                }
+            } else if settings.autoCopy && !output.isEmpty {
+                copyOutput()
+                markJustCopied()
+            }
+        } catch {
+            isStreaming = false
+            output = ""
+            input = submittedInput
+            errorMessage = error.localizedDescription
+        }
+        requestInputFocus()
     }
 
     private func webSearchQuery(

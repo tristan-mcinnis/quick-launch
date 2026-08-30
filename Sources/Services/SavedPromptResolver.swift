@@ -10,6 +10,10 @@ enum SavedPromptResolver {
         var providerID: UUID?
         var model: String?
         var outputBehavior: ActionOutputBehavior
+        /// The raw text typed after the alias, whitespace-collapsed. Command
+        /// actions substitute this for `{input}`; empty when the alias was
+        /// invoked alone.
+        var context: String = ""
     }
 
     /// Expand an input to its saved-prompt equivalent, or return `nil` when
@@ -50,7 +54,8 @@ enum SavedPromptResolver {
                 prompt: match.prompt,
                 providerID: match.providerID,
                 model: match.model,
-                outputBehavior: match.outputBehavior
+                outputBehavior: match.outputBehavior,
+                context: ""
             )
         }
         return Resolution(
@@ -58,7 +63,8 @@ enum SavedPromptResolver {
             prompt: prompt(for: match, source: context),
             providerID: match.providerID,
             model: match.model,
-            outputBehavior: match.outputBehavior
+            outputBehavior: match.outputBehavior,
+            context: context
         )
     }
 
