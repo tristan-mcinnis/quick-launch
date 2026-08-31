@@ -1639,6 +1639,21 @@ import Observation
             return
         }
         if await submitInputMode() { return }
+        // An exact command alias always runs its executable. Without this,
+        // an active answer thread (vault follow-up mode) captured the typed
+        // input before alias resolution and sent it to a model instead.
+        // `submit()` resolves the alias again and dispatches the command.
+        if pendingQuickLink == nil,
+           let exact = SavedPromptResolver.resolveAction(
+               input: input,
+               prefix: settings.savedPromptPrefix,
+               savedPrompts: settings.savedPrompts
+           ),
+           settings.savedPrompts.first(where: { $0.id == exact.actionID })?
+               .commandExecutable?.isEmpty == false {
+            await submit()
+            return
+        }
         if isAnswerActive,
            let mode = activeVaultSearchMode,
            !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
