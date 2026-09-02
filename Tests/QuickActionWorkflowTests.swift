@@ -118,9 +118,11 @@ struct QuickActionWorkflowTests {
 
     @Test func snippetCanCopyPasteOrDoBoth() async {
         let selection = FakeSelectedTextService(text: nil)
+        let pasteboard = FakePasteboard()
         let vm = QuickViewModel(
             service: MockQuickService(),
-            selectedTextService: selection
+            selectedTextService: selection,
+            pasteboard: pasteboard
         )
         vm.rememberSelectionTarget(target)
         vm.prepareForExternalAction = { selection.externalActionPrepared = true }
@@ -133,12 +135,12 @@ struct QuickActionWorkflowTests {
         )
 
         vm.copyLauncherItem(item)
-        #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
+        #expect(pasteboard.string == "Hello there")
         #expect(await vm.pasteLauncherItem(item))
         #expect(selection.pastedText == "Hello there")
         #expect(selection.wasPreparedWhenPasted)
         #expect(await vm.copyAndPasteLauncherItem(item))
-        #expect(NSPasteboard.general.string(forType: .string) == "Hello there")
+        #expect(pasteboard.string == "Hello there")
     }
 
     @Test func blockedSnippetPasteReportsAccessibilityAndRestoresOverlay() async {

@@ -8,7 +8,7 @@ import Foundation
 /// finish executes the searches, feeds the results back as `tool` messages,
 /// and streams the next round, up to `maxToolRounds`. Callers keep the same
 /// one-stream interface; tool progress arrives as `StreamDelta.status`.
-struct OpenAICompatibleService: QuickService, @unchecked Sendable {
+struct OpenAICompatibleService: QuickService, Sendable {
     let baseURL: URL
     let modelName: String
     let apiKey: String?

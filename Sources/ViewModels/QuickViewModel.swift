@@ -122,6 +122,12 @@ import Observation
     var caffeinateManager: (any CaffeinateManaging)?
     var screenshotService: (any ScreenshotCapturing)?
     var screenAwareness: (any ScreenAwarenessReading)?
+    /// AppKit seams (pasteboard, Finder/URL opening, running apps, displays).
+    /// The app keeps the system defaults; tests inject fakes.
+    @ObservationIgnored var pasteboard: any PasteboardWriting
+    @ObservationIgnored var workspace: any WorkspaceOpening
+    @ObservationIgnored var runningApplications: any RunningApplicationsQuerying
+    @ObservationIgnored var screenGeometry: any ScreenGeometryProviding
     /// On-device OCR over the screenshots folder. Defaults to in-memory;
     /// the app injects one backed by a file.
     @ObservationIgnored var screenshotTextIndex: ScreenshotTextIndex
@@ -188,6 +194,10 @@ import Observation
         screenshotService: (any ScreenshotCapturing)? = nil,
         screenAwareness: (any ScreenAwarenessReading)? = nil,
         screenshotTextIndex: ScreenshotTextIndex? = nil,
+        pasteboard: (any PasteboardWriting)? = nil,
+        workspace: (any WorkspaceOpening)? = nil,
+        runningApplications: (any RunningApplicationsQuerying)? = nil,
+        screenGeometry: (any ScreenGeometryProviding)? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.settings = settings
@@ -217,6 +227,10 @@ import Observation
         self.screenshotService = screenshotService
         self.screenAwareness = screenAwareness
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
+        self.pasteboard = pasteboard ?? SystemPasteboard()
+        self.workspace = workspace ?? SystemWorkspace()
+        self.runningApplications = runningApplications ?? SystemRunningApplications()
+        self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
         self.currentVersion = currentVersion
         self.colorHistory?.preferredFormat = settings.colorFormat
         self.screenHistory.host = self
@@ -811,14 +825,6 @@ import Observation
     /// The emoji grid shows more: 9 columns by 7 rows.
     static let maxGridCells = 63
     static let gridColumns = 9
-    /// Raycast Beta uses a calmer, wider search canvas. Keep enough room for
-    /// title, metadata, and two visible actions without crowding.
-    static let panelWidth: CGFloat = 720
-    static let panelWidthWithDetail: CGFloat = 960
-    /// A Quick AI thread gets a little more room so answers read like a
-    /// document rather than a strip.
-    static let panelWidthForAnswer: CGFloat = 800
-
     /// Emoji & Symbols is a grid, everything else a list. The grid stays put
     /// while the ⌘K pane floats over it; swapping layouts under a popover
     /// made the whole window shift.
@@ -857,9 +863,9 @@ import Observation
     }
 
     var currentPanelWidth: CGFloat {
-        if showsDetailPane { return Self.panelWidthWithDetail }
-        if isAnswerActive { return Self.panelWidthForAnswer }
-        return Self.panelWidth
+        if showsDetailPane { return PanelSizing.panelWidthWithDetail }
+        if isAnswerActive { return PanelSizing.panelWidthForAnswer }
+        return PanelSizing.panelWidth
     }
 
     /// Window height for the current surface. The AppDelegate applies this
@@ -1898,14 +1904,12 @@ import Observation
         guard !matches.isEmpty else { return }
         let index = min(applicationSelectionIndex, matches.count - 1)
         guard case .item(let item) = matches[index] else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
+        pasteboard.writeString(item.value)
         markJustCopied()
     }
 
     func copyLauncherItem(_ item: LauncherCatalogItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
+        pasteboard.writeString(item.value)
         markJustCopied()
     }
 
@@ -1919,7 +1923,7 @@ import Observation
             // Only a confirmed quit invalidates the capture; an unknown pid
             // (test stubs, odd processes) keeps its captured target.
             if let captured = target,
-               NSRunningApplication(processIdentifier: captured.processIdentifier)?.isTerminated == true {
+               runningApplications.isTerminated(processIdentifier: captured.processIdentifier) == true {
                 target = nil
             }
             if target == nil, let fresh = selectedTextService.currentExternalTarget() {
@@ -2543,7 +2547,7 @@ import Observation
            let pane = SystemSettingsPaneCatalog.panes.first(where: { $0.id == String(item.value.dropFirst("settingspane.".count)) }) {
             input = ""
             overlayPresenter.dismissOverlay()
-            NSWorkspace.shared.open(pane.url)
+            workspace.open(pane.url)
             return
         }
 
@@ -2568,7 +2572,7 @@ import Observation
         }
 
         if item.value == "paste.plain" {
-            guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            guard let text = pasteboard.readString(), !text.isEmpty else {
                 errorMessage = "The clipboard has no text."
                 requestInputFocus()
                 return
@@ -2584,14 +2588,13 @@ import Observation
         }
 
         if item.value == "clipboard.cleanLink" {
-            guard let text = NSPasteboard.general.string(forType: .string),
+            guard let text = pasteboard.readString(),
                   let cleaned = URLCleaner.clean(text) else {
                 errorMessage = "The clipboard does not hold a web link."
                 requestInputFocus()
                 return
             }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(cleaned, forType: .string)
+            pasteboard.writeString(cleaned)
             markJustCopied()
             output = cleaned
             lastQuestion = cleaned == text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2706,7 +2709,7 @@ import Observation
         guard applied else {
             let isDisplayMove = name == WindowMove.nextDisplay.rawValue || name == WindowMove.previousDisplay.rawValue
             errorMessage = windowManager.isAccessibilityTrusted
-                ? (isDisplayMove && NSScreen.screens.count < 2
+                ? (isDisplayMove && screenGeometry.screenCount < 2
                     ? "Only one display is connected."
                     : (name == WindowMove.restore.rawValue
                         ? "Nothing to restore yet for \(target.applicationName)."
@@ -2754,8 +2757,7 @@ import Observation
             overlayPresenter.dismissOverlay()
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.writeString(text)
         markJustCopied()
         overlayPresenter.presentOverlay()
         output = text
@@ -2845,12 +2847,11 @@ import Observation
         invalidateLauncherRanking()
     }
 
-    func runningApplication(for application: LaunchableApplication) -> NSRunningApplication? {
-        if let bundleID = application.bundleIdentifier,
-           let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
-            return running
-        }
-        return NSWorkspace.shared.runningApplications.first { $0.bundleURL == application.url }
+    func runningApplication(for application: LaunchableApplication) -> (any RunningApplicationControlling)? {
+        runningApplications.runningApplication(
+            bundleIdentifier: application.bundleIdentifier,
+            bundleURL: application.url
+        )
     }
 
     /// ⌘K on a running app: Hide, Quit, Force Quit, Relaunch.
@@ -2912,7 +2913,7 @@ import Observation
             CharacterSet(charactersIn: "&=+#?")
         )
         let encodedInput = input.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
-        let clipboard = NSPasteboard.general.string(forType: .string) ?? ""
+        let clipboard = pasteboard.readString() ?? ""
         let encodedClipboard = clipboard.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
         let rendered = item.value
             .replacingOccurrences(of: "{{input}}", with: encodedInput)
@@ -2932,7 +2933,7 @@ import Observation
     /// Browsers that can open web links, for the Quick Links setting.
     static var installedBrowsers: [LaunchableApplication] {
         guard let probe = URL(string: "https://example.com") else { return [] }
-        return NSWorkspace.shared.urlsForApplications(toOpen: probe)
+        return SystemWorkspace().applicationURLs(toOpen: probe)
             .compactMap { url in
                 let bundle = Bundle(url: url)
                 let name = (bundle?.infoDictionary?["CFBundleDisplayName"] as? String)
@@ -2947,12 +2948,10 @@ import Observation
     /// Open `url` in the browser chosen in Settings, or the system default.
     func openInQuickLinkBrowser(_ url: URL) {
         if let bundleID = settings.quickLinkBrowserBundleID,
-           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration, completionHandler: nil)
+           let appURL = workspace.applicationURL(forBundleIdentifier: bundleID) {
+            workspace.open(url, withApplicationAt: appURL, activating: true)
         } else {
-            NSWorkspace.shared.open(url)
+            workspace.open(url)
         }
     }
 
@@ -3365,8 +3364,7 @@ import Observation
             controlRunningApplication(application, action: action.kind)
         case .copyCleanLink:
             guard case .item(let item) = result, let cleaned = URLCleaner.clean(item.value) else { return true }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(cleaned, forType: .string)
+            pasteboard.writeString(cleaned)
             markJustCopied()
             closeItemActionPane()
             input = ""
@@ -3440,7 +3438,7 @@ import Observation
             closeItemActionPane()
             input = ""
             overlayPresenter.dismissOverlay()
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.value)])
+            workspace.revealInFileViewer([URL(fileURLWithPath: item.value)])
         case .quickLook:
             guard case .item(let item) = result, item.kind == .screenshot else { return true }
             ScreenshotLibrary.quickLook(URL(fileURLWithPath: item.value))
@@ -3461,8 +3459,7 @@ import Observation
                   let color = color(for: item)
             else { return true }
             let text = color.string(in: format)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            pasteboard.writeString(text)
             markJustCopied()
             closeItemActionPane()
             input = ""
@@ -3474,8 +3471,7 @@ import Observation
             case .item(let item) where item.kind == .screenshot || item.kind == .folder: path = item.value
             default: return true
             }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(path, forType: .string)
+            pasteboard.writeString(path)
             markJustCopied()
             closeItemActionPane()
         case .delete:
@@ -3623,7 +3619,7 @@ import Observation
         closeItemActionPane()
         input = ""
         overlayPresenter.dismissOverlay()
-        NSWorkspace.shared.activateFileViewerSelecting([application.url])
+        workspace.revealInFileViewer([application.url])
     }
 
     func closeApplicationActionPane() {
@@ -3897,8 +3893,35 @@ import Observation
         return captured
     }
 
+    /// One Return, prepared for a provider: the prompt the model receives
+    /// plus everything the stream and its rollback need.
+    struct PreparedRequest {
+        let submittedInput: String
+        let submittedImages: [QuickImageAttachment]
+        let action: SavedPromptResolver.Resolution?
+        let actionDefinition: SavedPrompt?
+        var effectivePrompt: String
+        var usedWebSearch = false
+        var webSearchFallback: String?
+        var usedPageRead = false
+
+        var submittedImage: QuickImageAttachment? { submittedImages.last }
+    }
+
+    /// Return on the input. Three stages, each of which may finish the
+    /// request itself: `prepareRequest` (aliases, `{selection}`, local
+    /// answers), `enrich` (web search, page reading), `stream` (provider).
     func submit() async {
-        guard !input.isEmpty || pendingImage != nil else { return }
+        guard var request = await prepareRequest() else { return }
+        guard await enrich(&request) else { return }
+        await stream(request)
+    }
+
+    /// Resolves saved-prompt aliases, runs command actions, expands
+    /// `{selection}`, and answers locally (math, conversions, facts). Returns
+    /// `nil` when the request was handled here or could not proceed.
+    func prepareRequest() async -> PreparedRequest? {
+        guard !input.isEmpty || pendingImage != nil else { return nil }
         isConversationHistoryPresented = false
         let submittedInput = input
         let submittedImages = !pendingImages.isEmpty
@@ -3926,7 +3949,7 @@ import Observation
                 executable: executable,
                 context: action.context
             )
-            return
+            return nil
         }
 
         var effectivePrompt = action?.prompt ?? input
@@ -3947,7 +3970,7 @@ import Observation
                     ? "Allow Accessibility in System Settings, then select text and try again."
                     : "This action needs selected text."
                 requestInputFocus()
-                return
+                return nil
             }
             effectivePrompt = effectivePrompt.replacingOccurrences(
                 of: "{selection}",
@@ -3969,7 +3992,7 @@ import Observation
                 errorMessage = "Math error: \(error)"
             }
             requestInputFocus()
-            return
+            return nil
         }
         if let result = localAnswer(for: effectivePrompt, allowConversions: action == nil) {
             errorMessage = nil
@@ -3979,34 +4002,45 @@ import Observation
                 markJustCopied()
             }
             requestInputFocus()
-            return
+            return nil
         }
 
         let actionDefinition = action.flatMap { resolution in
             settings.savedPrompts.first(where: { $0.id == resolution.actionID })
         }
-        var usedWebSearch = false
-        var webSearchFallback: String?
-        if let query = webSearchQuery(
+        return PreparedRequest(
             submittedInput: submittedInput,
-            action: actionDefinition
+            submittedImages: submittedImages,
+            action: action,
+            actionDefinition: actionDefinition,
+            effectivePrompt: effectivePrompt
+        )
+    }
+
+    /// Adds live context to the prompt: SearXNG results when the input asks
+    /// for a web search, and the content of any http(s) URLs it names.
+    /// Returns `false` when the search failed and the request must stop.
+    func enrich(_ request: inout PreparedRequest) async -> Bool {
+        if let query = webSearchQuery(
+            submittedInput: request.submittedInput,
+            action: request.actionDefinition
         ) {
             guard let webSearchService else {
                 errorMessage = "SearXNG search is not available on this Mac."
                 requestInputFocus()
-                return
+                return false
             }
             errorMessage = nil
             output = "Searching the web…"
             isStreaming = true
             do {
                 let searchBundle = try await webSearchService.search(query)
-                effectivePrompt = Self.webAnswerPrompt(
+                request.effectivePrompt = Self.webAnswerPrompt(
                     question: query,
                     searchBundle: searchBundle
                 )
-                webSearchFallback = Self.webSearchFallbackMarkdown(searchBundle)
-                usedWebSearch = true
+                request.webSearchFallback = Self.webSearchFallbackMarkdown(searchBundle)
+                request.usedWebSearch = true
                 output = ""
                 isStreaming = false
             } catch {
@@ -4014,15 +4048,14 @@ import Observation
                 isStreaming = false
                 errorMessage = error.localizedDescription
                 requestInputFocus()
-                return
+                return false
             }
         }
 
         // Page reading: when the prompt contains http(s) URLs, fetch their
         // content and attach it as context so the model answers from the live
         // pages instead of claiming it cannot browse.
-        var usedPageRead = false
-        let promptPageURLs = PromptURLScanner.urls(in: submittedInput)
+        let promptPageURLs = PromptURLScanner.urls(in: request.submittedInput)
         if !promptPageURLs.isEmpty, let pageReader {
             errorMessage = nil
             output = promptPageURLs.count == 1
@@ -4040,11 +4073,24 @@ import Observation
                     )
                 }
             }
-            effectivePrompt += "\n\n" + Self.pageContextSection(pages: sections.joined(separator: "\n\n"))
-            usedPageRead = true
+            request.effectivePrompt += "\n\n" + Self.pageContextSection(pages: sections.joined(separator: "\n\n"))
+            request.usedPageRead = true
             output = ""
             isStreaming = false
         }
+        return true
+    }
+
+    /// Picks the provider and model, records the turn in the conversation,
+    /// and streams the answer into `output`.
+    func stream(_ request: PreparedRequest) async {
+        let submittedInput = request.submittedInput
+        let submittedImages = request.submittedImages
+        let submittedImage = request.submittedImage
+        let action = request.action
+        let effectivePrompt = request.effectivePrompt
+        let usedWebSearch = request.usedWebSearch
+        let usedPageRead = request.usedPageRead
 
         guard let provider = provider(
             for: usedWebSearch ? nil : action?.providerID,
@@ -4176,7 +4222,7 @@ import Observation
 
         if let task = streamTask,
            usedWebSearch,
-           let webSearchFallback {
+           let webSearchFallback = request.webSearchFallback {
             await waitForWebAnswer(
                 task,
                 fallback: webSearchFallback,
@@ -4545,8 +4591,7 @@ import Observation
 
     func copyOutput() {
         guard !output.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(output, forType: .string)
+        pasteboard.writeString(output)
     }
 
     func copyOutputAndMark() {
@@ -4783,7 +4828,7 @@ import Observation
         updateState = .installing(newVersion: version)
         let isHB = FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom/quick-launch")
         guard isHB else {
-            NSWorkspace.shared.open(
+            workspace.open(
                 URL(string: "https://github.com/tristan-mcinnis/quick-launch/releases/latest")!
             )
             updateState = .idle

@@ -163,10 +163,12 @@ enum QuickToggleService {
     }
 
     private static func readFinderBool(_ key: String) async -> Bool? {
-        guard let result = try? await ProcessRunner.run(
-            executable: URL(fileURLWithPath: defaults),
-            arguments: ["read", finderDomain, key]
-        ), result.status == 0 else { return nil }
+        guard let result = await AppLog.attemptAsync("Read Finder default \(key)", logger: AppLog.process, {
+            try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: defaults),
+                arguments: ["read", finderDomain, key]
+            )
+        }), result.status == 0 else { return nil }
         return parseDefaultsBool(result.stdoutText)
     }
 

@@ -97,31 +97,30 @@ struct QuickViewModelTests {
         await service.setResponses([
             StreamDelta(text: "Copied text", finishReason: .some("stop")),
         ])
-        let vm = QuickViewModel(service: service)
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(service: service, pasteboard: pasteboard)
         vm.settings.autoCopy = true
         vm.input = "Give me something to copy"
         await vm.submit()
-        let clipboardValue = NSPasteboard.general.string(forType: .string)
-        #expect(clipboardValue == "Copied text")
+        #expect(pasteboard.string == "Copied text")
     }
 
     // MARK: - 7. Auto-copy disabled leaves clipboard untouched
 
     @Test func testAutoCopyDisabledSkipsClipboard() async throws {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("sentinel", forType: .string)
+        let pasteboard = FakePasteboard(string: "sentinel")
 
         let service = MockQuickService()
         await service.setResponses([
             StreamDelta(text: "Should not be copied", finishReason: .some("stop")),
         ])
-        let vm = QuickViewModel(service: service)
+        let vm = QuickViewModel(service: service, pasteboard: pasteboard)
         vm.settings.autoCopy = false
         vm.input = "Don't copy this"
         await vm.submit()
 
-        let clipboardValue = NSPasteboard.general.string(forType: .string)
-        #expect(clipboardValue == "sentinel")
+        #expect(pasteboard.string == "sentinel")
+        #expect(pasteboard.writeCount == 0)
     }
 
     // MARK: - 8. cancel() stops isStreaming
@@ -263,28 +262,24 @@ struct QuickViewModelTests {
     // MARK: - 14. copyOutput() writes to clipboard
 
     @Test func testCopyOutputWritesToClipboard() async throws {
-        NSPasteboard.general.clearContents()
-        let vm = QuickViewModel(service: MockQuickService())
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(service: MockQuickService(), pasteboard: pasteboard)
         vm.output = "content to copy"
         vm.copyOutput()
-        let clipboardValue = NSPasteboard.general.string(forType: .string)
-        #expect(clipboardValue == "content to copy")
+        #expect(pasteboard.string == "content to copy")
     }
 
     // MARK: - 15. copyOutput() with empty output is a no-op
 
     @Test func testCopyOutputEmptyStringIsNoOp() async throws {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("existing clipboard", forType: .string)
+        let pasteboard = FakePasteboard(string: "existing clipboard")
 
-        let vm = QuickViewModel(service: MockQuickService())
+        let vm = QuickViewModel(service: MockQuickService(), pasteboard: pasteboard)
         vm.output = ""
         vm.copyOutput()
 
-        let clipboardValue = NSPasteboard.general.string(forType: .string)
-        // Either clipboard is unchanged or empty — either is acceptable no-op behaviour
-        let isUnchangedOrEmpty = clipboardValue == "existing clipboard" || clipboardValue == nil || clipboardValue == ""
-        #expect(isUnchangedOrEmpty)
+        #expect(pasteboard.string == "existing clipboard")
+        #expect(pasteboard.writeCount == 0)
     }
 
     // MARK: - 16. Newer remote version sets .updateAvailable
@@ -447,27 +442,25 @@ struct QuickViewModelTests {
     }
 
     @Test func testMathExpressionAutoCopyEnabled() async throws {
-        let vm = QuickViewModel(service: nil)
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(service: nil, pasteboard: pasteboard)
         vm.settings.autoCopy = true
         vm.input = "10/2"
         await vm.submit()
         #expect(vm.output == "5")
-        let clip = NSPasteboard.general.string(forType: .string)
-        #expect(clip == "5")
+        #expect(pasteboard.string == "5")
     }
 
     @Test func testMathExpressionAutoCopyDisabled() async throws {
-        // Clear clipboard first
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("before", forType: .string)
-        let vm = QuickViewModel(service: nil)
+        let pasteboard = FakePasteboard(string: "before")
+        let vm = QuickViewModel(service: nil, pasteboard: pasteboard)
         vm.settings.autoCopy = false
         vm.input = "4+4"
         await vm.submit()
         #expect(vm.output == "8")
         // Clipboard must NOT have changed
-        let clip = NSPasteboard.general.string(forType: .string)
-        #expect(clip == "before")
+        #expect(pasteboard.string == "before")
+        #expect(pasteboard.writeCount == 0)
     }
 
     @Test func testMathExpressionDoesNotSetIsStreaming() async throws {

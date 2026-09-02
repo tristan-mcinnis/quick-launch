@@ -222,7 +222,7 @@ struct ColorPickerTests {
         sampler: StubColorSampler,
         store: ColorHistoryStore
     ) -> QuickViewModel {
-        let vm = QuickViewModel(colorHistory: store, colorSampler: sampler)
+        let vm = QuickViewModel(colorHistory: store, colorSampler: sampler, pasteboard: FakePasteboard())
         vm.persistSettings = { _ in }
         return vm
     }
@@ -236,7 +236,7 @@ struct ColorPickerTests {
         await vm.pickColorFromScreen()
 
         #expect(sampler.sampleCount == 1)
-        #expect(NSPasteboard.general.string(forType: .string) == "#FF0000")
+        #expect((vm.pasteboard as? FakePasteboard)?.string == "#FF0000")
         #expect(vm.colorItems.count == 1)
         #expect(vm.errorMessage == nil)
         // Picking is finished when the colour is on the clipboard: no answer
@@ -279,7 +279,7 @@ struct ColorPickerTests {
 
         await vm.pickColorFromScreen()
 
-        #expect(NSPasteboard.general.string(forType: .string) == "rgb(0, 0, 255)")
+        #expect((vm.pasteboard as? FakePasteboard)?.string == "rgb(0, 0, 255)")
         #expect(vm.colorItems[0].value == "rgb(0, 0, 255)")
     }
 
@@ -385,7 +385,7 @@ struct ColorPickerTests {
             commandValue: ColorFormat.rgb.rawValue
         )
         await vm.perform(action, on: .item(item))
-        #expect(NSPasteboard.general.string(forType: .string) == "rgb(255, 0, 0)")
+        #expect((vm.pasteboard as? FakePasteboard)?.string == "rgb(255, 0, 0)")
     }
 
     @Test func pinningAndDeletingAColorGoesThroughTheStore() async {

@@ -19,6 +19,9 @@ enum LocalSQLiteError: LocalizedError, Equatable {
     }
 }
 
+/// `@unchecked`: the raw sqlite3 handle is only ever touched from the one
+/// actor that owns the connection (`SQLiteScreenHistoryStore`,
+/// `CoastLegacyReader`); SQLite itself is compiled thread-safe.
 final class LocalSQLiteConnection: @unchecked Sendable {
     private(set) var handle: OpaquePointer?
 

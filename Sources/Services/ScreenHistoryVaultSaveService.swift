@@ -211,10 +211,12 @@ actor ScreenHistoryVaultSaveService: ScreenHistoryVaultSaving {
             throw ScreenHistoryVaultSaveError.unsafePath
         }
 
-        let values = try? candidate.resourceValues(forKeys: [
-            .isRegularFileKey,
-            .isSymbolicLinkKey,
-        ])
+        let values = AppLog.attempt("Stat vault save target", {
+            try candidate.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ])
+        })
         guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
             throw ScreenHistoryVaultSaveError.missingFile
         }

@@ -139,12 +139,16 @@ final class ScreenAwarenessService: ScreenAwarenessReading {
     func captureArea() async -> QuickImageAttachment? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-area-\(UUID().uuidString).png")
-        guard (try? await ProcessRunner.run(
-            executable: URL(fileURLWithPath: "/usr/sbin/screencapture"),
-            arguments: ["-i", "-x", "-t", "png", url.path]
-        )) != nil else { return nil }
+        guard await AppLog.attemptAsync("Run screencapture", logger: AppLog.process, {
+            try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: "/usr/sbin/screencapture"),
+                arguments: ["-i", "-x", "-t", "png", url.path]
+            )
+        }) != nil else { return nil }
         defer { try? FileManager.default.removeItem(at: url) }
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        // A cancelled capture leaves no file; that is not an error.
+        guard let data = AppLog.attempt("Read area capture", { try Data(contentsOf: url) }),
+              !data.isEmpty else { return nil }
         return ClipboardImageReader.attachment(data: data, mimeType: "image/png")
     }
 

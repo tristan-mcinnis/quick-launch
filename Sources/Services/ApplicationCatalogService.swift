@@ -100,7 +100,7 @@ final class ApplicationCatalogService: ApplicationCatalogServicing {
     nonisolated private static func stamps(fileManager: FileManager) -> [String: Date] {
         var stamps: [String: Date] = [:]
         for root in roots {
-            if let date = (try? fileManager.attributesOfItem(atPath: root))?[.modificationDate] as? Date {
+            if let date = AppLog.attempt("Stat \(root)", { try fileManager.attributesOfItem(atPath: root) })?[.modificationDate] as? Date {
                 stamps[root] = date
             }
         }
@@ -142,11 +142,13 @@ final class ApplicationCatalogService: ApplicationCatalogServicing {
         }
 
         for root in roots.map(URL.init(fileURLWithPath:)) {
-            guard let urls = try? fileManager.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+            guard let urls = AppLog.attempt("List \(root.path)", {
+                try fileManager.contentsOfDirectory(
+                    at: root,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            }) else { continue }
             for url in urls where url.pathExtension.caseInsensitiveCompare("app") == .orderedSame {
                 add(url)
             }

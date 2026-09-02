@@ -1,0 +1,109 @@
+import Foundation
+@testable import QuickLaunch
+
+/// In-memory pasteboard. Tests read `string` instead of the real clipboard.
+@MainActor
+final class FakePasteboard: PasteboardWriting {
+    var string: String?
+    private(set) var writeCount = 0
+
+    init(string: String? = nil) {
+        self.string = string
+    }
+
+    func readString() -> String? { string }
+
+    func writeString(_ text: String) {
+        string = text
+        writeCount += 1
+    }
+}
+
+/// Records every open and reveal; never launches anything.
+@MainActor
+final class FakeWorkspace: WorkspaceOpening {
+    private(set) var openedURLs: [URL] = []
+    private(set) var openedWithApplication: [(url: URL, applicationURL: URL, activating: Bool)] = []
+    private(set) var revealedURLs: [URL] = []
+    var applicationURLsByBundleIdentifier: [String: URL] = [:]
+    var applicationsThatOpenURLs: [URL] = []
+
+    init() {}
+
+    func open(_ url: URL) {
+        openedURLs.append(url)
+    }
+
+    func open(_ url: URL, withApplicationAt applicationURL: URL, activating: Bool) {
+        openedWithApplication.append((url, applicationURL, activating))
+    }
+
+    func revealInFileViewer(_ urls: [URL]) {
+        revealedURLs.append(contentsOf: urls)
+    }
+
+    func applicationURL(forBundleIdentifier bundleIdentifier: String) -> URL? {
+        applicationURLsByBundleIdentifier[bundleIdentifier]
+    }
+
+    func applicationURLs(toOpen url: URL) -> [URL] {
+        applicationsThatOpenURLs
+    }
+}
+
+@MainActor
+final class FakeRunningApplication: RunningApplicationControlling {
+    var isTerminated = false
+    private(set) var hideCount = 0
+    private(set) var terminateCount = 0
+    private(set) var forceTerminateCount = 0
+
+    init() {}
+
+    func hide() -> Bool {
+        hideCount += 1
+        return true
+    }
+
+    func terminate() -> Bool {
+        terminateCount += 1
+        isTerminated = true
+        return true
+    }
+
+    func forceTerminate() -> Bool {
+        forceTerminateCount += 1
+        isTerminated = true
+        return true
+    }
+}
+
+@MainActor
+final class FakeRunningApplications: RunningApplicationsQuerying {
+    /// pid → terminated. Unknown pids answer `nil`.
+    var terminatedByPID: [pid_t: Bool] = [:]
+    var runningByBundleIdentifier: [String: FakeRunningApplication] = [:]
+    var runningByBundleURL: [URL: FakeRunningApplication] = [:]
+
+    init() {}
+
+    func isTerminated(processIdentifier: pid_t) -> Bool? {
+        terminatedByPID[processIdentifier]
+    }
+
+    func runningApplication(bundleIdentifier: String?, bundleURL: URL) -> (any RunningApplicationControlling)? {
+        if let bundleIdentifier, let running = runningByBundleIdentifier[bundleIdentifier] {
+            return running
+        }
+        return runningByBundleURL[bundleURL]
+    }
+}
+
+@MainActor
+final class FakeScreenGeometry: ScreenGeometryProviding {
+    var screenCount: Int
+
+    init(screenCount: Int = 1) {
+        self.screenCount = screenCount
+    }
+}

@@ -208,6 +208,8 @@ enum ProcessRunner {
             }
             if let stdin, let stdinPipe {
                 queue.async {
+                    // A closed read end (child exited early) raises EPIPE
+                    // through the FileHandle API; ignore, as above.
                     try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
                     try? stdinPipe.fileHandleForWriting.close()
                 }

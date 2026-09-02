@@ -79,7 +79,7 @@ struct LauncherCatalogTests {
         #expect(vm.showsDetailPane, "a selected snippet previews its stored text")
         #expect(vm.detailItem?.kind == .snippet)
         #expect(vm.detailItem?.value == "Hello")
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthWithDetail)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidthWithDetail)
 
         vm.leaveCatalog()
         vm.enterCatalog(.quickLinks)
@@ -90,7 +90,7 @@ struct LauncherCatalogTests {
         vm.leaveCatalog()
         vm.enterCatalog(.commands)
         #expect(!vm.showsDetailPane, "catalogs without a preview keep the narrow panel")
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
     }
 
     @Test func windowAliasesAreSearchableFromTheLauncherRoot() {

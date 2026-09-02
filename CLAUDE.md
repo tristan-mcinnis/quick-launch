@@ -39,6 +39,17 @@ The user-facing product name is always **Quick Launch**. The `apfel` engine
 and Apple on-device provider were removed on 2026-08-22; `apfel` now appears
 only in upstream attribution, the legacy Keychain service name, and history.
 
+## Concurrency
+
+One rule. A service that owns I/O (files, SQLite, Keychain, child processes,
+the network) is an `actor`. State the UI reads is a `@MainActor final class`.
+A `@MainActor` store that hands its disk work to `JSONFileStore` (clipboard,
+color, launcher usage, chat history) satisfies the rule: the file store
+serialises the I/O off the main thread. `@unchecked Sendable` needs a comment
+on the type naming what guards the state; a type whose stored properties are
+all `Sendable` takes plain `Sendable`. View models reach AppKit singletons
+only through the seams in `Sources/Protocols/SystemServicing.swift`.
+
 ## Verification
 
 Run `swift test` after source changes. For packaging or identity changes, also

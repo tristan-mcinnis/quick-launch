@@ -12,6 +12,7 @@ import Observation
     var errorMessage: String? { get set }
     var applicationSelectionIndex: Int { get set }
     var overlayPresenter: any OverlayPresenting { get }
+    var workspace: any WorkspaceOpening { get }
     var prepareForExternalAction: (() -> Void)? { get }
     var persistSettings: (QuickSettings) -> Void { get }
     func requestInputFocus()
@@ -125,6 +126,7 @@ enum ScreenHistoryLoadState: Equatable, Sendable {
     private var overlayPresenter: any OverlayPresenting {
         host?.overlayPresenter ?? NotificationOverlayPresenter()
     }
+    private var workspace: any WorkspaceOpening { host?.workspace ?? SystemWorkspace() }
     private var prepareForExternalAction: (() -> Void)? { host?.prepareForExternalAction }
     private func persistSettings(_ settings: QuickSettings) { host?.persistSettings(settings) }
     private func requestInputFocus() { host?.requestInputFocus() }
@@ -549,7 +551,7 @@ enum ScreenHistoryLoadState: Equatable, Sendable {
                 return
             }
             self.prepareForExternalAction?()
-            NSWorkspace.shared.open(previewURL)
+            workspace.open(previewURL)
             overlayPresenter.dismissOverlay()
         }
     }
@@ -562,7 +564,7 @@ enum ScreenHistoryLoadState: Equatable, Sendable {
             return
         }
         prepareForExternalAction?()
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: locator)])
+        workspace.revealInFileViewer([URL(fileURLWithPath: locator)])
         overlayPresenter.dismissOverlay()
     }
 

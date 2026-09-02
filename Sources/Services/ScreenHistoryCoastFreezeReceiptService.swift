@@ -254,7 +254,9 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
                 if payload.approvalState == .approvedForRetirement {
                     payload.approvalRecordedAt = clock()
                     payload.approvalState = .revoked
-                    _ = try? Self.writeReceipt(payload, to: receiptURL, key: integrityKey)
+                    AppLog.attempt("Write Coast freeze receipt") {
+                        try Self.writeReceipt(payload, to: receiptURL, key: integrityKey)
+                    }
                 }
                 throw error
             }

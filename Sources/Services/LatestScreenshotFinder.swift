@@ -27,11 +27,13 @@ enum LatestScreenshotFinder {
 
     /// Newest image whose name starts with a known screenshot prefix.
     static func newestScreenshot(in folder: URL, fileManager: FileManager = .default) -> URL? {
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: folder,
-            includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else { return nil }
+        guard let urls = AppLog.attempt("List screenshots in \(folder.lastPathComponent)", {
+            try fileManager.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        }) else { return nil }
         return urls
             .filter { url in
                 imageExtensions.contains(url.pathExtension.lowercased())
@@ -68,7 +70,7 @@ enum LatestScreenshotFinder {
     }
 
     static func attachment(for url: URL) -> QuickImageAttachment? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = AppLog.attempt("Read screenshot \(url.lastPathComponent)", { try Data(contentsOf: url) }) else { return nil }
         if url.pathExtension.lowercased() == "png" {
             return ClipboardImageReader.attachment(data: data, mimeType: "image/png")
         }

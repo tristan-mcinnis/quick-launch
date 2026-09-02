@@ -896,7 +896,9 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
                 .filter { !$0.isEmpty }
             let valid = !locators.isEmpty && locators.allSatisfy { locator in
                 if let cached = validityByLocator[locator] { return cached }
-                let checked = (try? mediaLocatorMatchesMigrationLedger(locator)) == true
+                let checked = AppLog.attempt("Check media locator against the migration ledger", {
+                    try mediaLocatorMatchesMigrationLedger(locator)
+                }) == true
                 validityByLocator[locator] = checked
                 return checked
             }
@@ -2135,7 +2137,9 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
         }
         // The transaction is already durable. A busy reader must not turn a
         // completed prune into a reported failure.
-        try? database.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        AppLog.attempt("Checkpoint screen history WAL after prune") {
+            try database.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        }
         return (rows.count, rows.reduce(Int64(0)) { $0 + $1.bytes })
     }
 

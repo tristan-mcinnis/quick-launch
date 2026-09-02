@@ -46,11 +46,12 @@ struct CoreFeatureTests {
     }
 
     @Test func emojiPasteCopiesWhenNoTargetExists() async {
-        let vm = QuickViewModel()
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(pasteboard: pasteboard)
         vm.enterCatalog(.emoji)
         vm.input = "rocket"
         await vm.submitResolvingFuzzyAlias()
-        #expect(NSPasteboard.general.string(forType: .string) == "🚀")
+        #expect(pasteboard.string == "🚀")
     }
 
     // MARK: Translate

@@ -5,6 +5,19 @@ import CoreFoundation
 /// and reused by the observation-driven resize path.
 enum PanelSizing {
 
+    // MARK: - Widths
+
+    /// Raycast Beta uses a calmer, wider search canvas. Keep enough room for
+    /// title, metadata, and two visible actions without crowding.
+    static let panelWidth: CGFloat = 720
+    /// A preview-worthy catalog with its detail pane beside the list.
+    static let panelWidthWithDetail: CGFloat = 960
+    /// A Quick AI thread gets a little more room so answers read like a
+    /// document rather than a strip.
+    static let panelWidthForAnswer: CGFloat = 800
+
+    // MARK: - Heights
+
     static let inputHeight: CGFloat = 60
     static let maxBodyHeight: CGFloat = 640
     /// Horizontal padding around the answer body (20pt each side); the

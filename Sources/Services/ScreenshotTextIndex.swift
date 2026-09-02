@@ -151,7 +151,9 @@ final class ScreenshotTextIndex {
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = true
         request.recognitionLanguages = languages.map { Locale.Language(identifier: $0) }
-        guard let observations = try? await request.perform(on: image) else { return "" }
+        guard let observations = await AppLog.attemptAsync("Recognize screenshot text", logger: AppLog.recognition, {
+            try await request.perform(on: image)
+        }) else { return "" }
         return observations
             .compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")

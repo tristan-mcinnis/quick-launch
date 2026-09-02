@@ -495,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: QuickViewModel.panelWidth,
+                width: PanelSizing.panelWidth,
                 height: PanelSizing.inputHeight
             ),
             styleMask: [.borderless, .resizable, .fullSizeContentView],
@@ -548,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingController.view.frame = NSRect(
             x: 0,
             y: 0,
-            width: QuickViewModel.panelWidth,
+            width: PanelSizing.panelWidth,
             height: PanelSizing.inputHeight
         )
         panel.contentViewController = hostingController
@@ -558,14 +558,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: QuickViewModel.panelWidth,
+                panelWidth: PanelSizing.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
             panel.setFrame(
                 NSRect(
                     x: origin.x,
                     y: origin.y,
-                    width: QuickViewModel.panelWidth,
+                    width: PanelSizing.panelWidth,
                     height: PanelSizing.inputHeight
                 ),
                 display: false
@@ -598,7 +598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: viewModel?.currentPanelWidth ?? QuickViewModel.panelWidth,
+                panelWidth: viewModel?.currentPanelWidth ?? PanelSizing.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
             // Keep the input row on the centre line whatever the panel's

@@ -117,7 +117,8 @@ struct TypeToClickScanResult: Sendable {
 }
 
 /// Walks the accessibility tree of a process and collects actionable elements.
-final class TypeToClickService: TypeToClickServicing, @unchecked Sendable {
+/// Stateless: every walk starts from the pid it is given.
+final class TypeToClickService: TypeToClickServicing, Sendable {
 
     private struct Collected {
         let element: AXUIElement

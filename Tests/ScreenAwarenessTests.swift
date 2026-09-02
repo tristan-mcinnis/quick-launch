@@ -254,7 +254,7 @@ struct ScreenAwarenessTests {
         #expect(vm.launcherMatches.count == QuickViewModel.maxGridCells)
         #expect(vm.gridSections.map(\.title) == ["All"])
         #expect(!vm.showsDetailPane)
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
 
         vm.applicationSelectionIndex = 0
         vm.moveSelectionVertically(1)
@@ -296,10 +296,10 @@ struct ScreenAwarenessTests {
         // The preview and the wide layout stay put while ⌘K floats over
         // them; collapsing them made the whole window jump.
         #expect(vm.showsDetailPane)
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthWithDetail)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidthWithDetail)
         vm.closeItemActionPane()
         vm.leaveCatalog()
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
     }
 
     // MARK: Helpers

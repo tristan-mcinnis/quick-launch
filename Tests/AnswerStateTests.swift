@@ -73,9 +73,9 @@ struct AnswerStateTests {
 
     @Test func answerWidensThePanel() async {
         let (vm, _) = await answered("hello")
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidthForAnswer)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidthForAnswer)
         vm.startNewConversation()
-        #expect(vm.currentPanelWidth == QuickViewModel.panelWidth)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
     }
 
     @Test func chatHistoryActionOpensTheChatsCatalog() async {

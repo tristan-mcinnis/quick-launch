@@ -17,14 +17,18 @@ enum APIKeyStore {
         for legacyService in legacyServices {
             guard let value = load(providerID: providerID, service: legacyService, keychain: keychain) else { continue }
             // Migrate forward. Leave the legacy item alone so older builds keep working.
-            try? save(value, providerID: providerID, keychain: keychain)
+            AppLog.attempt("Migrate provider key to the current Keychain service") {
+                try save(value, providerID: providerID, keychain: keychain)
+            }
             return value
         }
         return nil
     }
 
     private static func load(providerID: UUID, service: String, keychain: any KeychainStoring) -> String? {
-        guard let data = try? keychain.read(service: service, account: providerID.uuidString) else { return nil }
+        guard let data = AppLog.attempt("Read provider key from Keychain", {
+            try keychain.read(service: service, account: providerID.uuidString)
+        }) ?? nil else { return nil }
         return String(data: data, encoding: .utf8)
     }
 

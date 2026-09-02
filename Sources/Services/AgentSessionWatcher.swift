@@ -32,7 +32,9 @@ final class AgentSessionWatcher {
     }
 
     func start() {
-        try? FileManager.default.createDirectory(at: folders[0], withIntermediateDirectories: true)
+        AppLog.attempt("Create \(folders[0].lastPathComponent)") {
+            try FileManager.default.createDirectory(at: folders[0], withIntermediateDirectories: true)
+        }
         for folder in folders {
             let descriptor = open(folder.path, O_EVTONLY)
             guard descriptor >= 0 else { continue }
@@ -63,13 +65,17 @@ final class AgentSessionWatcher {
     func reload(now: Date = Date()) {
         var found: [AgentSession] = []
         for folder in folders {
-            guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { continue }
+            guard let urls = AppLog.attempt("List \(folder.lastPathComponent)", {
+                try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            }) else { continue }
             for url in urls where url.pathExtension == "json" {
-                guard let data = try? Data(contentsOf: url),
-                      let session = try? Self.decoder.decode(AgentSession.self, from: data)
-                else { continue }
+                guard let session = AppLog.attempt("Read agent session \(url.lastPathComponent)", {
+                    try Self.decoder.decode(AgentSession.self, from: try Data(contentsOf: url))
+                }) else { continue }
                 if now.timeIntervalSince(session.updatedAt) >= CaffeinatePolicy.staleInterval {
-                    try? FileManager.default.removeItem(at: url)
+                    AppLog.attempt("Remove agent session \(url.lastPathComponent)") {
+                        try FileManager.default.removeItem(at: url)
+                    }
                     continue
                 }
                 found.append(session)
@@ -84,9 +90,13 @@ final class AgentSessionWatcher {
     /// Decaffeinate clears every session file; the next agent turn writes a new one.
     func clearAll() {
         for folder in folders {
-            guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { continue }
+            guard let urls = AppLog.attempt("List \(folder.lastPathComponent)", {
+                try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            }) else { continue }
             for url in urls where url.pathExtension == "json" {
-                try? FileManager.default.removeItem(at: url)
+                AppLog.attempt("Remove agent session \(url.lastPathComponent)") {
+                    try FileManager.default.removeItem(at: url)
+                }
             }
         }
         reload()

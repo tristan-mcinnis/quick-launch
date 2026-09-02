@@ -65,7 +65,7 @@ actor AVFoundationScreenHistoryMediaSegmentWriter: ScreenHistoryMediaSegmentWrit
         func materialize(in stageURL: URL) throws -> CapturedScreenFrame {
             let imageURL = stageURL.appendingPathComponent(filename)
             guard !Self.isSymbolicLink(imageURL),
-                  let data = try? Data(contentsOf: imageURL),
+                  let data = AppLog.attempt("Read staged frame \(filename)", { try Data(contentsOf: imageURL) }),
                   let frame = CapturedScreenFrame(
                       capturedAt: capturedAt,
                       bundleIdentifier: bundleIdentifier,

@@ -105,6 +105,8 @@ struct SystemKeychainStore: KeychainStoring {
 }
 
 /// In-memory Keychain for tests. Never touches the real Keychain.
+/// `@unchecked`: `items` is guarded by `lock`; `failureStatus` is set once
+/// by the test before any concurrent use.
 final class InMemoryKeychainStore: KeychainStoring, @unchecked Sendable {
     struct Item: Equatable, Sendable {
         var data: Data

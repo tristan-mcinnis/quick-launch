@@ -2,7 +2,7 @@ import Foundation
 
 /// Runs a one-shot CLI provider directly, never through a shell. The prompt is
 /// sent on stdin so user text cannot become command arguments.
-struct CommandQuickService: QuickService, @unchecked Sendable {
+struct CommandQuickService: QuickService, Sendable {
     let executable: URL
     let arguments: [String]
     let model: String

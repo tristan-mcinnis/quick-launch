@@ -11,6 +11,8 @@ import Foundation
 ///   introduced keep loading.
 /// - I/O errors are logged with the file name; a file that does not exist
 ///   yet is not an error.
+/// - `@unchecked`: every stored property is a `let`; the encoder and decoder
+///   are only used on `queue`, which serialises all disk work.
 final class JSONFileStore<Value: Codable & Sendable>: @unchecked Sendable {
     struct Envelope: Codable {
         var schemaVersion: Int

@@ -62,14 +62,8 @@ final class TunaCatalogService: LauncherCatalogServicing {
         _ item: LauncherCatalogItem,
         transform: (inout [String: Any]) -> Bool
     ) throws {
-        guard let data = try? Data(contentsOf: preferencesURL),
-              let root = try? PropertyListSerialization.propertyList(
-                from: data, format: nil
-              ) as? [String: Any],
-              let nested = root["CustomItemsCatalogItems"] as? Data,
-              var records = try? PropertyListSerialization.propertyList(
-                from: nested, format: nil
-              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+        guard let (root, storedRecords) = Self.readCustomItems(from: preferencesURL) else { throw MutationError.unreadableStore }
+        var records = storedRecords
 
         let storedID = item.itemID.replacingOccurrences(of: "tuna-custom-", with: "")
         guard let index = records.firstIndex(where: {
@@ -89,14 +83,8 @@ final class TunaCatalogService: LauncherCatalogServicing {
     func createSnippet(title: String, value: String) throws -> LauncherCatalogItem {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty, !value.isEmpty else { throw MutationError.invalidSnippet }
-        guard let data = try? Data(contentsOf: preferencesURL),
-              let root = try? PropertyListSerialization.propertyList(
-                from: data, format: nil
-              ) as? [String: Any],
-              let nested = root["CustomItemsCatalogItems"] as? Data,
-              var records = try? PropertyListSerialization.propertyList(
-                from: nested, format: nil
-              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+        guard let (root, storedRecords) = Self.readCustomItems(from: preferencesURL) else { throw MutationError.unreadableStore }
+        var records = storedRecords
         let id = UUID().uuidString.lowercased()
         records.append(["kind": "text", "id": id, "label": cleanTitle, "value": value])
         try writeRecords(records, root: root)
@@ -112,14 +100,8 @@ final class TunaCatalogService: LauncherCatalogServicing {
         guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
             throw MutationError.invalidSnippet
         }
-        guard let data = try? Data(contentsOf: preferencesURL),
-              let root = try? PropertyListSerialization.propertyList(
-                from: data, format: nil
-              ) as? [String: Any],
-              let nested = root["CustomItemsCatalogItems"] as? Data,
-              var records = try? PropertyListSerialization.propertyList(
-                from: nested, format: nil
-              ) as? [[String: Any]] else { throw MutationError.unreadableStore }
+        guard let (root, storedRecords) = Self.readCustomItems(from: preferencesURL) else { throw MutationError.unreadableStore }
+        var records = storedRecords
         let id = UUID().uuidString.lowercased()
         records.append(["kind": "url", "id": id, "label": cleanTitle, "value": cleanValue])
         try writeRecords(records, root: root)
@@ -148,17 +130,22 @@ final class TunaCatalogService: LauncherCatalogServicing {
         reload()
     }
 
+    /// The Tuna custom-items plist: the root dictionary and its nested
+    /// records. `nil` when the file is missing or unreadable; a read or
+    /// parse failure is logged, a missing file is not.
+    static func readCustomItems(from url: URL) -> (root: [String: Any], records: [[String: Any]])? {
+        AppLog.attempt("Read Tuna custom items", {
+            let data = try Data(contentsOf: url)
+            guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let nested = root["CustomItemsCatalogItems"] as? Data,
+                  let records = try PropertyListSerialization.propertyList(from: nested, format: nil) as? [[String: Any]]
+            else { throw CocoaError(.propertyListReadCorrupt) }
+            return (root, records)
+        })
+    }
+
     static func loadCustomItems(from url: URL) -> [LauncherCatalogItem] {
-        guard let data = try? Data(contentsOf: url),
-              let root = try? PropertyListSerialization.propertyList(
-                from: data,
-                format: nil
-              ) as? [String: Any],
-              let nested = root["CustomItemsCatalogItems"] as? Data,
-              let records = try? PropertyListSerialization.propertyList(
-                from: nested,
-                format: nil
-              ) as? [[String: Any]] else { return [] }
+        guard let (_, records) = Self.readCustomItems(from: url) else { return [] }
 
         return records.compactMap { record in
             guard let kind = record["kind"] as? String,
@@ -195,7 +182,7 @@ final class TunaCatalogService: LauncherCatalogServicing {
     }
 
     static func loadSmartLinks(from url: URL) -> [LauncherCatalogItem] {
-        guard let source = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        guard let source = AppLog.attempt("Read Tuna smart links", { try String(contentsOf: url, encoding: .utf8) }) else { return [] }
         return parseSmartLinks(source)
     }
 

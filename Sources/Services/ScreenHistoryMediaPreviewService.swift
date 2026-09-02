@@ -129,7 +129,9 @@ enum ScreenHistoryMediaPreviewService {
                 return (left ?? .distantPast) > (right ?? .distantPast)
             }
         for file in files.dropFirst(max(1, limit)) where !isSymbolicLink(file) {
-            try? FileManager.default.removeItem(at: file)
+            AppLog.attempt("Prune preview \(file.lastPathComponent)") {
+                try FileManager.default.removeItem(at: file)
+            }
         }
     }
 

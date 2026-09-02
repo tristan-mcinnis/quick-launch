@@ -13,11 +13,13 @@ enum ScreenshotLibrary {
     static let namePrefixes: Set<String> = LatestScreenshotFinder.namePrefixes
 
     static func items(in folder: URL, fileManager: FileManager = .default, now: Date = Date()) -> [LauncherCatalogItem] {
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: folder,
-            includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
+        guard let urls = AppLog.attempt("List screenshots in \(folder.lastPathComponent)", {
+            try fileManager.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+        }) else { return [] }
         let files: [(url: URL, date: Date, size: Int)] = urls.compactMap { url in
             let name = url.lastPathComponent.lowercased()
             guard LatestScreenshotFinder.imageExtensions.contains(url.pathExtension.lowercased()),
@@ -76,7 +78,8 @@ enum ScreenshotLibrary {
     /// marked as self-made: the next overlay open must not offer the app's
     /// own paste buffer back as an attachment.
     @MainActor static func copyImage(at url: URL, pasteboard: NSPasteboard = .general) -> Bool {
-        guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { return false }
+        guard let data = AppLog.attempt("Read screenshot \(url.lastPathComponent)", { try Data(contentsOf: url) }),
+              let image = NSImage(data: data) else { return false }
         pasteboard.clearContents()
         pasteboard.writeObjects([image, url as NSURL])
         ClipboardImageReader.suppressAutoOffer(for: pasteboard)
