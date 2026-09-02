@@ -166,7 +166,7 @@ into its settings.
 
 Copy a screenshot before opening Quick Launch and it appears as a removable
 attachment. Submitting it routes the prompt and image to the local MLX vision
-server at `127.0.0.1:8080`; an empty prompt asks for a useful description.
+local-models daemon at `127.0.0.1:8078/v1`; an empty prompt asks for a useful description.
 Screenshot bytes are kept only for the current request and are not written to
 history or settings.
 
@@ -240,7 +240,7 @@ OpenAI-compatible providers do not have a tool-calling loop.
 
 - Math and LM Studio stay local.
 - Clipboard screenshots are sent only to the configured local MLX vision server
-  at `127.0.0.1:8080` and are not persisted by Quick Launch.
+  at the local-models daemon (`127.0.0.1:8078`) and are not persisted by Quick Launch.
 - There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.

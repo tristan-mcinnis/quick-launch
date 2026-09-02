@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 17)
+        #expect(settings.configurationVersion == 18)
         #expect(!settings.screenHistorySameUserAccessRiskAccepted)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
@@ -52,7 +52,7 @@ struct QuickSettingsTests {
         settings.save(to: defaults)
         #expect(QuickSettings.load(from: defaults).screenHistorySameUserAccessRiskAccepted)
 
-        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        struct LegacySettings: Encodable { var configurationVersion = 18 }
         let legacy = try JSONDecoder().decode(
             QuickSettings.self,
             from: JSONEncoder().encode(LegacySettings())
@@ -67,7 +67,7 @@ struct QuickSettingsTests {
         settings.save(to: defaults)
         #expect(QuickSettings.load(from: defaults).typeToClickContinuation == .singleAction)
 
-        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        struct LegacySettings: Encodable { var configurationVersion = 18 }
         let legacy = try JSONDecoder().decode(
             QuickSettings.self,
             from: JSONEncoder().encode(LegacySettings())
@@ -86,7 +86,7 @@ struct QuickSettingsTests {
         settings.save(to: defaults)
         #expect(!QuickSettings.load(from: defaults).typeToClickHotkeyEnabled)
 
-        struct LegacySettings: Encodable { var configurationVersion = 17 }
+        struct LegacySettings: Encodable { var configurationVersion = 18 }
         let legacy = try JSONDecoder().decode(
             QuickSettings.self,
             from: JSONEncoder().encode(LegacySettings())
@@ -168,7 +168,7 @@ struct QuickSettingsTests {
             from: JSONEncoder().encode(LegacySettings())
         )
 
-        #expect(decoded.configurationVersion == 17)
+        #expect(decoded.configurationVersion == 18)
         #expect(decoded.screenHistoryExcludedBundleIDs == ["com.example.private"])
         #expect(decoded.screenHistoryExcludedDomains == ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted())
     }
@@ -340,5 +340,32 @@ struct QuickSettingsTests {
     // 10. defaultsKey is stable
     @Test func testDefaultsKeyIsStable() {
         #expect(QuickSettings.defaultsKey == "QuickSettings")
+    }
+}
+
+
+@Suite("Local provider migration")
+struct LocalProviderMigrationTests {
+    @Test func rawMLXPortMovesToTheDaemon() throws {
+        var legacy = QuickSettings()
+        legacy.configurationVersion = 17
+        let index = legacy.providers.firstIndex { $0.id == InferenceProvider.mlxVisionID }!
+        legacy.providers[index].baseURL = InferenceProvider.legacyMLXVisionBaseURL
+        legacy.providers[index].selectedModel = "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
+        legacy.visionProviderID = InferenceProvider.mlxVisionID
+        legacy.visionModel = "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
+        let migrated = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(legacy))
+        #expect(migrated.providers[index].baseURL == InferenceProvider.localModelsBaseURL)
+        #expect(migrated.providers[index].selectedModel == InferenceProvider.localModelsDefaultModel)
+        #expect(migrated.visionModel.isEmpty)
+    }
+
+    @Test func customLocalBaseURLIsKept() throws {
+        var legacy = QuickSettings()
+        legacy.configurationVersion = 17
+        let index = legacy.providers.firstIndex { $0.id == InferenceProvider.mlxVisionID }!
+        legacy.providers[index].baseURL = "http://10.0.0.5:9000/v1"
+        let migrated = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(legacy))
+        #expect(migrated.providers[index].baseURL == "http://10.0.0.5:9000/v1")
     }
 }

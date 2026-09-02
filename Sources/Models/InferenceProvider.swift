@@ -80,6 +80,12 @@ extension InferenceProvider {
     static let claudeCodeID = UUID(uuidString: "DD72A9CC-D388-471A-A081-A8C5DD55BC3E")!
     static let piID = UUID(uuidString: "288A36B5-DA8E-4916-8A33-6CD5777762BB")!
     static let mlxVisionID = UUID(uuidString: "9D12D3E7-3E4F-4C37-93BB-59CE9D61C66B")!
+    /// local-models daemon (127.0.0.1:8078), OpenAI passthrough under /v1.
+    static let localModelsBaseURL = "http://127.0.0.1:8078/v1"
+    static let localModelsDefaultModel = "qwen3-vl"
+    /// Where the local vision provider pointed before 2026-09-02: the raw
+    /// mlx-vlm port. Settings still on it are moved to the daemon.
+    static let legacyMLXVisionBaseURL = "http://127.0.0.1:8080"
 
     static var defaults: [InferenceProvider] {
         return [
@@ -94,15 +100,14 @@ extension InferenceProvider {
             ),
             InferenceProvider(
                 id: mlxVisionID,
-                name: "Local MLX Vision",
+                name: "Local Models",
                 kind: .openAICompatible,
                 location: .local,
-                baseURL: "http://127.0.0.1:8080",
-                models: [
-                    "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
-                    "mlx-community/Qwen3-VL-2B-Instruct-4bit",
-                ],
-                selectedModel: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                // The local-models daemon: one OpenAI-compatible door for
+                // every local backend, never a backend port directly.
+                baseURL: Self.localModelsBaseURL,
+                models: ["qwen3-vl", "qwen3.5", "gemma-it", "s1-mini"],
+                selectedModel: Self.localModelsDefaultModel,
                 discovery: .openAI,
                 isBuiltIn: true
             ),

@@ -15,7 +15,7 @@ enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 17
+    var configurationVersion: Int = 18
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -133,7 +133,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 17
+        configurationVersion = 18
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -310,6 +310,22 @@ struct QuickSettings: Codable, Sendable {
            !savedPrompts.contains(where: { $0.alias == "zh" }),
            let chinese = SavedPrompt.defaults.first(where: { $0.alias == "zh" }) {
             savedPrompts.append(chinese)
+        }
+        if decodedConfigurationVersion < 18,
+           let index = providers.firstIndex(where: { $0.id == InferenceProvider.mlxVisionID }),
+           providers[index].baseURL == InferenceProvider.legacyMLXVisionBaseURL,
+           let fresh = InferenceProvider.defaults.first(where: { $0.id == InferenceProvider.mlxVisionID }) {
+            // 2026-09-02: the local provider goes through the local-models
+            // daemon instead of the raw mlx-vlm port. A custom base URL is
+            // an explicit choice and stays.
+            providers[index].name = fresh.name
+            providers[index].baseURL = fresh.baseURL
+            providers[index].models = fresh.models
+            providers[index].selectedModel = fresh.selectedModel
+            if visionProviderID == InferenceProvider.mlxVisionID,
+               visionModel.hasPrefix("mlx-community/") {
+                visionModel = ""
+            }
         }
         if providers.isEmpty { providers = InferenceProvider.defaults }
         // A removed provider (the Apple on-device route, 2026-08-22) must not
