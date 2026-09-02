@@ -29,7 +29,7 @@ struct ProviderSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Text("Models").font(.headline)
+                    Text("Models").font(AQDesign.TypeToken.heading)
                     Spacer()
                     Button("Add endpoint") {
                         _ = viewModel.addOpenAICompatibleProvider()
@@ -63,31 +63,25 @@ struct ProviderSettingsView: View {
 
                 Toggle(
                     "Let the model search the web (SearXNG)",
-                    isOn: $viewModel.settings.modelWebSearchEnabled
+                    isOn: viewModel.settingsBinding(\.modelWebSearchEnabled)
                 )
-                .onChange(of: viewModel.settings.modelWebSearchEnabled) { _, _ in
-                    viewModel.settings.save()
-                }
                 Text("The model gets a search_web tool and decides when to use it: news, scores, prices, anything after its training. Works in follow-ups too.")
-                    .font(.system(size: 11))
+                    .font(AQDesign.TypeToken.hint)
                     .foregroundStyle(.secondary)
 
                 Divider()
 
                 Text("Quick-action instruction")
-                    .font(.subheadline.weight(.medium))
-                TextEditor(text: $viewModel.settings.systemPrompt)
-                    .font(.system(size: 12))
+                    .font(AQDesign.TypeToken.subheading)
+                TextEditor(text: viewModel.settingsBinding(\.systemPrompt))
+                    .font(AQDesign.TypeToken.detail)
                     .frame(minHeight: 82)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.25))
+                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius)
+                            .stroke(AQDesign.ColorToken.fieldStroke)
                     )
-                    .onChange(of: viewModel.settings.systemPrompt) { _, _ in
-                        viewModel.settings.save()
-                    }
                 Text("This instruction applies to every provider. Saved actions add their own prompt.")
-                    .font(.system(size: 11))
+                    .font(AQDesign.TypeToken.hint)
                     .foregroundStyle(.secondary)
             }
             .padding(24)
@@ -158,17 +152,17 @@ struct ProviderSettingsView: View {
             } else if provider.kind == .commandLine {
                 LabeledContent("Command") {
                     Text(provider.command?.executable ?? "Not configured")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(AQDesign.TypeToken.code)
                         .foregroundStyle(
                             provider.command.flatMap { ExecutableResolver.resolve($0.executable) } == nil
-                                ? .red : .secondary
+                                ? AQDesign.ColorToken.danger : Color.secondary
                         )
                 }
             }
 
             if let message = viewModel.modelRefreshMessage ?? keyStatus {
                 Text(message)
-                    .font(.system(size: 11))
+                    .font(AQDesign.TypeToken.hint)
                     .foregroundStyle(.secondary)
             }
 
@@ -185,12 +179,9 @@ struct ProviderSettingsView: View {
         _ index: Int,
         _ keyPath: WritableKeyPath<InferenceProvider, String>
     ) -> Binding<String> {
-        Binding(
-            get: { viewModel.settings.providers[index][keyPath: keyPath] },
-            set: {
-                viewModel.settings.providers[index][keyPath: keyPath] = $0
-                viewModel.settings.save()
-            }
+        viewModel.settingsBinding(
+            get: { $0.providers[index][keyPath: keyPath] },
+            set: { settings, value in settings.providers[index][keyPath: keyPath] = value }
         )
     }
 
@@ -279,7 +270,7 @@ private struct VisionModelPicker: View {
                 .frame(width: 330)
             }
             Text("Screenshots attached with ⌘⇧S or ⌘⇧D go only to this model. A local model keeps the image on this Mac. Refresh a provider's models to see new vision models.")
-                .font(.system(size: 11))
+                .font(AQDesign.TypeToken.hint)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

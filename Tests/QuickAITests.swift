@@ -36,7 +36,7 @@ struct QuickAITests {
         #expect(!vm.hasPendingAttachment)
     }
 
-    @Test func returnOnAnAnswerPastesItBackAndTypingIsAFollowUp() async {
+    @Test func returnOnAnAnswerDoesNothingAndCommandReturnPastesItBack() async {
         let mock = MockQuickService()
         let selection = PasteRecorder()
         let vm = QuickViewModel(service: mock, selectedTextService: selection)
@@ -45,8 +45,12 @@ struct QuickAITests {
         await ask(vm, mock, "hello", reply: "Bonjour")
         vm.input = ""
         await vm.submitResolvingFuzzyAlias()
-        #expect(selection.pasted == "Bonjour")
+        #expect(selection.pasted == nil)
         #expect(await mock.sendCallCount == 1)
+        // ⌘↩ is the one paste-back shortcut, the same as every result action.
+        #expect(vm.performShortcut(characters: nil, keyCode: VirtualKey.return.rawValue, modifiers: [.command]))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(selection.pasted == "Bonjour")
     }
 
     @Test func chatsCatalogListsPinsRenamesDeletesAndContinues() async {

@@ -246,14 +246,7 @@ private extension ScreenHistorySoakReceiptService {
     }
 
     static func defaultDirectoryURL() -> URL {
-        let applicationSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return applicationSupport
-            .appendingPathComponent("Quick Launch", isDirectory: true)
-            .appendingPathComponent("Screen History Soak", isDirectory: true)
+        AppPaths.directory("Screen History Soak")
     }
 
     static func defaultCalendar() -> Calendar {

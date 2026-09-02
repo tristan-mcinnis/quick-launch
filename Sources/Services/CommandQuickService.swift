@@ -34,60 +34,41 @@ struct CommandQuickService: QuickService, @unchecked Sendable {
     }
 
     func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
-        AsyncThrowingStream { continuation in
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = Self.expandedArguments(
+        let chunks = ProcessRunner.stream(
+            executable: executable,
+            arguments: Self.expandedArguments(
                 arguments,
                 model: model,
                 systemPrompt: systemPrompt
-            )
-            process.currentDirectoryURL = FileManager.default.temporaryDirectory
-            let input = Pipe()
-            let output = Pipe()
-            let errors = Pipe()
-            process.standardInput = input
-            process.standardOutput = output
-            process.standardError = errors
-
+            ),
+            stdin: Data(Self.flatten(messages).utf8),
+            currentDirectory: FileManager.default.temporaryDirectory,
+            onFailure: { status, stderr in
+                let message = String(data: stderr, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return QuickServiceError.commandFailed(
+                    message?.isEmpty == false ? message! : "Command exited with status \(status)"
+                )
+            }
+        )
+        return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 do {
-                    try process.run()
-                    let prompt = Self.flatten(messages)
-                    input.fileHandleForWriting.write(Data(prompt.utf8))
-                    try? input.fileHandleForWriting.close()
-
-                    while true {
+                    for try await data in chunks {
                         try Task.checkCancellation()
-                        let data = output.fileHandleForReading.availableData
-                        if data.isEmpty { break }
                         if let text = String(data: data, encoding: .utf8), !text.isEmpty {
                             continuation.yield(StreamDelta(text: text, finishReason: nil))
                         }
                     }
-                    process.waitUntilExit()
-                    guard process.terminationStatus == 0 else {
-                        let data = errors.fileHandleForReading.readDataToEndOfFile()
-                        let message = String(data: data, encoding: .utf8)?
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        throw QuickServiceError.commandFailed(
-                            message?.isEmpty == false ? message! : "Command exited with status \(process.terminationStatus)"
-                        )
-                    }
                     continuation.yield(StreamDelta(text: nil, finishReason: "stop"))
                     continuation.finish()
                 } catch is CancellationError {
-                    if process.isRunning { process.terminate() }
                     continuation.finish()
                 } catch {
-                    if process.isRunning { process.terminate() }
                     continuation.finish(throwing: error)
                 }
             }
-            continuation.onTermination = { _ in
-                task.cancel()
-                if process.isRunning { process.terminate() }
-            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

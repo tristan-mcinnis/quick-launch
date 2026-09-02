@@ -90,14 +90,14 @@ struct TranslatorView: View {
                         .foregroundStyle(.tertiary)
                 }
                 TextEditor(text: $model.source)
-                    .font(.system(size: 14))
+                    .font(AQDesign.TypeToken.prose)
                     .scrollContentBackground(.hidden)
                     .focused($sourceFocused)
                     .onChange(of: model.source) { _, _ in model.sourceChanged() }
                     .overlay(alignment: .topLeading) {
                         if model.source.isEmpty {
                             Text("Type or paste text. ⌘⇧V uses the clipboard.")
-                                .font(.system(size: 14))
+                                .font(AQDesign.TypeToken.prose)
                                 .foregroundStyle(.tertiary)
                                 .padding(.top, 1)
                                 .padding(.leading, 5)
@@ -127,13 +127,13 @@ struct TranslatorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.translation.isEmpty && !model.isTranslating ? " " : model.translation)
-                            .font(.system(size: 15))
+                            .font(AQDesign.TypeToken.input)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let pinyin = model.pinyin, !pinyin.isEmpty {
                             Divider()
                             Text(pinyin)
-                                .font(.system(size: 12))
+                                .font(AQDesign.TypeToken.detail)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,31 +163,24 @@ struct TranslatorView: View {
                 KeyCapGroup(keys: ["esc"])
             }
             .padding(.horizontal, 20)
-            .frame(height: 44)
+            .frame(height: PanelSizing.paneHeaderHeight)
             Divider()
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(Array(model.filteredTargets.enumerated()), id: \.element.id) { index, item in
-                        Button { choose(index) } label: {
-                            HStack {
-                                Text(item.title).font(.system(size: 13, weight: .medium))
-                                Spacer()
-                                if item == model.target {
-                                    Image(systemName: "checkmark").foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .frame(height: 36)
-                            .background(
-                                RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                    .fill(index == pickerIndex ? AQDesign.ColorToken.selectionFill : .clear)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+            SelectableListPane(
+                items: model.filteredTargets,
+                selectedIndex: $pickerIndex,
+                rowSpacing: 2,
+                rowHeight: 36,
+                listInsets: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8),
+                onActivate: { target in model.setTarget(target) }
+            ) { _, item, _ in
+                HStack {
+                    Text(item.title).font(AQDesign.TypeToken.body.weight(.medium))
+                    Spacer()
+                    if item == model.target {
+                        Image(systemName: "checkmark").foregroundStyle(.secondary)
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 12)
             }
         }
     }
@@ -212,9 +205,9 @@ struct TranslatorView: View {
     }
 
     private func move(_ delta: Int) {
-        let count = model.filteredTargets.count
-        guard count > 0 else { return }
-        pickerIndex = (pickerIndex + delta + count) % count
+        pickerIndex = ListSelection.wrappedIndex(
+            pickerIndex, by: delta, count: model.filteredTargets.count
+        )
     }
 
     private func choose(_ index: Int) {
@@ -224,17 +217,11 @@ struct TranslatorView: View {
     }
 
     private func focusSource() {
-        Task { @MainActor in
-            await Task.yield()
-            sourceFocused = true
-        }
+        FocusRequest.apply($sourceFocused)
     }
 
     private func focusPicker() {
-        Task { @MainActor in
-            await Task.yield()
-            pickerFocused = true
-        }
+        FocusRequest.apply($pickerFocused)
     }
 }
 

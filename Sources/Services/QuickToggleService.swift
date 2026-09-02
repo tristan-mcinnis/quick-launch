@@ -142,12 +142,12 @@ enum QuickToggleService {
 
     /// Reads the current state needed by toggles that flip a `defaults`
     /// value. A missing key falls back to the macOS default.
-    static func readState(for toggle: QuickToggle) -> [String: Bool] {
+    static func readState(for toggle: QuickToggle) async -> [String: Bool] {
         switch toggle {
         case .toggleHiddenFiles:
-            return [hiddenFilesKey: readFinderBool(hiddenFilesKey) ?? false]
+            return [hiddenFilesKey: await readFinderBool(hiddenFilesKey) ?? false]
         case .toggleDesktopIcons:
-            return [desktopIconsKey: readFinderBool(desktopIconsKey) ?? true]
+            return [desktopIconsKey: await readFinderBool(desktopIconsKey) ?? true]
         default:
             return [:]
         }
@@ -162,28 +162,18 @@ enum QuickToggleService {
         }
     }
 
-    private static func readFinderBool(_ key: String) -> Bool? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: defaults)
-        process.arguments = ["read", finderDomain, key]
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return parseDefaultsBool(String(decoding: data, as: UTF8.self))
+    private static func readFinderBool(_ key: String) async -> Bool? {
+        guard let result = try? await ProcessRunner.run(
+            executable: URL(fileURLWithPath: defaults),
+            arguments: ["read", finderDomain, key]
+        ), result.status == 0 else { return nil }
+        return parseDefaultsBool(result.stdoutText)
     }
 
     /// Runs the plan. Returns nil on success or a short user-facing error message.
     @MainActor
     static func run(_ toggle: QuickToggle) async -> String? {
-        let state = readState(for: toggle)
+        let state = await readState(for: toggle)
         for step in plan(for: toggle, currentState: state) {
             if let failure = await execute(step) {
                 return failure
@@ -192,33 +182,17 @@ enum QuickToggleService {
         return nil
     }
 
-    private struct StepResult: Sendable {
-        let status: Int32
-        let stderr: String
-    }
-
     private static func execute(_ step: ProcessPlan) async -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: step.executable)
-        process.arguments = step.arguments
-        let stderrPipe = Pipe()
-        process.standardError = stderrPipe
-        process.standardOutput = Pipe()
+        let result: ProcessResult
         do {
-            try process.run()
+            result = try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: step.executable),
+                arguments: step.arguments
+            )
         } catch {
             return "Could not start \(URL(fileURLWithPath: step.executable).lastPathComponent)."
         }
-        let result: StepResult = await withCheckedContinuation { continuation in
-            process.terminationHandler = { finished in
-                let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: StepResult(
-                    status: finished.terminationStatus,
-                    stderr: String(decoding: data, as: UTF8.self)
-                ))
-            }
-        }
-        return failureMessage(for: step, status: result.status, stderr: result.stderr)
+        return failureMessage(for: step, status: result.status, stderr: result.stderrText)
     }
 
     /// nil when the step succeeded. Pure; tests cover the permission hint.

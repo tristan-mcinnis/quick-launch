@@ -234,6 +234,7 @@ struct ScreenAwarenessTests {
         #expect(vm.catalogMatches.isEmpty)
 
         // The index survives a relaunch and is not re-read.
+        index.waitForPendingWrites()
         let reopened = ScreenshotTextIndex(storeURL: folder.appendingPathComponent("index.json"))
         #expect(reopened.indexedCount == 2)
         #expect(reopened.text(for: invoice)?.isEmpty == false)

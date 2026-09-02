@@ -1,20 +1,5 @@
 import Foundation
 
-/// Picked colors, newest first, kept locally so a color can be copied again
-/// in any format long after the loupe closed.
-@MainActor
-protocol ColorHistoryServicing: AnyObject {
-    var entries: [LauncherCatalogItem] { get }
-    /// The format every row's value is written in. Changing it rewrites the rows.
-    var preferredFormat: ColorFormat { get set }
-    @discardableResult
-    func record(_ color: PickedColor, limit: Int) -> LauncherCatalogItem
-    func color(for item: LauncherCatalogItem) -> PickedColor?
-    func remove(_ item: LauncherCatalogItem)
-    func togglePin(_ item: LauncherCatalogItem)
-    func clear()
-}
-
 @MainActor
 final class ColorHistoryStore: ColorHistoryServicing {
     private struct StoredColor: Codable, Sendable {
@@ -33,14 +18,10 @@ final class ColorHistoryStore: ColorHistoryServicing {
     }
 
     private var storedColors: [StoredColor] = []
-    private let fileURL: URL
-    nonisolated private static let writeQueue = DispatchQueue(
-        label: "com.tristanmcinnis.quick-launch.color-history",
-        qos: .utility
-    )
+    private let file: JSONFileStore<[StoredColor]>
 
     init(fileURL: URL? = nil, preferredFormat: ColorFormat = .hex) {
-        self.fileURL = fileURL ?? Self.defaultFileURL()
+        self.file = JSONFileStore(fileURL: fileURL ?? Self.defaultFileURL())
         self.preferredFormat = preferredFormat
         load()
     }
@@ -83,8 +64,7 @@ final class ColorHistoryStore: ColorHistoryServicing {
     func clear() {
         storedColors.removeAll()
         entries.removeAll()
-        let url = fileURL
-        Self.writeQueue.async { try? FileManager.default.removeItem(at: url) }
+        file.delete()
     }
 
     /// Keeps every pinned color and the newest `limit` unpinned ones.
@@ -129,38 +109,21 @@ final class ColorHistoryStore: ColorHistoryServicing {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([StoredColor].self, from: data)
-        else { return }
+        guard let decoded = file.load() else { return }
         storedColors = decoded
         rebuildPublicEntries()
     }
 
     private func save() {
-        let snapshot = storedColors
-        let url = fileURL
-        Self.writeQueue.async {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try? data.write(to: url, options: .atomic)
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: url.path
-            )
-        }
+        file.save(storedColors)
     }
 
     /// Tests: block until queued writes are on disk.
     func waitForPendingWrites() {
-        Self.writeQueue.sync {}
+        file.flush()
     }
 
     private static func defaultFileURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch")
-            .appendingPathComponent("color-history.json")
+        AppPaths.file("color-history.json")
     }
 }

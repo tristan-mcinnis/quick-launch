@@ -116,57 +116,39 @@ actor WebPageReader: WebPageReading {
 
     // MARK: - VPS fallback
 
+    /// The single remote command string ssh runs on vault-vps. Pure; tests
+    /// pin the quoting.
+    nonisolated static func remoteCommand(for url: URL) -> [String] {
+        let escaped = url.absoluteString
+            .replacingOccurrences(of: "'", with: "%27")
+        return ["~/search-tools/venv/bin/python ~/search-tools/read_page.py '\(escaped)'"]
+    }
+
     /// Runs the trafilatura reader on vault-vps over SSH. Mirrors the
     /// transport of `SearXNGSearchService`: direct process execution, no
     /// local shell interpolation.
     private func readViaVPS(_ url: URL) async throws -> String {
         guard let host = vpsHost else { throw PageReadError.empty }
-        let escaped = url.absoluteString
-            .replacingOccurrences(of: "'", with: "%27")
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            host,
-            "~/search-tools/venv/bin/python ~/search-tools/read_page.py '\(escaped)'",
-        ]
-        process.standardOutput = stdout
-        process.standardError = stderr
+        let remoteCommand = Self.remoteCommand(for: url)
 
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
-                try await withCheckedThrowingContinuation { continuation in
-                    process.terminationHandler = { finished in
-                        let output = stdout.fileHandleForReading.readDataToEndOfFile()
-                        guard finished.terminationStatus == 0 else {
-                            let message = String(
-                                decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-                                as: UTF8.self
-                            )
-                            continuation.resume(throwing: PageReadError.failed(
-                                message.isEmpty
-                                    ? "reader exited with \(finished.terminationStatus)"
-                                    : message
-                            ))
-                            return
-                        }
-                        continuation.resume(returning: String(decoding: output, as: UTF8.self))
-                    }
-                    do {
-                        try process.run()
-                    } catch {
-                        continuation.resume(throwing: PageReadError.failed(
-                            error.localizedDescription
-                        ))
-                    }
+                let result: ProcessResult
+                do {
+                    result = try await SSHRunner.run(host: host, remoteCommand: remoteCommand)
+                } catch let error as ProcessRunnerError {
+                    throw PageReadError.failed(error.localizedDescription)
                 }
+                guard result.status == 0 else {
+                    let message = result.stderrText
+                    throw PageReadError.failed(
+                        message.isEmpty ? "reader exited with \(result.status)" : message
+                    )
+                }
+                return result.stdoutText
             }
             group.addTask { [requestTimeout] in
                 try await Task.sleep(for: requestTimeout)
-                process.terminate()
                 throw PageReadError.timedOut
             }
             defer { group.cancelAll() }

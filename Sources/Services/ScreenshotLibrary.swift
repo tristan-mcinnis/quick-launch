@@ -84,10 +84,10 @@ enum ScreenshotLibrary {
     }
 
     static func quickLook(_ url: URL) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/qlmanage")
-        process.arguments = ["-p", url.path]
-        try? process.run()
+        ProcessRunner.launch(
+            executable: URL(fileURLWithPath: "/usr/bin/qlmanage"),
+            arguments: ["-p", url.path]
+        )
     }
 }
 

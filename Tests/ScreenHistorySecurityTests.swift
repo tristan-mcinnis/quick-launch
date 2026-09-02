@@ -164,10 +164,10 @@ struct ScreenHistorySecurityTests {
         let vm = QuickViewModel(settings: settings, screenHistoryStore: store)
         vm.catalogScope = .screenHistory
 
-        await vm.loadScreenHistory(query: "notes")
+        await vm.screenHistory.load(query: "notes")
 
-        #expect(vm.screenHistoryFrames.count == 1)
-        #expect(vm.screenHistoryFrames.first?.domain == "allowed.example")
+        #expect(vm.screenHistory.frames.count == 1)
+        #expect(vm.screenHistory.frames.first?.domain == "allowed.example")
         try receipt.finish(measurements: .init(
             localFileCount: 0, toolCallCount: 0, helperCallCount: 1, sourceRootCount: 1
         ))
@@ -185,20 +185,20 @@ struct ScreenHistorySecurityTests {
         var saved: QuickSettings?
         vm.persistSettings = { saved = $0 }
 
-        await vm.prepareScreenHistoryCaptureForBootstrap()
+        await vm.screenHistory.prepareCaptureForBootstrap()
 
         #expect(!vm.settings.screenHistoryCaptureConfirmed)
         #expect(saved?.screenHistoryCaptureConfirmed == false)
-        #expect(vm.screenHistoryCaptureStatus?.state == .disabled)
+        #expect(vm.screenHistory.captureStatus?.state == .disabled)
         #expect(await source.captureCalls == 0)
 
-        await vm.confirmAndStartScreenHistoryCapture()
-        #expect(vm.screenHistoryCaptureStatus?.state == .disabled)
+        await vm.screenHistory.confirmAndStartCapture()
+        #expect(vm.screenHistory.captureStatus?.state == .disabled)
         #expect(vm.errorMessage == "Owned capture is locked in this search-only beta.")
 
-        vm.noteScreenHistorySettingsPresented()
-        await vm.confirmAndStartScreenHistoryCapture()
-        #expect(vm.screenHistoryCaptureStatus?.state == .disabled)
+        vm.screenHistory.noteSettingsPresented()
+        await vm.screenHistory.confirmAndStartCapture()
+        #expect(vm.screenHistory.captureStatus?.state == .disabled)
         #expect(!vm.settings.screenHistoryCaptureConfirmed)
         #expect(await source.captureCalls == 0)
         try receipt.finish(measurements: .init(
@@ -212,13 +212,13 @@ struct ScreenHistorySecurityTests {
         settings.screenHistoryCaptureEnabled = true
         let capture = Self.captureService(source: SecurityHistoryFrameSource())
         let vm = QuickViewModel(settings: settings, screenHistoryCaptureService: capture)
-        await vm.prepareScreenHistoryCaptureForBootstrap()
+        await vm.screenHistory.prepareCaptureForBootstrap()
 
         #expect(!vm.systemCommands.contains { $0.itemID == "screenHistory.toggleCapture" })
-        vm.noteScreenHistorySettingsPresented()
-        await vm.toggleScreenHistoryCaptureFromCommand()
+        vm.screenHistory.noteSettingsPresented()
+        await vm.screenHistory.toggleCaptureFromCommand()
         #expect(vm.errorMessage == "Owned capture is locked in this search-only beta.")
-        #expect(vm.screenHistoryCaptureStatus?.state == .disabled)
+        #expect(vm.screenHistory.captureStatus?.state == .disabled)
         try receipt.finish(measurements: .init(
             localFileCount: 0, toolCallCount: 0, helperCallCount: 2, sourceRootCount: 0
         ))

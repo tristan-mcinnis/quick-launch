@@ -104,47 +104,26 @@ actor SSHVaultSearchService: VaultSearchServicing {
         mode: VaultSearchMode,
         query: String
     ) async throws -> Data {
-        let process = Process()
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host,
-            "python3", remoteScript, mode.rawValue,
-            "--stdin", "--limit", "10", "--json",
-        ]
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                process.terminationHandler = { finished in
-                    let output = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errorOutput = String(
-                        decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-                        as: UTF8.self
-                    ).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard finished.terminationStatus == 0 else {
-                        continuation.resume(throwing: VaultSearchError.failed(
-                            errorOutput.isEmpty ? "exit \(finished.terminationStatus)" : errorOutput
-                        ))
-                        return
-                    }
-                    continuation.resume(returning: output)
-                }
-                do {
-                    try process.run()
-                    stdin.fileHandleForWriting.write(Data(query.utf8))
-                    try? stdin.fileHandleForWriting.close()
-                } catch {
-                    continuation.resume(throwing: VaultSearchError.failed(error.localizedDescription))
-                }
-            }
-        } onCancel: {
-            if process.isRunning { process.terminate() }
+        let result: ProcessResult
+        do {
+            result = try await SSHRunner.run(
+                host: host,
+                remoteCommand: remoteArguments(remoteScript: remoteScript, mode: mode),
+                disablePTY: true,
+                stdin: Data(query.utf8)
+            )
+        } catch let error as ProcessRunnerError {
+            throw VaultSearchError.failed(error.localizedDescription)
         }
+        guard result.status == 0 else {
+            throw VaultSearchError.failed(result.trimmedStderr ?? "exit \(result.status)")
+        }
+        return result.stdout
+    }
+
+    /// The remote argv after the host. Pure; tests pin it.
+    nonisolated static func remoteArguments(remoteScript: String, mode: VaultSearchMode) -> [String] {
+        ["python3", remoteScript, mode.rawValue, "--stdin", "--limit", "10", "--json"]
     }
 
     nonisolated static func formatResponse(_ data: Data) throws -> String {

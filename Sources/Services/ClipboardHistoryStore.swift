@@ -17,14 +17,12 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     private var lastChangeCount = NSPasteboard.general.changeCount
     private let fileURL: URL
     /// Every copy rewrites the whole file; that work leaves the main thread
-    /// and stays ordered on one serial queue.
-    nonisolated private static let writeQueue = DispatchQueue(
-        label: "com.tristanmcinnis.quick-launch.clipboard-history",
-        qos: .utility
-    )
+    /// and stays ordered on the store's serial queue.
+    private let file: JSONFileStore<[StoredEntry]>
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
+        self.file = JSONFileStore(fileURL: self.fileURL)
         load()
     }
 
@@ -87,8 +85,7 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         storedEntries.removeAll()
         entries.removeAll()
         guard fileURL.path.hasSuffix("/clipboard-history.json") else { return }
-        let url = fileURL
-        Self.writeQueue.async { try? FileManager.default.removeItem(at: url) }
+        file.delete()
     }
 
     /// Pasteboard markers that mean "do not record": password managers mark
@@ -139,39 +136,22 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([StoredEntry].self, from: data)
-        else { return }
+        guard let decoded = file.load() else { return }
         storedEntries = decoded
         rebuildPublicEntries()
     }
 
+    /// Clipboard content is private; the store keeps the file owner-only.
     private func save() {
-        let snapshot = storedEntries
-        let url = fileURL
-        Self.writeQueue.async {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try? data.write(to: url, options: .atomic)
-            // Clipboard content is private; keep the file owner-only.
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: url.path
-            )
-        }
+        file.save(storedEntries)
     }
 
     /// Tests: block until queued writes are on disk.
     func waitForPendingWrites() {
-        Self.writeQueue.sync {}
+        file.flush()
     }
 
     private static func defaultFileURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch")
-            .appendingPathComponent("clipboard-history.json")
+        AppPaths.file("clipboard-history.json")
     }
 }

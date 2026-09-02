@@ -289,6 +289,21 @@ actor ScreenHistoryCoastFreezeReceiptService: ScreenHistoryCoastFreezeReceipting
     static func loadOrCreateOwnerOnlyIntegrityKeyForTesting(at url: URL) throws -> SymmetricKey {
         try loadOrCreateOwnerOnlyIntegrityKey(at: url)
     }
+
+    static func loadOrCreateIntegrityKeyForTesting(
+        receiptDirectoryURL: URL,
+        fallbackFileURL: URL,
+        keychain: any KeychainStoring
+    ) throws -> SymmetricKey {
+        try loadOrCreateIntegrityKey(
+            receiptDirectoryURL: receiptDirectoryURL,
+            fallbackFileURL: fallbackFileURL,
+            keychain: keychain
+        )
+    }
+
+    static var integrityKeyServiceForTesting: String { integrityKeyService }
+    static var defaultReceiptDirectoryURLForTesting: URL { defaultReceiptDirectoryURL() }
 }
 
 private extension ScreenHistoryCoastFreezeReceiptService {
@@ -1366,33 +1381,32 @@ private extension ScreenHistoryCoastFreezeReceiptService {
         return hex(HMAC<SHA256>.authenticationCode(for: data, using: key))
     }
 
+    static let integrityKeyService = "ai.quick-launch.screen-history.coast-freeze"
+
     static func loadOrCreateIntegrityKey(
         receiptDirectoryURL: URL,
-        fallbackFileURL: URL
+        fallbackFileURL: URL,
+        keychain: any KeychainStoring = SystemKeychainStore()
     ) throws -> SymmetricKey {
         let account = hex(SHA256.hash(data: Data(
             receiptDirectoryURL.standardizedFileURL.path.utf8
         )))
-        let baseQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "ai.quick-launch.screen-history.coast-freeze",
-            kSecAttrAccount as String: account,
-        ]
+        func isLockedOut(_ status: OSStatus) -> Bool {
+            status == errSecAuthFailed || status == errSecInteractionNotAllowed
+        }
         func existingKey() throws -> SymmetricKey? {
-            var query = baseQuery
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            if status == errSecItemNotFound { return nil }
-            guard status == errSecSuccess,
-                  let data = result as? Data,
-                  data.count == 32
-            else {
-                if status == errSecAuthFailed || status == errSecInteractionNotAllowed {
+            let data: Data?
+            do {
+                data = try keychain.read(service: integrityKeyService, account: account)
+            } catch {
+                if isLockedOut(error.status) {
                     return try loadOrCreateOwnerOnlyIntegrityKey(at: fallbackFileURL)
                 }
-                throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(status)
+                throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(error.status)
+            }
+            guard let data else { return nil }
+            guard data.count == 32 else {
+                throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(errSecSuccess)
             }
             return SymmetricKey(data: data)
         }
@@ -1403,16 +1417,21 @@ private extension ScreenHistoryCoastFreezeReceiptService {
             throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(errSecInternalError)
         }
         let data = Data(bytes)
-        var add = baseQuery
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        if status == errSecDuplicateItem, let key = try existingKey() { return key }
-        if status == errSecAuthFailed || status == errSecInteractionNotAllowed {
-            return try loadOrCreateOwnerOnlyIntegrityKey(at: fallbackFileURL, candidate: data)
-        }
-        guard status == errSecSuccess else {
-            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(status)
+        do {
+            try keychain.add(
+                data,
+                service: integrityKeyService,
+                account: account,
+                options: KeychainItemOptions(
+                    accessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
+                )
+            )
+        } catch {
+            if error.status == errSecDuplicateItem, let key = try existingKey() { return key }
+            if isLockedOut(error.status) {
+                return try loadOrCreateOwnerOnlyIntegrityKey(at: fallbackFileURL, candidate: data)
+            }
+            throw ScreenHistoryCoastFreezeReceiptError.integrityKeyUnavailable(error.status)
         }
         return SymmetricKey(data: data)
     }
@@ -1524,14 +1543,7 @@ private extension ScreenHistoryCoastFreezeReceiptService {
     }
 
     static func defaultReceiptDirectoryURL() -> URL {
-        let support = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return support
-            .appendingPathComponent("Quick Launch", isDirectory: true)
-            .appendingPathComponent("Screen History Coast Freeze", isDirectory: true)
+        AppPaths.directory("Screen History Coast Freeze")
     }
 
     static func utcCalendar() -> Calendar {

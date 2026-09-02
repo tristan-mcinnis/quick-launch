@@ -172,7 +172,7 @@ final class TypeToClickOverlayView: NSView {
             characters: "\u{1b}",
             charactersIgnoringModifiers: "\u{1b}",
             isARepeat: false,
-            keyCode: 53
+            keyCode: VirtualKey.escape.rawValue
         ), keyHandler?(event) == true {
             return
         }

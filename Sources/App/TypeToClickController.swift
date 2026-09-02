@@ -666,16 +666,16 @@ final class TypeToClickController {
         ) {
             return false
         }
-        if keyCode == 53 { // Esc always exits, including during a pulse.
+        if VirtualKey(rawValue: keyCode) == .escape { // Esc always exits, including during a pulse.
             dismiss()
             return true
         }
         if actionTask != nil {
             // Type-ahead belongs to the next chained step. Keep it out of the
             // controlled app, then apply it as soon as this pulse completes.
-            if keyCode == 51 {
+            if VirtualKey(rawValue: keyCode) == .delete {
                 bufferedPostActionQuery = String(bufferedPostActionQuery.dropLast())
-            } else if keyCode == 36 || keyCode == 76 {
+            } else if VirtualKey.isReturn(keyCode: keyCode) {
                 bufferedPostActionAction = TypeToClickKeyPolicy.action(for: modifiers)
             } else if let character = TypeToClickKeyPolicy.queryCharacter(
                 charactersIgnoringModifiers: charactersIgnoringModifiers,
@@ -685,33 +685,33 @@ final class TypeToClickController {
             }
             return true
         }
-        switch keyCode {
-        case 36, 76: // Return / keypad Enter
+        switch VirtualKey(rawValue: keyCode) {
+        case .return, .keypadEnter:
             requestAction(TypeToClickKeyPolicy.action(for: modifiers))
             return true
-        case 51: // Delete / Backspace
+        case .delete:
             query = String(query.dropLast())
             notice = targets.isEmpty ? findingNotice : nil
             updateMatches(resetSelection: true)
             refreshIfStale()
             render()
             return true
-        case 125: // Down
+        case .downArrow:
             moveSelection(by: 1)
             return true
-        case 126: // Up
+        case .upArrow:
             moveSelection(by: -1)
             return true
-        case 48 where !modifiers.contains(.command): // Tab / Shift-Tab
+        case .tab where !modifiers.contains(.command):
             moveSelection(by: modifiers.contains(.shift) ? -1 : 1)
             return true
-        case 45 where modifiers.contains(.control): // Ctrl-N
+        case _ where keyCode == 45 && modifiers.contains(.control): // Ctrl-N
             moveSelection(by: 1)
             return true
-        case 35 where modifiers.contains(.control): // Ctrl-P
+        case _ where keyCode == 35 && modifiers.contains(.control): // Ctrl-P
             moveSelection(by: -1)
             return true
-        case 15 where modifiers.contains(.command): // Cmd-R
+        case _ where keyCode == 15 && modifiers.contains(.command): // Cmd-R
             pendingAction = nil
             notice = "Refreshing controls and menu commands…"
             requestScan(force: true)

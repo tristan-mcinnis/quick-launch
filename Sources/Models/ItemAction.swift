@@ -57,13 +57,10 @@ struct KeyShortcut: Equatable, Sendable {
 
     /// `characters` is `NSEvent.charactersIgnoringModifiers`; `keyCode` 36 is Return.
     func matches(characters: String?, keyCode: UInt16, modifiers flags: NSEvent.ModifierFlags) -> Bool {
-        let relevant = flags
-            .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.function, .numericPad, .capsLock])
-        guard relevant.rawValue == modifiers else { return false }
+        guard flags.overlayRelevant.rawValue == modifiers else { return false }
         switch key {
         case .return:
-            return keyCode == 36 || keyCode == 76
+            return VirtualKey.isReturn(keyCode: keyCode)
         case .character(let character):
             return characters?.lowercased() == String(character).lowercased()
         }
@@ -340,6 +337,26 @@ enum ItemActionForm: Equatable, Sendable {
     case alias
     case hotkey
     case screenHistorySave
+
+    /// Window height the whole overlay must reach while this form is open,
+    /// or nil when the form fits inside the default pane budget.
+    var minimumWindowHeight: CGFloat? {
+        switch self {
+        case .edit, .alias, .hotkey: nil
+        case .screenHistorySave: ScreenHistorySaveLayout.minimumWindowHeight
+        }
+    }
+
+    /// ⌘K pane showing this form instead of the list: header 44 + divider + body.
+    var minimumPaneHeight: CGFloat {
+        switch self {
+        case .edit: 44 + 1 + 240
+        case .alias, .hotkey: 44 + 1 + 130
+        case .screenHistorySave:
+            ScreenHistorySaveLayout.minimumWindowHeight
+                - PanelSizing.inputHeight - PanelSizing.paneBottomMargin
+        }
+    }
 }
 
 /// Actions on an AI answer. One table drives the footer, the ⌘K palette,

@@ -208,8 +208,8 @@ struct PanelSizingTests {
     }
 
     @Test func screenHistorySaveHasAProductionVisibilityBudget() {
-        #expect(PanelSizing.screenHistorySaveMinimumHeight >= 620)
-        #expect(PanelSizing.screenHistorySaveMinimumHeight > PanelSizing.windowHeight(
+        #expect(ItemActionForm.screenHistorySave.minimumWindowHeight! >= 620)
+        #expect(ItemActionForm.screenHistorySave.minimumWindowHeight! > PanelSizing.windowHeight(
             base: PanelSizing.inputHeight,
             paneHeight: PanelSizing.itemActionPaneHeight(rows: 2)
         ))

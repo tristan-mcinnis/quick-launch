@@ -10,27 +10,22 @@ struct ClipboardLinksSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 section("Clipboard History") {
-                    Toggle("Keep text clipboard history", isOn: $viewModel.settings.clipboardHistoryEnabled)
-                        .onChange(of: viewModel.settings.clipboardHistoryEnabled) { _, _ in saveClipboardSettings() }
+                    Toggle(
+                        "Keep text clipboard history",
+                        isOn: viewModel.settingsBinding(\.clipboardHistoryEnabled) { _ in notifyClipboardSettingsChanged() }
+                    )
                     Stepper(
                         "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)",
-                        value: $viewModel.settings.clipboardHistoryLimit,
+                        value: viewModel.settingsBinding(\.clipboardHistoryLimit) { _ in notifyClipboardSettingsChanged() },
                         in: 10...200,
                         step: 10
                     )
-                    .onChange(of: viewModel.settings.clipboardHistoryLimit) { _, _ in saveClipboardSettings() }
                     HStack {
                         Text("Open Clipboard History")
                         Spacer()
                         HotkeyRecorderView(
-                            keyCode: Binding(
-                                get: { viewModel.settings.clipboardHistoryHotkey.keyCode },
-                                set: { viewModel.settings.clipboardHistoryHotkey.keyCode = $0 }
-                            ),
-                            modifiers: Binding(
-                                get: { viewModel.settings.clipboardHistoryHotkey.modifiers },
-                                set: { viewModel.settings.clipboardHistoryHotkey.modifiers = $0 }
-                            ),
+                            keyCode: viewModel.settingsBinding(\.clipboardHistoryHotkey.keyCode),
+                            modifiers: viewModel.settingsBinding(\.clipboardHistoryHotkey.modifiers),
                             label: "",
                             changeNotification: .clipboardHistorySettingsChanged
                         )
@@ -70,11 +65,10 @@ struct ClipboardLinksSettingsView: View {
                     }
                     Stepper(
                         "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)",
-                        value: $viewModel.settings.colorHistoryLimit,
+                        value: viewModel.settingsBinding(\.colorHistoryLimit),
                         in: 10...200,
                         step: 10
                     )
-                    .onChange(of: viewModel.settings.colorHistoryLimit) { _, _ in viewModel.settings.save() }
                     HStack {
                         Text("\(viewModel.colorItems.count) saved colors")
                             .font(AQDesign.TypeToken.label)
@@ -109,8 +103,7 @@ struct ClipboardLinksSettingsView: View {
                 }
 
                 section("Text from Screen") {
-                    Toggle("Keep line breaks in text read from the screen", isOn: $viewModel.settings.ocrKeepLineBreaks)
-                        .onChange(of: viewModel.settings.ocrKeepLineBreaks) { _, _ in viewModel.settings.save() }
+                    Toggle("Keep line breaks in text read from the screen", isOn: viewModel.settingsBinding(\.ocrKeepLineBreaks))
                     Text("Off joins the recognized lines into one paragraph, which suits prose. On keeps code and lists as they were laid out.")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(.secondary)
@@ -163,36 +156,25 @@ struct ClipboardLinksSettingsView: View {
     }
 
     private var skinToneSelection: Binding<Int> {
-        Binding(
-            get: { viewModel.settings.emojiSkinTone },
-            set: { tone in
-                viewModel.settings.emojiSkinTone = tone
-                viewModel.settings.save()
-                viewModel.invalidateLauncherRanking()
-            }
-        )
+        viewModel.settingsBinding(\.emojiSkinTone) { _ in viewModel.invalidateLauncherRanking() }
     }
 
     private var browserSelection: Binding<String> {
-        Binding(
-            get: { viewModel.settings.quickLinkBrowserBundleID ?? "" },
-            set: { value in
-                viewModel.settings.quickLinkBrowserBundleID = value.isEmpty ? nil : value
-                viewModel.settings.save()
-            }
+        viewModel.settingsBinding(
+            get: { $0.quickLinkBrowserBundleID ?? "" },
+            set: { settings, value in settings.quickLinkBrowserBundleID = value.isEmpty ? nil : value }
         )
     }
 
     @ViewBuilder
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
+            Text(title).font(AQDesign.TypeToken.heading)
             content()
         }
     }
 
-    private func saveClipboardSettings() {
-        viewModel.settings.save()
+    private func notifyClipboardSettingsChanged() {
         NotificationCenter.default.post(name: .clipboardHistorySettingsChanged, object: nil)
     }
 }

@@ -73,8 +73,7 @@ enum SystemFactsResolver {
     }
 
     private static func normalized(_ input: String) -> String {
-        let folded = input
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let folded = FuzzyMatcher.fold(input)
             .lowercased()
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "’", with: "")

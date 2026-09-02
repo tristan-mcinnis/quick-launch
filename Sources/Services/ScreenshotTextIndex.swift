@@ -9,7 +9,7 @@ import Vision
 /// index is one JSON file in Application Support.
 @MainActor
 final class ScreenshotTextIndex {
-    struct Entry: Codable, Equatable {
+    struct Entry: Codable, Equatable, Sendable {
         let text: String
         let modifiedAt: Double
         let byteCount: Int
@@ -30,22 +30,16 @@ final class ScreenshotTextIndex {
     private var entries: [String: Entry]
     private var normalizedCache: [String: String] = [:]
     private var indexingTask: Task<Void, Never>?
-    private let storeURL: URL?
+    private let file: JSONFileStore<[String: Entry]>?
 
     static func defaultStoreURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch")
-            .appendingPathComponent("screenshot-text-index.json")
+        AppPaths.file("screenshot-text-index.json")
     }
 
     /// Pass `nil` for an in-memory index (tests, previews).
     init(storeURL: URL?) {
-        self.storeURL = storeURL
-        if let storeURL, let data = try? Data(contentsOf: storeURL) {
-            entries = (try? JSONDecoder().decode([String: Entry].self, from: data)) ?? [:]
-        } else {
-            entries = [:]
-        }
+        self.file = storeURL.map { JSONFileStore(fileURL: $0) }
+        entries = file?.load() ?? [:]
     }
 
     var indexedCount: Int { entries.count }
@@ -126,12 +120,12 @@ final class ScreenshotTextIndex {
     }
 
     private func persist() {
-        guard let storeURL, let data = try? JSONEncoder().encode(entries) else { return }
-        try? FileManager.default.createDirectory(
-            at: storeURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? data.write(to: storeURL, options: .atomic)
+        file?.save(entries)
+    }
+
+    /// Tests: block until queued writes are on disk.
+    func waitForPendingWrites() {
+        file?.flush()
     }
 
     nonisolated static func byteCount(of path: String) -> Int {

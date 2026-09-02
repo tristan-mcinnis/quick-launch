@@ -208,12 +208,12 @@ struct ScreenHistoryProductEvaluationTests {
         let viewModel = QuickViewModel(screenHistoryStore: countingStore)
 
         viewModel.enterCatalog(.screenHistory)
-        await viewModel.loadScreenHistory(
+        await viewModel.screenHistory.load(
             query: try evaluation.requiredQuery(),
             now: try fixture.referenceDate(),
             calendar: fixture.calendar
         )
-        #expect(Set(viewModel.screenHistoryFrames.map(\.sourceIdentifier)) == Set(evaluation.expectedIds ?? []))
+        #expect(Set(viewModel.screenHistory.frames.map(\.sourceIdentifier)) == Set(evaluation.expectedIds ?? []))
         #expect(viewModel.showsDetailPane)
         #expect(viewModel.detailItem?.kind == .screenHistory)
         #expect(await countingStore.searchCalls == 2)
@@ -250,7 +250,7 @@ struct ScreenHistoryProductEvaluationTests {
         Self.diagnostic(caseID: "SH-N01", fields: [
             "owned_store_calls": await countingStore.searchCalls,
             "coast_store_calls": 0,
-            "result_count": viewModel.screenHistoryFrames.count,
+            "result_count": viewModel.screenHistory.frames.count,
             "forbidden_hook_hits": forbiddenHookHits,
             "runtime_network_denied": runtimeNetworkDenied,
             "files_scanned": sourceFiles.count,
@@ -487,9 +487,9 @@ struct ScreenHistoryProductEvaluationTests {
 
         let viewModel = QuickViewModel(screenHistoryStore: store)
         viewModel.catalogScope = .screenHistory
-        await viewModel.loadScreenHistory(query: "coral variance chart")
-        let selectedIndex = try #require(viewModel.screenHistoryItems.firstIndex { item in
-            viewModel.screenHistoryFrame(for: item)?.sourceIdentifier == recordID
+        await viewModel.screenHistory.load(query: "coral variance chart")
+        let selectedIndex = try #require(viewModel.screenHistory.items.firstIndex { item in
+            viewModel.screenHistory.frame(for: item)?.sourceIdentifier == recordID
         })
         viewModel.applicationSelectionIndex = selectedIndex
 
@@ -504,12 +504,12 @@ struct ScreenHistoryProductEvaluationTests {
             #expect(preview != nil)
             samples.append(Double(end - start) / 1_000_000)
 
-            let items = viewModel.screenHistoryItems
+            let items = viewModel.screenHistory.items
             guard items.indices.contains(viewModel.applicationSelectionIndex) else {
                 selectionStayedStable = false
                 continue
             }
-            let selectedFrame = viewModel.screenHistoryFrame(
+            let selectedFrame = viewModel.screenHistory.frame(
                 for: items[viewModel.applicationSelectionIndex]
             )
             selectionStayedStable = selectionStayedStable

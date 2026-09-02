@@ -32,6 +32,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Translator window (`⇧⌘T`, or the Translate item): source above, translation below, retranslates as you type, arrives with the selected text, auto-detects the direction (CJK → English, else your last target), `⌘P` target language, `⌘S` swap, `⌘↩` copy, `⇧⌘↩` paste back, `⇧⌘V` use the clipboard, pinyin under Chinese; committed translations are kept locally (500). `⇧↩` in the launcher still translates one-shot; `/zh` and `/translate` act on selected text
 - Caffeinate catalog: toggle, Caffeinate Until… (`17:30`, `5:30pm`, `90m`, `2h`), presets, Agent Watch (stays awake while Claude Code or Codex is working, from hook files), Status; native power assertions, battery cutoff at 20%
 - Screenshots catalog: captures plus the saved files with a preview pane; search by name, date words (`today`, `7d`), or the text inside the image (on-device OCR, Vision); attach, copy image, paste image, Quick Look, pin to top, reveal, copy path, trash; Paste Latest Screenshot pastes the newest file straight into the previous app
+- Type to Click: a global hotkey (Settings › General) puts a label on every clickable control in the frontmost app and its menu bar, found through macOS Accessibility. Type part of a label, role, or menu path to narrow the map, press Return to click the best match; `⌘`, `⇧`, or `⌥` with Return sends a modified click, `⌃↩` a right click. "Stay open and rescan" keeps the overlay up so you can chain steps, and an opened native menu becomes the next target map with labels drawn over its items; "Dismiss after one action" closes after one click. The overlay never activates Quick Launch, so menus and field focus stay with the app you are driving
 - Screen Awareness: Send Focused Window to AI (`⌘⇧S`, or a double tap of right `⌘` from anywhere) attaches a screenshot plus the app name, window title, selection, readable text, and page URL; Send Screen, Send Screen Area, and Send Selected Text cover the narrower cases. The attachment card says what was included
 - Clipboard History: pin to top (`⌘⇧P`), save as snippet (`⌘⇧N`) or Quick Link (`⌘⇧L`), delete (`⌃X`)
 - Quick Links open in the browser you choose in Settings, or the system default
@@ -240,7 +241,7 @@ OpenAI-compatible providers do not have a tool-calling loop.
 - Math and LM Studio stay local.
 - Clipboard screenshots are sent only to the configured local MLX vision server
   at `127.0.0.1:8080` and are not persisted by Quick Launch.
-- Apple inference stays local when the Apple provider is available.
+- There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
 - Text clipboard history is local, optional, deduplicated, and bounded. It is
@@ -302,10 +303,13 @@ interpolated into a shell command.
 
 ## Deliberately not in the core build
 
-Finder file actions, document attachments, ambient screen capture, screenshot
-library management, the full Tuna translation window, voice input, and a larger
-chat workspace are deferred. Explicit clipboard image
-attachments are supported; Quick Launch does not observe or record the screen.
+Finder file actions, document attachments, screenshot library management, the
+full Tuna translation window, voice input, and a larger chat workspace are
+deferred. Explicit clipboard image attachments are supported. Quick Launch does
+not watch the screen on its own: the only continuous capture is the opt-in owned
+Screen History capture, off by default, switched on with "Enable owned screen
+capture" in its own Settings tab, stored only on this Mac, and hard-locked in
+the current build until the privacy review and soak test pass.
 
 ## Agent Watch hooks
 

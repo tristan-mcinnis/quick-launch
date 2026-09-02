@@ -14,7 +14,7 @@ struct HotkeyRecorderView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 13))
+                    .font(AQDesign.TypeToken.body)
                 Spacer()
                 if isRecording {
                     HotkeyCapture { captured in
@@ -43,15 +43,14 @@ struct HotkeyRecorderView: View {
                         isRecording = true
                     } label: {
                         Text(displayName)
-                            .font(.system(size: 13, weight: .medium,
-                                          design: .monospaced))
+                            .font(AQDesign.TypeToken.codeLabel)
                     }
                     .buttonStyle(.bordered)
                 }
             }
             if let error = validationError {
                 Text(error)
-                    .font(.system(size: 11))
+                    .font(AQDesign.TypeToken.hint)
                     .foregroundStyle(AQDesign.ColorToken.danger)
             }
         }
@@ -76,7 +75,7 @@ struct ActionHotkeyRecorderView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 13))
+                    .font(AQDesign.TypeToken.body)
                 Spacer()
                 if isRecording {
                     HotkeyCapture { event in
@@ -100,7 +99,7 @@ struct ActionHotkeyRecorderView: View {
                     .frame(width: 180, height: 28)
                 } else if let hotkey {
                     Button(displayName(hotkey)) { isRecording = true }
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(AQDesign.TypeToken.codeLabel)
                         .buttonStyle(.bordered)
                     Button("Clear") {
                         self.hotkey = nil
@@ -115,7 +114,7 @@ struct ActionHotkeyRecorderView: View {
             }
             if let validationError {
                 Text(validationError)
-                    .font(.system(size: 11))
+                    .font(AQDesign.TypeToken.hint)
                     .foregroundStyle(AQDesign.ColorToken.danger)
             }
         }
@@ -178,7 +177,7 @@ final class HotkeyCaptureView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {  // Escape
+        if VirtualKey(event: event) == .escape {
             onCancel?()
         } else {
             onCapture?(event)

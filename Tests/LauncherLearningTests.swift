@@ -71,6 +71,7 @@ struct LauncherLearningTests {
         let store = LauncherUsageStore(fileURL: file)
         store.recordSelection(query: "sl", scope: "root", itemID: "application:slack")
         store.recordUse(itemID: "command:window.leftHalf")
+        store.waitForPendingWrites()
 
         let reloaded = LauncherUsageStore(fileURL: file)
         #expect(reloaded.mnemonicWeight(query: "sl", scope: "root", itemID: "application:slack") > 0.99)
@@ -79,6 +80,7 @@ struct LauncherLearningTests {
         #expect(top == ["application:slack", "command:window.leftHalf"])
 
         reloaded.reset()
+        reloaded.waitForPendingWrites()
         #expect(reloaded.isEmpty)
         #expect(LauncherUsageStore(fileURL: file).isEmpty)
 

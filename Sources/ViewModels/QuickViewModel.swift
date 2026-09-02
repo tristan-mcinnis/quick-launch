@@ -23,10 +23,27 @@ import Observation
     var translatorHotkeyRegistrationError: String?
     var typeToClickHotkeyRegistrationError: String?
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
-    var isActionPalettePresented: Bool = false
-    var isApplicationActionPanePresented: Bool = false
+    /// The one ⌘K layer that can sit above the launcher. Exclusive by
+    /// construction: a palette and a pane can never both be open.
+    enum PresentedLayer: Equatable, Sendable {
+        case actionPalette
+        case applicationPane
+        case catalogPane
+    }
+    var presentedLayer: PresentedLayer?
+    var isActionPalettePresented: Bool {
+        get { presentedLayer == .actionPalette }
+        set { presentedLayer = newValue ? .actionPalette : (presentedLayer == .actionPalette ? nil : presentedLayer) }
+    }
+    var isApplicationActionPanePresented: Bool {
+        get { presentedLayer == .applicationPane }
+        set { presentedLayer = newValue ? .applicationPane : (presentedLayer == .applicationPane ? nil : presentedLayer) }
+    }
+    var isCatalogActionPanePresented: Bool {
+        get { presentedLayer == .catalogPane }
+        set { presentedLayer = newValue ? .catalogPane : (presentedLayer == .catalogPane ? nil : presentedLayer) }
+    }
     var contextualApplicationID: String?
-    var isCatalogActionPanePresented: Bool = false
     var contextualCatalogItemID: String?
     /// Sub-form shown in the ⌘K pane instead of the action list.
     var activeItemActionForm: ItemActionForm?
@@ -68,42 +85,8 @@ import Observation
     /// silently handing them to the selected AI provider.
     var activeVaultSearchMode: VaultSearchMode?
     var vaultSearchAnchor: String?
-    var screenHistoryFrames: [ScreenHistoryFrame] = []
-    private(set) var screenHistoryOCRBoxesByFrameID: [String: [ScreenHistoryOCRBox]] = [:]
-    var screenHistoryTimelineFrames: [ScreenHistoryFrame] = []
-    var screenHistoryShowsTimeline = false
-    var screenHistoryQueryBeforeTimeline = ""
-    var screenHistoryLoadState: ScreenHistoryLoadState = .idle
     private(set) var launcherSelectionAnnouncement = ""
     private(set) var launcherSelectionAnnouncementRevision = 0
-    private(set) var screenHistoryResultAnnouncement = ""
-    private(set) var screenHistoryAnnouncementRevision = 0
-    private(set) var screenHistorySaveError: String?
-    var screenHistoryCaptureStatus: ScreenHistoryCaptureStatus?
-    var screenHistoryRetentionMessage: String?
-    private(set) var screenHistoryRetentionPreview: ScreenHistoryPrunePreview?
-    private(set) var screenHistoryPendingRetentionPolicy: ScreenHistoryRetentionPolicy?
-    private(set) var screenHistoryCoastImportState: ScreenHistoryCoastImportState = .idle
-    @ObservationIgnored private var screenHistoryApprovedCoastPreview: ScreenHistoryCoastImportPreview?
-    private(set) var screenHistoryRetirementReviewSnapshot: ScreenHistoryRetirementReviewSnapshot?
-    private(set) var screenHistoryRetirementReviewMessage: String?
-    var screenHistoryIsRetirementReviewing = false
-    private(set) var screenHistorySoakSummary: ScreenHistorySoakReceiptSummary?
-    private(set) var screenHistorySoakMessage: String?
-    private(set) var screenHistoryCoastFreezeReceipt: ScreenHistoryCoastFreezeReceipt?
-    private(set) var screenHistoryCoastFreezeMessage: String?
-    private(set) var screenHistoryCoastFreezeIsRunning = false
-    private(set) var screenHistorySettingsPresentedThisRun = false
-
-    enum ScreenHistoryLoadState: Equatable, Sendable {
-        case idle
-        case loading
-        case ready
-        case unavailable
-        case failed(String)
-        case refusedFuture
-        case routedToVaultSearch
-    }
 
     enum InputMode: Equatable, Sendable {
         case caffeinateUntil
@@ -129,14 +112,9 @@ import Observation
     var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
-    var screenHistoryStore: (any ScreenHistoryStoring)?
-    var coastLegacyReader: (any CoastLegacyReading)?
-    var screenHistoryCaptureService: ScreenHistoryCaptureService?
-    var screenHistoryVaultSaver: (any ScreenHistoryVaultSaving)?
-    var screenHistoryCoastImporter: (any ScreenHistoryCoastImporting)?
-    var screenHistoryRetirementReviewer: (any ScreenHistoryRetirementReviewing)?
-    var screenHistorySoakReceipt: (any ScreenHistorySoakReceipting)?
-    var screenHistoryCoastFreezeReceipter: (any ScreenHistoryCoastFreezeReceipting)?
+    /// Screen History lives behind this one hook; the core only knows the
+    /// catalog scope, the ⌘K form, and the pause/resume command.
+    let screenHistory: ScreenHistoryController
     /// Reads pages whose URLs appear in the prompt, so answers can use the
     /// live content instead of the model's stale training data.
     var pageReader: (any WebPageReading)?
@@ -150,6 +128,9 @@ import Observation
     /// Learned ranking. Defaults to an in-memory store; the app injects a
     /// persistent one.
     @ObservationIgnored var launcherUsage: LauncherUsageStore
+    /// Shows/hides the panel. AppDelegate installs the real one; the default
+    /// posts the legacy notifications so tests and previews keep working.
+    @ObservationIgnored var overlayPresenter: any OverlayPresenting = NotificationOverlayPresenter()
     @ObservationIgnored var prepareForExternalAction: (() -> Void)?
     @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
@@ -162,9 +143,6 @@ import Observation
     @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
     @ObservationIgnored private var catalogIdleResetTask: Task<Void, Never>?
-    @ObservationIgnored private var screenHistorySearchTask: Task<Void, Never>?
-    @ObservationIgnored private var screenHistoryStatusTask: Task<Void, Never>?
-    @ObservationIgnored private var lastScreenHistorySoakRecordAt: Date?
 
     // MARK: - Private
 
@@ -222,14 +200,16 @@ import Observation
         self.colorSampler = colorSampler
         self.webSearchService = webSearchService
         self.vaultSearchService = vaultSearchService
-        self.screenHistoryStore = screenHistoryStore
-        self.coastLegacyReader = coastLegacyReader
-        self.screenHistoryCaptureService = screenHistoryCaptureService
-        self.screenHistoryVaultSaver = screenHistoryVaultSaver
-        self.screenHistoryCoastImporter = screenHistoryCoastImporter
-        self.screenHistoryRetirementReviewer = screenHistoryRetirementReviewer
-        self.screenHistorySoakReceipt = screenHistorySoakReceipt
-        self.screenHistoryCoastFreezeReceipter = screenHistoryCoastFreezeReceipt
+        self.screenHistory = ScreenHistoryController(
+            store: screenHistoryStore,
+            coastLegacyReader: coastLegacyReader,
+            captureService: screenHistoryCaptureService,
+            vaultSaver: screenHistoryVaultSaver,
+            coastImporter: screenHistoryCoastImporter,
+            retirementReviewer: screenHistoryRetirementReviewer,
+            soakReceipt: screenHistorySoakReceipt,
+            coastFreezeReceipter: screenHistoryCoastFreezeReceipt
+        )
         self.pageReader = pageReader
         self.windowManager = windowManager
         self.caffeinateManager = caffeinateManager
@@ -239,6 +219,7 @@ import Observation
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
         self.currentVersion = currentVersion
         self.colorHistory?.preferredFormat = settings.colorFormat
+        self.screenHistory.host = self
         self.screenshotTextIndex.onProgress = { [weak self] progress in
             self?.screenshotIndexProgress = progress
             // Newly recognized text changes what queries match; drop cached
@@ -652,12 +633,12 @@ import Observation
             keywords: "settings preferences configure quick launch"
         )
         let screenHistoryControl: LauncherCatalogItem? = {
-            guard screenHistoryCaptureIsActive || screenHistoryCaptureCanResume else { return nil }
+            guard screenHistory.captureIsActive || screenHistory.captureCanResume else { return nil }
             return LauncherCatalogItem(
                 kind: .command,
                 itemID: "screenHistory.toggleCapture",
-                title: screenHistoryCaptureIsActive ? "Pause Screen History" : "Resume Screen History",
-                detail: screenHistoryCaptureIsActive
+                title: screenHistory.captureIsActive ? "Pause Screen History" : "Resume Screen History",
+                detail: screenHistory.captureIsActive
                     ? "Stop ambient capture now. Local history remains searchable"
                     : "Resume capture after you start it once in Screen History settings",
                 value: "screenHistory.toggleCapture",
@@ -728,7 +709,7 @@ import Observation
         case .commands: return systemCommands
         case .folders: return folderItems
         case .vaultSearch: return vaultSearchItems
-        case .screenHistory: return screenHistoryItems
+        case .screenHistory: return screenHistory.items
         case .colors: return colorItems
         }
     }
@@ -758,97 +739,6 @@ import Observation
         pinnedFirst(screenshotFiles)
     }
 
-    var screenHistoryItems: [LauncherCatalogItem] {
-        let frames = screenHistoryShowsTimeline ? screenHistoryTimelineFrames : screenHistoryFrames
-        return frames.map(screenHistoryItem(for:))
-    }
-
-    func screenHistoryFrame(for item: LauncherCatalogItem) -> ScreenHistoryFrame? {
-        guard item.kind == .screenHistory else { return nil }
-        return (screenHistoryShowsTimeline ? screenHistoryTimelineFrames : screenHistoryFrames).first {
-            screenHistoryItemID(for: $0) == item.itemID
-        } ?? screenHistoryFrames.first { screenHistoryItemID(for: $0) == item.itemID }
-    }
-
-    func screenHistoryOCRBoxes(for frame: ScreenHistoryFrame) -> [ScreenHistoryOCRBox] {
-        screenHistoryOCRBoxesByFrameID[Self.screenHistoryStableID(for: frame)] ?? []
-    }
-
-    func loadScreenHistoryOCRBoxes(for frame: ScreenHistoryFrame) async {
-        let key = Self.screenHistoryStableID(for: frame)
-        guard screenHistoryOCRBoxesByFrameID[key] == nil else { return }
-        do {
-            var boxes = try await screenHistoryStore?.ocrBoxes(
-                source: frame.source,
-                sourceIdentifier: frame.sourceIdentifier
-            ) ?? []
-            if boxes.isEmpty, frame.source == .coast,
-               let coastLegacyReader, await coastLegacyReader.isAvailable() {
-                boxes = try await coastLegacyReader.ocrBoxes(
-                    sourceIdentifier: frame.sourceIdentifier
-                )
-            }
-            screenHistoryOCRBoxesByFrameID[key] = Array(boxes.prefix(1_000))
-        } catch {
-            screenHistoryOCRBoxesByFrameID[key] = []
-        }
-    }
-
-    private func screenHistoryItem(for frame: ScreenHistoryFrame) -> LauncherCatalogItem {
-        let title = Self.screenHistoryStableTitle(for: frame)
-        let excerpt = Self.screenHistoryExcerpt(frame.ocrText, fallback: "No text found")
-        let stamp = frame.capturedAt.formatted(date: .abbreviated, time: .shortened)
-        let app = frame.application ?? "Unknown app"
-        let source = frame.source == .owned ? "Owned" : "Coast"
-        let locatorCue = (frame.imageLocator ?? frame.mediaLocator) == nil ? nil : "has-local-file"
-        var context = [source, "Seen \(stamp)"]
-        if screenHistoryIsRetirementReviewing,
-           let review = screenHistoryRetirementReviewSnapshot?.moments.first(where: {
-               $0.frame.sourceIdentifier == frame.sourceIdentifier
-                   && $0.frame.contentHash == frame.contentHash
-           }) {
-            let reviewLabel: String
-            switch review.decision {
-            case .pending: reviewLabel = "Review pending"
-            case .accepted: reviewLabel = "Accepted"
-            case .flagged: reviewLabel = "Flagged"
-            }
-            context.append(reviewLabel)
-        }
-        if title.caseInsensitiveCompare(app) != .orderedSame { context.append(app) }
-        context.append(excerpt)
-        return LauncherCatalogItem(
-            kind: .screenHistory,
-            itemID: screenHistoryItemID(for: frame),
-            title: title,
-            detail: context.joined(separator: " · "),
-            value: String(frame.ocrText.prefix(12_000)),
-            keywords: [frame.application, frame.domain, frame.windowTitle, source, locatorCue].compactMap { $0 }.joined(separator: " "),
-            capturedAt: frame.capturedAt
-        )
-    }
-
-    private func screenHistoryItemID(for frame: ScreenHistoryFrame) -> String {
-        Self.screenHistoryStableID(for: frame)
-    }
-
-    nonisolated private static func screenHistoryStableID(for frame: ScreenHistoryFrame) -> String {
-        "\(frame.source.rawValue):\(frame.sourceIdentifier)"
-    }
-
-    private static func screenHistoryExcerpt(_ text: String, fallback: String) -> String {
-        let flattened = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
-        let value = flattened.isEmpty ? fallback : flattened
-        return value.count > 220 ? String(value.prefix(217)) + "…" : value
-    }
-
-    nonisolated private static func screenHistoryStableTitle(for frame: ScreenHistoryFrame) -> String {
-        for candidate in [frame.windowTitle, frame.application, frame.domain] {
-            let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !value.isEmpty { return value }
-        }
-        return "Screen moment"
-    }
 
     /// The capture and Screen Awareness commands offered in the Screenshots
     /// catalog's ⌘K pane. No shortcuts: they are palette rows only.
@@ -1018,8 +908,8 @@ import Observation
             paneTop: PanelSizing.inputHeight
                 + (hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
         )
-        if activeItemActionForm == .screenHistorySave {
-            total = max(total, PanelSizing.screenHistorySaveMinimumHeight)
+        if let floor = activeItemActionForm?.minimumWindowHeight {
+            total = max(total, floor)
         }
         return total
     }
@@ -1061,7 +951,7 @@ import Observation
 
     var catalogMatches: [LauncherCatalogItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if catalogScope == .screenHistory { return Array(screenHistoryItems.prefix(Self.maxLauncherRows)) }
+        if catalogScope == .screenHistory { return Array(screenHistory.items.prefix(Self.maxLauncherRows)) }
         let items = catalogItems
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
         let rows = Self.maxRows(for: catalogScope)
@@ -1171,8 +1061,8 @@ import Observation
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
         parts.append(String(clipboardEntries.count))
-        parts.append(String(screenHistoryItems.count))
-        parts.append(screenHistoryShowsTimeline ? "timeline" : "results")
+        parts.append(String(screenHistory.items.count))
+        parts.append(screenHistory.showsTimeline ? "timeline" : "results")
         parts.append(String(history.count))
         let pinnedChats = history.filter { $0.isPinned }.count
         parts.append(String(pinnedChats))
@@ -1289,12 +1179,12 @@ import Observation
     }
 
     /// Deterministic answers computed as you type. None of these touch a model.
-    func localAnswer(for query: String) -> String? {
+    func localAnswer(for query: String, allowConversions: Bool = true) -> String? {
         if MathExpressionDetector.isMathExpression(query),
            let value = try? MathCalculator.evaluate(query) {
             return MathCalculator.format(value)
         }
-        if let converted = LocalConversionResolver.answer(query) { return converted }
+        if allowConversions, let converted = LocalConversionResolver.answer(query) { return converted }
         return SystemFactsResolver.answer(query)
     }
 
@@ -1365,10 +1255,10 @@ import Observation
             return "Reading text \(screenshotIndexProgress.completed)/\(screenshotIndexProgress.total)"
         }
         if catalogScope == .screenHistory {
-            let place = screenHistoryShowsTimeline
+            let place = screenHistory.showsTimeline
                 ? "Timeline"
-                : (screenHistoryLoadState == .loading ? "Searching" : "Results")
-            return "Screen History · \(place) · \(screenHistoryCaptureStatusLabel)"
+                : (screenHistory.loadState == .loading ? "Searching" : "Results")
+            return "Screen History · \(place) · \(screenHistory.captureStatusLabel)"
         }
         switch inputMode {
         case .caffeinateUntil: return "Caffeinate Until"
@@ -1439,7 +1329,7 @@ import Observation
                     FooterHint(label: "Actions", keys: ["⌘", "K"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
-                if !screenHistoryShowsTimeline {
+                if !screenHistory.showsTimeline {
                     hints.insert(FooterHint(label: "Timeline", keys: ["⌘", "Y"]), at: 1)
                 }
                 return hints
@@ -1574,7 +1464,7 @@ import Observation
             return colorItems.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("screenHistory:") {
-            return screenHistoryItems.first { $0.id == contextualCatalogItemID }
+            return screenHistory.items.first { $0.id == contextualCatalogItemID }
         }
         return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
@@ -1633,53 +1523,89 @@ import Observation
         complete(savedPrompt: first)
     }
 
-    func submitResolvingFuzzyAlias() async {
-        if pendingImage != nil {
-            await submit()
-            return
+    /// What Return means for the current input, in one fixed precedence.
+    /// Live ranking (`rankLauncherMatches`) and Return both derive from the
+    /// same rules: exact alias, then a deterministic local answer, then the
+    /// highlighted row, then the model.
+    enum SubmitIntent: Equatable {
+        /// An attachment travels with whatever was typed; straight to `submit`.
+        case attachment
+        /// A typing-capture mode owns Return (`submitInputMode`).
+        case inputMode
+        /// An exact `/alias` that runs a local executable. Always wins, even
+        /// over an active answer thread.
+        case commandAlias
+        /// Typing while a Vault Search thread is active continues that search.
+        case vaultFollowUp(VaultSearchMode)
+        /// Answer on screen, nothing typed: Return is a no-op.
+        case answerIdle
+        /// A Quick Link that takes typed input.
+        case quickLinkInput
+        /// A highlighted launcher row (application, catalog, item, or the
+        /// inline local-answer row).
+        case launcherRow(Int)
+        /// A bare `/ali` that fuzzy-matches one saved prompt: complete and run.
+        case fuzzyAliasCompletion
+        /// Everything else: saved prompt alias with context, or a free prompt.
+        case prompt
+    }
+
+    func classifySubmit() -> SubmitIntent {
+        if pendingImage != nil { return .attachment }
+        if inputMode != nil { return .inputMode }
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if pendingQuickLink == nil, exactCommandAlias() != nil { return .commandAlias }
+        if isAnswerActive {
+            if let mode = activeVaultSearchMode, !trimmed.isEmpty { return .vaultFollowUp(mode) }
+            if trimmed.isEmpty { return .answerIdle }
         }
-        if await submitInputMode() { return }
-        // An exact command alias always runs its executable. Without this,
-        // an active answer thread (vault follow-up mode) captured the typed
-        // input before alias resolution and sent it to a model instead.
-        // `submit()` resolves the alias again and dispatches the command.
-        if pendingQuickLink == nil,
-           let exact = SavedPromptResolver.resolveAction(
-               input: input,
-               prefix: settings.savedPromptPrefix,
-               savedPrompts: settings.savedPrompts
-           ),
-           settings.savedPrompts.first(where: { $0.id == exact.actionID })?
-               .commandExecutable?.isEmpty == false {
-            await submit()
-            return
+        if pendingQuickLink != nil { return .quickLinkInput }
+        let matches = launcherMatches
+        if !matches.isEmpty { return .launcherRow(min(applicationSelectionIndex, matches.count - 1)) }
+        if exactSavedPromptAction() == nil, isBareAliasQuery, savedPromptMatches.first != nil {
+            return .fuzzyAliasCompletion
         }
-        if isAnswerActive,
-           let mode = activeVaultSearchMode,
-           !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            await submitVaultSearch(mode: mode, followUp: true)
-            return
-        }
-        if isAnswerActive, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !output.isEmpty {
-            await performResultAction(.pasteBack)
-            return
-        }
-        if let pendingQuickLink {
-            openQuickLink(pendingQuickLink, input: input)
-            return
-        }
-        if await performSelectedLauncherResultIfAvailable() { return }
-        let exact = SavedPromptResolver.resolveAction(
+        return .prompt
+    }
+
+    /// The saved prompt an exact `/alias` names, resolved once per Return.
+    private func exactSavedPromptAction() -> SavedPromptResolver.Resolution? {
+        SavedPromptResolver.resolveAction(
             input: input,
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
-        if exact == nil,
-           isBareAliasQuery,
-           let first = savedPromptMatches.first {
-            input = settings.savedPromptPrefix + first.alias
+    }
+
+    private func exactCommandAlias() -> SavedPromptResolver.Resolution? {
+        guard let exact = exactSavedPromptAction(),
+              settings.savedPrompts.first(where: { $0.id == exact.actionID })?
+                  .commandExecutable?.isEmpty == false else { return nil }
+        return exact
+    }
+
+    func submitResolvingFuzzyAlias() async {
+        switch classifySubmit() {
+        case .attachment, .commandAlias, .prompt:
+            await submit()
+        case .inputMode:
+            _ = await submitInputMode()
+        case .vaultFollowUp(let mode):
+            await submitVaultSearch(mode: mode, followUp: true)
+        case .answerIdle:
+            // Paste-back is ⌘↩ via `resultActions`, the same rule as every
+            // other result action. Bare Return does nothing.
+            return
+        case .quickLinkInput:
+            if let pendingQuickLink { openQuickLink(pendingQuickLink, input: input) }
+        case .launcherRow(let index):
+            await performLauncherResult(launcherMatches[index])
+        case .fuzzyAliasCompletion:
+            if let first = savedPromptMatches.first {
+                input = settings.savedPromptPrefix + first.alias
+            }
+            await submit()
         }
-        await submit()
     }
 
     func resetApplicationSelection() {
@@ -1699,7 +1625,7 @@ import Observation
         ) % matches.count
         announceCurrentLauncherSelection()
         if catalogScope == .screenHistory {
-            setScreenHistoryAnnouncement(launcherSelectionAnnouncement)
+            screenHistory.setAnnouncement(launcherSelectionAnnouncement)
         }
         noteInteraction()
     }
@@ -1725,15 +1651,7 @@ import Observation
         }
         self.input = ""
         errorMessage = nil
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-        return true
-    }
-
-    private func performSelectedLauncherResultIfAvailable() async -> Bool {
-        let matches = launcherMatches
-        guard !matches.isEmpty else { return false }
-        let index = min(applicationSelectionIndex, matches.count - 1)
-        await performLauncherResult(matches[index])
+        overlayPresenter.dismissOverlay()
         return true
     }
 
@@ -1778,6 +1696,13 @@ import Observation
 
     /// Tab, the Ask AI row, or its hotkey: keep what was typed, hide the
     /// launcher rows, and send the next Return to the model.
+    /// A per-item hotkey on a Quick Link that needs typed input: the
+    /// overlay opens straight into that link's input field.
+    func enterQuickLinkInput(itemID: String) {
+        reset([.layers, .mode, .input])
+        pendingQuickLinkID = itemID
+    }
+
     func enterAskAIMode() {
         let preserved = input
         inputMode = .askAI
@@ -1808,6 +1733,8 @@ import Observation
 
     func leaveInputMode() {
         inputMode = nil
+        activeVaultSearchMode = nil
+        vaultSearchAnchor = nil
         input = ""
         errorMessage = nil
         requestInputFocus()
@@ -1842,7 +1769,7 @@ import Observation
                 settings.caffeinateUntil = date
                 persistSettings(settings)
                 leaveInputMode()
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
             } catch {
                 errorMessage = error.localizedDescription
                 requestInputFocus()
@@ -1883,925 +1810,6 @@ import Observation
         requestInputFocus()
     }
 
-    // MARK: - Screen History
-
-    func startScreenHistoryStatusObservation() {
-        screenHistoryStatusTask?.cancel()
-        guard let screenHistoryCaptureService else { return }
-        screenHistoryStatusTask = Task { [weak self] in
-            let updates = await screenHistoryCaptureService.statusUpdates()
-            for await status in updates {
-                guard !Task.isCancelled, let self else { return }
-                self.screenHistoryCaptureStatus = status
-                self.invalidateLauncherRanking()
-                await self.recordScreenHistorySoakSnapshot(status: status)
-            }
-        }
-    }
-
-    private func recordScreenHistorySoakSnapshot(status: ScreenHistoryCaptureStatus) async {
-        guard let screenHistorySoakReceipt else { return }
-        let now = Date()
-        let isActive = status.state == .running || status.state == .pausedForInactivity
-        if isActive,
-           let lastScreenHistorySoakRecordAt,
-           now.timeIntervalSince(lastScreenHistorySoakRecordAt) < 300 {
-            return
-        }
-        let gauge = await Task.detached(priority: .utility) {
-            Self.screenHistoryOwnedStorageGauge()
-        }.value
-        let failures: Set<ScreenHistorySoakFailureCode> = gauge.succeeded
-            ? [] : [.storageObservationFailed]
-        do {
-            let summary = try await screenHistorySoakReceipt.record(ScreenHistorySoakSnapshot(
-                observedAt: now,
-                captureStatus: status,
-                storageBytes: gauge.bytes,
-                storageFiles: gauge.files,
-                processEvent: lastScreenHistorySoakRecordAt == nil ? .cleanRestart : .none,
-                newFailures: failures,
-                resolvedFailures: gauge.succeeded ? [.storageObservationFailed] : []
-            ))
-            lastScreenHistorySoakRecordAt = now
-            screenHistorySoakSummary = summary
-            screenHistorySoakMessage = summary.isReadyForCoastRetirement
-                ? "Seven-day soak gate passed."
-                : "Soak: \(summary.activeDayCount) of 7 active days; \(summary.readinessBlockers.count) gates remain."
-        } catch {
-            screenHistorySoakMessage = "Unable to update the content-free soak receipt."
-        }
-    }
-
-    private nonisolated static func screenHistoryOwnedStorageGauge() -> (
-        bytes: Int64,
-        files: Int,
-        succeeded: Bool
-    ) {
-        let root = SQLiteScreenHistoryStore.defaultDatabaseURL().deletingLastPathComponent()
-        let allowedNames = Set([
-            "screen-history.sqlite3",
-            "screen-history.sqlite3-wal",
-            "screen-history.sqlite3-shm",
-            "Screen History Frames",
-            "Screen History Legacy Media",
-        ])
-        let manager = FileManager.default
-        guard let entries = try? manager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { return (0, 0, false) }
-        var bytes: Int64 = 0
-        var files = 0
-        for entry in entries where allowedNames.contains(entry.lastPathComponent) {
-            if let enumerator = manager.enumerator(
-                at: entry,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
-            ) {
-                for case let file as URL in enumerator {
-                    guard let values = try? file.resourceValues(
-                        forKeys: [.isRegularFileKey, .fileSizeKey]
-                    ), values.isRegularFile == true else { continue }
-                    files += 1
-                    bytes += Int64(values.fileSize ?? 0)
-                }
-            } else if let values = try? entry.resourceValues(
-                forKeys: [.isRegularFileKey, .fileSizeKey]
-            ), values.isRegularFile == true {
-                files += 1
-                bytes += Int64(values.fileSize ?? 0)
-            }
-        }
-        return (bytes, files, true)
-    }
-
-    func setScreenHistoryAnnouncement(_ announcement: String) {
-        screenHistoryResultAnnouncement = announcement
-        screenHistoryAnnouncementRevision &+= 1
-    }
-
-    func announceScreenHistoryActionSelection(_ action: ItemAction, position: Int, total: Int) {
-        guard catalogScope == .screenHistory else { return }
-        setScreenHistoryAnnouncement("\(action.title), selected, \(position) of \(total).")
-    }
-
-    func saveScreenHistoryNote(
-        for result: LauncherSearchResult,
-        projectSlug: String,
-        note: String
-    ) async -> Bool {
-        guard case .item(let item) = result,
-              let frame = screenHistoryFrame(for: item),
-              let screenHistoryVaultSaver
-        else {
-            screenHistorySaveError = "Save to Vault is unavailable. Check the local vault helper and try again."
-            return false
-        }
-        let cleanProject = projectSlug.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            _ = try await screenHistoryVaultSaver.save(
-                frame,
-                note: cleanNote.isEmpty ? nil : cleanNote,
-                projectSlug: cleanProject.isEmpty ? nil : cleanProject
-            )
-            screenHistorySaveError = nil
-            closeItemActionPane()
-            setScreenHistoryAnnouncement("Saved this screen moment to Vault triage.")
-            return true
-        } catch {
-            screenHistorySaveError = error.localizedDescription
-            return false
-        }
-    }
-
-    /// Called by the input field after each edit. Root typing stays free of
-    /// Screen History I/O; only the open catalog schedules a local query.
-    func screenHistoryInputDidChange(debounce: Duration = .zero) {
-        guard catalogScope == .screenHistory,
-              !screenHistoryShowsTimeline,
-              !screenHistoryIsRetirementReviewing else { return }
-        let query = input
-        screenHistorySearchTask?.cancel()
-        screenHistorySearchTask = Task { [weak self] in
-            if debounce != .zero { try? await Task.sleep(for: debounce) }
-            guard !Task.isCancelled else { return }
-            await self?.loadScreenHistory(query: query)
-        }
-    }
-
-    func loadScreenHistory(query: String, now: Date = Date(), calendar: Calendar = .current) async {
-        guard catalogScope == .screenHistory else { return }
-        guard !screenHistoryIsRetirementReviewing else { return }
-        let decision = ScreenHistoryQueryParser.parse(query, now: now, calendar: calendar)
-        switch decision {
-        case .refuseFuture:
-            screenHistoryFrames = []
-            screenHistoryLoadState = .refusedFuture
-            setScreenHistoryAnnouncement("Future screen activity cannot be known.")
-            invalidateLauncherRanking()
-            return
-        case .routeVaultSearch:
-            screenHistoryFrames = []
-            screenHistoryLoadState = .routedToVaultSearch
-            setScreenHistoryAnnouncement("Use Vault Search for current project status.")
-            invalidateLauncherRanking()
-            return
-        case .search(let parsed):
-            await runScreenHistorySearch(parsed)
-        }
-    }
-
-    private func runScreenHistorySearch(_ parsed: ScreenHistoryParsedQuery) async {
-        let ownedStore = screenHistoryStore
-        let coast = settings.searchLegacyCoastHistory ? coastLegacyReader : nil
-        let coastIsAvailable = await coast?.isAvailable() ?? false
-        guard ownedStore != nil || coastIsAvailable else {
-            screenHistoryFrames = []
-            screenHistoryLoadState = .unavailable
-            setScreenHistoryAnnouncement("Screen History is unavailable on this Mac.")
-            invalidateLauncherRanking()
-            return
-        }
-
-        let loadingTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            self?.screenHistoryLoadState = .loading
-        }
-        defer { loadingTask.cancel() }
-
-        do {
-            let ownedRows = try await ownedStore?.search(parsed.storageQuery) ?? []
-            var coastRows: [ScreenHistoryFrame] = []
-            if let coast, coastIsAvailable {
-                coastRows = try await coast.search(parsed.storageQuery)
-            }
-            let excludedBundles = Set(settings.screenHistoryExcludedBundleIDs)
-            let excludedDomains = Set(settings.screenHistoryExcludedDomains)
-            let merged = ownedRows + coastRows
-            let unique = Dictionary(grouping: merged, by: { Self.screenHistoryStableID(for: $0) })
-                .compactMap { $0.value.first }
-                .filter {
-                    ScreenHistoryPrivacyPolicy.allowsSearchResult(
-                        $0,
-                        excludedBundleIdentifiers: excludedBundles,
-                        excludedDomains: excludedDomains
-                    )
-                }
-                .sorted {
-                    if $0.capturedAt == $1.capturedAt { return Self.screenHistoryStableID(for: $0) < Self.screenHistoryStableID(for: $1) }
-                    return $0.capturedAt > $1.capturedAt
-                }
-            guard !Task.isCancelled else { return }
-            screenHistoryFrames = Array(unique.prefix(50))
-            screenHistoryLoadState = .ready
-            setScreenHistoryAnnouncement(unique.count == 1
-                ? "1 screen history result"
-                : "\(unique.count) screen history results")
-        } catch {
-            guard !Task.isCancelled else { return }
-            screenHistoryFrames = []
-            screenHistoryLoadState = .failed("Unable to search Screen History. Check the local store and try again.")
-            setScreenHistoryAnnouncement("Screen History search failed.")
-        }
-        applicationSelectionIndex = 0
-        invalidateLauncherRanking()
-    }
-
-    func openScreenHistorySequence(for frame: ScreenHistoryFrame) async {
-        let radius: TimeInterval = 10 * 60
-        let from = frame.capturedAt.addingTimeInterval(-radius)
-        let through = frame.capturedAt.addingTimeInterval(radius)
-        do {
-            let owned = try await screenHistoryStore?.search(
-                ScreenHistorySearchQuery(from: from, through: through, limit: 200)
-            ) ?? []
-            var coast: [ScreenHistoryFrame] = []
-            if settings.searchLegacyCoastHistory, let coastLegacyReader,
-               await coastLegacyReader.isAvailable() {
-                coast = try await coastLegacyReader.moments(from: from, through: through, limit: 200)
-            }
-            let excludedBundles = Set(settings.screenHistoryExcludedBundleIDs)
-            let excludedDomains = Set(settings.screenHistoryExcludedDomains)
-            let candidates = (owned + coast).filter {
-                ScreenHistoryPrivacyPolicy.allowsSearchResult(
-                    $0,
-                    excludedBundleIdentifiers: excludedBundles,
-                    excludedDomains: excludedDomains
-                )
-            }
-            screenHistoryTimelineFrames = ScreenHistoryTimeline.sequence(around: frame, in: candidates)
-            if screenHistoryTimelineFrames.isEmpty { screenHistoryTimelineFrames = [frame] }
-            screenHistoryShowsTimeline = true
-            screenHistoryQueryBeforeTimeline = input
-            input = ""
-            applicationSelectionIndex = screenHistoryTimelineFrames.firstIndex {
-                $0.source == frame.source && $0.sourceIdentifier == frame.sourceIdentifier
-            } ?? 0
-            setScreenHistoryAnnouncement("\(screenHistoryTimelineFrames.count) moments in this timeline")
-            invalidateLauncherRanking()
-        } catch {
-            screenHistoryLoadState = .failed("Unable to open this timeline. Try again.")
-        }
-    }
-
-    func closeScreenHistoryTimeline() {
-        guard screenHistoryShowsTimeline else { return }
-        screenHistoryShowsTimeline = false
-        screenHistoryTimelineFrames = []
-        input = screenHistoryQueryBeforeTimeline
-        screenHistoryQueryBeforeTimeline = ""
-        applicationSelectionIndex = 0
-        invalidateLauncherRanking()
-        requestInputFocus()
-    }
-
-    func openScreenHistoryMoment(_ frame: ScreenHistoryFrame) {
-        guard let locator = frame.imageLocator ?? frame.mediaLocator,
-              Self.validScreenHistoryLocator(locator) else {
-            errorMessage = "No local preview is available for this moment."
-            requestInputFocus()
-            return
-        }
-        Task { [weak self] in
-            guard let self,
-                  let previewURL = await ScreenHistoryMediaPreviewService.materializedMomentURL(
-                    for: frame
-                  ) else {
-                self?.errorMessage = "No exact local preview is available for this moment."
-                self?.requestInputFocus()
-                return
-            }
-            self.prepareForExternalAction?()
-            NSWorkspace.shared.open(previewURL)
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-        }
-    }
-
-    func revealScreenHistoryMoment(_ frame: ScreenHistoryFrame) {
-        guard let locator = frame.imageLocator ?? frame.mediaLocator,
-              Self.validScreenHistoryLocator(locator) else {
-            errorMessage = "No local file is available for this moment."
-            requestInputFocus()
-            return
-        }
-        prepareForExternalAction?()
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: locator)])
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-    }
-
-    private static func validScreenHistoryLocator(_ locator: String) -> Bool {
-        guard locator.hasPrefix("/"), !locator.contains("\0") else { return false }
-        let standardized = URL(fileURLWithPath: locator).standardizedFileURL.path
-        let ownedRoot = SQLiteScreenHistoryStore.defaultDatabaseURL().deletingLastPathComponent().path + "/"
-        let coastRoot = CoastLegacyReader.defaultDatabaseURL().deletingLastPathComponent().path + "/"
-        return standardized.hasPrefix(ownedRoot) || standardized.hasPrefix(coastRoot)
-    }
-
-    func applyScreenHistoryCaptureSettings(startIfConfirmed: Bool = false) async {
-        guard let screenHistoryCaptureService else {
-            screenHistoryCaptureStatus = nil
-            return
-        }
-        let configuration = ScreenHistoryCaptureConfiguration(
-            isEnabled: ScreenHistoryReleasePolicy.allowsOwnedCapture
-                && settings.screenHistoryCaptureEnabled,
-            excludedBundleIdentifiers: Set(settings.screenHistoryExcludedBundleIDs),
-            excludedDomains: Set(settings.screenHistoryExcludedDomains)
-        )
-        await screenHistoryCaptureService.updateConfiguration(configuration)
-        _ = await screenHistoryCaptureService.refreshSecurityStatus()
-        if startIfConfirmed, settings.screenHistoryCaptureEnabled, settings.screenHistoryCaptureConfirmed,
-           screenHistoryCaptureStartBlocker == nil {
-            await screenHistoryCaptureService.start()
-        } else if !settings.screenHistoryCaptureEnabled {
-            await screenHistoryCaptureService.stop()
-        }
-        screenHistoryCaptureStatus = await screenHistoryCaptureService.status()
-        invalidateLauncherRanking()
-    }
-
-    func prepareScreenHistoryCaptureForBootstrap() async {
-        startScreenHistoryStatusObservation()
-        screenHistorySettingsPresentedThisRun = false
-        settings.screenHistoryCaptureConfirmed = false
-        persistSettings(settings)
-        await screenHistoryCaptureService?.stop()
-        await applyScreenHistoryCaptureSettings(startIfConfirmed: false)
-    }
-
-    func noteScreenHistorySettingsPresented() {
-        screenHistorySettingsPresentedThisRun = true
-    }
-
-    func requestScreenHistoryScreenRecordingAuthorization() async {
-        guard let screenHistoryCaptureService else {
-            errorMessage = "Screen History capture is unavailable in this build."
-            return
-        }
-        let authorized = await screenHistoryCaptureService.requestScreenRecordingAuthorization()
-        screenHistoryCaptureStatus = await screenHistoryCaptureService.status()
-        errorMessage = authorized
-            ? nil
-            : "Screen Recording is still off. Enable Quick Launch in System Settings, then reopen the app."
-        invalidateLauncherRanking()
-    }
-
-    func confirmAndStartScreenHistoryCapture() async {
-        guard ScreenHistoryReleasePolicy.allowsOwnedCapture else {
-            errorMessage = "Owned capture is locked in this search-only beta."
-            return
-        }
-        guard settings.screenHistoryCaptureEnabled else { return }
-        guard screenHistorySettingsPresentedThisRun else {
-            errorMessage = "Open Screen History settings before starting capture."
-            return
-        }
-        await applyScreenHistoryCaptureSettings()
-        guard screenHistoryCaptureStartBlocker == nil else {
-            errorMessage = screenHistoryCaptureStartBlocker
-            return
-        }
-        settings.screenHistoryCaptureConfirmed = true
-        persistSettings(settings)
-        await applyScreenHistoryCaptureSettings(startIfConfirmed: true)
-        guard screenHistoryCaptureStatus?.state == .running else {
-            settings.screenHistoryCaptureConfirmed = false
-            persistSettings(settings)
-            errorMessage = screenHistoryCaptureStartBlocker
-                ?? "Unable to start Screen History. Capture stays stopped."
-            return
-        }
-        errorMessage = nil
-    }
-
-    func stopScreenHistoryCapture() async {
-        settings.screenHistoryCaptureConfirmed = false
-        persistSettings(settings)
-        await screenHistoryCaptureService?.stop()
-        screenHistoryCaptureStatus = await screenHistoryCaptureService?.status()
-        invalidateLauncherRanking()
-    }
-
-    /// Stops the active loop without clearing this run's explicit consent.
-    /// The Commands catalog can resume it without opening Settings again.
-    func pauseScreenHistoryCapture() async {
-        await screenHistoryCaptureService?.stop()
-        screenHistoryCaptureStatus = await screenHistoryCaptureService?.status()
-        invalidateLauncherRanking()
-    }
-
-    func toggleScreenHistoryCaptureFromCommand() async {
-        guard ScreenHistoryReleasePolicy.allowsOwnedCapture else {
-            errorMessage = "Owned capture is locked in this search-only beta."
-            requestInputFocus()
-            return
-        }
-        if screenHistoryCaptureIsActive {
-            await pauseScreenHistoryCapture()
-            return
-        }
-        guard settings.screenHistoryCaptureEnabled,
-              settings.screenHistoryCaptureConfirmed,
-              screenHistorySettingsPresentedThisRun
-        else {
-            errorMessage = "Start Screen History once in Settings before using Resume."
-            requestInputFocus()
-            return
-        }
-        await applyScreenHistoryCaptureSettings(startIfConfirmed: true)
-        if screenHistoryCaptureStatus?.state != .running {
-            errorMessage = screenHistoryCaptureStartBlocker
-                ?? "Unable to resume Screen History. Capture stays stopped."
-            requestInputFocus()
-        }
-    }
-
-    func applyScreenHistoryRetention(now: Date = Date()) async {
-        guard let screenHistoryStore else { return }
-        do {
-            let policy = ScreenHistoryRetentionPolicy(
-                retentionDays: settings.screenHistoryRetentionDays,
-                storageCapBytes: Int64(settings.screenHistoryStorageCapGB) * 1_024 * 1_024 * 1_024
-            )
-            let result = try await screenHistoryStore.prune(policy: policy, now: now)
-            if result.retryRequired {
-                screenHistoryRetentionMessage = "Retention will retry \(result.pendingRows) records and \(result.pendingLocators) files. No searchable record was removed early."
-            } else if result.rowsRemoved == 0 {
-                screenHistoryRetentionMessage = "Retention is current."
-            } else {
-                screenHistoryRetentionMessage = "Removed \(result.rowsRemoved) old records and \(result.filesRemoved) owned files."
-            }
-        } catch {
-            screenHistoryRetentionMessage = "Unable to apply Screen History retention."
-        }
-    }
-
-    var screenHistoryRetentionDaysSelection: Int {
-        get { screenHistoryPendingRetentionPolicy?.retentionDays ?? settings.screenHistoryRetentionDays }
-        set {
-            let capGB = screenHistoryPendingRetentionPolicy?.storageCapBytes.map {
-                Int($0 / 1_024 / 1_024 / 1_024)
-            } ?? settings.screenHistoryStorageCapGB
-            Task { await previewScreenHistoryRetention(days: newValue, capGB: capGB) }
-        }
-    }
-
-    var screenHistoryStorageCapGBSelection: Int {
-        get {
-            screenHistoryPendingRetentionPolicy?.storageCapBytes.map {
-                Int($0 / 1_024 / 1_024 / 1_024)
-            } ?? settings.screenHistoryStorageCapGB
-        }
-        set {
-            let days = screenHistoryPendingRetentionPolicy?.retentionDays
-                ?? settings.screenHistoryRetentionDays
-            Task { await previewScreenHistoryRetention(days: days, capGB: newValue) }
-        }
-    }
-
-    func previewScreenHistoryRetention(days: Int, capGB: Int, now: Date = Date()) async {
-        guard let screenHistoryStore else { return }
-        let policy = ScreenHistoryRetentionPolicy(
-            retentionDays: days,
-            storageCapBytes: Int64(capGB) * 1_024 * 1_024 * 1_024
-        )
-        do {
-            let preview = try await screenHistoryStore.previewPrune(policy: policy, now: now)
-            screenHistoryPendingRetentionPolicy = policy
-            screenHistoryRetentionPreview = preview
-            if preview.rowsPlanned == 0 {
-                screenHistoryRetentionMessage = "This change removes no current history. Apply it to save the new limits."
-            } else {
-                let range: String
-                if let earliest = preview.earliestRemoval, let latest = preview.latestRemoval {
-                    range = "\(earliest.formatted(date: .abbreviated, time: .omitted)) to \(latest.formatted(date: .abbreviated, time: .omitted))"
-                } else {
-                    range = "the selected range"
-                }
-                screenHistoryRetentionMessage = "Review before applying: remove \(preview.rowsPlanned) records and \(preview.ownedFilesPlanned) owned files from \(range), freeing about \(ByteCountFormatter.string(fromByteCount: preview.bytesPlanned, countStyle: .file))."
-            }
-        } catch {
-            screenHistoryRetentionMessage = "Unable to preview Screen History retention. Nothing changed."
-            screenHistoryPendingRetentionPolicy = nil
-            screenHistoryRetentionPreview = nil
-        }
-    }
-
-    func applyReviewedScreenHistoryRetention(now: Date = Date()) async {
-        guard let policy = screenHistoryPendingRetentionPolicy,
-              screenHistoryRetentionPreview?.policy == policy else {
-            screenHistoryRetentionMessage = "Preview the retention change before applying it."
-            return
-        }
-        settings.screenHistoryRetentionDays = policy.retentionDays
-            ?? settings.screenHistoryRetentionDays
-        if let bytes = policy.storageCapBytes {
-            settings.screenHistoryStorageCapGB = Int(bytes / 1_024 / 1_024 / 1_024)
-        }
-        persistSettings(settings)
-        screenHistoryPendingRetentionPolicy = nil
-        screenHistoryRetentionPreview = nil
-        await applyScreenHistoryRetention(now: now)
-    }
-
-    func refreshScreenHistoryCoastImportAvailability() async {
-        guard let screenHistoryCoastImporter else {
-            screenHistoryCoastImportState = .unavailable
-            return
-        }
-        switch screenHistoryCoastImportState {
-        case .completed, .failed, .previewReady, .previewInvalidated, .previewingMetadata,
-                .importingMetadata, .copyingVerifiedMedia, .preparingVerificationSample:
-            return
-        case .idle, .checkingSource, .ready, .unavailable:
-            break
-        }
-        screenHistoryCoastImportState = .checkingSource
-        screenHistoryCoastImportState = await screenHistoryCoastImporter.sourceIsAvailable()
-            ? .ready
-            : .unavailable
-    }
-
-    /// Reads Coast metadata and applies the current exclusion policy without
-    /// writing an owned row or opening any media file. Import remains disabled
-    /// until this exact policy and source snapshot has been reviewed.
-    func previewCoastHistoryImport() async {
-        guard let screenHistoryCoastImporter else {
-            screenHistoryCoastImportState = .unavailable
-            return
-        }
-
-        await stopScreenHistoryCapture()
-        screenHistoryApprovedCoastPreview = nil
-        guard await screenHistoryCoastImporter.sourceIsAvailable() else {
-            screenHistoryCoastImportState = .unavailable
-            return
-        }
-
-        screenHistoryCoastImportState = .previewingMetadata
-        do {
-            let preview = try await screenHistoryCoastImporter.previewMetadata(
-                policy: settings.screenHistoryMigrationPolicy
-            )
-            guard preview.reconciles,
-                  preview.policyFingerprint == settings.screenHistoryMigrationPolicy.fingerprint
-            else {
-                screenHistoryCoastImportState = .failed(.preview)
-                return
-            }
-            screenHistoryApprovedCoastPreview = preview
-            screenHistoryCoastImportState = .previewReady(preview)
-        } catch {
-            screenHistoryCoastImportState = .failed(.preview)
-        }
-    }
-
-    func freezeCoastSourceForImport() async {
-        guard let screenHistoryCoastFreezeReceipter else {
-            screenHistoryCoastFreezeMessage = "Coast freeze receipt is unavailable in this build."
-            return
-        }
-        await stopScreenHistoryCapture()
-        screenHistoryCoastFreezeIsRunning = true
-        screenHistoryCoastFreezeMessage = "Hashing the stopped Coast source. No screen content is opened."
-        defer { screenHistoryCoastFreezeIsRunning = false }
-        do {
-            let progress = try await screenHistoryCoastFreezeReceipter.makePrimaryReceipt(
-                maximumNewFiles: nil
-            )
-            guard progress.isComplete, let receipt = progress.receipt else {
-                screenHistoryCoastFreezeMessage = "Coast freeze is incomplete. Run it again to resume."
-                return
-            }
-            screenHistoryCoastFreezeReceipt = receipt
-            screenHistoryCoastFreezeMessage = "Coast source frozen: \(receipt.primary.database.counts.frames) frames and \(receipt.primary.files.count) files hashed."
-        } catch ScreenHistoryCoastFreezeReceiptError.sourceIsActive {
-            screenHistoryCoastFreezeMessage = "Close Coast before freezing its source."
-        } catch {
-            screenHistoryCoastFreezeMessage = "Unable to freeze Coast safely. No import was authorized."
-        }
-    }
-
-    func refreshCoastFreezeReceipt() async {
-        guard let screenHistoryCoastFreezeReceipter else { return }
-        do {
-            screenHistoryCoastFreezeReceipt = try await screenHistoryCoastFreezeReceipter.currentReceipt()
-            if let receipt = screenHistoryCoastFreezeReceipt {
-                screenHistoryCoastFreezeMessage = "Coast source freeze is available for \(receipt.primary.database.counts.frames) frames."
-            }
-        } catch {
-            screenHistoryCoastFreezeMessage = "The Coast freeze receipt failed its integrity check."
-        }
-    }
-
-    /// Exclusion edits revoke the reviewed authorization immediately. The
-    /// importer also verifies this fingerprint before any owned write.
-    func invalidateScreenHistoryCoastImportPreview() {
-        guard screenHistoryApprovedCoastPreview != nil else { return }
-        screenHistoryApprovedCoastPreview = nil
-        screenHistoryCoastImportState = .previewInvalidated
-        let importer = screenHistoryCoastImporter
-        Task { await importer?.invalidatePreview() }
-    }
-
-    /// Runs only after the visible Settings button is pressed. Capture is
-    /// stopped first. Coast remains read-only, and another press resumes from
-    /// the migration ledgers if a prior run stopped.
-    func importCoastHistory() async {
-        guard let screenHistoryCoastImporter else {
-            screenHistoryCoastImportState = .unavailable
-            return
-        }
-
-        await stopScreenHistoryCapture()
-        if screenHistoryCoastFreezeReceipter != nil,
-           screenHistoryCoastFreezeReceipt == nil {
-            screenHistoryCoastImportState = .previewInvalidated
-            screenHistoryCoastFreezeMessage = "Freeze the Coast source before importing."
-            return
-        }
-        guard let preview = screenHistoryApprovedCoastPreview,
-              preview.policyFingerprint == settings.screenHistoryMigrationPolicy.fingerprint
-        else {
-            screenHistoryApprovedCoastPreview = nil
-            screenHistoryCoastImportState = .previewInvalidated
-            return
-        }
-        guard await screenHistoryCoastImporter.sourceIsAvailable() else {
-            screenHistoryCoastImportState = .unavailable
-            return
-        }
-
-        screenHistoryCoastImportState = .importingMetadata
-        let metadata: ScreenHistoryMigrationResult
-        do {
-            metadata = try await screenHistoryCoastImporter.importMetadata(
-                preview: preview,
-                policy: settings.screenHistoryMigrationPolicy
-            )
-            guard metadata.reconciles else {
-                screenHistoryCoastImportState = .failed(.metadata)
-                return
-            }
-            screenHistoryApprovedCoastPreview = nil
-        } catch ScreenHistoryCoastImportError.stalePreview,
-                ScreenHistoryCoastImportError.sourceChanged {
-            screenHistoryApprovedCoastPreview = nil
-            screenHistoryCoastImportState = .previewInvalidated
-            return
-        } catch {
-            screenHistoryCoastImportState = .failed(.metadata)
-            return
-        }
-
-        screenHistoryCoastImportState = .copyingVerifiedMedia
-        let media: ScreenHistoryMediaMigrationResult
-        do {
-            media = try await screenHistoryCoastImporter.copyVerifiedMedia()
-            guard media.failures.isEmpty else {
-                screenHistoryCoastImportState = .failed(.media)
-                return
-            }
-        } catch {
-            screenHistoryCoastImportState = .failed(.media)
-            return
-        }
-
-        screenHistoryCoastImportState = .preparingVerificationSample
-        let sampleCount: Int
-        do {
-            if let screenHistoryRetirementReviewer {
-                let review = try await screenHistoryRetirementReviewer.refresh()
-                screenHistoryRetirementReviewSnapshot = review
-                sampleCount = review.moments.count
-                let required = min(
-                    metadata.imported,
-                    ScreenHistoryRetirementReadiness.requiredSampleSize
-                )
-                guard review.readiness.hasCompleteImportedPopulation,
-                      sampleCount == required
-                else {
-                    screenHistoryCoastImportState = .failed(.verificationSample)
-                    return
-                }
-            } else {
-                sampleCount = try await screenHistoryCoastImporter.verificationSampleCount(
-                    limit: ScreenHistoryCoastImportSummary.verificationSampleTarget
-                )
-                guard sampleCount == ScreenHistoryCoastImportSummary.verificationSampleTarget else {
-                    screenHistoryCoastImportState = .failed(.verificationSample)
-                    return
-                }
-            }
-        } catch {
-            screenHistoryCoastImportState = .failed(.verificationSample)
-            return
-        }
-
-        screenHistoryCoastImportState = .completed(ScreenHistoryCoastImportSummary(
-            sourceRows: metadata.source,
-            importedRows: metadata.imported,
-            excludedRows: metadata.excluded,
-            invalidRows: metadata.invalid,
-            newOwnedRows: metadata.ownedRowDelta,
-            copiedFiles: media.copiedFileDelta,
-            mediaFailures: media.failures.count,
-            verificationSampleCount: sampleCount
-        ))
-        await applyScreenHistoryRetention()
-    }
-
-    func refreshScreenHistoryRetirementReview() async {
-        guard let screenHistoryRetirementReviewer else {
-            screenHistoryRetirementReviewMessage = "Coast review is unavailable in this build."
-            return
-        }
-        do {
-            let snapshot = try await screenHistoryRetirementReviewer.refresh()
-            screenHistoryRetirementReviewSnapshot = snapshot
-            screenHistoryRetirementReviewMessage = Self.retirementReviewMessage(snapshot)
-        } catch {
-            screenHistoryRetirementReviewMessage = "Unable to prepare the Coast review sample."
-        }
-    }
-
-    func openScreenHistoryRetirementReview() async {
-        await refreshScreenHistoryRetirementReview()
-        guard let snapshot = screenHistoryRetirementReviewSnapshot,
-              !snapshot.moments.isEmpty else { return }
-        screenHistorySearchTask?.cancel()
-        screenHistoryIsRetirementReviewing = true
-        screenHistoryShowsTimeline = false
-        screenHistoryTimelineFrames = []
-        screenHistoryFrames = snapshot.moments.map(\.frame)
-        screenHistoryLoadState = .ready
-        catalogScope = .screenHistory
-        inputMode = nil
-        input = ""
-        applicationSelectionIndex = snapshot.moments.firstIndex {
-            $0.decision == .pending
-        } ?? 0
-        setScreenHistoryAnnouncement(
-            "Coast review. \(snapshot.readiness.acceptedMoments) accepted, \(snapshot.readiness.pendingMoments) pending, \(snapshot.readiness.flaggedMoments) flagged."
-        )
-        NotificationCenter.default.post(name: .presentOverlay, object: nil)
-        requestInputFocus()
-    }
-
-    func decideScreenHistoryRetirementMoment(
-        frame: ScreenHistoryFrame,
-        decision: ScreenHistoryRetirementReviewDecision
-    ) async {
-        guard screenHistoryIsRetirementReviewing,
-              let screenHistoryRetirementReviewer else { return }
-        let sampleID = "coast:\(frame.sourceIdentifier)"
-        do {
-            let snapshot = try await screenHistoryRetirementReviewer.decide(
-                sampleID: sampleID,
-                contentHash: frame.contentHash,
-                decision: decision
-            )
-            screenHistoryRetirementReviewSnapshot = snapshot
-            screenHistoryFrames = snapshot.moments.map(\.frame)
-            screenHistoryRetirementReviewMessage = Self.retirementReviewMessage(snapshot)
-            closeItemActionPane()
-            if let next = snapshot.moments.firstIndex(where: { $0.decision == .pending }) {
-                applicationSelectionIndex = next
-            }
-            setScreenHistoryAnnouncement(
-                decision == .accepted
-                    ? "Accepted this imported moment."
-                    : "Flagged this imported moment for review."
-            )
-        } catch {
-            screenHistoryRetirementReviewMessage = "The review sample changed. Refresh it before continuing."
-        }
-    }
-
-    private static func retirementReviewMessage(
-        _ snapshot: ScreenHistoryRetirementReviewSnapshot
-    ) -> String {
-        let readiness = snapshot.readiness
-        if readiness.totalImportedMoments == 0 {
-            return "No imported Coast moments are ready for review."
-        }
-        if readiness.isReady {
-            return "Coast review passed: \(readiness.acceptedMoments) accepted and no flags."
-        }
-        return "Coast review: \(readiness.acceptedMoments) accepted, \(readiness.pendingMoments) pending, \(readiness.flaggedMoments) flagged."
-    }
-
-    var screenHistoryCoastImportIsRunning: Bool {
-        switch screenHistoryCoastImportState {
-        case .checkingSource, .previewingMetadata, .importingMetadata,
-                .copyingVerifiedMedia, .preparingVerificationSample:
-            return true
-        case .idle, .ready, .unavailable, .previewReady, .previewInvalidated,
-                .completed, .failed:
-            return false
-        }
-    }
-
-    var screenHistoryCoastImportCanImport: Bool {
-        if screenHistoryCoastFreezeReceipter != nil,
-           screenHistoryCoastFreezeReceipt == nil { return false }
-        guard let preview = screenHistoryApprovedCoastPreview,
-              preview.policyFingerprint == settings.screenHistoryMigrationPolicy.fingerprint
-        else { return false }
-        guard case .previewReady(let visiblePreview) = screenHistoryCoastImportState else { return false }
-        return visiblePreview == preview
-    }
-
-    var screenHistoryCoastImportMessage: String? {
-        switch screenHistoryCoastImportState {
-        case .idle:
-            return nil
-        case .checkingSource:
-            return "Checking for Coast history…"
-        case .ready:
-            return "Coast history is available. Preview the current exclusions before import. Coast stays unchanged."
-        case .unavailable:
-            return "No usable Coast history was found on this Mac."
-        case .previewingMetadata:
-            return "Previewing Coast text and metadata with the current exclusions. Nothing is being written, and media stays closed."
-        case .previewReady(let preview):
-            return "Preview: \(preview.sourceRows) source records. \(preview.importedRows) will import, \(preview.excludedRows) are excluded, and \(preview.invalidRows) are invalid. Review these counts, then use the separate Import button."
-        case .previewInvalidated:
-            return "The Coast preview expired because the exclusions or source changed. Run Preview again before import."
-        case .importingMetadata:
-            return "Importing Coast text and metadata. Capture is stopped."
-        case .copyingVerifiedMedia:
-            return "Copying and checking Coast media. Source files stay unchanged."
-        case .preparingVerificationSample:
-            return "Preparing a 100-moment metadata sample for later review."
-        case .completed(let result):
-            return "Imported \(result.importedRows) of \(result.sourceRows) Coast records. Added \(result.newOwnedRows) records and \(result.copiedFiles) verified media files. Prepared \(result.verificationSampleCount) of \(result.verificationSampleTarget) moments for review. \(result.mediaFailures) media files need retry. Coast stays unchanged."
-        case .failed(.metadata):
-            return "Import stopped while reading metadata. Coast stayed unchanged. Run Preview again before resuming."
-        case .failed(.preview):
-            return "Coast preview stopped before any import write. Coast stayed unchanged. Run Preview again."
-        case .failed(.media):
-            return "Metadata is safe, but media copying stopped. Coast stayed unchanged. Run Preview again to resume."
-        case .failed(.verificationSample):
-            return "The import is safe, but the 100-moment review sample was not prepared. Coast stayed unchanged. Run Preview again."
-        }
-    }
-
-    var screenHistoryCaptureStartBlocker: String? {
-        guard ScreenHistoryReleasePolicy.allowsOwnedCapture else {
-            return "Owned capture is locked in this search-only beta."
-        }
-        guard screenHistoryCaptureService != nil else {
-            return "Screen History capture is unavailable in this build."
-        }
-        guard settings.screenHistorySameUserAccessRiskAccepted else {
-            return "Review and accept the same-user storage risk before capture."
-        }
-        if screenHistoryCaptureStatus?.lastSkipReason == .screenRecordingNotAuthorized {
-            return "Allow Screen Recording for Quick Launch in System Settings before capture."
-        }
-        switch screenHistoryCaptureStatus?.fileVaultStatus {
-        case .on:
-            return nil
-        case .off:
-            return "Turn on FileVault before starting Screen History."
-        case .unknown, nil:
-            return "Quick Launch could not verify FileVault. Capture stays stopped."
-        }
-    }
-
-    var screenHistoryCaptureIsActive: Bool {
-        ScreenHistoryReleasePolicy.allowsOwnedCapture
-            && (screenHistoryCaptureStatus?.state == .running
-            || screenHistoryCaptureStatus?.state == .pausedForInactivity
-            )
-    }
-
-    var screenHistoryCaptureCanResume: Bool {
-        ScreenHistoryReleasePolicy.allowsOwnedCapture
-            && screenHistoryCaptureService != nil
-            && settings.screenHistoryCaptureEnabled
-            && screenHistoryCaptureStartBlocker == nil
-    }
-
-    var screenHistoryMenuBarCanBeHidden: Bool {
-        !screenHistoryCaptureIsActive
-    }
-
-    var screenHistoryCaptureStatusLabel: String {
-        guard ScreenHistoryReleasePolicy.allowsOwnedCapture else { return "Capture unavailable" }
-        switch screenHistoryCaptureStatus?.state {
-        case .running: return "Running"
-        case .pausedForInactivity: return "Paused"
-        case .stopped, .disabled: return "Stopped"
-        case nil: return screenHistoryCaptureService == nil ? "Capture unavailable" : "Stopped"
-        }
-    }
-
     func enterCatalog(_ scope: LauncherCatalogScope) {
         if scope == .screenshots {
             // A scan from the last two seconds is already on screen; rescanning
@@ -2819,35 +1827,12 @@ import Observation
         errorMessage = nil
         requestInputFocus()
         noteInteraction()
-        if scope == .screenHistory {
-            screenHistoryIsRetirementReviewing = false
-            screenHistoryShowsTimeline = false
-            screenHistoryLoadState = .idle
-            screenHistorySearchTask?.cancel()
-            screenHistorySearchTask = Task { [weak self] in
-                await self?.loadScreenHistory(query: "")
-            }
-        }
+        if scope == .screenHistory { screenHistory.enterCatalogScope() }
     }
 
     func leaveCatalog() {
-        if catalogScope == .screenHistory, screenHistoryShowsTimeline {
-            closeScreenHistoryTimeline()
-            return
-        }
-        screenHistorySearchTask?.cancel()
-        catalogIdleResetTask?.cancel()
-        isCatalogActionPanePresented = false
-        isApplicationActionPanePresented = false
-        contextualCatalogItemID = nil
-        contextualApplicationID = nil
-        catalogScope = nil
-        pendingQuickLinkID = nil
-        inputMode = nil
-        input = ""
-        applicationSelectionIndex = 0
-        screenHistoryShowsTimeline = false
-        screenHistoryIsRetirementReviewing = false
+        if screenHistory.leaveCatalogIfTimeline() { return }
+        reset([.layers, .mode, .input])
         requestInputFocus()
     }
 
@@ -2877,7 +1862,7 @@ import Observation
         inputMode = nil
         input = ""
         applicationSelectionIndex = 0
-        screenHistoryIsRetirementReviewing = false
+        screenHistory.isRetirementReviewing = false
         requestInputFocus()
     }
 
@@ -2894,7 +1879,7 @@ import Observation
         case .commands: systemCommands.count
         case .folders: folderItems.count
         case .vaultSearch: vaultSearchItems.count
-        case .screenHistory: screenHistoryItems.count
+        case .screenHistory: screenHistory.items.count
         }
     }
 
@@ -2988,7 +1973,7 @@ import Observation
         case .screenshot:
             if await pasteImageFile(URL(fileURLWithPath: item.value)) {
                 learn(.item(item))
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
             }
         case .conversation:
             continueConversation(itemID: item.itemID)
@@ -3001,7 +1986,7 @@ import Observation
             input = ""
             prepareForExternalAction?()
             if await FolderLocationService.open(location) {
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
             } else {
                 recoverFromExternalActionFailure?()
                 errorMessage = "Could not open \(location.title)."
@@ -3010,19 +1995,19 @@ import Observation
         case .answer:
             copyLauncherItem(item)
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
         case .screenHistory:
-            guard let frame = screenHistoryFrame(for: item) else {
+            guard let frame = screenHistory.frame(for: item) else {
                 errorMessage = "This screen moment is no longer available."
                 requestInputFocus()
                 return
             }
-            openScreenHistoryMoment(frame)
+            screenHistory.openMoment(frame)
         case .askAI:
             if item.value.isEmpty {
                 // Empty root row or global hotkey: capture the next typing for the AI.
                 enterAskAIMode()
-                NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                overlayPresenter.presentOverlay()
             } else {
                 input = item.value
                 inputMode = nil
@@ -3037,25 +2022,25 @@ import Observation
             }
             if let kind = ScreenshotKind(commandID: item.value) {
                 if await attachScreenshot(kind, clearingInput: true) {
-                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                    overlayPresenter.presentOverlay()
                 }
                 return
             }
             if item.value == LatestScreenshotFinder.commandID {
                 if attachLatestScreenshot() {
-                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                    overlayPresenter.presentOverlay()
                 }
                 return
             }
             if item.value == "awareness.area" {
                 if await attachScreenArea() {
-                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                    overlayPresenter.presentOverlay()
                 }
                 return
             }
             if item.value == "awareness.selection" {
                 if attachSelectedText() {
-                    NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                    overlayPresenter.presentOverlay()
                 }
                 return
             }
@@ -3064,7 +2049,7 @@ import Observation
                 return
             }
             if item.value == "screenHistory.toggleCapture" {
-                await toggleScreenHistoryCaptureFromCommand()
+                await screenHistory.toggleCaptureFromCommand()
                 return
             }
             performSystemCommand(item)
@@ -3138,7 +2123,7 @@ import Observation
         case .copy:
             copyOutputAndMark()
             isActionPalettePresented = false
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
         case .saveSnippet:
             saveOutputAsSnippet()
         case .searchWeb:
@@ -3542,7 +2527,7 @@ import Observation
         if item.value.hasPrefix("toggle."),
            let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count))) {
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             Task { @MainActor [weak self] in
                 if let failure = await QuickToggleService.run(toggle) {
                     guard let self else { return }
@@ -3557,7 +2542,7 @@ import Observation
         if item.value.hasPrefix("settingspane."),
            let pane = SystemSettingsPaneCatalog.panes.first(where: { $0.id == String(item.value.dropFirst("settingspane.".count)) }) {
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             NSWorkspace.shared.open(pane.url)
             return
         }
@@ -3592,7 +2577,7 @@ import Observation
             input = ""
             Task {
                 if await pasteLauncherItem(plain) {
-                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                    overlayPresenter.dismissOverlay()
                 }
             }
             return
@@ -3620,8 +2605,8 @@ import Observation
 
         if item.value == "settings.open" {
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-            NotificationCenter.default.post(name: .openSettings, object: nil)
+            overlayPresenter.dismissOverlay()
+            overlayPresenter.openSettings()
             return
         }
 
@@ -3637,7 +2622,7 @@ import Observation
             settings.caffeinateUntil = nil
             persistSettings(settings)
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             return
         }
 
@@ -3667,15 +2652,15 @@ import Observation
 
         if item.value == "translate.mode" {
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-            NotificationCenter.default.post(name: .openTranslator, object: nil)
+            overlayPresenter.dismissOverlay()
+            overlayPresenter.openTranslator()
             return
         }
 
         if item.value == "type-to-click.mode" {
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
-            NotificationCenter.default.post(name: .openTypeToClick, object: nil)
+            overlayPresenter.dismissOverlay()
+            overlayPresenter.openTypeToClick()
             return
         }
 
@@ -3693,7 +2678,7 @@ import Observation
             settings.caffeinateUntil = caffeinateManager.endsAt
             persistSettings(settings)
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             return
         }
 
@@ -3753,7 +2738,7 @@ import Observation
         let recognized = await ScreenshotTextIndex.recognizeText(in: attachment.data)
         let text = Self.flattenRecognizedText(recognized, keepLineBreaks: settings.ocrKeepLineBreaks)
         guard !text.isEmpty else {
-            NotificationCenter.default.post(name: .presentOverlay, object: nil)
+            overlayPresenter.presentOverlay()
             errorMessage = "No text was found in that area."
             requestInputFocus()
             return
@@ -3766,13 +2751,13 @@ import Observation
             value: text
         )
         if thenPaste, await pasteLauncherItem(item) {
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             return
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         markJustCopied()
-        NotificationCenter.default.post(name: .presentOverlay, object: nil)
+        overlayPresenter.presentOverlay()
         output = text
         lastQuestion = thenPaste ? "Text from screen" : "Text from screen, copied"
         errorMessage = nil
@@ -3814,11 +2799,11 @@ import Observation
         let item = recordPickedColor(color)
         if thenPaste {
             if await pasteLauncherItem(item) {
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
             } else {
                 // The paste failed. It was copied instead, and the reason
                 // needs the panel back to be readable.
-                NotificationCenter.default.post(name: .presentOverlay, object: nil)
+                overlayPresenter.presentOverlay()
             }
             invalidateLauncherRanking()
             return
@@ -3826,7 +2811,7 @@ import Observation
         copyLauncherItem(item)
         errorMessage = nil
         invalidateLauncherRanking()
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        overlayPresenter.dismissOverlay()
     }
 
     /// Adds a pick to the local history and returns the row it became.
@@ -3896,7 +2881,7 @@ import Observation
         default:
             return
         }
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        overlayPresenter.dismissOverlay()
     }
 
     func addCustomFolder(_ url: URL) {
@@ -3941,7 +2926,7 @@ import Observation
         openInQuickLinkBrowser(url)
         self.input = ""
         pendingQuickLinkID = nil
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        overlayPresenter.dismissOverlay()
     }
 
     /// Browsers that can open web links, for the Quick Links setting.
@@ -4022,10 +3007,10 @@ import Observation
         }
         var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName, isRunning: isRunning)
         if case .item(let item) = result, item.kind == .screenHistory {
-            if screenHistoryShowsTimeline {
+            if screenHistory.showsTimeline {
                 actions.removeAll { $0.kind == .showTimeline }
             }
-            if screenHistoryIsRetirementReviewing {
+            if screenHistory.isRetirementReviewing {
                 actions.removeAll { $0.kind == .showTimeline || $0.kind == .saveToVault }
                 actions.insert(ItemAction(
                     kind: .acceptScreenHistoryReview,
@@ -4044,7 +3029,7 @@ import Observation
                 actions.append(ItemAction(
                     kind: .runCommand,
                     title: control.title,
-                    systemImage: screenHistoryCaptureIsActive ? "pause.circle" : "record.circle",
+                    systemImage: screenHistory.captureIsActive ? "pause.circle" : "record.circle",
                     shortcut: nil,
                     commandValue: control.value
                 ))
@@ -4157,7 +3142,7 @@ import Observation
         isActionPalettePresented = false
         actionQuery = ""
         activeItemActionForm = form
-        if form != .screenHistorySave { screenHistorySaveError = nil }
+        if form != .screenHistorySave { screenHistory.saveError = nil }
         deleteArmedItemID = nil
         noteInteraction()
     }
@@ -4168,11 +3153,74 @@ import Observation
         contextualCatalogItemID = nil
         contextualApplicationID = nil
         activeItemActionForm = nil
-        screenHistorySaveError = nil
+        screenHistory.saveError = nil
         deleteArmedItemID = nil
         actionQuery = ""
         requestInputFocus()
         noteInteraction()
+    }
+
+    // MARK: - Layer stack (Escape and empty Backspace)
+
+    /// What sits on top of the overlay right now, from the outermost UI
+    /// layer down to the root. Escape and an empty Backspace both pop this
+    /// stack; the only difference is what they do at the answer and root.
+    enum OverlayLayer: Equatable, Sendable {
+        case itemActionForm
+        case itemActionPane
+        case actionPalette
+        case streaming
+        case attachment
+        case typedText
+        case answer
+        case inputMode
+        case catalog
+        case quickLinkInput
+        case root
+    }
+
+    var topLayer: OverlayLayer {
+        if isItemActionPanePresented {
+            return activeItemActionForm != nil ? .itemActionForm : .itemActionPane
+        }
+        if isActionPalettePresented { return .actionPalette }
+        if isStreaming { return .streaming }
+        if !input.isEmpty { return .typedText }
+        if hasPendingAttachment { return .attachment }
+        if isAnswerActive { return .answer }
+        if inputMode != nil { return .inputMode }
+        if pendingQuickLinkID != nil { return .quickLinkInput }
+        if catalogScope != nil { return .catalog }
+        return .root
+    }
+
+    /// Removes one layer. Returns `false` at the root, where there is
+    /// nothing left to pop.
+    @discardableResult
+    func popTopLayer() -> Bool {
+        switch topLayer {
+        case .itemActionForm, .itemActionPane:
+            dismissItemActionLayer()
+        case .actionPalette:
+            closeActionPalette()
+        case .streaming:
+            cancel()
+        case .typedText:
+            input = ""
+            errorMessage = nil
+            requestInputFocus()
+        case .attachment:
+            removePendingImage()
+        case .answer:
+            startNewConversation()
+        case .inputMode:
+            leaveInputMode()
+        case .quickLinkInput, .catalog:
+            leaveCatalog()
+        case .root:
+            return false
+        }
+        return true
     }
 
     /// Backspace on an empty field pops one layer: attachment, answer,
@@ -4181,40 +3229,21 @@ import Observation
     @discardableResult
     func popLayerForEmptyBackspace() -> Bool {
         guard input.isEmpty, !isItemActionPanePresented, !isActionPalettePresented else { return false }
-        if hasPendingAttachment {
-            removePendingImage()
-            return true
-        }
-        if isAnswerActive {
-            startNewConversation()
-            return true
-        }
-        if inputMode != nil {
-            leaveInputMode()
-            return true
-        }
-        if catalogScope != nil || pendingQuickLinkID != nil {
-            leaveCatalog()
-            return true
-        }
-        return false
+        return popTopLayer()
     }
 
     /// Escape is handled at the NSPanel boundary so it works even when a
-    /// SwiftUI field editor consumes cancelOperation. Returns true because
-    /// every visible launcher state has an Escape action.
+    /// SwiftUI field editor consumes cancelOperation. It walks the same
+    /// stack as Backspace, with two differences: typed text is cleared
+    /// before anything else closes, and a finished answer or the root
+    /// hides the overlay instead of discarding the thread.
     @discardableResult
     func handleEscapeKey() -> Bool {
-        // A visible ⌘K layer is the topmost job, even if an answer is still
-        // streaming behind it. Escape always removes that layer first.
-        if isItemActionPanePresented {
-            dismissItemActionLayer()
-        } else if isActionPalettePresented {
-            closeActionPalette()
-        } else if isStreaming {
-            cancel()
-        } else {
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        switch topLayer {
+        case .answer, .root:
+            overlayPresenter.dismissOverlay()
+        default:
+            popTopLayer()
         }
         return true
     }
@@ -4223,7 +3252,7 @@ import Observation
     func dismissItemActionLayer() {
         if activeItemActionForm != nil {
             activeItemActionForm = nil
-            screenHistorySaveError = nil
+            screenHistory.saveError = nil
             deleteArmedItemID = nil
             noteInteraction()
         } else {
@@ -4291,19 +3320,19 @@ import Observation
             await performLauncherItem(command)
         case .saveToVault:
             guard case .item(let item) = result,
-                  screenHistoryFrame(for: item) != nil,
-                  screenHistoryVaultSaver != nil
+                  screenHistory.frame(for: item) != nil,
+                  screenHistory.vaultSaver != nil
             else {
-                screenHistorySaveError = "Save to Vault is unavailable. Check the local vault helper and try again."
+                screenHistory.saveError = "Save to Vault is unavailable. Check the local vault helper and try again."
                 openActionPane(for: result, form: .screenHistorySave)
                 return
             }
-            screenHistorySaveError = nil
+            screenHistory.saveError = nil
             openActionPane(for: result, form: .screenHistorySave)
         case .acceptScreenHistoryReview, .flagScreenHistoryReview:
             guard case .item(let item) = result,
-                  let frame = screenHistoryFrame(for: item) else { return }
-            await decideScreenHistoryRetirementMoment(
+                  let frame = screenHistory.frame(for: item) else { return }
+            await screenHistory.decideRetirementMoment(
                 frame: frame,
                 decision: action.kind == .acceptScreenHistoryReview ? .accepted : .flagged
             )
@@ -4323,14 +3352,14 @@ import Observation
             return false
         case .showTimeline:
             guard case .item(let item) = result,
-                  let frame = screenHistoryFrame(for: item) else { return true }
+                  let frame = screenHistory.frame(for: item) else { return true }
             closeItemActionPane()
-            Task { await openScreenHistorySequence(for: frame) }
+            Task { await screenHistory.openSequence(for: frame) }
         case .openMoment:
             guard case .item(let item) = result,
-                  let frame = screenHistoryFrame(for: item) else { return true }
+                  let frame = screenHistory.frame(for: item) else { return true }
             closeItemActionPane()
-            openScreenHistoryMoment(frame)
+            screenHistory.openMoment(frame)
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
             controlRunningApplication(application, action: action.kind)
@@ -4341,7 +3370,7 @@ import Observation
             markJustCopied()
             closeItemActionPane()
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
         case .secondary:
             switch result {
             case .application(let application):
@@ -4350,7 +3379,7 @@ import Observation
                 guard let location = folderLocation(for: item) else { return true }
                 closeItemActionPane()
                 input = ""
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
                 FolderLocationService.reveal(location)
             case .item(let item) where item.kind == .answer:
                 closeItemActionPane()
@@ -4360,7 +3389,7 @@ import Observation
                     markJustCopied()
                     closeItemActionPane()
                     input = ""
-                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                    overlayPresenter.dismissOverlay()
                 } else {
                     errorMessage = "Could not read \(item.title)."
                     requestInputFocus()
@@ -4372,7 +3401,7 @@ import Observation
                 copyLauncherItem(item)
                 closeItemActionPane()
                 input = ""
-                NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                overlayPresenter.dismissOverlay()
             case .catalog:
                 break
             }
@@ -4402,15 +3431,15 @@ import Observation
             saveClipboardEntry(item, asLink: true)
         case .revealInFinder:
             guard case .item(let item) = result else { return true }
-            if item.kind == .screenHistory, let frame = screenHistoryFrame(for: item) {
+            if item.kind == .screenHistory, let frame = screenHistory.frame(for: item) {
                 closeItemActionPane()
-                revealScreenHistoryMoment(frame)
+                screenHistory.revealMoment(frame)
                 return true
             }
             guard item.kind == .screenshot else { return true }
             closeItemActionPane()
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.value)])
         case .quickLook:
             guard case .item(let item) = result, item.kind == .screenshot else { return true }
@@ -4437,7 +3466,7 @@ import Observation
             markJustCopied()
             closeItemActionPane()
             input = ""
-            NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+            overlayPresenter.dismissOverlay()
         case .copyPath:
             let path: String
             switch result {
@@ -4593,7 +3622,7 @@ import Observation
     private func revealInFinder(_ application: LaunchableApplication) {
         closeItemActionPane()
         input = ""
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        overlayPresenter.dismissOverlay()
         NSWorkspace.shared.activateFileViewerSelecting([application.url])
     }
 
@@ -4926,37 +3955,23 @@ import Observation
             )
         }
 
-        // Math shortcut — evaluate locally without the AI
-        if MathExpressionDetector.isMathExpression(effectivePrompt) {
-            errorMessage = nil
+        // Math, conversions, dates, system facts: the same deterministic
+        // resolver the live ranking uses, so Return and the inline row agree.
+        // Unit conversions only apply to raw typed input, never to an
+        // expanded saved prompt.
+        if MathExpressionDetector.isMathExpression(effectivePrompt),
+           (try? MathCalculator.evaluate(effectivePrompt)) == nil {
+            // Math-shaped but not computable (1/0): say so instead of
+            // handing an arithmetic slip to a model.
             do {
-                let result = try MathCalculator.evaluate(effectivePrompt)
-                output = MathCalculator.format(result)
-                if settings.autoCopy {
-                    copyOutput()
-                    markJustCopied()
-                }
+                _ = try MathCalculator.evaluate(effectivePrompt)
             } catch {
                 errorMessage = "Math error: \(error)"
             }
             requestInputFocus()
             return
         }
-
-        // Unit conversions, date arithmetic, city times: local and deterministic.
-        if action == nil, let result = LocalConversionResolver.answer(effectivePrompt) {
-            errorMessage = nil
-            output = result
-            if settings.autoCopy {
-                copyOutput()
-                markJustCopied()
-            }
-            requestInputFocus()
-            return
-        }
-
-        // Trusted system facts should stay fast and work without a provider.
-        if let result = SystemFactsResolver.answer(effectivePrompt) {
+        if let result = localAnswer(for: effectivePrompt, allowConversions: action == nil) {
             errorMessage = nil
             output = result
             if settings.autoCopy {
@@ -5130,7 +4145,7 @@ import Observation
                     if let context = captureSelectedText(promptForPermission: false),
                        let selectedTextService,
                        await selectedTextService.replace(output, in: context) {
-                        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                        overlayPresenter.dismissOverlay()
                     } else {
                         copyOutput()
                         markJustCopied()
@@ -5198,7 +4213,7 @@ import Observation
                 if let selectionContext = captureSelectedText(promptForPermission: false),
                    let selectedTextService,
                    await selectedTextService.replace(output, in: selectionContext) {
-                    NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+                    overlayPresenter.dismissOverlay()
                 } else {
                     copyOutput()
                     markJustCopied()
@@ -5490,6 +4505,7 @@ import Observation
         streamTask = nil
         discardStreamBuffer()
         isStreaming = false
+        streamingStatus = nil
         output = ""
     }
 
@@ -5553,7 +4569,7 @@ import Observation
             requestInputFocus()
             return false
         }
-        NotificationCenter.default.post(name: .dismissOverlay, object: nil)
+        overlayPresenter.dismissOverlay()
         return true
     }
 
@@ -5575,22 +4591,76 @@ import Observation
         errorMessage = nil
     }
 
+    /// Which part of the overlay a reset clears. Every "leave", "clear",
+    /// or "start over" path goes through `reset(_:)` so nothing is forgotten.
+    struct ResetScope: OptionSet, Sendable {
+        let rawValue: UInt8
+        /// ⌘K pane, palette, sub-form, delete arming, action query.
+        static let layers = ResetScope(rawValue: 1 << 0)
+        /// Catalog, Quick Link input, input mode, vault-search mode.
+        static let mode = ResetScope(rawValue: 1 << 1)
+        /// Attachments and screen-awareness context.
+        static let attachments = ResetScope(rawValue: 1 << 2)
+        /// The answer thread: stream, output, conversation, last question.
+        static let thread = ResetScope(rawValue: 1 << 3)
+        /// Typed text and the selection index.
+        static let input = ResetScope(rawValue: 1 << 4)
+        static let all: ResetScope = [.layers, .mode, .attachments, .thread, .input]
+    }
+
+    func reset(_ scope: ResetScope) {
+        if scope.contains(.layers) {
+            presentedLayer = nil
+            contextualApplicationID = nil
+            contextualCatalogItemID = nil
+            activeItemActionForm = nil
+            deleteArmedItemID = nil
+            actionQuery = ""
+            screenHistory.resetForLayers()
+        }
+        if scope.contains(.mode) {
+            screenHistory.resetForMode()
+            catalogIdleResetTask?.cancel()
+            catalogScope = nil
+            pendingQuickLinkID = nil
+            inputMode = nil
+            activeVaultSearchMode = nil
+            vaultSearchAnchor = nil
+        }
+        if scope.contains(.attachments) {
+            pendingImages.removeAll()
+            pendingContext = nil
+        }
+        if scope.contains(.thread) {
+            streamTask?.cancel()
+            streamTask = nil
+            discardStreamBuffer()
+            isStreaming = false
+            streamingStatus = nil
+            output = ""
+            errorMessage = nil
+            lastQuestion = nil
+            currentConversation = nil
+            conversationImages = []
+            isConversationHistoryPresented = false
+            activeVaultSearchMode = nil
+            vaultSearchAnchor = nil
+        }
+        if scope.contains(.input) {
+            input = ""
+            errorMessage = nil
+            applicationSelectionIndex = 0
+        }
+    }
+
+    /// Back to the root surface, like a fresh open. The conversation is
+    /// kept so a reopened overlay can still browse to it; only what was on
+    /// screen goes.
     func clearTransientDisplay() {
-        input = ""
+        reset([.layers, .mode, .attachments, .input])
         clearOutput()
-        isActionPalettePresented = false
-        isApplicationActionPanePresented = false
-        isCatalogActionPanePresented = false
-        contextualApplicationID = nil
-        contextualCatalogItemID = nil
-        catalogScope = nil
-        pendingQuickLinkID = nil
         isConversationHistoryPresented = false
-        actionQuery = ""
-        pendingImage = nil
         lastQuestion = nil
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
     }
 
     /// Overlay open: offer a clipboard image once per copy. A clipboard the
@@ -5629,15 +4699,7 @@ import Observation
     }
 
     func startNewConversation() {
-        currentConversation = nil
-        conversationImages = []
-        lastQuestion = nil
-        isConversationHistoryPresented = false
-        output = ""
-        errorMessage = nil
-        input = ""
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
+        reset([.thread, .input])
         requestInputFocus()
     }
 
@@ -5729,20 +4791,18 @@ import Observation
         }
 
         Task { [weak self, version] in
-            let installError = await Task.detached(priority: .utility) { () -> String? in
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = ["-c", "brew upgrade quick-launch"]
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    return process.terminationStatus == 0
-                        ? nil
-                        : "Homebrew exited with status \(process.terminationStatus)"
-                } catch {
-                    return error.localizedDescription
-                }
-            }.value
+            let installError: String?
+            do {
+                let result = try await ProcessRunner.run(
+                    executable: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                    arguments: ["upgrade", "quick-launch"]
+                )
+                installError = result.status == 0
+                    ? nil
+                    : "Homebrew exited with status \(result.status)"
+            } catch {
+                installError = error.localizedDescription
+            }
 
             if let installError {
                 self?.updateState = .error(message: installError)
@@ -5804,3 +4864,5 @@ import Observation
         return false // equal
     }
 }
+
+extension QuickViewModel: ScreenHistoryHost {}

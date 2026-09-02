@@ -25,32 +25,23 @@ enum CommandActionRunner {
             throw QuickServiceError.commandFailed("\(executable) is not installed")
         }
         let argv = substitutedArguments(arguments, input: input)
-        return try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = url
-            process.arguments = argv
-            process.currentDirectoryURL = FileManager.default.temporaryDirectory
-            let output = Pipe()
-            let errors = Pipe()
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = output
-            process.standardError = errors
-            try process.run()
-            let outputData = output.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errors.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let message = String(data: errorData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw QuickServiceError.commandFailed(
-                    message?.isEmpty == false
-                        ? message!
-                        : "Command exited with status \(process.terminationStatus)"
-                )
-            }
-            var text = String(data: outputData, encoding: .utf8) ?? ""
-            if text.hasSuffix("\n") { text.removeLast() }
-            return text
-        }.value
+        let result: ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                executable: url,
+                arguments: argv,
+                currentDirectory: FileManager.default.temporaryDirectory
+            )
+        } catch let error as ProcessRunnerError {
+            throw QuickServiceError.commandFailed(error.localizedDescription)
+        }
+        guard result.status == 0 else {
+            throw QuickServiceError.commandFailed(
+                result.trimmedStderr ?? "Command exited with status \(result.status)"
+            )
+        }
+        var text = String(data: result.stdout, encoding: .utf8) ?? ""
+        if text.hasSuffix("\n") { text.removeLast() }
+        return text
     }
 }

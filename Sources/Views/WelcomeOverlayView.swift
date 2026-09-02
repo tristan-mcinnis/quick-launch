@@ -15,16 +15,16 @@ struct WelcomeOverlayView: View {
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing))
                     Image(systemName: "bolt.fill")
-                        .font(.system(size: 32, weight: .semibold))
+                        .font(.largeTitle.weight(.semibold))
                         .foregroundStyle(.white)
                 }
                 .frame(width: 64, height: 64)
 
                 Text("Welcome to Quick Launch")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.title.weight(.bold))
 
                 Text("Press Option+Space anywhere, choose a model, and run a quick action. The result streams in and copies to your clipboard automatically.")
-                    .font(.system(size: 14))
+                    .font(AQDesign.TypeToken.prose)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -59,11 +59,11 @@ struct WelcomeOverlayView: View {
     private func featureBullet(_ systemImage: String, _ text: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .medium))
+                .font(AQDesign.TypeToken.prose.weight(.medium))
                 .foregroundStyle(AQDesign.ColorToken.accent)
                 .frame(width: 20)
             Text(text)
-                .font(.system(size: 13))
+                .font(AQDesign.TypeToken.body)
                 .foregroundStyle(.secondary)
         }
     }

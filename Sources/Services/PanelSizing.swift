@@ -20,6 +20,10 @@ enum PanelSizing {
     static let actionRowSpacing: CGFloat = 2
     /// Rows shown before the action list scrolls.
     static let actionVisibleRows = 6
+    /// Title row at the top of the ⌘K item pane.
+    static let paneHeaderHeight: CGFloat = 44
+    /// Search field row at the bottom of the ⌘K item pane.
+    static let paneSearchRowHeight: CGFloat = 40
     /// Gap between the floating pane's bottom edge and the window edge.
     static let paneBottomMargin: CGFloat = 12
     /// Footer row plus its divider.
@@ -34,9 +38,6 @@ enum PanelSizing {
     static let launcherListMaximumHeight: CGFloat = 504
     /// A preview plus its Information block needs this much room.
     static let detailPaneMinimumHeight: CGFloat = 360
-    /// Keeps the exact payload preview and its primary action visible. The
-    /// payload body scrolls within this fixed production budget.
-    static let screenHistorySaveMinimumHeight: CGFloat = 620
 
     // MARK: - Floating ⌘K pane / prompt palette
     //
@@ -55,16 +56,13 @@ enum PanelSizing {
 
     /// ⌘K item pane: header 44 + divider + list + divider + search row 40.
     static func itemActionPaneHeight(rows: Int) -> CGFloat {
-        44 + 1 + actionListHeight(rows: rows) + 1 + 40
+        paneHeaderHeight + 1 + actionListHeight(rows: rows) + 1 + paneSearchRowHeight
     }
 
-    /// ⌘K pane showing a form instead of the list: header 44 + divider + body.
+    /// ⌘K pane showing a form instead of the list. Each form knows its own
+    /// body height; sizing never names a feature.
     static func itemActionFormPaneHeight(form: ItemActionForm) -> CGFloat {
-        switch form {
-        case .edit: 44 + 1 + 240
-        case .alias, .hotkey: 44 + 1 + 130
-        case .screenHistorySave: screenHistorySaveMinimumHeight - inputHeight - paneBottomMargin
-        }
+        form.minimumPaneHeight
     }
 
     /// Prompt palette: search row 42 + spacing + list + spacing + hint row 26.

@@ -31,7 +31,9 @@ struct InterfaceContractTests {
     @Test("Actions expose selected state and announcements")
     func actionSelectionAccessibilityContract() throws {
         let overlay = try Self.source("Sources/Views/OverlayView.swift")
-        #expect(overlay.contains("accessibilityAddTraits(index == selectedIndex ? .isSelected : [])"))
+        let pane = try Self.source("Sources/Views/SelectableListPane.swift")
+        #expect(pane.contains("accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        #expect(overlay.contains("SelectableListPane("))
         #expect(overlay.contains("private func announceSelected()"))
     }
 

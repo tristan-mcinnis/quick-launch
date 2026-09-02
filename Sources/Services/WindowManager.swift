@@ -2,13 +2,6 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-@MainActor
-protocol WindowManaging: AnyObject {
-    var isAccessibilityTrusted: Bool { get }
-    func apply(_ layout: WindowLayout, to target: SelectionTarget) -> Bool
-    func move(_ move: WindowMove, target: SelectionTarget) -> Bool
-}
-
 /// Resizes the window that was actually on top behind Quick Launch.
 ///
 /// Accuracy notes, learned the hard way:

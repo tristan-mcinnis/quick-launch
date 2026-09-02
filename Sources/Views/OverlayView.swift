@@ -5,7 +5,6 @@ struct OverlayView: View {
     @Bindable var viewModel: QuickViewModel
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ScaledMetric(relativeTo: .body) private var screenHistoryRowMinHeight: CGFloat = 58
     /// The send button icon and color change based on state:
     ///  - idle: arrow.up.circle.fill (purple)
     ///  - streaming: stop.fill (purple)
@@ -69,13 +68,10 @@ struct OverlayView: View {
                         viewModel.moveApplicationSelection(-1)
                         return .handled
                     }
-                    .onKeyPress(.delete) {
-                        viewModel.popLayerForEmptyBackspace() ? .handled : .ignored
-                    }
                     .onChange(of: viewModel.input) { _, _ in
                         viewModel.resetApplicationSelection()
                         viewModel.noteInteraction()
-                        viewModel.screenHistoryInputDidChange()
+                        viewModel.screenHistory.inputDidChange()
                     }
                     .disabled(viewModel.isStreaming)
 
@@ -94,7 +90,7 @@ struct OverlayView: View {
                     } else {
                         Image(systemName: sendIcon)
                             .foregroundStyle(sendColor)
-                            .font(.system(size: 20))
+                            .font(.title2)
                             .contentTransition(.symbolEffect(.replace))
                     }
                 }
@@ -185,10 +181,10 @@ struct OverlayView: View {
                         } label: {
                             HStack(spacing: 10) {
                                 Text(viewModel.settings.savedPromptPrefix + match.alias)
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .font(AQDesign.TypeToken.codeLabel)
                                     .foregroundStyle(AQDesign.ColorToken.accent)
                                 Text(match.prompt)
-                                    .font(.system(size: 12))
+                                    .font(AQDesign.TypeToken.detail)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                 Spacer()
@@ -249,7 +245,7 @@ struct OverlayView: View {
                 Divider()
                 HStack(spacing: AQDesign.Space.standard) {
                     Text(error)
-                        .font(.system(size: 12))
+                        .font(AQDesign.TypeToken.detail)
                         .foregroundStyle(AQDesign.ColorToken.danger)
                     Spacer()
                     if viewModel.needsAccessibilityPermission {
@@ -293,24 +289,17 @@ struct OverlayView: View {
         .onChange(of: viewModel.launcherSelectionAnnouncementRevision) { _, _ in
             announceLauncherSelection(viewModel.launcherSelectionAnnouncement)
         }
-        .onChange(of: viewModel.screenHistoryAnnouncementRevision) { _, _ in
-            announceScreenHistoryResult(viewModel.screenHistoryResultAnnouncement)
+        .onChange(of: viewModel.screenHistory.announcementRevision) { _, _ in
+            announceScreenHistoryResult(viewModel.screenHistory.resultAnnouncement)
         }
         .onChange(of: viewModel.errorMessage) { _, error in
             guard let error, !error.isEmpty else { return }
             postAccessibilityAnnouncement("Error. \(error)", priority: .high)
         }
-        .onKeyPress(.escape) {
-            _ = viewModel.handleEscapeKey()
-            return .handled
-        }
     }
 
     private func focusInput() {
-        Task { @MainActor in
-            await Task.yield()
-            inputFocused = true
-        }
+        FocusRequest.apply($inputFocused)
     }
 
     @ViewBuilder
@@ -340,10 +329,9 @@ struct OverlayView: View {
         )
         .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
         .frame(
-            maxHeight: viewModel.activeItemActionForm == .screenHistorySave
-                ? PanelSizing.screenHistorySaveMinimumHeight - PanelSizing.inputHeight
-                    - PanelSizing.paneBottomMargin
-                : 460,
+            maxHeight: viewModel.activeItemActionForm?.minimumWindowHeight
+                .map { $0 - PanelSizing.inputHeight - PanelSizing.paneBottomMargin }
+                ?? 460,
             alignment: .top
         )
         // Below the input row and, when present, the attachment strip:
@@ -365,11 +353,11 @@ struct OverlayView: View {
             ScreenHistoryEmptyState(viewModel: viewModel)
         }
         if viewModel.catalogScope == .screenHistory,
-           !viewModel.screenHistoryResultAnnouncement.isEmpty {
-            Text(viewModel.screenHistoryResultAnnouncement)
+           !viewModel.screenHistory.resultAnnouncement.isEmpty {
+            Text(viewModel.screenHistory.resultAnnouncement)
                 .frame(width: 1, height: 1)
                 .opacity(0.001)
-                .accessibilityLabel(viewModel.screenHistoryResultAnnouncement)
+                .accessibilityLabel(viewModel.screenHistory.resultAnnouncement)
         }
     }
 
@@ -406,52 +394,23 @@ struct OverlayView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 4)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(
-                            Array(viewModel.launcherMatches.enumerated()),
-                            id: \.element.id
-                        ) { index, result in
-                            Button {
-                                Task { await viewModel.performLauncherResult(result) }
-                            } label: {
-                                LauncherResultRow(
-                                    result: result,
-                                    isSelected: index == viewModel.applicationSelectionIndex,
-                                    hotkey: viewModel.hotkey(for: result),
-                                    position: index + 1,
-                                    total: viewModel.launcherMatches.count
-                                )
-                                .padding(.horizontal, 12)
-                                .frame(
-                                    minHeight: isScreenHistoryResult(result) ? screenHistoryRowMinHeight : 42,
-                                    maxHeight: isScreenHistoryResult(result) ? nil : 42
-                                )
-                                .background(
-                                    RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                        .fill(
-                                            index == viewModel.applicationSelectionIndex
-                                                ? AQDesign.ColorToken.selectionFill
-                                                : .clear
-                                        )
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(
-                                index == viewModel.applicationSelectionIndex ? .isSelected : []
-                            )
-                            .id(result.id)
-                        }
-                    }
+            SelectableListPane(
+                items: viewModel.launcherMatches,
+                selectedIndex: $viewModel.applicationSelectionIndex,
+                scrollsToSelection: true,
+                onActivate: { result in
+                    Task { await viewModel.performLauncherResult(result) }
                 }
-                .scrollIndicators(.never)
-                .onChange(of: viewModel.applicationSelectionIndex) { _, index in
-                    let matches = viewModel.launcherMatches
-                    guard matches.indices.contains(index) else { return }
-                    proxy.scrollTo(matches[index].id, anchor: .center)
-                }
+            ) { index, result, isSelected in
+                LauncherResultRow(
+                    result: result,
+                    isSelected: isSelected,
+                    hotkey: viewModel.hotkey(for: result),
+                    position: index + 1,
+                    total: viewModel.launcherMatches.count
+                )
+                .padding(.horizontal, 12)
+                .modifier(ScreenHistoryRowFrame(result: result))
             }
         }
         .padding(.horizontal, 8)
@@ -464,11 +423,6 @@ struct OverlayView: View {
         return viewModel.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Suggestions"
             : "Results"
-    }
-
-    private func isScreenHistoryResult(_ result: LauncherSearchResult) -> Bool {
-        guard case .item(let item) = result else { return false }
-        return item.kind == .screenHistory
     }
 
     private var moreMenu: some View {
@@ -497,13 +451,13 @@ struct OverlayView: View {
 
             Divider()
             Button {
-                NotificationCenter.default.post(name: .openSettings, object: nil)
+                viewModel.overlayPresenter.openSettings()
             } label: {
                 Label("Settings…", systemImage: "gear")
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .font(.system(size: 16))
+                .font(AQDesign.TypeToken.input)
                 .foregroundStyle(viewModel.isActionPalettePresented ? sendColor : .secondary)
                 .frame(width: 32, height: 32)
                 .background(Circle().fill(AQDesign.ColorToken.surfaceFill))
@@ -546,7 +500,7 @@ struct OverlayView: View {
                 Task { await viewModel.refreshDetectedModels() }
             }
             Button("Model settings…") {
-                NotificationCenter.default.post(name: .openSettings, object: nil)
+                viewModel.overlayPresenter.openSettings()
             }
         } label: {
             Label("Model: \(viewModel.activeModelDisplay)", systemImage: "cpu")
@@ -582,12 +536,12 @@ private struct ConversationTranscript: View {
                     ForEach(messages) { message in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(message.role == .user ? "You" : "Answer")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(AQDesign.TypeToken.section)
                                 .foregroundStyle(
                                     message.role == .user ? AQDesign.ColorToken.accent : .secondary
                                 )
                             Text(String(message.content.prefix(2_000)))
-                                .font(.system(size: 12))
+                                .font(AQDesign.TypeToken.detail)
                                 .lineLimit(message.role == .user ? 3 : 8)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -622,18 +576,8 @@ private struct LauncherResultRow: View {
     var body: some View {
         HStack(spacing: 10) {
             icon.frame(width: 24, height: 24)
-            if isScreenHistory {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                }
+            if let screenHistoryRow {
+                screenHistoryRow
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(title)
@@ -652,14 +596,14 @@ private struct LauncherResultRow: View {
             Spacer()
             if case .item(let item) = result, item.isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(AQDesign.TypeToken.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Pinned")
             }
             if let hotkey {
                 KeyCapGroup(keys: hotkey.keyCaps)
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
-            } else if !isScreenHistory {
+            } else if screenHistoryRow == nil {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(.secondary)
@@ -679,7 +623,7 @@ private struct LauncherResultRow: View {
             Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
         case .item(let item):
             if item.kind == .emoji {
-                Text(item.value).font(.system(size: 18))
+                Text(item.value).font(AQDesign.TypeToken.glyph)
             } else if item.kind == .screenshot, let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
                 Image(nsImage: thumbnail)
                     .resizable().scaledToFill()
@@ -736,157 +680,23 @@ private struct LauncherResultRow: View {
         }
     }
 
-    private var isScreenHistory: Bool {
-        guard case .item(let item) = result else { return false }
-        return item.kind == .screenHistory
+    private var screenHistoryRow: ScreenHistoryResultRow? {
+        ScreenHistoryResultRow(
+            result: result,
+            isSelected: isSelected,
+            position: position,
+            total: total,
+            primaryAction: action
+        )
     }
 
     private var accessibilityValue: String {
-        if isScreenHistory {
-            return ScreenHistoryAccessibilityPresentation.rowValue(
-                isSelected: isSelected,
-                position: position,
-                total: total,
-                primaryAction: action
-            )
-        }
+        if let screenHistoryRow { return screenHistoryRow.accessibilityValue }
         var parts: [String] = []
         if isSelected { parts.append("Selected") }
         if let position, let total { parts.append("\(position) of \(total)") }
         if isSelected { parts.append("\(action) with Return") }
         return parts.joined(separator: ", ")
-    }
-}
-
-private struct ScreenHistoryEmptyState: View {
-    @Bindable var viewModel: QuickViewModel
-    @ScaledMetric(relativeTo: .body) private var minimumHeight: CGFloat = 96
-
-    var body: some View {
-        let presentation = ScreenHistoryEmptyPresentation(
-            state: viewModel.screenHistoryLoadState,
-            query: viewModel.input
-        )
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: presentation.icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(presentation.title)
-                    .font(.body.weight(.semibold))
-                Text(presentation.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if presentation.offersClearFilters {
-                    Button("Clear filters") {
-                        viewModel.input = ""
-                    }
-                    .buttonStyle(.link)
-                }
-            }
-            Spacer()
-        }
-        .padding(20)
-        .frame(minHeight: minimumHeight)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-struct ScreenHistoryEmptyPresentation: Equatable, Sendable {
-    let icon: String
-    let title: String
-    let detail: String
-    let offersClearFilters: Bool
-
-    init(state: QuickViewModel.ScreenHistoryLoadState, query: String) {
-        let filterDecision = ScreenHistoryQueryParser.parse(query)
-        if case .search(let parsed) = filterDecision {
-            offersClearFilters = parsed.hasFilters
-        } else {
-            offersClearFilters = false
-        }
-        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        icon = switch state {
-        case .loading: "hourglass"
-        case .failed, .unavailable: "exclamationmark.circle"
-        case .refusedFuture, .routedToVaultSearch: "arrow.triangle.branch"
-        default: "clock.arrow.circlepath"
-        }
-        title = switch state {
-        case .loading: "Searching screen history…"
-        case .unavailable: "Screen History is unavailable on this Mac."
-        case .failed(let message): message
-        case .refusedFuture: "Future screen activity cannot be known."
-        case .routedToVaultSearch: "Use Vault Search for current project status."
-        case .ready:
-            cleanQuery.isEmpty ? "No screen history yet" : "No screen history for “\(String(cleanQuery.prefix(120)))”"
-        case .idle: "Open Screen History to search this Mac."
-        }
-        detail = switch state {
-        case .loading: "Search stays on this Mac."
-        case .unavailable: "Enable legacy search or create the owned local store in Settings."
-        case .failed: "No web, model, Vault Search, or VPS fallback was used."
-        case .refusedFuture: "Screen History only reports what was visible in the past."
-        case .routedToVaultSearch: "Screen History records visibility. Vault Search reports current work state."
-        case .ready:
-            offersClearFilters
-                ? "Try different words or clear the filters."
-                : "Try different words."
-        case .idle: ""
-        }
-    }
-}
-
-struct ScreenHistorySavePreview: Equatable, Sendable {
-    let source: String
-    let localRecordID: String
-    let seenAt: String
-    let application: String
-    let window: String
-    let ocrExcerpt: String
-    let validationError: String?
-
-    init(frame: ScreenHistoryFrame) {
-        source = frame.source == .owned ? "Owned" : "Coast"
-        localRecordID = frame.sourceIdentifier
-        seenAt = ScreenHistoryVaultSaveService.formattedTimestamp(frame.capturedAt)
-        application = frame.application.map {
-            String($0.prefix(ScreenHistoryVaultSaveService.maximumApplicationCharacters))
-        } ?? "Not included"
-        window = frame.windowTitle.map {
-            String($0.prefix(ScreenHistoryVaultSaveService.maximumWindowTitleCharacters))
-        } ?? "Not included"
-        let boundedOCR = String(
-            frame.ocrText.prefix(ScreenHistoryVaultSaveService.maximumOCRExcerptCharacters)
-        )
-        ocrExcerpt = boundedOCR
-        let cleanRecordID = frame.sourceIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        validationError = cleanRecordID.isEmpty
-            || cleanRecordID.count > ScreenHistoryVaultSaveService.maximumRecordIDCharacters
-            ? "This local record ID cannot be saved."
-            : nil
-    }
-}
-
-enum ScreenHistoryAccessibilityPresentation {
-    static let informationGroupName = "Information"
-
-    static func rowValue(
-        isSelected: Bool,
-        position: Int?,
-        total: Int?,
-        primaryAction: String
-    ) -> String {
-        var parts: [String] = []
-        if isSelected { parts.append("Selected") }
-        if let position, let total { parts.append("\(position) of \(total)") }
-        if isSelected { parts.append("\(primaryAction) with Return") }
-        return parts.joined(separator: ", ")
-    }
-
-    static func actionValue(isSelected: Bool, position: Int, total: Int) -> String {
-        "\(isSelected ? "Selected, " : "")\(position) of \(total)"
     }
 }
 
@@ -900,20 +710,7 @@ private struct ItemActionPane: View {
     @FocusState private var searchFocused: Bool
     @State private var editedTitle = ""
     @State private var editedValue = ""
-    @State private var screenHistoryProjectSlug = ""
-    @State private var screenHistoryNote = ""
     @FocusState private var formFocused: Bool
-
-    private var screenHistoryTextScale: CGFloat {
-        switch dynamicTypeSize {
-        case .accessibility1: 1.35
-        case .accessibility2: 1.6
-        case .accessibility3: 2
-        case .accessibility4: 2.25
-        case .accessibility5: 2.5
-        default: 1
-        }
-    }
 
     private var actions: [ItemAction] {
         viewModel.filteredFocusedItemActions
@@ -933,7 +730,7 @@ private struct ItemActionPane: View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, 20)
-                .frame(height: 44)
+                .frame(height: PanelSizing.paneHeaderHeight)
             Divider()
             if let form = viewModel.activeItemActionForm {
                 formView(form)
@@ -987,7 +784,7 @@ private struct ItemActionPane: View {
             Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         } else if let item, item.kind == .emoji {
-            Text(item.value).font(.system(size: 18))
+            Text(item.value).font(AQDesign.TypeToken.glyph)
         } else if let item {
             Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
         }
@@ -1030,56 +827,41 @@ private struct ItemActionPane: View {
     // MARK: Action list
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: PanelSizing.actionRowSpacing) {
-                if actions.isEmpty {
-                    Text("No matching actions")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: PanelSizing.actionRowHeight)
-                }
-                ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
-                    Button {
-                        Task { await viewModel.perform(action, on: result) }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: action.systemImage)
-                                .frame(width: 18)
-                                .foregroundStyle(
-                                    action.isDestructive
-                                        ? AQDesign.ColorToken.danger
-                                        : (index == selectedIndex ? AQDesign.ColorToken.accent : .secondary)
-                                )
-                            Text(action.title)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(action.isDestructive ? AQDesign.ColorToken.danger : .primary)
-                            Spacer()
-                            if let shortcut = action.shortcut {
-                                KeyCapGroup(keys: shortcut.keyCaps)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(height: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                .fill(index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear)
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
-                    .accessibilityValue(
-                        ScreenHistoryAccessibilityPresentation.actionValue(
-                            isSelected: index == selectedIndex,
-                            position: index + 1,
-                            total: actions.count
-                        )
+        SelectableListPane(
+            items: actions,
+            selectedIndex: $selectedIndex,
+            rowSpacing: PanelSizing.actionRowSpacing,
+            rowHeight: PanelSizing.actionRowHeight,
+            listInsets: EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8),
+            emptyText: "No matching actions",
+            accessibilityValue: { index, isSelected in
+                ScreenHistoryAccessibilityPresentation.actionValue(
+                    isSelected: isSelected,
+                    position: index + 1,
+                    total: actions.count
+                )
+            },
+            onActivate: { action in
+                Task { await viewModel.perform(action, on: result) }
+            }
+        ) { _, action, isSelected in
+            HStack(spacing: 10) {
+                Image(systemName: action.systemImage)
+                    .frame(width: 18)
+                    .foregroundStyle(
+                        action.isDestructive
+                            ? AQDesign.ColorToken.danger
+                            : (isSelected ? AQDesign.ColorToken.accent : .secondary)
                     )
+                Text(action.title)
+                    .font(AQDesign.TypeToken.body.weight(.medium))
+                    .foregroundStyle(action.isDestructive ? AQDesign.ColorToken.danger : .primary)
+                Spacer()
+                if let shortcut = action.shortcut {
+                    KeyCapGroup(keys: shortcut.keyCaps)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
         }
         // Exactly as tall as its rows (capped at six): the pane hugs its
         // content instead of stretching into an empty dark sheet.
@@ -1100,7 +882,7 @@ private struct ItemActionPane: View {
             KeyCapGroup(keys: ["⌘", "K"])
         }
         .padding(.horizontal, 20)
-        .frame(height: 40)
+        .frame(height: PanelSizing.paneSearchRowHeight)
     }
 
     // MARK: Forms
@@ -1176,100 +958,7 @@ private struct ItemActionPane: View {
                 }
             }
         case .screenHistorySave:
-            screenHistorySaveForm
-        }
-    }
-
-    @ViewBuilder
-    private var screenHistorySaveForm: some View {
-        if let item,
-           let frame = viewModel.screenHistoryFrame(for: item) {
-            let preview = ScreenHistorySavePreview(frame: frame)
-            VStack(alignment: .leading, spacing: 12) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            LabeledContent("Source", value: preview.source)
-                            LabeledContent("Local record ID", value: preview.localRecordID)
-                            LabeledContent("Seen at", value: preview.seenAt)
-                            LabeledContent("Application", value: preview.application)
-                            LabeledContent("Window", value: preview.window)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("OCR excerpt saved to Vault")
-                                    .font(.system(size: 11 * screenHistoryTextScale, weight: .semibold))
-                                Text(preview.ocrExcerpt.isEmpty ? "Empty" : preview.ocrExcerpt)
-                                    .font(.system(size: 11 * screenHistoryTextScale))
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(AQDesign.ColorToken.keyCapFill)
-                                    )
-                            }
-                        }
-                        .font(.system(size: 13 * screenHistoryTextScale))
-                        .accessibilityElement(children: .contain)
-                        .accessibilityLabel("Screen moment preview")
-
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Project slug")
-                                .font(.system(size: 11 * screenHistoryTextScale))
-                                .foregroundStyle(.secondary)
-                            TextField("Optional, for example: acme-launch", text: $screenHistoryProjectSlug)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 13 * screenHistoryTextScale))
-                                .focused($formFocused)
-                                .accessibilityLabel("Optional project slug")
-                        }
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Note")
-                                .font(.system(size: 11 * screenHistoryTextScale))
-                                .foregroundStyle(.secondary)
-                            TextEditor(text: $screenHistoryNote)
-                                .font(.system(size: 13 * screenHistoryTextScale))
-                                .frame(minHeight: 64, maxHeight: 110)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                                .accessibilityLabel("Optional note")
-                        }
-                        if let error = preview.validationError ?? viewModel.screenHistorySaveError {
-                            Text(error)
-                                .font(.system(size: 11 * screenHistoryTextScale))
-                                .foregroundStyle(AQDesign.ColorToken.danger)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityLabel("Unable to save. \(error)")
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 380)
-                HStack(spacing: AQDesign.Space.standard) {
-                    Button("Save moment") {
-                        Task {
-                            _ = await viewModel.saveScreenHistoryNote(
-                                for: result,
-                                projectSlug: screenHistoryProjectSlug,
-                                note: screenHistoryNote
-                            )
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .font(.system(size: 13 * screenHistoryTextScale, weight: .semibold))
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(preview.validationError != nil)
-                    Button("Cancel") { viewModel.dismissItemActionLayer() }
-                        .font(.system(size: 13 * screenHistoryTextScale))
-                    Spacer()
-                    Text("⌘↩ saves · esc cancels")
-                        .font(.system(size: 11 * screenHistoryTextScale))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } else {
-            Text("This screen moment is no longer available.")
-                .font(.body)
-                .foregroundStyle(AQDesign.ColorToken.danger)
+            ScreenHistorySaveForm(viewModel: viewModel, result: result, formFocused: $formFocused)
         }
     }
 
@@ -1321,29 +1010,22 @@ private struct ItemActionPane: View {
     }
 
     private func focusSearch() {
-        Task { @MainActor in
-            await Task.yield()
-            searchFocused = true
-        }
+        FocusRequest.apply($searchFocused)
     }
 
     private func focusForm() {
-        Task { @MainActor in
-            await Task.yield()
-            formFocused = true
-        }
+        FocusRequest.apply($formFocused)
     }
 
     private func move(_ delta: Int) {
-        let count = actions.count
-        guard count > 0 else { return }
-        selectedIndex = (selectedIndex + delta + count) % count
+        guard !actions.isEmpty else { return }
+        selectedIndex = ListSelection.wrappedIndex(selectedIndex, by: delta, count: actions.count)
         announceSelectedAction()
     }
 
     private func announceSelectedAction() {
         guard actions.indices.contains(selectedIndex) else { return }
-        viewModel.announceScreenHistoryActionSelection(
+        viewModel.screenHistory.announceActionSelection(
             actions[selectedIndex],
             position: selectedIndex + 1,
             total: actions.count
@@ -1391,47 +1073,29 @@ private struct QuickActionPalette: View {
                     .onSubmit { runSelected() }
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onKeyPress(.upArrow) { move(-1); return .handled }
-                    .onKeyPress(.escape) {
-                        viewModel.closeActionPalette()
-                        return .handled
-                    }
                 Text("⌘K")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(AQDesign.TypeToken.hint.weight(.medium))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
 
-            ScrollView {
-                LazyVStack(spacing: PanelSizing.actionRowSpacing) {
-                    if entries.isEmpty {
-                        Text("No actions here yet")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: PanelSizing.actionRowHeight)
-                    }
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        Button { run(entry) } label: {
-                            row(for: entry, isSelected: index == selectedIndex)
-                                .padding(.horizontal, 20)
-                                .frame(height: 42)
-                                .background(
-                                    index == selectedIndex ? AQDesign.ColorToken.selectionFill : .clear,
-                                    in: RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
-                        .accessibilityValue(
-                            index == selectedIndex
-                                ? "Selected, \(index + 1) of \(entries.count)"
-                                : "\(index + 1) of \(entries.count)"
-                        )
-                    }
-                }
-                .padding(.horizontal, 6)
+            SelectableListPane(
+                items: entries,
+                selectedIndex: $selectedIndex,
+                rowSpacing: PanelSizing.actionRowSpacing,
+                rowHeight: PanelSizing.actionRowHeight,
+                listInsets: EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6),
+                emptyText: "No actions here yet",
+                accessibilityValue: { index, isSelected in
+                    isSelected
+                        ? "Selected, \(index + 1) of \(entries.count)"
+                        : "\(index + 1) of \(entries.count)"
+                },
+                onActivate: run
+            ) { _, entry, isSelected in
+                row(for: entry, isSelected: isSelected)
+                    .padding(.horizontal, 20)
             }
             // Hug the rows (capped at six); an empty palette shows one quiet
             // placeholder row instead of a stretched dark sheet.
@@ -1515,16 +1179,12 @@ private struct QuickActionPalette: View {
     }
 
     private func focusSearch() {
-        Task { @MainActor in
-            await Task.yield()
-            searchFocused = true
-        }
+        FocusRequest.apply($searchFocused)
     }
 
     private func move(_ delta: Int) {
-        let count = entries.count
-        guard count > 0 else { return }
-        selectedIndex = (selectedIndex + delta + count) % count
+        guard !entries.isEmpty else { return }
+        selectedIndex = ListSelection.wrappedIndex(selectedIndex, by: delta, count: entries.count)
         announceSelected()
     }
 
@@ -1569,7 +1229,6 @@ private struct QuickActionPalette: View {
 private struct LauncherFooter: View {
     @Bindable var viewModel: QuickViewModel
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .caption) private var screenHistoryFooterMinHeight: CGFloat = 34
 
     private var visibleHints: [QuickViewModel.FooterHint] {
         let hints = viewModel.footerHints
@@ -1614,11 +1273,10 @@ private struct LauncherFooter: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-        .frame(
-            minHeight: viewModel.catalogScope == .screenHistory
-                ? screenHistoryFooterMinHeight
-                : AQDesign.footerHeight
-        )
+        .modifier(ScreenHistoryFooterFrame(
+            isActive: viewModel.catalogScope == .screenHistory,
+            defaultMinHeight: AQDesign.footerHeight
+        ))
         .accessibilityElement(children: .combine)
     }
 }
@@ -1656,21 +1314,6 @@ struct KeyCap: View {
     }
 }
 
-extension Notification.Name {
-    static let dismissOverlay = Notification.Name("QuickLaunch.dismissOverlay")
-    static let presentOverlay = Notification.Name("QuickLaunch.presentOverlay")
-    static let screenAwarenessSettingsChanged = Notification.Name("QuickLaunch.screenAwarenessSettingsChanged")
-    static let openTranslator = Notification.Name("QuickLaunch.openTranslator")
-    static let translatorSettingsChanged = Notification.Name("QuickLaunch.translatorSettingsChanged")
-    static let openTypeToClick = Notification.Name("QuickLaunch.openTypeToClick")
-    static let typeToClickSettingsChanged = Notification.Name("QuickLaunch.typeToClickSettingsChanged")
-    static let openSettings = Notification.Name("QuickLaunch.openSettings")
-    static let hotkeyChanged = Notification.Name("QuickLaunch.hotkeyChanged")
-    static let actionHotkeysChanged = Notification.Name("QuickLaunch.actionHotkeysChanged")
-    static let launcherItemHotkeysChanged = Notification.Name("QuickLaunch.launcherItemHotkeysChanged")
-    static let clipboardHistorySettingsChanged = Notification.Name("QuickLaunch.clipboardHistorySettingsChanged")
-    static let providerChanged = Notification.Name("QuickLaunch.providerChanged")
-}
 
 
 /// Three dots that breathe in turn: the model is working. Subtle on purpose.

@@ -12,8 +12,11 @@ is not used. Local OpenAI-compatible servers,
 API providers, and one-shot CLI subscriptions can be swapped without turning
 the app into a broad chat or agent workspace. Short follow-ups and bounded
 local history support the immediate action. Finder automation, document
-workflows, ambient screen capture, and autonomous file changes are outside the
-core until they have a separate permission and safety design. Explicit
+workflows, and autonomous file changes are outside the core until they have a
+separate permission and safety design. The only screen capture is the owned
+Screen History capture: opt-in, off by default, switched on in its own Settings
+tab, local only, and hard-locked in the current build until its privacy review
+passes. Explicit
 clipboard-image attachments may be routed to the local vision server, but must
 not be persisted. Preserve the local
 math shortcut, no telemetry, Keychain secrets, direct process execution with

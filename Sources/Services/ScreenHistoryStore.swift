@@ -15,9 +15,7 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
     private let afterMediaRemoval: (@Sendable (URL) throws -> Void)?
 
     static func defaultDatabaseURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch")
-            .appendingPathComponent("screen-history.sqlite3")
+        AppPaths.file("screen-history.sqlite3")
     }
 
     static func defaultMediaDirectoryURL() -> URL {

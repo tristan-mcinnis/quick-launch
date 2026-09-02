@@ -287,18 +287,3 @@ struct OpenAICompatibleService: QuickService, @unchecked Sendable {
         return (200..<300).contains(http.statusCode)
     }
 }
-
-enum QuickServiceError: LocalizedError {
-    case serverError(String)
-    case streamError(String)
-    case connectionFailed(String)
-    case commandFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .serverError(let message), .streamError(let message),
-             .connectionFailed(let message), .commandFailed(let message):
-            return message
-        }
-    }
-}

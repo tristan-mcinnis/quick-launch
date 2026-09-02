@@ -21,7 +21,7 @@ final class LauncherUsageStore {
         var lastUsed: Date
     }
 
-    private struct Snapshot: Codable {
+    private struct Snapshot: Codable, Sendable {
         var version: Int = 1
         var mnemonics: [String: [String: Record]]
         var items: [String: Record]
@@ -39,20 +39,18 @@ final class LauncherUsageStore {
     /// `"<scope>\u{1F}<item id>"` → record.
     private(set) var items: [String: Record] = [:]
 
-    private let fileURL: URL?
+    private let file: JSONFileStore<Snapshot>?
     var now: () -> Date
 
     /// Pass `nil` for an in-memory store (tests, previews).
     init(fileURL: URL?, now: @escaping () -> Date = Date.init) {
-        self.fileURL = fileURL
+        self.file = fileURL.map { JSONFileStore(fileURL: $0) }
         self.now = now
         load()
     }
 
     static func defaultFileURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch")
-            .appendingPathComponent("launcher-usage.json")
+        AppPaths.file("launcher-usage.json")
     }
 
     // MARK: - Recording
@@ -194,9 +192,8 @@ final class LauncherUsageStore {
     // MARK: - Helpers
 
     static func normalizedQuery(_ query: String) -> String {
-        let folded = query
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let folded = FuzzyMatcher
+            .fold(query.trimmingCharacters(in: .whitespacesAndNewlines))
             .lowercased()
         return String(folded.prefix(maxQueryLength))
     }
@@ -233,23 +230,18 @@ final class LauncherUsageStore {
     // MARK: - Persistence
 
     private func load() {
-        guard let fileURL,
-              let data = try? Data(contentsOf: fileURL),
-              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data)
-        else { return }
+        guard let snapshot = file?.load() else { return }
         mnemonics = snapshot.mnemonics
         items = snapshot.items
     }
 
     private func save() {
-        guard let fileURL else { return }
-        let snapshot = Snapshot(mnemonics: mnemonics, items: items)
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? data.write(to: fileURL, options: [.atomic])
+        file?.save(Snapshot(mnemonics: mnemonics, items: items))
+    }
+
+    /// Tests: block until queued writes are on disk.
+    func waitForPendingWrites() {
+        file?.flush()
     }
 }
 

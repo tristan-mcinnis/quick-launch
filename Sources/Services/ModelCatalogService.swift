@@ -68,26 +68,20 @@ struct ModelCatalogService: Sendable {
         }
         guard provider.discovery == .pi else { return provider.models }
 
-        return try await Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = ["--offline", "--list-models"]
-            process.currentDirectoryURL = FileManager.default.temporaryDirectory
-            let output = Pipe()
-            let errors = Pipe()
-            process.standardOutput = output
-            process.standardError = errors
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let data = errors.fileHandleForReading.readDataToEndOfFile()
-                let message = String(data: data, encoding: .utf8) ?? "Pi model discovery failed"
-                throw QuickServiceError.commandFailed(message.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
-            return Self.parsePiModels(text)
-        }.value
+        let result: ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                executable: executable,
+                arguments: ["--offline", "--list-models"],
+                currentDirectory: FileManager.default.temporaryDirectory
+            )
+        } catch let error as ProcessRunnerError {
+            throw QuickServiceError.commandFailed(error.localizedDescription)
+        }
+        guard result.status == 0 else {
+            throw QuickServiceError.commandFailed(result.trimmedStderr ?? "Pi model discovery failed")
+        }
+        return Self.parsePiModels(result.stdoutText)
     }
 
     static func refreshFailureMessage(status: Int, providerName: String, hasAPIKey: Bool) -> String {

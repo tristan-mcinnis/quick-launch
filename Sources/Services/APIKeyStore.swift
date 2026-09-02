@@ -10,68 +10,44 @@ enum APIKeyStore {
         "com.fullstackoptimization.apfel-quick.provider-api-keys",
     ]
 
-    static func load(providerID: UUID) -> String? {
-        if let value = load(providerID: providerID, service: service) {
+    static func load(providerID: UUID, keychain: any KeychainStoring = SystemKeychainStore()) -> String? {
+        if let value = load(providerID: providerID, service: service, keychain: keychain) {
             return value
         }
         for legacyService in legacyServices {
-            guard let value = load(providerID: providerID, service: legacyService) else { continue }
+            guard let value = load(providerID: providerID, service: legacyService, keychain: keychain) else { continue }
             // Migrate forward. Leave the legacy item alone so older builds keep working.
-            try? save(value, providerID: providerID)
+            try? save(value, providerID: providerID, keychain: keychain)
             return value
         }
         return nil
     }
 
-    private static func load(providerID: UUID, service: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: providerID.uuidString,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data
-        else { return nil }
+    private static func load(providerID: UUID, service: String, keychain: any KeychainStoring) -> String? {
+        guard let data = try? keychain.read(service: service, account: providerID.uuidString) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    static func save(_ apiKey: String, providerID: UUID) throws {
-        let value = Data(apiKey.utf8)
-        let lookup: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: providerID.uuidString,
-        ]
-        let attributes: [String: Any] = [kSecValueData as String: value]
-        let updateStatus = SecItemUpdate(lookup as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw APIKeyStoreError.keychain(updateStatus)
-        }
-
-        var newItem = lookup
-        newItem[kSecValueData as String] = value
-        // This Mac only. Do not sync provider secrets through iCloud Keychain.
-        newItem[kSecAttrSynchronizable as String] = false
-        let addStatus = SecItemAdd(newItem as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw APIKeyStoreError.keychain(addStatus)
+    static func save(_ apiKey: String, providerID: UUID, keychain: any KeychainStoring = SystemKeychainStore()) throws {
+        do {
+            // This Mac only. Do not sync provider secrets through iCloud Keychain.
+            try keychain.write(
+                Data(apiKey.utf8),
+                service: service,
+                account: providerID.uuidString,
+                options: .thisMacOnly
+            )
+        } catch {
+            throw APIKeyStoreError.keychain(error.status)
         }
     }
 
-    static func delete(providerID: UUID) throws {
+    static func delete(providerID: UUID, keychain: any KeychainStoring = SystemKeychainStore()) throws {
         for candidate in [service] + legacyServices {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: candidate,
-                kSecAttrAccount as String: providerID.uuidString,
-            ]
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw APIKeyStoreError.keychain(status)
+            do {
+                try keychain.delete(service: candidate, account: providerID.uuidString)
+            } catch {
+                throw APIKeyStoreError.keychain(error.status)
             }
         }
     }

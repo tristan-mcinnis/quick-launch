@@ -23,33 +23,27 @@ final class KeyablePanel: NSPanel {
     /// Escape must work even when a SwiftUI TextField's field editor consumes
     /// cancelOperation before the root view sees `.onKeyPress(.escape)`.
     var escapeHandler: (() -> Bool)?
+    /// Plain submit, used when a modified Return has no special meaning.
+    var returnHandler: (() -> Void)?
 
     /// Unmodified keys never reach `performKeyEquivalent`; the field editor
     /// eats Backspace before SwiftUI sees it. `sendEvent` sees everything.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown,
-           event.keyCode == 53,
-           event.modifierFlags
-               .intersection(.deviceIndependentFlagsMask)
-               .subtracting([.function, .numericPad, .capsLock]).isEmpty,
-           escapeHandler?() == true {
-            return
-        }
-        if event.type == .keyDown,
-           event.keyCode == 51,
-           event.modifierFlags
-               .intersection(.deviceIndependentFlagsMask)
-               .subtracting([.function, .numericPad, .capsLock]).isEmpty,
-           backspaceHandler?() == true {
-            return
+        if event.type == .keyDown, event.modifierFlags.overlayRelevant.isEmpty {
+            switch VirtualKey(event: event) {
+            case .escape where escapeHandler?() == true:
+                return
+            case .delete where backspaceHandler?() == true:
+                return
+            default:
+                break
+            }
         }
         super.sendEvent(event)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.function, .numericPad, .capsLock])
+        let modifiers = event.modifierFlags.overlayRelevant
         if event.type == .keyDown,
            event.charactersIgnoringModifiers?.lowercased() == "c",
            modifiers == [.command],
@@ -72,8 +66,11 @@ final class KeyablePanel: NSPanel {
         }
         if event.type == .keyDown,
            modifiers == [.shift],
-           event.keyCode == 36 || event.keyCode == 76,
-           translateHandler?() == true {
+           VirtualKey.isReturn(keyCode: event.keyCode) {
+            // ⇧↩ translates when a direction is set; otherwise it submits
+            // like a plain Return instead of silently doing nothing.
+            if translateHandler?() == true { return true }
+            returnHandler?()
             return true
         }
         if event.type == .keyDown,
@@ -214,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
+        vm.overlayPresenter = self
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)
@@ -304,8 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.settings = settings
         // Stored colors are written in whichever notation settings ask for.
         colorHistory.preferredFormat = settings.colorFormat
-        await viewModel.prepareScreenHistoryCaptureForBootstrap()
-        await viewModel.applyScreenHistoryRetention()
+        await viewModel.screenHistory.prepareCaptureForBootstrap()
+        await viewModel.screenHistory.applyRetention()
         caffeinateManager.onChange = { [weak viewModel] in
             viewModel?.syncCaffeinateState()
         }
@@ -531,6 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.escapeHandler = { [weak viewModel] in
             viewModel?.handleEscapeKey() ?? false
         }
+        panel.returnHandler = { [weak viewModel] in
+            Task { @MainActor in await viewModel?.submitResolvingFuzzyAlias() }
+        }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -621,12 +622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func hideOverlay() {
         guard let panel else { return }
         panel.orderOut(nil)
-        viewModel?.isActionPalettePresented = false
-        viewModel?.isApplicationActionPanePresented = false
-        viewModel?.isCatalogActionPanePresented = false
-        viewModel?.contextualApplicationID = nil
-        viewModel?.contextualCatalogItemID = nil
-        viewModel?.actionQuery = ""
+        viewModel?.reset(.layers)
         viewModel?.rememberSelectionTarget(nil)
 
         overlayClearTask?.cancel()
@@ -658,9 +654,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Back to the root, like a fresh Raycast open.
     private static func resetOverlaySurface(_ viewModel: QuickViewModel) {
-        if viewModel.catalogScope != nil || viewModel.pendingQuickLinkID != nil || viewModel.inputMode != nil {
-            viewModel.leaveCatalog()
-        }
         viewModel.clearTransientDisplay()
     }
 
@@ -891,8 +884,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panel.shortcutHandler = { [weak self, weak model] characters, keyCode, modifiers in
             guard let self, let model else { return false }
-            let isReturn = keyCode == 36 || keyCode == 76
-            if keyCode == 53, modifiers.isEmpty {
+            let isReturn = VirtualKey.isReturn(keyCode: keyCode)
+            if VirtualKey(rawValue: keyCode) == .escape, modifiers.isEmpty {
                 if model.isTargetPickerPresented {
                     model.isTargetPickerPresented = false
                 } else if !model.source.isEmpty {
@@ -1016,9 +1009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vm.learnDirectUse(of: item)
         vm.rememberSelectionTarget(selectedTextService.currentExternalTarget())
         if item.kind == .quickLink, item.requiresInput {
-            vm.pendingQuickLinkID = item.id
-            vm.catalogScope = nil
-            vm.input = ""
+            vm.enterQuickLinkInput(itemID: item.id)
             showOverlay(captureSelectionTarget: false)
         } else {
             Task { await vm.performLauncherItem(item) }
@@ -1074,7 +1065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncStatusItemVisibilityAndPresentation(viewModel: QuickViewModel) {
         let presentation = ScreenHistoryMenuBarPresentation.make(
-            status: viewModel.screenHistoryCaptureStatus
+            status: viewModel.screenHistory.captureStatus
         )
         let shouldShow = viewModel.settings.showMenuBar || presentation.forcesVisibility
         if shouldShow {
@@ -1138,7 +1129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         let screenHistory = ScreenHistoryStatusPresentation.make(
-            status: viewModel?.screenHistoryCaptureStatus
+            status: viewModel?.screenHistory.captureStatus
         )
         let screenHistoryStatus = NSMenuItem(
             title: screenHistory.statusTitle,
@@ -1226,11 +1217,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.pendingContext
             _ = viewModel.applicationSelectionIndex
             _ = viewModel.screenshotIndexProgress
-            _ = viewModel.screenHistoryCaptureStatus
+            _ = viewModel.screenHistory.captureStatus
             // Screen History loads frames asynchronously and can flip into
             // the timeline; both change the row count the window must fit.
-            _ = viewModel.screenHistoryShowsTimeline
-            _ = viewModel.screenHistoryFrames.count
+            _ = viewModel.screenHistory.showsTimeline
+            _ = viewModel.screenHistory.frames.count
             _ = viewModel.settings.showMenuBar
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
@@ -1324,7 +1315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func stopScreenHistoryFromMenu() {
         Task { @MainActor [weak viewModel] in
-            await viewModel?.pauseScreenHistoryCapture()
+            await viewModel?.screenHistory.pauseCapture()
         }
     }
 
@@ -1452,4 +1443,14 @@ extension QuickViewModel {
         }
     }
 
+}
+
+// MARK: - OverlayPresenting
+
+extension AppDelegate: OverlayPresenting {
+    func presentOverlay() { showOverlay(captureSelectionTarget: false) }
+    func dismissOverlay() { hideOverlay() }
+    func openSettings() { showSettingsPanel() }
+    func openTranslator() { showTranslator() }
+    func openTypeToClick() { showTypeToClick() }
 }

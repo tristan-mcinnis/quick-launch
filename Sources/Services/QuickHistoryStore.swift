@@ -1,24 +1,70 @@
 import Foundation
 
+/// Chat history: one JSON file in Application Support.
+///
+/// Earlier builds kept the same array as a JSON blob under a UserDefaults
+/// key. The first load that finds no file copies that blob into the file
+/// and removes the key.
 enum QuickHistoryStore {
     static let defaultsKey = "QuickConversationHistory"
+    static let fileName = "chat-history.json"
+    static let schemaVersion = 1
 
-    static func load(from defaults: UserDefaults = .standard) -> [QuickConversation] {
-        guard let data = defaults.data(forKey: defaultsKey),
-              let conversations = try? JSONDecoder().decode([QuickConversation].self, from: data)
-        else { return [] }
-        return ordered(conversations)
+    static func defaultFileURL() -> URL {
+        AppPaths.file(fileName)
+    }
+
+    /// One serial queue so every caller's writes to the history file stay ordered.
+    private static let writeQueue = DispatchQueue(
+        label: "com.tristanmcinnis.quick-launch.chat-history",
+        qos: .utility
+    )
+
+    private static func store(for url: URL) -> JSONFileStore<[QuickConversation]> {
+        JSONFileStore(fileURL: url, schemaVersion: schemaVersion, queue: writeQueue)
+    }
+
+    static func load(
+        from fileURL: URL = defaultFileURL(),
+        migratingFrom defaults: UserDefaults? = .standard
+    ) -> [QuickConversation] {
+        let store = store(for: fileURL)
+        if let conversations = store.load() {
+            return ordered(conversations)
+        }
+        guard !store.exists, let defaults, let migrated = migrate(from: defaults, into: store) else {
+            return []
+        }
+        return ordered(migrated)
+    }
+
+    /// Moves the UserDefaults blob into the file. Returns what was moved.
+    private static func migrate(
+        from defaults: UserDefaults,
+        into store: JSONFileStore<[QuickConversation]>
+    ) -> [QuickConversation]? {
+        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
+        guard let conversations = try? JSONDecoder().decode([QuickConversation].self, from: data) else {
+            AppLog.persistence.error("Chat history in UserDefaults could not be decoded; leaving it in place.")
+            return nil
+        }
+        do {
+            try store.saveNow(conversations)
+        } catch {
+            AppLog.persistence.error("Could not migrate chat history to \(fileName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return conversations
+        }
+        defaults.removeObject(forKey: defaultsKey)
+        AppLog.persistence.info("Migrated chat history from UserDefaults to \(fileName, privacy: .public).")
+        return conversations
     }
 
     static func save(
         _ conversations: [QuickConversation],
         limit: Int,
-        to defaults: UserDefaults = .standard
+        to fileURL: URL = defaultFileURL()
     ) {
-        let bounded = bounded(conversations, limit: limit)
-        if let data = try? JSONEncoder().encode(bounded) {
-            defaults.set(data, forKey: defaultsKey)
-        }
+        store(for: fileURL).save(bounded(conversations, limit: limit))
     }
 
     static func upserting(
@@ -55,7 +101,16 @@ enum QuickHistoryStore {
         return kept
     }
 
-    static func clear(from defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: defaultsKey)
+    static func clear(
+        from fileURL: URL = defaultFileURL(),
+        defaults: UserDefaults? = .standard
+    ) {
+        store(for: fileURL).delete()
+        defaults?.removeObject(forKey: defaultsKey)
+    }
+
+    /// Tests: block until queued writes are on disk.
+    static func waitForPendingWrites() {
+        writeQueue.sync {}
     }
 }

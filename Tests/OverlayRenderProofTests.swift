@@ -200,9 +200,9 @@ struct OverlayRenderProofTests {
             byteCount: Int64((try Data(contentsOf: imageURL)).count)
         ))
         let vm = Self.makeViewModel(appearance: .dark)
-        vm.screenHistoryStore = store
+        vm.screenHistory.store = store
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "coral variance")
+        await vm.screenHistory.load(query: "coral variance")
         #expect(vm.showsDetailPane)
         try Self.save(
             try Self.render(viewModel: vm, appearance: .darkAqua),
@@ -215,7 +215,7 @@ struct OverlayRenderProofTests {
             name: "overlay-screen-history-actions-dark.png"
         )
         vm.closeItemActionPane()
-        if let item = vm.screenHistoryItems.first {
+        if let item = vm.screenHistory.items.first {
             vm.openActionPane(for: .item(item), form: .screenHistorySave)
             try Self.save(
                 try Self.render(viewModel: vm, appearance: .darkAqua),
@@ -224,7 +224,7 @@ struct OverlayRenderProofTests {
             let productionSave = try Self.renderFixedHeight(
                 viewModel: vm,
                 appearance: .darkAqua,
-                height: PanelSizing.screenHistorySaveMinimumHeight
+                height: ItemActionForm.screenHistorySave.minimumWindowHeight!
             )
             try Self.save(
                 productionSave,
@@ -233,7 +233,7 @@ struct OverlayRenderProofTests {
             let largeTextSave = try Self.renderFixedHeight(
                 viewModel: vm,
                 appearance: .darkAqua,
-                height: PanelSizing.screenHistorySaveMinimumHeight,
+                height: ItemActionForm.screenHistorySave.minimumWindowHeight!,
                 accessibilitySize: true
             )
             try Self.saveOpaque(
@@ -259,17 +259,17 @@ struct OverlayRenderProofTests {
             try Self.renderAtAccessibilitySize(viewModel: vm, appearance: .darkAqua),
             name: "overlay-screen-history-large-text-dark.png"
         )
-        if let frame = vm.screenHistoryFrames.first {
-            await vm.openScreenHistorySequence(for: frame)
+        if let frame = vm.screenHistory.frames.first {
+            await vm.screenHistory.openSequence(for: frame)
             try Self.save(
                 try Self.render(viewModel: vm, appearance: .darkAqua),
                 name: "overlay-screen-history-timeline-dark.png"
             )
-            vm.closeScreenHistoryTimeline()
+            vm.screenHistory.closeTimeline()
         }
 
         vm.input = "synthetic phrase with no match"
-        await vm.loadScreenHistory(query: vm.input)
+        await vm.screenHistory.load(query: vm.input)
         try Self.save(
             try Self.render(viewModel: vm, appearance: .darkAqua),
             name: "overlay-screen-history-empty-dark.png"
@@ -281,7 +281,7 @@ struct OverlayRenderProofTests {
         unavailableSettings.searchLegacyCoastHistory = false
         let unavailable = QuickViewModel(settings: unavailableSettings)
         unavailable.enterCatalog(.screenHistory)
-        await unavailable.loadScreenHistory(query: "coral")
+        await unavailable.screenHistory.load(query: "coral")
         try Self.save(
             try Self.render(viewModel: unavailable, appearance: .darkAqua),
             name: "overlay-screen-history-unavailable-dark.png"

@@ -19,6 +19,7 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 15. Search past on-screen activity through one local Screen History catalog, including the owned store and the closed Coast database.
 16. Pick a colour from any pixel on any display, copy it as Hex, RGB, HSL, or HSB, and search a bounded local history of picks.
 17. Read the text inside a dragged screen area on this Mac and copy or paste it.
+18. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
 
 Screenshot capture to the chat context is in the core: a window or display
 capture attaches to one question and follow-ups in that thread, never to
@@ -27,6 +28,16 @@ window remain future catalogs. The current Translate action is a configurable se
 AI action, not the full Tuna translation interface.
 
 It does not need general Finder file search or a full chat workspace. The search-only beta hard-locks ambient capture. A later capture release still needs separate explicit consent and will keep all browsers blocked.
+
+Current refactor plan: `docs/consistency-audit-20260902.md` (keyboard layers, overlay modes, persistence, view styling).
+
+## Type to Click
+
+A second global hotkey (Settings › General, where it can also be cleared) opens a keyboard-only overlay over the frontmost app. The controller walks the app's Accessibility tree and its full menu hierarchy, then draws a label on each visible control and menu-bar item, one panel per display so mixed-Retina setups line up. Typing fuzzy-searches labels, roles, and menu paths; the map narrows with the query. Return acts on the best match with the element's semantic action, falling back to a guarded click at its midpoint; Command, Shift, or Option with Return sends a modified click, Control with Return a right click. Two continuation modes: "Stay open and rescan" keeps the overlay up after each action, and when a native menu opens its items become the next target map with labels drawn above the menu; "Dismiss after one action" closes after one click. Keys are intercepted by a CGEvent tap, so Quick Launch never becomes the active app and the controlled app keeps its menus and field focus.
+
+## Agent Watch
+
+`AgentSessionWatcher` keeps the Mac awake while Claude Code or Codex is working. Agent hooks write one small JSON file per session into `~/Library/Application Support/Quick Launch/AgentSessions` (the old Tuna Companion folder is watched too). The watcher uses one file-system event source per folder, no polling, and sweeps stale files after 12 hours. Live sessions drive the Caffeinate Agent Watch state and its Status row.
 
 ## Interaction contract
 

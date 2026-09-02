@@ -103,47 +103,22 @@ actor SearXNGSearchService: WebSearchServicing {
         return components?.url
     }
 
+    /// The single remote command string ssh runs on vault-vps. Pure; tests
+    /// pin the quoting.
+    nonisolated static func remoteCommand(for url: URL) -> [String] {
+        ["curl -s --max-time 6 '\(url.absoluteString.replacingOccurrences(of: "'", with: "%27"))'"]
+    }
+
     private nonisolated static func runSearch(host: String, url: URL) async throws -> Data {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            host,
-            "curl -s --max-time 6 '\(url.absoluteString.replacingOccurrences(of: "'", with: "%27"))'",
-        ]
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                process.terminationHandler = { finished in
-                    let output = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errorOutput = String(
-                        decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-                        as: UTF8.self
-                    ).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard finished.terminationStatus == 0 else {
-                        continuation.resume(throwing: WebSearchError.failed(
-                            errorOutput.isEmpty
-                                ? "exit \(finished.terminationStatus)"
-                                : errorOutput
-                        ))
-                        return
-                    }
-                    continuation.resume(returning: output)
-                }
-
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(throwing: WebSearchError.failed(error.localizedDescription))
-                }
-            }
-        } onCancel: {
-            if process.isRunning { process.terminate() }
+        let result: ProcessResult
+        do {
+            result = try await SSHRunner.run(host: host, remoteCommand: remoteCommand(for: url))
+        } catch let error as ProcessRunnerError {
+            throw WebSearchError.failed(error.localizedDescription)
         }
+        guard result.status == 0 else {
+            throw WebSearchError.failed(result.trimmedStderr ?? "exit \(result.status)")
+        }
+        return result.stdout
     }
 }

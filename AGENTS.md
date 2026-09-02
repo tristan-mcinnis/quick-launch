@@ -54,10 +54,13 @@ Preserve:
 - protocol-backed services with regression tests;
 - deterministic previous-window layouts and native Caffeinate lifecycle control.
 
-Finder automation, document workflows, ambient screen capture, and autonomous
-file changes remain outside the core until they have explicit interaction,
-permission, and safety designs. A user-copied screenshot may be attached to one
-request and routed locally, but must never be persisted in settings or history.
+Finder automation, document workflows, and autonomous file changes remain
+outside the core until they have explicit interaction, permission, and safety
+designs. Screen capture exists only as the owned Screen History capture: opt-in,
+off by default, enabled by "Enable owned screen capture" in its own Settings
+tab, local only, and hard-locked in the current build until its privacy review
+and soak test pass. A user-copied screenshot may be attached to one request and
+routed locally, but must never be persisted in settings or history.
 
 ## Development
 

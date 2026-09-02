@@ -25,16 +25,16 @@ struct ScreenHistoryWorkflowTests {
         let coast = FakeCoastReader(rows: [Self.frame(id: "coast-1", source: .coast, text: "Coral source table")])
         let vm = QuickViewModel(screenHistoryStore: owned, coastLegacyReader: coast)
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "coral")
+        await vm.screenHistory.load(query: "coral")
 
-        #expect(vm.screenHistoryItems.count == 2)
-        #expect(vm.screenHistoryItems.allSatisfy { $0.title == "Project Juniper" })
-        #expect(vm.screenHistoryItems.contains { $0.keywords.contains("Owned") })
-        #expect(vm.screenHistoryItems.contains { $0.keywords.contains("Coast") })
-        #expect(vm.screenHistoryItems.contains { $0.detail.hasPrefix("Owned · Seen ") })
-        #expect(vm.screenHistoryItems.contains { $0.detail.hasPrefix("Coast · Seen ") })
-        #expect(vm.screenHistoryItems.allSatisfy { $0.kind == .screenHistory })
-        #expect(vm.screenHistoryLoadState == .ready)
+        #expect(vm.screenHistory.items.count == 2)
+        #expect(vm.screenHistory.items.allSatisfy { $0.title == "Project Juniper" })
+        #expect(vm.screenHistory.items.contains { $0.keywords.contains("Owned") })
+        #expect(vm.screenHistory.items.contains { $0.keywords.contains("Coast") })
+        #expect(vm.screenHistory.items.contains { $0.detail.hasPrefix("Owned · Seen ") })
+        #expect(vm.screenHistory.items.contains { $0.detail.hasPrefix("Coast · Seen ") })
+        #expect(vm.screenHistory.items.allSatisfy { $0.kind == .screenHistory })
+        #expect(vm.screenHistory.loadState == .ready)
         #expect(vm.footerHints.contains { $0.label == "Copy text" && $0.keys == ["⌘", "↩"] })
         vm.handleCommandK()
         #expect(vm.isCatalogActionPanePresented)
@@ -45,10 +45,10 @@ struct ScreenHistoryWorkflowTests {
         let owned = FakeScreenHistoryStore(rows: [])
         let vm = QuickViewModel(screenHistoryStore: owned)
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "what will be on my screen tomorrow")
-        #expect(vm.screenHistoryLoadState == .refusedFuture)
-        await vm.loadScreenHistory(query: "where does Project Juniper stand now?")
-        #expect(vm.screenHistoryLoadState == .routedToVaultSearch)
+        await vm.screenHistory.load(query: "what will be on my screen tomorrow")
+        #expect(vm.screenHistory.loadState == .refusedFuture)
+        await vm.screenHistory.load(query: "where does Project Juniper stand now?")
+        #expect(vm.screenHistory.loadState == .routedToVaultSearch)
         #expect(await owned.searchCalls == 0)
     }
 
@@ -87,14 +87,14 @@ struct ScreenHistoryWorkflowTests {
         let owned = FakeScreenHistoryStore(rows: rows)
         let vm = QuickViewModel(screenHistoryStore: owned)
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "coral")
-        await vm.openScreenHistorySequence(for: anchor)
+        await vm.screenHistory.load(query: "coral")
+        await vm.screenHistory.openSequence(for: anchor)
 
-        #expect(vm.screenHistoryShowsTimeline)
-        #expect(vm.screenHistoryTimelineFrames.map(\.sourceIdentifier) == ["1", "2", "3"])
+        #expect(vm.screenHistory.showsTimeline)
+        #expect(vm.screenHistory.timelineFrames.map(\.sourceIdentifier) == ["1", "2", "3"])
         vm.input = ""
         #expect(vm.popLayerForEmptyBackspace())
-        #expect(!vm.screenHistoryShowsTimeline)
+        #expect(!vm.screenHistory.showsTimeline)
         #expect(vm.catalogScope == .screenHistory)
     }
 
@@ -115,9 +115,9 @@ struct ScreenHistoryWorkflowTests {
         let vm = QuickViewModel(screenHistoryStore: FakeScreenHistoryStore(rows: rows))
         vm.catalogScope = .screenHistory
 
-        await vm.openScreenHistorySequence(for: anchor)
+        await vm.screenHistory.openSequence(for: anchor)
 
-        #expect(vm.screenHistoryTimelineFrames.map(\.sourceIdentifier) == ["1", "2", "3"])
+        #expect(vm.screenHistory.timelineFrames.map(\.sourceIdentifier) == ["1", "2", "3"])
     }
 
     @Test func actionTableUsesTheLauncherGrammarAndVaultWriteUsesConfirmedForm() async throws {
@@ -126,8 +126,8 @@ struct ScreenHistoryWorkflowTests {
         let saver = FakeScreenHistoryVaultSaver()
         let vm = QuickViewModel(screenHistoryStore: store, screenHistoryVaultSaver: saver)
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "coral")
-        let item = try #require(vm.screenHistoryItems.first)
+        await vm.screenHistory.load(query: "coral")
+        let item = try #require(vm.screenHistory.items.first)
         let actions = ItemActionCatalog.actions(for: .item(item), pasteTarget: nil)
         #expect(actions.map(\.title).contains("Open moment"))
         #expect(actions.map(\.title).contains("Show timeline"))
@@ -146,7 +146,7 @@ struct ScreenHistoryWorkflowTests {
         #expect(preview.application == "Keynote")
         #expect(preview.window == "Project Juniper")
         #expect(!preview.ocrExcerpt.contains("/tmp/not-owned.jpg"))
-        #expect(await vm.saveScreenHistoryNote(
+        #expect(await vm.screenHistory.saveNote(
             for: .item(item),
             projectSlug: "project-juniper",
             note: "Follow up with the team"
@@ -154,7 +154,7 @@ struct ScreenHistoryWorkflowTests {
         #expect(await saver.savedRecordIDs == ["one"])
         #expect(await saver.savedProjectSlugs == ["project-juniper"])
         #expect(await saver.savedNotes == ["Follow up with the team"])
-        #expect(vm.screenHistoryResultAnnouncement == "Saved this screen moment to Vault triage.")
+        #expect(vm.screenHistory.resultAnnouncement == "Saved this screen moment to Vault triage.")
     }
 
     @Test func settingsKeepSearchAndCaptureConsentSeparate() {
@@ -181,21 +181,21 @@ struct ScreenHistoryWorkflowTests {
         })
         await vm.performLauncherResult(root)
         vm.input = "coral"
-        await vm.loadScreenHistory(query: vm.input)
+        await vm.screenHistory.load(query: vm.input)
         vm.moveSelectionVertically(1)
         #expect(vm.applicationSelectionIndex == 1)
-        #expect(vm.screenHistoryResultAnnouncement.contains("selected"))
+        #expect(vm.screenHistory.resultAnnouncement.contains("selected"))
 
-        let selected = try #require(vm.screenHistoryFrame(for: vm.screenHistoryItems[1]))
-        await vm.openScreenHistorySequence(for: selected)
-        #expect(vm.screenHistoryShowsTimeline)
+        let selected = try #require(vm.screenHistory.frame(for: vm.screenHistory.items[1]))
+        await vm.screenHistory.openSequence(for: selected)
+        #expect(vm.screenHistory.showsTimeline)
         vm.handleCommandK()
         #expect(vm.isCatalogActionPanePresented)
         #expect(!vm.focusedItemActions.contains { $0.kind == .showTimeline })
         vm.dismissItemActionLayer()
         #expect(!vm.isCatalogActionPanePresented)
-        vm.closeScreenHistoryTimeline()
-        #expect(!vm.screenHistoryShowsTimeline)
+        vm.screenHistory.closeTimeline()
+        #expect(!vm.screenHistory.showsTimeline)
         vm.input = ""
         #expect(vm.popLayerForEmptyBackspace())
         #expect(vm.catalogScope == nil)
@@ -210,10 +210,10 @@ struct ScreenHistoryWorkflowTests {
             screenHistoryVaultSaver: saver
         )
         vm.catalogScope = .screenHistory
-        await vm.loadScreenHistory(query: "visible")
-        let firstRevision = vm.screenHistoryAnnouncementRevision
-        await vm.loadScreenHistory(query: "visible")
-        #expect(vm.screenHistoryAnnouncementRevision == firstRevision + 1)
+        await vm.screenHistory.load(query: "visible")
+        let firstRevision = vm.screenHistory.announcementRevision
+        await vm.screenHistory.load(query: "visible")
+        #expect(vm.screenHistory.announcementRevision == firstRevision + 1)
         #expect(ScreenHistoryAccessibilityPresentation.rowValue(
             isSelected: true,
             position: 1,
@@ -227,10 +227,10 @@ struct ScreenHistoryWorkflowTests {
         ) == "Selected, 2 of 6")
         #expect(ScreenHistoryAccessibilityPresentation.informationGroupName == "Information")
 
-        let item = try #require(vm.screenHistoryItems.first)
+        let item = try #require(vm.screenHistory.items.first)
         vm.openActionPane(for: .item(item), form: .screenHistorySave)
         let focusBeforeSave = vm.inputFocusRequest
-        #expect(await vm.saveScreenHistoryNote(for: .item(item), projectSlug: "", note: ""))
+        #expect(await vm.screenHistory.saveNote(for: .item(item), projectSlug: "", note: ""))
         #expect(vm.inputFocusRequest == focusBeforeSave + 1)
         let preview = ScreenHistorySavePreview(frame: frame)
         #expect(preview.ocrExcerpt == String(frame.ocrText.prefix(
@@ -251,12 +251,12 @@ struct ScreenHistoryWorkflowTests {
             return true
         }.count == 1)
         vm.enterCatalog(.screenHistory)
-        await vm.loadScreenHistory(query: "coral")
+        await vm.screenHistory.load(query: "coral")
         vm.applicationSelectionIndex = 1
-        let stableIDs = vm.screenHistoryItems.map(\.itemID)
+        let stableIDs = vm.screenHistory.items.map(\.itemID)
         _ = vm.detailItem
         #expect(vm.applicationSelectionIndex == 1)
-        #expect(vm.screenHistoryItems.map(\.itemID) == stableIDs)
+        #expect(vm.screenHistory.items.map(\.itemID) == stableIDs)
         vm.handleCommandK()
         let actions = vm.focusedItemActions
         #expect(actions.first?.title == "Open moment")
@@ -289,13 +289,13 @@ struct ScreenHistoryWorkflowTests {
         )
         let vm = QuickViewModel(screenHistoryStore: slowStore)
         vm.enterCatalog(.screenHistory)
-        let search = Task { await vm.loadScreenHistory(query: "coral") }
+        let search = Task { await vm.screenHistory.load(query: "coral") }
         try await Task.sleep(for: .milliseconds(60))
-        #expect(vm.screenHistoryLoadState != .loading)
+        #expect(vm.screenHistory.loadState != .loading)
         try await Task.sleep(for: .milliseconds(100))
-        #expect(vm.screenHistoryLoadState == .loading)
+        #expect(vm.screenHistory.loadState == .loading)
         await search.value
-        #expect(vm.screenHistoryLoadState == .ready)
+        #expect(vm.screenHistory.loadState == .ready)
     }
 
     @Test func explicitCoastImportUsesCurrentPolicyAndReportsTheHundredMomentSample() async throws {
@@ -307,10 +307,10 @@ struct ScreenHistoryWorkflowTests {
         let importer = FakeScreenHistoryCoastImporter(sampleCount: 100)
         let vm = QuickViewModel(settings: settings, screenHistoryCoastImporter: importer)
 
-        await vm.refreshScreenHistoryCoastImportAvailability()
-        #expect(vm.screenHistoryCoastImportState == .ready)
-        await vm.previewCoastHistoryImport()
-        guard case .previewReady(let preview) = vm.screenHistoryCoastImportState else {
+        await vm.screenHistory.refreshCoastImportAvailability()
+        #expect(vm.screenHistory.coastImportState == .ready)
+        await vm.screenHistory.previewCoastImport()
+        guard case .previewReady(let preview) = vm.screenHistory.coastImportState else {
             Issue.record("Expected reviewed Coast preview")
             return
         }
@@ -318,11 +318,11 @@ struct ScreenHistoryWorkflowTests {
         #expect(preview.importedRows == 10)
         #expect(preview.excludedRows == 1)
         #expect(preview.invalidRows == 1)
-        #expect(vm.screenHistoryCoastImportCanImport)
-        await vm.importCoastHistory()
+        #expect(vm.screenHistory.coastImportCanImport)
+        await vm.screenHistory.importCoastHistory()
 
         let summary: ScreenHistoryCoastImportSummary
-        guard case .completed(let completed) = vm.screenHistoryCoastImportState else {
+        guard case .completed(let completed) = vm.screenHistory.coastImportState else {
             Issue.record("Expected completed Coast import")
             return
         }
@@ -338,8 +338,8 @@ struct ScreenHistoryWorkflowTests {
         let policy = try #require(await importer.importPolicies.first)
         #expect(policy.excludedBundleIdentifiers.contains("com.example.current-private"))
         #expect(policy.excludedDomains.contains("current-private.example"))
-        #expect(vm.screenHistoryCoastImportMessage?.contains("Prepared 100 of 100") == true)
-        #expect(vm.screenHistoryCoastImportMessage?.contains("Coast stays unchanged") == true)
+        #expect(vm.screenHistory.coastImportMessage?.contains("Prepared 100 of 100") == true)
+        #expect(vm.screenHistory.coastImportMessage?.contains("Coast stays unchanged") == true)
     }
 
     @Test func coastImportFailureStopsSafelyAndCanResumeWithoutSamplingEarly() async {
@@ -349,41 +349,41 @@ struct ScreenHistoryWorkflowTests {
         let importer = FakeScreenHistoryCoastImporter(failure: .media)
         let vm = QuickViewModel(settings: settings, screenHistoryCoastImporter: importer)
 
-        await vm.previewCoastHistoryImport()
-        await vm.importCoastHistory()
+        await vm.screenHistory.previewCoastImport()
+        await vm.screenHistory.importCoastHistory()
 
-        #expect(vm.screenHistoryCoastImportState == .failed(.media))
+        #expect(vm.screenHistory.coastImportState == .failed(.media))
         #expect(!vm.settings.screenHistoryCaptureConfirmed)
         #expect(await importer.calls == ["available", "preview", "available", "metadata", "media"])
-        #expect(vm.screenHistoryCoastImportMessage?.contains("Coast stayed unchanged") == true)
-        #expect(vm.screenHistoryCoastImportMessage?.contains("resume") == true)
+        #expect(vm.screenHistory.coastImportMessage?.contains("Coast stayed unchanged") == true)
+        #expect(vm.screenHistory.coastImportMessage?.contains("resume") == true)
     }
 
     @Test func coastImportUnavailableDoesNotReadOrWriteMigrationStages() async {
         let importer = FakeScreenHistoryCoastImporter(isAvailable: false)
         let vm = QuickViewModel(screenHistoryCoastImporter: importer)
 
-        await vm.refreshScreenHistoryCoastImportAvailability()
-        #expect(vm.screenHistoryCoastImportState == .unavailable)
-        await vm.importCoastHistory()
+        await vm.screenHistory.refreshCoastImportAvailability()
+        #expect(vm.screenHistory.coastImportState == .unavailable)
+        await vm.screenHistory.importCoastHistory()
 
-        #expect(vm.screenHistoryCoastImportState == .previewInvalidated)
+        #expect(vm.screenHistory.coastImportState == .previewInvalidated)
         #expect(await importer.calls == ["available"])
     }
 
     @Test func coastImportCannotCompleteWithMediaFailuresOrAShortReviewSample() async {
         let mediaFailure = FakeScreenHistoryCoastImporter(mediaFailureCount: 1)
         let mediaVM = QuickViewModel(screenHistoryCoastImporter: mediaFailure)
-        await mediaVM.previewCoastHistoryImport()
-        await mediaVM.importCoastHistory()
-        #expect(mediaVM.screenHistoryCoastImportState == .failed(.media))
+        await mediaVM.screenHistory.previewCoastImport()
+        await mediaVM.screenHistory.importCoastHistory()
+        #expect(mediaVM.screenHistory.coastImportState == .failed(.media))
         #expect(await mediaFailure.calls == ["available", "preview", "available", "metadata", "media"])
 
         let shortSample = FakeScreenHistoryCoastImporter(sampleCount: 99)
         let sampleVM = QuickViewModel(screenHistoryCoastImporter: shortSample)
-        await sampleVM.previewCoastHistoryImport()
-        await sampleVM.importCoastHistory()
-        #expect(sampleVM.screenHistoryCoastImportState == .failed(.verificationSample))
+        await sampleVM.screenHistory.previewCoastImport()
+        await sampleVM.screenHistory.importCoastHistory()
+        #expect(sampleVM.screenHistory.coastImportState == .failed(.verificationSample))
         #expect(await shortSample.calls == ["available", "preview", "available", "metadata", "media", "sample:100"])
     }
 
@@ -391,50 +391,50 @@ struct ScreenHistoryWorkflowTests {
         let importer = FakeScreenHistoryCoastImporter()
         let vm = QuickViewModel(screenHistoryCoastImporter: importer)
 
-        await vm.importCoastHistory()
-        #expect(vm.screenHistoryCoastImportState == .previewInvalidated)
+        await vm.screenHistory.importCoastHistory()
+        #expect(vm.screenHistory.coastImportState == .previewInvalidated)
         #expect(await importer.calls.isEmpty)
 
-        await vm.previewCoastHistoryImport()
-        #expect(vm.screenHistoryCoastImportCanImport)
+        await vm.screenHistory.previewCoastImport()
+        #expect(vm.screenHistory.coastImportCanImport)
         vm.settings.screenHistoryExcludedDomains = ["new-private.example"]
-        vm.invalidateScreenHistoryCoastImportPreview()
-        #expect(vm.screenHistoryCoastImportState == .previewInvalidated)
-        #expect(!vm.screenHistoryCoastImportCanImport)
+        vm.screenHistory.invalidateCoastImportPreview()
+        #expect(vm.screenHistory.coastImportState == .previewInvalidated)
+        #expect(!vm.screenHistory.coastImportCanImport)
 
-        await vm.importCoastHistory()
+        await vm.screenHistory.importCoastHistory()
         #expect(await importer.calls == ["available", "preview"])
     }
 
     @Test func coastImportRejectsSilentPolicyDriftEvenWithoutUIInvalidation() async {
         let importer = FakeScreenHistoryCoastImporter()
         let vm = QuickViewModel(screenHistoryCoastImporter: importer)
-        await vm.previewCoastHistoryImport()
+        await vm.screenHistory.previewCoastImport()
         vm.settings.screenHistoryExcludedBundleIDs.append("com.example.changed")
 
-        await vm.importCoastHistory()
+        await vm.screenHistory.importCoastHistory()
 
-        #expect(vm.screenHistoryCoastImportState == .previewInvalidated)
-        #expect(!vm.screenHistoryCoastImportCanImport)
+        #expect(vm.screenHistory.coastImportState == .previewInvalidated)
+        #expect(!vm.screenHistory.coastImportCanImport)
         #expect(await importer.calls == ["available", "preview"])
     }
 
     @Test func coastPreviewShowsProgressAndFailsBeforeImportStages() async throws {
         let slowImporter = FakeScreenHistoryCoastImporter(previewDelay: .milliseconds(120))
         let slowVM = QuickViewModel(screenHistoryCoastImporter: slowImporter)
-        let preview = Task { await slowVM.previewCoastHistoryImport() }
+        let preview = Task { await slowVM.screenHistory.previewCoastImport() }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(slowVM.screenHistoryCoastImportState == .previewingMetadata)
-        #expect(slowVM.screenHistoryCoastImportIsRunning)
+        #expect(slowVM.screenHistory.coastImportState == .previewingMetadata)
+        #expect(slowVM.screenHistory.coastImportIsRunning)
         await preview.value
-        #expect(slowVM.screenHistoryCoastImportCanImport)
+        #expect(slowVM.screenHistory.coastImportCanImport)
 
         let failedImporter = FakeScreenHistoryCoastImporter(failure: .preview)
         let failedVM = QuickViewModel(screenHistoryCoastImporter: failedImporter)
-        await failedVM.previewCoastHistoryImport()
-        #expect(failedVM.screenHistoryCoastImportState == .failed(.preview))
-        #expect(!failedVM.screenHistoryCoastImportCanImport)
-        #expect(failedVM.screenHistoryCoastImportMessage?.contains("before any import write") == true)
+        await failedVM.screenHistory.previewCoastImport()
+        #expect(failedVM.screenHistory.coastImportState == .failed(.preview))
+        #expect(!failedVM.screenHistory.coastImportCanImport)
+        #expect(failedVM.screenHistory.coastImportMessage?.contains("before any import write") == true)
         #expect(await failedImporter.calls == ["available", "preview"])
     }
 
@@ -443,20 +443,20 @@ struct ScreenHistoryWorkflowTests {
         disabledSettings.screenHistoryCaptureEnabled = false
         let disabled = QuickViewModel(settings: disabledSettings)
         #expect(!disabled.systemCommands.contains { $0.itemID == "screenHistory.toggleCapture" })
-        #expect(disabled.screenHistoryCaptureStatusLabel == "Capture unavailable")
+        #expect(disabled.screenHistory.captureStatusLabel == "Capture unavailable")
 
-        disabled.screenHistoryCaptureStatus = ScreenHistoryCaptureStatus(
+        disabled.screenHistory.captureStatus = ScreenHistoryCaptureStatus(
             state: .running,
             lastSkipReason: nil,
             metrics: .init(),
             configuration: .init(isEnabled: true),
             fileVaultStatus: .on
         )
-        #expect(disabled.screenHistoryMenuBarCanBeHidden)
-        #expect(!disabled.screenHistoryCaptureIsActive)
+        #expect(disabled.screenHistory.menuBarCanBeHidden)
+        #expect(!disabled.screenHistory.captureIsActive)
         #expect(!disabled.systemCommands.contains { $0.itemID == "screenHistory.toggleCapture" })
 
-        let running = ScreenHistoryMenuBarPresentation.make(status: disabled.screenHistoryCaptureStatus)
+        let running = ScreenHistoryMenuBarPresentation.make(status: disabled.screenHistory.captureStatus)
         #expect(running.symbolName == "record.circle.fill")
         #expect(running.accessibilityName == "Quick Launch, Screen History running")
         #expect(running.forcesVisibility)

@@ -66,14 +66,6 @@ struct CaptureContext: Equatable, Sendable {
     }
 }
 
-@MainActor
-protocol ScreenAwarenessReading: AnyObject {
-    /// Reads the focused window of `target` through Accessibility.
-    func readContext(for target: SelectionTarget) -> CaptureContext
-    /// Lets the user drag out a screen area; returns the image or nil when cancelled.
-    func captureArea() async -> QuickImageAttachment?
-}
-
 /// Accessibility walk of the focused window: title, selection, focused
 /// field, readable static text, and the page URL when a web area is present.
 @MainActor
@@ -147,17 +139,10 @@ final class ScreenAwarenessService: ScreenAwarenessReading {
     func captureArea() async -> QuickImageAttachment? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-area-\(UUID().uuidString).png")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-i", "-x", "-t", "png", url.path]
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in continuation.resume() }
-        }
+        guard (try? await ProcessRunner.run(
+            executable: URL(fileURLWithPath: "/usr/sbin/screencapture"),
+            arguments: ["-i", "-x", "-t", "png", url.path]
+        )) != nil else { return nil }
         defer { try? FileManager.default.removeItem(at: url) }
         guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
         return ClipboardImageReader.attachment(data: data, mimeType: "image/png")

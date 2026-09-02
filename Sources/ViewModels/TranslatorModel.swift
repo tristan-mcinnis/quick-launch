@@ -352,28 +352,3 @@ final class TranslatorModel {
         onCommit?(TranslationRecord(source: source, translation: translation, target: target.code))
     }
 }
-
-/// Committed translations only, newest first, bounded. Local JSON, 0600.
-enum TranslationHistoryStore {
-    static func defaultURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Quick Launch/translation-history.json")
-    }
-
-    static func load(from url: URL) -> [TranslationRecord] {
-        guard let data = try? Data(contentsOf: url),
-              let records = try? JSONDecoder().decode([TranslationRecord].self, from: data)
-        else { return [] }
-        return records
-    }
-
-    static func append(_ record: TranslationRecord, to url: URL, limit: Int = TranslatorModel.historyLimit) {
-        var records = load(from: url)
-        records.insert(record, at: 0)
-        records = Array(records.prefix(limit))
-        guard let data = try? JSONEncoder().encode(records) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-    }
-}

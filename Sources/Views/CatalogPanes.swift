@@ -35,7 +35,7 @@ struct EmojiGridView: View {
                                 Task { await viewModel.performLauncherResult(items[index]) }
                             } label: {
                                 Text(item.value)
-                                    .font(.system(size: 26))
+                                    .font(.largeTitle)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: Self.cellHeight - 4)
                                     .background(
@@ -117,8 +117,8 @@ struct CatalogDetailPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: item.id) {
             guard item.kind == .screenHistory,
-                  let frame = viewModel.screenHistoryFrame(for: item) else { return }
-            await viewModel.loadScreenHistoryOCRBoxes(for: frame)
+                  let frame = viewModel.screenHistory.frame(for: item) else { return }
+            await viewModel.screenHistory.loadOCRBoxes(for: frame)
         }
     }
 
@@ -141,7 +141,7 @@ struct CatalogDetailPane: View {
         case .clipboard, .snippet:
             ScrollView {
                 Text(item.value)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(AQDesign.TypeToken.code)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -176,7 +176,7 @@ struct CatalogDetailPane: View {
                         .truncationMode(.middle)
                 }
                 Text(item.value)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(AQDesign.TypeToken.code)
                     .textSelection(.enabled)
                     .lineLimit(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,10 +184,10 @@ struct CatalogDetailPane: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
         case .screenHistory:
-            if let frame = viewModel.screenHistoryFrame(for: item) {
+            if let frame = viewModel.screenHistory.frame(for: item) {
                 ScreenHistoryMomentPreview(
                     frame: frame,
-                    boxes: viewModel.screenHistoryOCRBoxes(for: frame),
+                    boxes: viewModel.screenHistory.ocrBoxes(for: frame),
                     accessibilityLabel: screenHistoryPreviewLabel(frame)
                 )
             } else {
@@ -265,7 +265,7 @@ struct CatalogDetailPane: View {
             if item.isPinned { list.append(("Pinned", "Yes")) }
             return list
         case .screenHistory:
-            guard let frame = viewModel.screenHistoryFrame(for: item) else { return [] }
+            guard let frame = viewModel.screenHistory.frame(for: item) else { return [] }
             var list: [(String, String)] = [
                 ("Seen", frame.capturedAt.formatted(date: .abbreviated, time: .shortened)),
                 ("Application", frame.application ?? "Unknown"),
@@ -289,7 +289,7 @@ struct CatalogDetailPane: View {
 
     private var longText: String? {
         if item.kind == .screenHistory {
-            guard let frame = viewModel.screenHistoryFrame(for: item) else { return nil }
+            guard let frame = viewModel.screenHistory.frame(for: item) else { return nil }
             let text = frame.ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? "No text found" : String(text.prefix(4_000))
         }
