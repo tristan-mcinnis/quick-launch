@@ -36,6 +36,46 @@ enum ScreenPlacement {
         return result
     }
 
+    /// The top edge a panel keeps for its whole visible life: the input row
+    /// on the centre line, pulled down only if the tallest panel would not
+    /// fit above the bottom margin. Computed once per show so later growth
+    /// never moves the search field.
+    static func anchoredTop(
+        visibleFrame: CGRect,
+        inputHeight: CGFloat,
+        margin: CGFloat = 12
+    ) -> CGFloat {
+        let centred = (visibleFrame.midY + inputHeight / 2).rounded()
+        return min(centred, visibleFrame.maxY - margin)
+    }
+
+    /// A frame hung from `top`: the height is capped so the bottom stays
+    /// above the margin, and only the bottom edge moves as content changes.
+    static func frameHanging(
+        from top: CGFloat,
+        height: CGFloat,
+        width: CGFloat,
+        centreX: CGFloat,
+        within visibleFrame: CGRect,
+        margin: CGFloat = 12
+    ) -> CGRect {
+        let maxHeight = max(1, top - (visibleFrame.minY + margin))
+        let clampedHeight = min(height, maxHeight)
+        var result = CGRect(
+            x: (centreX - width / 2).rounded(),
+            y: top - clampedHeight,
+            width: width,
+            height: clampedHeight
+        )
+        let availableWidth = max(1, visibleFrame.width - margin * 2)
+        result.size.width = min(result.width, availableWidth)
+        let minX = visibleFrame.minX + margin
+        let maxX = visibleFrame.maxX - margin
+        if result.minX < minX { result.origin.x = minX }
+        if result.maxX > maxX { result.origin.x = maxX - result.width }
+        return result
+    }
+
     static func screenIndex(containing point: CGPoint, frames: [CGRect]) -> Int? {
         frames.firstIndex(where: { $0.contains(point) }) ?? frames.indices.first
     }

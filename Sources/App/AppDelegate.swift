@@ -113,6 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayClearTask: Task<Void, Never>?
     /// Pending delayed shrink of the overlay panel; growth cancels it.
     private var panelShrinkTask: Task<Void, Never>?
+    /// The launcher's top edge and the display it was anchored on, fixed at
+    /// show time. Content growth hangs from here; the search field never moves.
+    private var panelAnchor: (top: CGFloat, visibleFrame: CGRect)?
     private var overlayRetentionID: UUID?
 
     private let selectedTextService = SelectedTextService()
@@ -601,13 +604,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 panelWidth: viewModel?.currentPanelWidth ?? PanelSizing.panelWidth,
                 inputHeight: PanelSizing.inputHeight
             )
-            // Keep the input row on the centre line whatever the panel's
-            // current height: the frame's top edge is what the eye reads.
-            var frame = panel.frame
-            frame.origin = NSPoint(x: origin.x, y: origin.y - (frame.height - PanelSizing.inputHeight))
-            // A retained answer keeps the panel tall; without the clamp the
-            // bottom of the window reopened below the screen edge.
-            frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+            // Anchor the top edge once: the input row sits on the centre
+            // line and stays there while results grow below it. The old
+            // "grow down, then clamp" path pushed the search field up the
+            // moment the list reached the bottom margin.
+            let top = ScreenPlacement.anchoredTop(
+                visibleFrame: screen.visibleFrame,
+                inputHeight: PanelSizing.inputHeight
+            )
+            panelAnchor = (top: top, visibleFrame: screen.visibleFrame)
+            let frame = ScreenPlacement.frameHanging(
+                from: top,
+                height: panel.frame.height,
+                width: panel.frame.width,
+                centreX: origin.x + panel.frame.width / 2,
+                within: screen.visibleFrame
+            )
             panel.setFrame(frame, display: false)
         }
         // No fade. The panel appears on the same frame as the hotkey, like
@@ -1270,14 +1282,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel else { return }
         var frame = panel.frame
         guard abs(frame.height - height) > 1 || abs(frame.width - width) > 1 else { return }
-        let delta = height - frame.height
         let centreX = frame.midX
-        frame.size.height = height
-        frame.size.width = width
-        frame.origin.x = (centreX - width / 2).rounded()
-        frame.origin.y -= delta  // grow down from the top
-        if let screen = panel.screen ?? screenContainingMouse() {
-            frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+        if let panelAnchor {
+            // Hang from the fixed top edge: only the bottom moves.
+            frame = ScreenPlacement.frameHanging(
+                from: panelAnchor.top,
+                height: height,
+                width: width,
+                centreX: centreX,
+                within: panelAnchor.visibleFrame
+            )
+        } else {
+            let delta = height - frame.height
+            frame.size.height = height
+            frame.size.width = width
+            frame.origin.x = (centreX - width / 2).rounded()
+            frame.origin.y -= delta  // grow down from the top
+            if let screen = panel.screen ?? screenContainingMouse() {
+                frame = ScreenPlacement.clamped(frame: frame, within: screen.visibleFrame)
+            }
         }
         panel.setFrame(frame, display: true, animate: false)
     }

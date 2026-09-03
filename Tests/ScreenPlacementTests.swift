@@ -38,6 +38,34 @@ struct ScreenPlacementTests {
         ))
     }
 
+    @Test func anchoredTopKeepsTheInputRowCentredAndInsideTheMargin() {
+        let visible = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        // Input row 408...468 is centred on 437.5; its top edge is the anchor.
+        #expect(ScreenPlacement.anchoredTop(visibleFrame: visible, inputHeight: 60) == 468)
+        // A very short display pulls the anchor down to the top margin.
+        let tiny = CGRect(x: 0, y: 0, width: 800, height: 40)
+        #expect(ScreenPlacement.anchoredTop(visibleFrame: tiny, inputHeight: 60) == 28)
+    }
+
+    @Test func framesHungFromTheAnchorNeverMoveTheTopEdge() {
+        let visible = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        let top = ScreenPlacement.anchoredTop(visibleFrame: visible, inputHeight: 60)
+        let short = ScreenPlacement.frameHanging(from: top, height: 60, width: 720, centreX: 720, within: visible)
+        let tall = ScreenPlacement.frameHanging(from: top, height: 603, width: 720, centreX: 720, within: visible)
+        // Growth from the empty input to the full list keeps the same top.
+        #expect(short.maxY == 468)
+        #expect(tall.maxY == 468)
+        #expect(short.height == 60)
+        // Content taller than the room below the anchor is capped, not moved.
+        #expect(tall.height == 456)
+        #expect(tall.minY == 12)
+        #expect(tall.minX == 360)
+        // Width is kept inside the display's side margins.
+        let wide = ScreenPlacement.frameHanging(from: top, height: 60, width: 2000, centreX: 720, within: visible)
+        #expect(wide.width == 1416)
+        #expect(wide.minX == 12)
+    }
+
     @Test func panelInputRowSitsOnTheVisualCentreLine() {
         let origin = ScreenPlacement.panelOrigin(
             screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),

@@ -207,3 +207,28 @@ Done 2026-08-22: option 1. Option 2 is off the table; Apple Intelligence is not 
 - The Keychain migration copies the key to the new service and leaves the old
   item in place. macOS may ask once to allow Quick Launch to read the legacy
   item; Always Allow ends the prompts.
+
+## Addendum 2026-08-30: saved future task, voice targeting for Type to Click
+
+Saved as a separate task to pick up later. Not scheduled.
+
+**What:** speak a target instead of typing it while the Type to Click overlay
+is open ("Save As", "sidebar", "text field"). The existing search pipeline
+stays; speech becomes a second input feeding the same fuzzy filter, and the
+top hit activates on a confirmation word or a short silence.
+
+**Why it is cheap here:** Type to Click is search-only over real control
+names, roles, and menu paths, with no generated hint codes, so every target
+is already speakable. This is Voice Control's model with better search.
+
+**Constraints from the ohr post-mortem**
+(`docs/learnings/voice-input-ohr.md`):
+
+- In-process `Speech` framework (`SFSpeechRecognizer`), never a subprocess
+  helper. One entitlement, no child-TCC puzzle.
+- The acceptance test is end-to-end on an installed, signed build: press the
+  hotkey, speak, the right control activates.
+- Distinct from dictation, which stays not-planned above (`local-dictation`
+  owns typing by voice). This task is voice *targeting* only.
+
+Origin: the Peekaboo comparison (`docs/peekaboo-comparison.md`).

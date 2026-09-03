@@ -603,6 +603,8 @@ private struct LauncherResultRow: View {
             if let hotkey {
                 KeyCapGroup(keys: hotkey.keyCaps)
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
+            } else if let statusLight {
+                StatusLightLabel(light: statusLight)
             } else if screenHistoryRow == nil {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
@@ -641,6 +643,10 @@ private struct LauncherResultRow: View {
         case .catalog(let scope, _): scope.title
         case .item(let item): item.title
         }
+    }
+    private var statusLight: LauncherStatusLight? {
+        if case .item(let item) = result { return item.statusLight }
+        return nil
     }
     private var detail: String {
         switch result {
@@ -1282,6 +1288,25 @@ private struct LauncherFooter: View {
 }
 
 /// A short run of key caps such as ⌥ ⌘ ←.
+/// A coloured light and its word: "● On" in the success colour, "● Off" in
+/// the danger colour. Read at a glance before the row text is.
+struct StatusLightLabel: View {
+    let light: LauncherStatusLight
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(light == .on ? AQDesign.ColorToken.success : AQDesign.ColorToken.danger)
+                .frame(width: 7, height: 7)
+            Text(light.label)
+                .font(AQDesign.TypeToken.metadata.weight(.medium))
+                .foregroundStyle(light == .on ? AQDesign.ColorToken.success : AQDesign.ColorToken.danger)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(light.label)
+    }
+}
+
 struct KeyCapGroup: View {
     let keys: [String]
 

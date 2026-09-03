@@ -1,5 +1,19 @@
 import Foundation
 
+/// On/off state a row reports at a glance: green light and "On", red light
+/// and "Off". Status colour only, never chrome.
+enum LauncherStatusLight: Equatable, Sendable {
+    case on
+    case off
+
+    var label: String {
+        switch self {
+        case .on: "On"
+        case .off: "Off"
+        }
+    }
+}
+
 struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var kind: LauncherItemKind
     var itemID: String
@@ -14,6 +28,9 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var isPinned: Bool = false
     /// Screenshots only: when the file was captured, for date filters.
     var capturedAt: Date?
+    /// A live on/off state the row shows as a coloured light with a word,
+    /// in place of its type label. Caffeinate uses it.
+    var statusLight: LauncherStatusLight?
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
@@ -31,6 +48,13 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "screenshot.display": "rectangle.dashed.badge.record",
         "awareness.area": "rectangle.dashed",
         "awareness.selection": "text.cursor",
+        "caffeinate.toggle": "cup.and.saucer.fill",
+        "caffeinate.until": "clock",
+        "caffeinate.30": "timer",
+        "caffeinate.60": "timer",
+        "caffeinate.120": "timer",
+        "caffeinate.240": "timer",
+        "caffeinate.agentWatch": "eye",
     ]
 
     var defaultActionTitle: String {

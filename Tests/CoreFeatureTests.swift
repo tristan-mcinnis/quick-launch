@@ -103,34 +103,47 @@ struct CoreFeatureTests {
         let manager = RecordingCaffeinateManager()
         let vm = QuickViewModel(caffeinateManager: manager)
         manager.onChange = { [weak vm] in vm?.syncCaffeinateState() }
-        let titles = vm.systemCommands.filter { $0.value.hasPrefix("caffeinate.") }.map(\.title)
-        #expect(titles == [
-            "Turn Caffeinate On", "Caffeinate Until…", "Caffeinate for 30 Minutes", "Caffeinate for 1 Hour",
-            "Caffeinate for 2 Hours", "Caffeinate for 4 Hours", "Agent Watch: On", "Caffeinate Status",
+        // The root carries one status row; timers and Agent Watch live in
+        // the catalog so "caffeinate" answers "is it on?" in a single line.
+        let rootTitles = vm.systemCommands.filter { $0.value.hasPrefix("caffeinate.") }.map(\.title)
+        #expect(rootTitles == ["Caffeinate: Off"])
+        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.statusLight == .off)
+        #expect(vm.caffeinateItems.map(\.title) == [
+            "Caffeinate: Off", "Keep Awake for 30 Minutes", "Keep Awake for 1 Hour",
+            "Keep Awake for 2 Hours", "Keep Awake for 4 Hours", "Keep Awake Until a Time…", "Agent Watch: On",
         ])
         #expect(vm.caffeinateItems.map(\.itemID).first == "caffeinate.toggle")
-        #expect(vm.caffeinateItems.count == 8)
-        let oneHour = vm.systemCommands.first { $0.value == "caffeinate.60" }!
+        #expect(vm.caffeinateItems.count == 7)
+        let oneHour = vm.caffeinateItems.first { $0.value == "caffeinate.60" }!
         vm.performSystemCommand(oneHour)
         #expect(manager.enabledFor == 3_600)
         #expect(vm.isCaffeinating)
         #expect(vm.caffeinateEndsAt != nil)
         #expect(!vm.settings.caffeinateEnabled)
         #expect(vm.settings.caffeinateUntil != nil)
-        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.detail.hasPrefix("Awake until") == true)
+        let running = vm.systemCommands.first { $0.value == "caffeinate.toggle" }!
+        #expect(running.title == "Caffeinate: On")
+        #expect(running.statusLight == .on)
+        #expect(running.detail.hasPrefix("Until "))
+        #expect(running.detail.hasSuffix(" left"))
 
         manager.expire()
         #expect(!vm.isCaffeinating)
-        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.title == "Turn Caffeinate On")
+        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.title == "Caffeinate: Off")
 
-        vm.performSystemCommand(vm.systemCommands.first { $0.value == "caffeinate.agentWatch" }!)
+        vm.performSystemCommand(vm.caffeinateItems.first { $0.value == "caffeinate.agentWatch" }!)
         #expect(!vm.settings.caffeinateAgentWatch)
         #expect(manager.isAgentWatchEnabled == false)
-        #expect(vm.systemCommands.first { $0.value == "caffeinate.agentWatch" }?.title == "Agent Watch: Off")
+        #expect(vm.caffeinateItems.first { $0.value == "caffeinate.agentWatch" }?.title == "Agent Watch: Off")
+        #expect(vm.caffeinateItems.first { $0.value == "caffeinate.agentWatch" }?.statusLight == .off)
+    }
 
-        vm.performSystemCommand(vm.systemCommands.first { $0.value == "caffeinate.status" }!)
-        #expect(vm.output == manager.statusSummary)
-        #expect(vm.lastQuestion == "Caffeinate status")
+    @Test func caffeinateRemainingTimeReadsInMinutesAndHours() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(QuickViewModel.remainingTitle(until: now.addingTimeInterval(42 * 60), now: now) == "42 min")
+        #expect(QuickViewModel.remainingTitle(until: now.addingTimeInterval(60 * 60), now: now) == "1 hr")
+        #expect(QuickViewModel.remainingTitle(until: now.addingTimeInterval(125 * 60), now: now) == "2 hr 5 min")
+        #expect(QuickViewModel.remainingTitle(until: now.addingTimeInterval(-5), now: now) == "")
     }
 
     // MARK: Latest screenshot

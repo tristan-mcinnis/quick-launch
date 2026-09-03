@@ -79,6 +79,9 @@ import Observation
     /// End of a timed Caffeinate session, for the command title.
     var caffeinateEndsAt: Date?
     var caffeinateReason: String?
+    private var caffeinateCountdownTask: Task<Void, Never>?
+    /// Clock for anything time-derived in the launcher rows; tests pin it.
+    var now: () -> Date = Date.init
     /// Typing-capture modes beyond Quick Link input.
     var inputMode: InputMode?
     /// Keeps Vault Search follow-ups on the VPS retrieval path instead of
@@ -575,51 +578,7 @@ import Observation
                 keywords: "image paste"
             ),
         ]
-        let caffeinateDetail: String = {
-            if let caffeinateEndsAt, isCaffeinating {
-                return "Awake until \(caffeinateEndsAt.formatted(date: .omitted, time: .shortened))"
-            }
-            return isCaffeinating ? "This Mac will stay awake" : "Prevent this Mac from sleeping"
-        }()
-        let caffeine = LauncherCatalogItem(
-            kind: .command,
-            itemID: "caffeinate.toggle",
-            title: isCaffeinating ? "Turn Caffeinate Off" : "Turn Caffeinate On",
-            detail: caffeinateDetail,
-            value: "caffeinate.toggle"
-        )
-        let timed = Self.caffeinateDurations.map { minutes in
-            LauncherCatalogItem(
-                kind: .command,
-                itemID: "caffeinate.\(minutes)",
-                title: "Caffeinate for \(Self.durationTitle(minutes: minutes))",
-                detail: "Stay awake, then let the Mac sleep again",
-                value: "caffeinate.\(minutes)"
-            )
-        }
-        let until = LauncherCatalogItem(
-            kind: .command,
-            itemID: "caffeinate.until",
-            title: "Caffeinate Until…",
-            detail: "A time like 17:30 or 5:30pm, or a duration like 90m or 2h",
-            value: "caffeinate.until",
-            keywords: "timer schedule"
-        )
-        let agentWatch = LauncherCatalogItem(
-            kind: .command,
-            itemID: "caffeinate.agentWatch",
-            title: settings.caffeinateAgentWatch ? "Agent Watch: On" : "Agent Watch: Off",
-            detail: "Stay awake while Claude Code or Codex is working",
-            value: "caffeinate.agentWatch",
-            keywords: "agent claude codex"
-        )
-        let status = LauncherCatalogItem(
-            kind: .command,
-            itemID: "caffeinate.status",
-            title: "Caffeinate Status",
-            detail: caffeinateManager?.statusSummary ?? "Decaffeinated. Normal Mac sleep is enabled.",
-            value: "caffeinate.status"
-        )
+        let caffeine = caffeinateStatusRow
         let translate = LauncherCatalogItem(
             kind: .command,
             itemID: "translate.mode",
@@ -662,21 +621,86 @@ import Observation
         var commands: [LauncherCatalogItem] = []
         commands.append(contentsOf: layouts)
         commands.append(contentsOf: screenshots)
-        commands.append(contentsOf: [translate, typeToClick, caffeine, until])
-        commands.append(contentsOf: timed)
-        commands.append(contentsOf: [agentWatch, status])
+        // Only the status row lives at the root: typing "caffeinate" answers
+        // "is it on?" in one line. Timers and Agent Watch sit in the catalog.
+        commands.append(contentsOf: [translate, typeToClick, caffeine])
         if let screenHistoryControl { commands.append(screenHistoryControl) }
         commands.append(settings)
         commands.append(contentsOf: utilityCommands)
         return commands
     }
 
-    /// Everything in the Caffeinate catalog, in the order it reads best.
+    /// The one Caffeinate row at the launcher root. The title says On or
+    /// Off, the light shows it, the detail says until when. Return toggles.
+    var caffeinateStatusRow: LauncherCatalogItem {
+        let detail: String
+        if isCaffeinating {
+            if let caffeinateEndsAt {
+                let clock = caffeinateEndsAt.formatted(date: .omitted, time: .shortened)
+                let left = Self.remainingTitle(until: caffeinateEndsAt, now: now())
+                detail = left.isEmpty ? "Until \(clock)" : "Until \(clock) · \(left) left"
+            } else if let caffeinateReason, caffeinateReason.hasPrefix("Caffeinated while") {
+                // "Caffeinated while Claude Code is working." → "While Claude Code is working"
+                let rest = caffeinateReason.dropFirst("Caffeinated ".count).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                detail = rest.prefix(1).uppercased() + rest.dropFirst()
+            } else {
+                detail = "Until you turn it off"
+            }
+        } else {
+            detail = "The Mac sleeps normally"
+        }
+        return LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.toggle",
+            title: isCaffeinating ? "Caffeinate: On" : "Caffeinate: Off",
+            detail: detail,
+            value: "caffeinate.toggle",
+            keywords: "caffeine awake sleep decaffeinate",
+            statusLight: isCaffeinating ? .on : .off
+        )
+    }
+
+    /// Everything in the Caffeinate catalog, in the order it reads best:
+    /// the status row, then the timers, then Agent Watch.
     var caffeinateItems: [LauncherCatalogItem] {
-        let ids = ["caffeinate.toggle", "caffeinate.until", "caffeinate.30", "caffeinate.60",
-                   "caffeinate.120", "caffeinate.240", "caffeinate.agentWatch", "caffeinate.status"]
-        let all = systemCommands
-        return ids.compactMap { id in all.first { $0.itemID == id } }
+        let timed = Self.caffeinateDurations.map { minutes in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "caffeinate.\(minutes)",
+                title: "Keep Awake for \(Self.durationTitle(minutes: minutes))",
+                detail: "Then let the Mac sleep again",
+                value: "caffeinate.\(minutes)",
+                keywords: "caffeinate timer"
+            )
+        }
+        let until = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.until",
+            title: "Keep Awake Until a Time…",
+            detail: "Type a time (17:30, 5:30pm) or a duration (90m, 2h)",
+            value: "caffeinate.until",
+            keywords: "caffeinate timer schedule"
+        )
+        let agentWatch = LauncherCatalogItem(
+            kind: .command,
+            itemID: "caffeinate.agentWatch",
+            title: settings.caffeinateAgentWatch ? "Agent Watch: On" : "Agent Watch: Off",
+            detail: "Stay awake while Claude Code or Codex is working",
+            value: "caffeinate.agentWatch",
+            keywords: "agent claude codex",
+            statusLight: settings.caffeinateAgentWatch ? .on : .off
+        )
+        return [caffeinateStatusRow] + timed + [until, agentWatch]
+    }
+
+    /// "42 min" / "1 hr 5 min" until `until`; empty once it has passed.
+    static func remainingTitle(until: Date, now: Date) -> String {
+        let minutes = Int((until.timeIntervalSince(now) / 60).rounded(.up))
+        guard minutes > 0 else { return "" }
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        return rest == 0 ? "\(hours) hr" : "\(hours) hr \(rest) min"
     }
 
     static let caffeinateDurations = [30, 60, 120, 240]
@@ -1073,6 +1097,9 @@ import Observation
         let pinnedChats = history.filter { $0.isPinned }.count
         parts.append(String(pinnedChats))
         parts.append(isCaffeinating ? "1" : "0")
+        // The status row shows minutes left, so the cache turns over with them.
+        parts.append(caffeinateEndsAt.map { String(Int($0.timeIntervalSince(now()) / 60)) } ?? "-")
+        parts.append(caffeinateReason ?? "")
         parts.append(settings.launcherLearningEnabled ? "1" : "0")
         parts.append(settings.savedPromptPrefix)
         parts.append(String(settings.launcherItemConfigurations.hashValue))
@@ -1679,6 +1706,20 @@ import Observation
         caffeinateEndsAt = caffeinateManager?.endsAt
         caffeinateReason = caffeinateManager?.reason
         invalidateLauncherRanking()
+        scheduleCaffeinateCountdown()
+    }
+
+    /// A timed session shows minutes left, so the row is re-derived once a
+    /// minute while one is running. Nothing runs when there is no deadline.
+    private func scheduleCaffeinateCountdown() {
+        caffeinateCountdownTask?.cancel()
+        caffeinateCountdownTask = nil
+        guard isCaffeinating, caffeinateEndsAt != nil else { return }
+        caffeinateCountdownTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled, let self else { return }
+            self.syncCaffeinateState()
+        }
     }
 
     // MARK: - Input modes
