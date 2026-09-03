@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 18)
+        #expect(settings.configurationVersion == 19)
         #expect(!settings.screenHistorySameUserAccessRiskAccepted)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
@@ -168,7 +168,7 @@ struct QuickSettingsTests {
             from: JSONEncoder().encode(LegacySettings())
         )
 
-        #expect(decoded.configurationVersion == 18)
+        #expect(decoded.configurationVersion == 19)
         #expect(decoded.screenHistoryExcludedBundleIDs == ["com.example.private"])
         #expect(decoded.screenHistoryExcludedDomains == ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted())
     }
@@ -367,5 +367,19 @@ struct LocalProviderMigrationTests {
         legacy.providers[index].baseURL = "http://10.0.0.5:9000/v1"
         let migrated = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(legacy))
         #expect(migrated.providers[index].baseURL == "http://10.0.0.5:9000/v1")
+    }
+
+    @Test func systemAppearanceMigratesToDarkOnce() throws {
+        // A config saved before v19 that never chose an appearance moves to
+        // dark; an explicit light choice, or a v19 config, is left alone.
+        func decode(version: Int, appearance: String) throws -> QuickSettings {
+            let json = """
+            {"configurationVersion": \(version), "appearance": "\(appearance)"}
+            """
+            return try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
+        }
+        #expect(try decode(version: 18, appearance: "system").appearance == .dark)
+        #expect(try decode(version: 18, appearance: "light").appearance == .light)
+        #expect(try decode(version: 19, appearance: "system").appearance == .system)
     }
 }

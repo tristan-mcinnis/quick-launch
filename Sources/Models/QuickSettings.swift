@@ -15,7 +15,7 @@ enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 18
+    var configurationVersion: Int = 19
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -133,7 +133,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 18
+        configurationVersion = 19
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -339,7 +339,7 @@ struct QuickSettings: Codable, Sendable {
                 ?? providers.first(where: { $0.kind == .openAICompatible })?.id
                 ?? providers[0].id
         }
-        if decodedConfigurationVersion < 10, appearance == .system {
+        if decodedConfigurationVersion < 19, appearance == .system {
             // The overlay moved to a dark, monochrome look. Settings that never
             // chose an appearance follow it; an explicit light choice stays.
             appearance = .dark
