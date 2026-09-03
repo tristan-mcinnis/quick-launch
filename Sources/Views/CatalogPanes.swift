@@ -48,7 +48,7 @@ struct EmojiGridView: View {
                                         RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
                                             .strokeBorder(
                                                 index == viewModel.applicationSelectionIndex
-                                                    ? AQDesign.ColorToken.accent.opacity(0.6)
+                                                    ? AQDesign.ColorToken.emphasis.opacity(0.6)
                                                     : .clear,
                                                 lineWidth: 1
                                             )
@@ -169,7 +169,7 @@ struct CatalogDetailPane: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: item.requiresInput ? "text.cursor" : "link")
-                        .foregroundStyle(AQDesign.ColorToken.accent)
+                        .foregroundStyle(AQDesign.ColorToken.emphasis)
                     Text(item.title)
                         .font(AQDesign.TypeToken.body.weight(.semibold))
                         .lineLimit(1)
@@ -373,7 +373,7 @@ private struct ScreenHistoryOCRBoxOverlay: View {
                         containerSize: geometry.size
                     )
                     RoundedRectangle(cornerRadius: 2)
-                        .stroke(AQDesign.ColorToken.accent.opacity(0.55), lineWidth: 1)
+                        .stroke(AQDesign.ColorToken.emphasis.opacity(0.55), lineWidth: 1)
                         .frame(
                             width: rect.width,
                             height: rect.height

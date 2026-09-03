@@ -305,7 +305,7 @@ struct CompactHotkeyRecorder: View {
                 .frame(width: 120, height: 24)
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(AQDesign.ColorToken.accent, lineWidth: 1)
+                        .strokeBorder(AQDesign.ColorToken.emphasis, lineWidth: 1)
                 )
             } else {
                 Button {

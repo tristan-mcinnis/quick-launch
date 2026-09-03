@@ -182,7 +182,7 @@ struct OverlayView: View {
                             HStack(spacing: 10) {
                                 Text(viewModel.settings.savedPromptPrefix + match.alias)
                                     .font(AQDesign.TypeToken.codeLabel)
-                                    .foregroundStyle(AQDesign.ColorToken.accent)
+                                    .foregroundStyle(AQDesign.ColorToken.emphasis)
                                 Text(match.prompt)
                                     .font(AQDesign.TypeToken.detail)
                                     .foregroundStyle(.secondary)
@@ -538,7 +538,7 @@ private struct ConversationTranscript: View {
                             Text(message.role == .user ? "You" : "Answer")
                                 .font(AQDesign.TypeToken.section)
                                 .foregroundStyle(
-                                    message.role == .user ? AQDesign.ColorToken.accent : .secondary
+                                    message.role == .user ? AQDesign.ColorToken.emphasis : .secondary
                                 )
                             Text(String(message.content.prefix(2_000)))
                                 .font(AQDesign.TypeToken.detail)
@@ -620,7 +620,7 @@ private struct LauncherResultRow: View {
             Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         case .catalog(let scope, _):
-            Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+            Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
         case .item(let item):
             if item.kind == .emoji {
                 Text(item.value).font(AQDesign.TypeToken.glyph)
@@ -630,7 +630,7 @@ private struct LauncherResultRow: View {
                     .frame(width: 22, height: 22)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
-                Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+                Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
             }
         }
     }
@@ -786,7 +786,7 @@ private struct ItemActionPane: View {
         } else if let item, item.kind == .emoji {
             Text(item.value).font(AQDesign.TypeToken.glyph)
         } else if let item {
-            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.accent)
+            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
         }
     }
 
@@ -851,7 +851,7 @@ private struct ItemActionPane: View {
                     .foregroundStyle(
                         action.isDestructive
                             ? AQDesign.ColorToken.danger
-                            : (isSelected ? AQDesign.ColorToken.accent : .secondary)
+                            : (isSelected ? AQDesign.ColorToken.emphasis : .secondary)
                     )
                 Text(action.title)
                     .font(AQDesign.TypeToken.body.weight(.medium))
@@ -1130,7 +1130,7 @@ private struct QuickActionPalette: View {
             HStack(spacing: 10) {
                 Image(systemName: action.systemImage)
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(action.title)
                         .font(AQDesign.TypeToken.body.weight(.medium))
@@ -1145,7 +1145,7 @@ private struct QuickActionPalette: View {
             HStack(spacing: 10) {
                 Image(systemName: item.systemImage)
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(AQDesign.TypeToken.body.weight(.medium))
@@ -1162,7 +1162,7 @@ private struct QuickActionPalette: View {
                 Image(systemName: action.outputBehavior == .replaceSelection
                       ? "text.cursor" : "sparkles")
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.accent : .secondary)
+                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(action.name)
                         .font(AQDesign.TypeToken.body.weight(.medium))
@@ -1326,7 +1326,7 @@ struct ThinkingIndicator: View {
         HStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(AQDesign.ColorToken.accent)
+                    .fill(AQDesign.ColorToken.emphasis)
                     .frame(width: 5, height: 5)
                     .opacity(reduceMotion ? 0.55 : (index == phase ? 0.95 : 0.3))
             }

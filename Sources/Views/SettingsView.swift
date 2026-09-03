@@ -126,7 +126,7 @@ struct SettingsView: View {
                     }
                             .padding(.horizontal, 10)
                             .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                    .foregroundStyle(tab == item ? AQDesign.ColorToken.accent : .secondary)
+                    .foregroundStyle(tab == item ? AQDesign.ColorToken.emphasis : .secondary)
                     .background(
                         RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
                             .fill(tab == item ? AQDesign.ColorToken.selectionFill : .clear)
@@ -416,7 +416,7 @@ private struct AboutTab: View {
         case .updateAvailable(let v):
             Button("Update to \(v)") { [weak viewModel] in viewModel?.installUpdate() }
                 .font(AQDesign.TypeToken.detail)
-                .foregroundStyle(AQDesign.ColorToken.accent)
+                .foregroundStyle(AQDesign.ColorToken.emphasis)
                 .buttonStyle(.plain)
         case .installing(let v):
             Text("Installing \(v)…").font(AQDesign.TypeToken.detail).foregroundStyle(.secondary)

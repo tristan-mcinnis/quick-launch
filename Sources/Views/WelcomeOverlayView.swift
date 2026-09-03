@@ -60,7 +60,7 @@ struct WelcomeOverlayView: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(AQDesign.TypeToken.prose.weight(.medium))
-                .foregroundStyle(AQDesign.ColorToken.accent)
+                .foregroundStyle(AQDesign.ColorToken.emphasis)
                 .frame(width: 20)
             Text(text)
                 .font(AQDesign.TypeToken.body)

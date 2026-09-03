@@ -48,7 +48,7 @@ struct TranslatorView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "character.bubble")
-                .foregroundStyle(AQDesign.ColorToken.accent)
+                .foregroundStyle(AQDesign.ColorToken.emphasis)
             Text("Translate")
                 .font(AQDesign.TypeToken.body.weight(.semibold))
             if let detected = model.detectedSource {
