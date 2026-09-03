@@ -288,7 +288,7 @@ struct ScreenHistoryWorkflowTests {
         // that into a race with whatever else holds the main actor.
         let slowStore = FakeScreenHistoryStore(
             rows: [Self.frame(id: "slow", text: "coral")],
-            searchDelay: .milliseconds(1_200)
+            searchDelay: .milliseconds(3_000)
         )
         let vm = QuickViewModel(screenHistoryStore: slowStore)
         vm.enterCatalog(.screenHistory)
@@ -300,7 +300,10 @@ struct ScreenHistoryWorkflowTests {
         // search: the point is that "loading" appears after the debounce and
         // before the results, not that it appears at one exact millisecond.
         var waited = 0
-        while vm.screenHistory.loadState != .loading, waited < 600 {
+        // Under a full parallel suite the debounce has been seen to land
+        // late by whole seconds, so the store's search is 3 s and the wait
+        // is 2 s: still far inside the search, no longer a coin toss.
+        while vm.screenHistory.loadState != .loading, waited < 2_000 {
             try await Task.sleep(for: .milliseconds(20))
             waited += 20
         }
