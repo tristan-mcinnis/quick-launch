@@ -1,0 +1,8 @@
+# design-lint exceptions for Quick Launch. Each line is a deliberate, argued
+# exception, not debt: debt lives in .design-lint-baseline.json and only falls.
+# Form: <glob>            whole file exempt
+#       <glob>:<regex>    exempt only lines matching the regex
+
+# The colour-picker data model. Hex is the format this type reads and writes,
+# and the samples are user-facing example strings, not app chrome.
+Sources/Models/PickedColor.swift
