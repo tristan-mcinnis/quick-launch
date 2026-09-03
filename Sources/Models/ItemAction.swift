@@ -366,6 +366,7 @@ enum ItemActionForm: Equatable, Sendable {
 enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case pasteBack
     case copy
+    case readAloud
     case saveSnippet
     case searchWeb
     case regenerate
@@ -383,6 +384,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .pasteBack: "Paste Answer Back"
         case .copy: "Copy Answer"
+        case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
@@ -400,6 +402,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .pasteBack: "arrow.turn.down.right"
         case .copy: "doc.on.doc"
+        case .readAloud: "speaker.wave.2"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
         case .regenerate: "arrow.clockwise"
@@ -417,6 +420,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
+        case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")

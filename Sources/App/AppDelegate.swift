@@ -174,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watcher: agentSessions,
         power: powerSources
     )
+    private let localSpeechService = LocalSpeechService()
     private let launcherUsage = LauncherUsageStore(fileURL: LauncherUsageStore.defaultFileURL())
     private let screenshotService = ScreenshotCaptureService()
     private let screenAwareness = ScreenAwarenessService()
@@ -207,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
+            localSpeechService: localSpeechService,
             launcherUsage: launcherUsage,
             screenshotService: screenshotService,
             screenAwareness: screenAwareness,

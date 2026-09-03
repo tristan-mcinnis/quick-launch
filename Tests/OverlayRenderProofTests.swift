@@ -67,6 +67,33 @@ struct OverlayRenderProofTests {
         try Self.save(image, name: "translator-dark.png")
     }
 
+    @Test func rendersCommandsCatalogWithReadAloudAndStopReadingRows() throws {
+        // The Commands catalog caps its empty-query list well under the full
+        // `systemCommands` count, so a fresh, unpinned row needs a query to
+        // surface — matching how a real "tts" search would find it.
+        let vm = Self.makeViewModel(appearance: .dark)
+        vm.pasteboard = FakePasteboard(string: "A short paragraph copied to the clipboard, ready to read aloud.")
+        vm.enterCatalog(.commands)
+        vm.input = "read aloud"
+        let readAloudIndex = vm.launcherMatches.firstIndex {
+            if case .item(let item) = $0 { return item.itemID == "speech.readAloud" }
+            return false
+        }
+        #expect(readAloudIndex != nil, "the Read Aloud row must be in the Commands catalog")
+        vm.applicationSelectionIndex = readAloudIndex ?? 0
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-readaloud-dark.png")
+
+        vm.isSpeaking = true
+        vm.input = "stop reading"
+        let stopIndex = vm.launcherMatches.firstIndex {
+            if case .item(let item) = $0 { return item.itemID == "speech.stop" }
+            return false
+        }
+        #expect(stopIndex != nil, "Stop Reading must appear once speaking")
+        vm.applicationSelectionIndex = stopIndex ?? 0
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-readaloud-stop-dark.png")
+    }
+
     @Test func rendersEmojiGridAndScreenshotDetailPane() throws {
         let vm = Self.makeViewModel(appearance: .dark)
         vm.settings.screenshotTextSearch = false

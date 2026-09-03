@@ -107,3 +107,29 @@ final class FakeScreenGeometry: ScreenGeometryProviding {
         self.screenCount = screenCount
     }
 }
+
+/// Controllable local-tts stand-in. An actor, like `MockQuickService`, since
+/// `LocalSpeechServicing` requires `Sendable` and the real implementation is
+/// an actor too. Tests set `healthy`/`speakError` and read back `spoken` and
+/// `stopCount` with `await`.
+actor FakeLocalSpeechService: LocalSpeechServicing {
+    var healthy: Bool
+    var speakError: Error?
+    private(set) var spoken: [String] = []
+    private(set) var stopCount = 0
+
+    init(healthy: Bool = true) {
+        self.healthy = healthy
+    }
+
+    func isHealthy() async -> Bool { healthy }
+
+    func speak(_ text: String) async throws {
+        if let speakError { throw speakError }
+        spoken.append(text)
+    }
+
+    func stop() async {
+        stopCount += 1
+    }
+}

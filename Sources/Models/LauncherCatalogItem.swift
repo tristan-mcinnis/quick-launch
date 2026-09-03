@@ -55,6 +55,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "caffeinate.120": "timer",
         "caffeinate.240": "timer",
         "caffeinate.agentWatch": "eye",
+        "speech.readAloud": "speaker.wave.2",
+        "speech.stop": "speaker.slash",
     ]
 
     var defaultActionTitle: String {
