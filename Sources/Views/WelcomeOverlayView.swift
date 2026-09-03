@@ -1,70 +1,85 @@
 import SwiftUI
 
+/// The first-run card: the app mark, one paragraph, three bullets, and the
+/// key that starts the launcher. Monochrome glass, exactly like the launcher.
 struct WelcomeOverlayView: View {
     @Bindable var viewModel: QuickViewModel
     var onContinue: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.38, green: 0.13, blue: 0.66),
-                                     Color(red: 0.24, green: 0.07, blue: 0.44)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing))
-                    Image(systemName: "bolt.fill")
-                        .font(.largeTitle.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 64, height: 64)
+            VStack(spacing: House.Spacing.md) {
+                // The app icon's own shape: one flat ink tile, one glyph.
+                // No gradient, no shadow.
+                RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                    .fill(AQDesign.ColorToken.textPrimary)
+                    .frame(width: House.Spacing.xxxxl, height: House.Spacing.xxxxl)
+                    .overlay {
+                        Image(systemName: "bolt.fill")
+                            .font(House.TypeToken.display)
+                            .foregroundStyle(AQDesign.ColorToken.textInverse)
+                    }
+                    .accessibilityHidden(true)
 
                 Text("Welcome to Quick Launch")
-                    .font(.title.weight(.bold))
+                    .font(AQDesign.TypeToken.title)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
 
                 Text("Press Option+Space anywhere, choose a model, and run a quick action. The result streams in and copies to your clipboard automatically.")
                     .font(AQDesign.TypeToken.prose)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
                     featureBullet("arrow.triangle.2.circlepath", "Switch local, API, and CLI models")
                     featureBullet("bolt", "Saved actions and short follow-ups")
                     featureBullet("lock.shield", "API keys stay in macOS Keychain")
                 }
-                .padding(.top, 4)
+                .padding(.top, AQDesign.Space.compact)
 
             }
-            .padding(32)
+            .padding(House.Spacing.xxl)
 
-            Divider()
+            HouseDivider()
 
-            Button("Get Started") {
+            Button {
                 viewModel.settings.save()
                 onContinue()
+            } label: {
+                Text("Get Started")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textInverse)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: AQDesign.controlHeight)
+                    .background(
+                        RoundedRectangle(
+                            cornerRadius: AQDesign.menuCornerRadius,
+                            style: .continuous
+                        )
+                        .fill(AQDesign.ColorToken.textPrimary)
+                    )
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(.plain)
             .keyboardShortcut(.defaultAction)
-            .padding(20)
+            .padding(AQDesign.Space.panel)
         }
         .frame(width: 460)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .preferredColorScheme(.light)
+        .panelGlass()
+        .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
     }
 
     private func featureBullet(_ systemImage: String, _ text: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(AQDesign.TypeToken.prose.weight(.medium))
-                .foregroundStyle(AQDesign.ColorToken.emphasis)
-                .frame(width: 20)
+        HStack(spacing: AQDesign.Space.row) {
+            IconTile {
+                Image(systemName: systemImage)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            }
             Text(text)
                 .font(AQDesign.TypeToken.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
         }
     }
 }

@@ -20,7 +20,7 @@ struct OverlayRenderProofTests {
     @Test func rendersDarkLauncherWithBadgesAndFooter() throws {
         let image = try Self.render(appearance: .darkAqua)
         try Self.save(image, name: "overlay-dark.png")
-        let sample = try Self.averageColor(of: image, region: CGRect(x: 40, y: 10, width: 200, height: 20))
+        let sample = try Self.averageColor(of: image, region: CGRect(x: 300, y: 8, width: 200, height: 20))
         #expect(sample.brightness < 0.35, "dark overlay should read as dark, got \(sample)")
     }
 
@@ -288,9 +288,14 @@ struct OverlayRenderProofTests {
         )
     }
 
-    private static func saveSettings(_ vm: QuickViewModel, tab: SettingsView.SettingsTab, name: String) throws {
+    private static func saveSettings(
+        _ vm: QuickViewModel,
+        tab: SettingsView.SettingsTab,
+        name: String,
+        appearance: NSAppearance.Name = .darkAqua
+    ) throws {
         let host = NSHostingView(rootView: SettingsView(viewModel: vm, initialTab: tab))
-        host.appearance = NSAppearance(named: .darkAqua)
+        host.appearance = NSAppearance(named: appearance)
         host.frame = NSRect(origin: .zero, size: SettingsView.windowSize)
         host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw ProofError.noBitmap }
@@ -300,10 +305,114 @@ struct OverlayRenderProofTests {
         try Self.save(image, name: name)
     }
 
+    /// The screens the Slate mockup shows, rendered as the user sees them:
+    /// panel on a ground, two shadows, both appearances.
+    @Test func rendersSlateProofSet() async throws {
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let root = Self.makeViewModel(appearance: appearance == .darkAqua ? .dark : .light)
+            root.input = ""
+            root.applicationSelectionIndex = 0
+            try Self.save(
+                try Self.renderLauncherOnGround(root, appearance: appearance),
+                name: "slate-root-\(suffix).png"
+            )
+
+            let results = Self.makeViewModel(appearance: appearance == .darkAqua ? .dark : .light)
+            results.input = "cla"
+            results.applicationSelectionIndex = 0
+            try Self.save(
+                try Self.renderLauncherOnGround(results, appearance: appearance),
+                name: "slate-results-\(suffix).png"
+            )
+
+            let actions = Self.makeViewModel(appearance: appearance == .darkAqua ? .dark : .light)
+            actions.handleCommandK()
+            #expect(actions.isItemActionPanePresented)
+            try Self.save(
+                try Self.renderLauncherOnGround(actions, appearance: appearance),
+                name: "slate-actions-\(suffix).png"
+            )
+
+            let answer = Self.makeViewModel(appearance: appearance == .darkAqua ? .dark : .light)
+            let mock = MockQuickService()
+            await mock.setResponses([StreamDelta(
+                text: "Mercury, Venus, Earth. Mercury is the smallest and closest to the Sun; Venus is the hottest; Earth is the only one known to hold liquid water at the surface.",
+                finishReason: "stop"
+            )])
+            answer.service = mock
+            answer.settings.autoCopy = false
+            answer.input = "name three planets"
+            await answer.submit()
+            try Self.save(
+                try Self.renderOnGround(
+                    OverlayView(viewModel: answer),
+                    appearance: appearance,
+                    width: answer.currentPanelWidth,
+                    height: answer.estimatedWindowHeight + 96
+                ),
+                name: "slate-answer-\(suffix).png"
+            )
+
+            let caffeinate = Self.makeViewModel(appearance: appearance == .darkAqua ? .dark : .light)
+            caffeinate.enterCatalog(.caffeinate)
+            caffeinate.input = ""
+            try Self.save(
+                try Self.renderLauncherOnGround(caffeinate, appearance: appearance),
+                name: "slate-caffeinate-\(suffix).png"
+            )
+
+            try Self.saveSettings(
+                root, tab: .general, name: "slate-settings-\(suffix).png", appearance: appearance
+            )
+
+            try Self.save(
+                try Self.renderOnGround(
+                    WelcomeOverlayView(viewModel: root, onContinue: {}),
+                    appearance: appearance,
+                    width: 460
+                ),
+                name: "slate-welcome-\(suffix).png"
+            )
+        }
+    }
+
+    /// The Type to Click HUD: badges and a status pill, drawn by AppKit.
+    @Test func rendersTypeToClickHUD() throws {
+        let view = TypeToClickOverlayView()
+        view.frame = NSRect(x: 0, y: 0, width: 720, height: 300)
+        view.badges = [
+            TypeToClickBadge(rect: NSRect(x: 60, y: 210, width: 120, height: 28), label: "Save", isSelected: false, isPulsing: false),
+            TypeToClickBadge(rect: NSRect(x: 240, y: 210, width: 140, height: 28), label: "Cancel", isSelected: true, isPulsing: false),
+            TypeToClickBadge(rect: NSRect(x: 440, y: 210, width: 160, height: 28), label: "Send Message", isSelected: false, isPulsing: true),
+        ]
+        view.statusText = "3 targets"
+        view.statusAnchor = NSPoint(x: 360, y: 70)
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw ProofError.noBitmap
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let hud = NSImage(size: view.bounds.size)
+        hud.addRepresentation(rep)
+        // The HUD floats over whatever is on screen; a mid grey stands in for
+        // the desktop so the chips and the status pill can be judged.
+        let composited = NSImage(size: view.bounds.size)
+        composited.lockFocus()
+        NSColor(srgbRed: 0.16, green: 0.18, blue: 0.22, alpha: 1).setFill()
+        NSRect(origin: .zero, size: view.bounds.size).fill()
+        hud.draw(
+            in: NSRect(origin: .zero, size: view.bounds.size),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        composited.unlockFocus()
+        try Self.save(composited, name: "slate-type-to-click.png")
+    }
+
     @Test func rendersLightLauncher() throws {
         let image = try Self.render(appearance: .aqua)
         try Self.save(image, name: "overlay-light.png")
-        let sample = try Self.averageColor(of: image, region: CGRect(x: 40, y: 10, width: 200, height: 20))
+        let sample = try Self.averageColor(of: image, region: CGRect(x: 300, y: 8, width: 200, height: 20))
         #expect(sample.brightness > 0.65, "light overlay should read as light, got \(sample)")
     }
 
@@ -347,6 +456,58 @@ struct OverlayRenderProofTests {
         let image = NSImage(size: host.bounds.size)
         image.addRepresentation(rep)
         return image
+    }
+
+    /// The launcher as it is actually seen: the panel floating on a ground,
+    /// with its two house shadows under it. Offscreen blur has nothing behind
+    /// the window to sample, so the ground also stands in for the desktop.
+    static func renderOnGround<V: View>(
+        _ view: V,
+        appearance: NSAppearance.Name,
+        width: CGFloat,
+        height: CGFloat? = nil,
+        margin: CGFloat = 48
+    ) throws -> NSImage {
+        let isDark = appearance == .darkAqua
+        let ground = isDark
+            ? Color(nsColor: NSColor(srgbRed: 0.106, green: 0.129, blue: 0.188, alpha: 1))
+            : Color(nsColor: NSColor(srgbRed: 0.863, green: 0.890, blue: 0.933, alpha: 1))
+        let root = ZStack {
+            ground
+            view
+                .frame(width: width)
+                .panelShadows()
+                .padding(margin)
+        }
+        let host = NSHostingView(rootView: root)
+        host.appearance = NSAppearance(named: appearance)
+        let fitting = host.fittingSize
+        host.frame = NSRect(
+            origin: .zero,
+            size: NSSize(
+                width: width + margin * 2,
+                height: height ?? max(fitting.height, 200)
+            )
+        )
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            throw ProofError.noBitmap
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let image = NSImage(size: host.bounds.size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    private static func renderLauncherOnGround(
+        _ vm: QuickViewModel,
+        appearance: NSAppearance.Name
+    ) throws -> NSImage {
+        try renderOnGround(
+            OverlayView(viewModel: vm),
+            appearance: appearance,
+            width: vm.currentPanelWidth
+        )
     }
 
     private static func renderAtAccessibilitySize(

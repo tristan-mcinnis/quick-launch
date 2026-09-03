@@ -512,6 +512,9 @@ final class TypeToClickController {
             )
             panel.isOpaque = false
             panel.backgroundColor = .clear
+            // The HUD reads the same in both appearances (its tokens do not
+            // branch), but the window still needs one so its layer resolves.
+            panel.appearance = NSAppearance(named: .darkAqua)
             // Native macOS dropdown menus sit above `.statusBar`. Badges for
             // their commands must be one layer higher or the menu hides them.
             panel.level = NSWindow.Level(

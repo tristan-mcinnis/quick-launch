@@ -1,21 +1,28 @@
 import SwiftUI
 import AppKit
 
-/// A button that, when clicked, captures the next key combo as the new hotkey.
+/// A control that shows the current hotkey as key caps and, when clicked,
+/// captures the next key combo as the new one. Inside a `SettingsRow` the
+/// row carries the title, so `showsLabel` turns the built-in label off.
 struct HotkeyRecorderView: View {
     @Binding var keyCode: UInt16
     @Binding var modifiers: UInt
     @State private var isRecording = false
     @State private var validationError: String?
     var label: String = "Hotkey"
+    /// False when the surrounding row already names the control.
+    var showsLabel: Bool = true
     var changeNotification: Notification.Name = .hotkeyChanged
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(AQDesign.TypeToken.body)
-                Spacer()
+        VStack(alignment: .trailing, spacing: AQDesign.Space.compact) {
+            HStack(spacing: AQDesign.Space.standard) {
+                if showsLabel && !label.isEmpty {
+                    Text(label)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    Spacer(minLength: AQDesign.Space.standard)
+                }
                 if isRecording {
                     HotkeyCapture { captured in
                         let rawMods = captured.modifierFlags
@@ -36,16 +43,28 @@ struct HotkeyRecorderView: View {
                     } onCancel: {
                         isRecording = false
                     }
-                    .frame(width: 160, height: 28)
+                    .frame(width: 160, height: House.Control.compact)
+                    .overlay(
+                        RoundedRectangle(
+                            cornerRadius: AQDesign.fieldCornerRadius,
+                            style: .continuous
+                        )
+                        .strokeBorder(
+                            AQDesign.ColorToken.panelStrokeStrong,
+                            lineWidth: AQDesign.hairline
+                        )
+                    )
                 } else {
                     Button {
                         validationError = nil
                         isRecording = true
                     } label: {
-                        Text(displayName)
-                            .font(AQDesign.TypeToken.codeLabel)
+                        KeyCapGroup(keys: keyCaps)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(displayName)
+                    .help("Click, then press the keys")
                 }
             }
             if let error = validationError {
@@ -56,6 +75,10 @@ struct HotkeyRecorderView: View {
         }
     }
 
+    private var keyCaps: [String] {
+        ActionHotkey(keyCode: keyCode, modifiers: modifiers).keyCaps
+    }
+
     private var displayName: String {
         var s = QuickSettings()
         s.hotkeyKeyCode = keyCode
@@ -64,19 +87,26 @@ struct HotkeyRecorderView: View {
     }
 }
 
+/// The same control for an optional action hotkey: key caps when set, a
+/// plain "Set hotkey…" when not.
 struct ActionHotkeyRecorderView: View {
     @Binding var hotkey: ActionHotkey?
     @State private var isRecording = false
     @State private var validationError: String?
     var label: String = "Global hotkey"
+    /// False when the surrounding row already names the control.
+    var showsLabel: Bool = true
     var changeNotification: Notification.Name = .actionHotkeysChanged
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(AQDesign.TypeToken.body)
-                Spacer()
+        VStack(alignment: .trailing, spacing: AQDesign.Space.compact) {
+            HStack(spacing: AQDesign.Space.standard) {
+                if showsLabel && !label.isEmpty {
+                    Text(label)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    Spacer(minLength: AQDesign.Space.standard)
+                }
                 if isRecording {
                     HotkeyCapture { event in
                         let modifiers = event.modifierFlags
@@ -96,20 +126,39 @@ struct ActionHotkeyRecorderView: View {
                     } onCancel: {
                         isRecording = false
                     }
-                    .frame(width: 180, height: 28)
+                    .frame(width: 180, height: House.Control.compact)
+                    .overlay(
+                        RoundedRectangle(
+                            cornerRadius: AQDesign.fieldCornerRadius,
+                            style: .continuous
+                        )
+                        .strokeBorder(
+                            AQDesign.ColorToken.panelStrokeStrong,
+                            lineWidth: AQDesign.hairline
+                        )
+                    )
                 } else if let hotkey {
-                    Button(displayName(hotkey)) { isRecording = true }
-                        .font(AQDesign.TypeToken.codeLabel)
-                        .buttonStyle(.bordered)
+                    Button {
+                        isRecording = true
+                    } label: {
+                        KeyCapGroup(keys: hotkey.keyCaps)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(displayName(hotkey))
+                    .help("Click, then press the keys")
                     Button("Clear") {
                         self.hotkey = nil
                         notifyChanged()
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 } else {
                     Button("Set hotkey…") { isRecording = true }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 }
             }
             if let validationError {
@@ -185,13 +234,20 @@ final class HotkeyCaptureView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlAccentColor.withAlphaComponent(0.1).setFill()
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+        House.NSColorToken.surfaceTint.setFill()
+        let path = NSBezierPath(
+            roundedRect: bounds,
+            xRadius: House.Radius.sm,
+            yRadius: House.Radius.sm
+        )
         path.fill()
         let label = "Press a key combo..."
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .font: NSFont.monospacedSystemFont(
+                ofSize: House.TypeToken.Size.code,
+                weight: .medium
+            ),
+            .foregroundColor: House.NSColorToken.textTertiary,
         ]
         let size = label.size(withAttributes: attrs)
         let point = NSPoint(

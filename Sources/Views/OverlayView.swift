@@ -5,26 +5,20 @@ struct OverlayView: View {
     @Bindable var viewModel: QuickViewModel
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The send button icon and color change based on state:
-    ///  - idle: arrow.up.circle.fill (purple)
-    ///  - streaming: stop.fill (purple)
-    ///  - justCopied: checkmark.circle.fill (green, 2s)
-    private var sendIcon: String {
-        if viewModel.justCopied { return "checkmark.circle.fill" }
-        if viewModel.isStreaming { return "stop.fill" }
-        return "arrow.up.circle.fill"
-    }
-
-    private var sendColor: Color {
-        viewModel.justCopied
-            ? AQDesign.ColorToken.success
-            : AQDesign.ColorToken.accent
-    }
-
     var body: some View {
         VStack(spacing: 0) {
-            // Input row
-            HStack(spacing: AQDesign.Space.standard) {
+            // Input row: a leading glyph, the field, and one square menu
+            // button. No send circle and no accent anywhere — Return sends.
+            HStack(spacing: AQDesign.Space.row) {
+                Image(systemName: viewModel.isAnswerActive ? "sparkles" : "magnifyingglass")
+                    .font(.system(size: 18))
+                    .foregroundStyle(
+                        viewModel.isAnswerActive
+                            ? AQDesign.ColorToken.textSecondary
+                            : AQDesign.ColorToken.textTertiary
+                    )
+                    .accessibilityHidden(true)
+
                 // Single line, scrolling horizontally like Raycast. A
                 // vertical-axis field capped at one line scrolled long text
                 // upward until only the descenders were visible.
@@ -75,41 +69,30 @@ struct OverlayView: View {
                     }
                     .disabled(viewModel.isStreaming)
 
-                // Send / stop / copied indicator — same slot, different icon
-                Button {
-                    if viewModel.isStreaming {
-                        viewModel.cancel()
-                    } else {
-                        Task { await viewModel.submitResolvingFuzzyAlias() }
+                // Working / copied lives in the same slot; at rest the row
+                // carries one control, the menu, exactly as the design does.
+                if viewModel.isStreaming {
+                    Button { viewModel.cancel() } label: {
+                        ThinkingIndicator().frame(width: 22, height: 22)
                     }
-                } label: {
-                    if viewModel.isStreaming {
-                        ThinkingIndicator()
-                            .frame(width: 22, height: 22)
-                            .help("Working… press Escape to stop")
-                    } else {
-                        Image(systemName: sendIcon)
-                            .foregroundStyle(sendColor)
-                            .font(.title2)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop response")
+                    .help("Working… press Escape to stop")
+                } else if viewModel.justCopied {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(AQDesign.TypeToken.input)
+                        .foregroundStyle(AQDesign.ColorToken.success)
+                        .accessibilityLabel("Copied to clipboard")
+                        .help("Copied to clipboard")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(viewModel.isStreaming ? "Stop response" : "Send")
-                .disabled(
-                    viewModel.input.isEmpty
-                        && viewModel.pendingImage == nil
-                        && !viewModel.isStreaming
-                )
-                .help(viewModel.justCopied ? "Copied to clipboard" : "Send (or press Return)")
 
                 moreMenu
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.horizontal, AQDesign.Space.panel)
+            .frame(minHeight: AQDesign.inputHeight)
 
             if viewModel.hasPendingAttachment {
-                Divider()
+                HouseDivider()
                 HStack(spacing: AQDesign.Space.standard) {
                     HStack(spacing: 4) {
                         ForEach(Array(viewModel.pendingImages.suffix(4).enumerated()), id: \.offset) { _, image in
@@ -118,7 +101,7 @@ struct OverlayView: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 40, height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .clipShape(RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous))
                                     .accessibilityLabel(
                                         "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
                                     )
@@ -127,12 +110,12 @@ struct OverlayView: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(viewModel.attachmentTitle)
-                            .font(AQDesign.TypeToken.body.weight(.semibold))
+                            .font(AQDesign.TypeToken.label)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text(viewModel.attachmentSubtitle)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -152,7 +135,7 @@ struct OverlayView: View {
             }
 
             if !viewModel.launcherMatches.isEmpty {
-                Divider()
+                HouseDivider()
                 if viewModel.isGridCatalog {
                     EmojiGridView(viewModel: viewModel)
                 } else {
@@ -160,7 +143,7 @@ struct OverlayView: View {
                         launcherList
                             .frame(width: viewModel.showsDetailPane ? 380 : nil)
                         if viewModel.showsDetailPane, let item = viewModel.detailItem {
-                            Divider()
+                            Rectangle().fill(AQDesign.ColorToken.divider).frame(width: AQDesign.hairline)
                             CatalogDetailPane(viewModel: viewModel, item: item)
                         }
                     }
@@ -173,7 +156,7 @@ struct OverlayView: View {
             if !viewModel.isApplicationActionPanePresented,
                !viewModel.isCatalogActionPanePresented,
                !viewModel.savedPromptMatches.isEmpty {
-                Divider()
+                HouseDivider()
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.savedPromptMatches) { match in
                         Button {
@@ -185,7 +168,7 @@ struct OverlayView: View {
                                     .foregroundStyle(AQDesign.ColorToken.emphasis)
                                 Text(match.prompt)
                                     .font(AQDesign.TypeToken.detail)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                                     .lineLimit(1)
                                 Spacer()
                             }
@@ -199,25 +182,17 @@ struct OverlayView: View {
             }
 
             if !viewModel.output.isEmpty || viewModel.isStreaming {
-                Divider()
+                HouseDivider()
                 VStack(alignment: .leading, spacing: 8) {
                     if viewModel.conversationMessages.count > 2 {
                         // Earlier turns, compact; the latest answer follows in full.
                         ConversationTranscript(messages: Array(viewModel.conversationMessages.dropLast(2)))
                             .frame(maxHeight: PanelSizing.transcriptHeight)
-                        Divider()
+                        HouseDivider()
                     }
                     if let question = viewModel.lastQuestion, !question.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "text.cursor")
-                                .font(AQDesign.TypeToken.caption)
-                            Text(question)
-                                .font(AQDesign.TypeToken.label)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Question: \(question)")
+                        HouseChip(text: question)
+                            .accessibilityLabel("Question: \(question)")
                     }
                     if viewModel.isStreaming, viewModel.output.isEmpty {
                         HStack(spacing: 8) {
@@ -225,7 +200,7 @@ struct OverlayView: View {
                                 .frame(width: 18, height: 18)
                             Text(viewModel.streamingStatus ?? "Thinking…")
                                 .font(AQDesign.TypeToken.label)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
                         }
                         .frame(height: 28)
                     } else {
@@ -233,16 +208,20 @@ struct OverlayView: View {
                             markdown: viewModel.output,
                             isStreaming: viewModel.isStreaming
                         )
+                        .frame(maxWidth: House.Layout.answerMaxWidth, alignment: .leading)
                         .frame(maxHeight: PanelSizing.maxBodyHeight)
                     }
                 }
-                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, AQDesign.Space.panel)
+                .padding(.top, 18)
+                .padding(.bottom, AQDesign.Space.panel)
                 .transition(.opacity)
             }
 
             // Error message
             if let error = viewModel.errorMessage {
-                Divider()
+                HouseDivider()
                 HStack(spacing: AQDesign.Space.standard) {
                     Text(error)
                         .font(AQDesign.TypeToken.detail)
@@ -261,22 +240,11 @@ struct OverlayView: View {
             }
 
             if viewModel.showsLauncherFooter {
-                Divider()
-                LauncherFooter(viewModel: viewModel)
+                FooterWell { LauncherFooter(viewModel: viewModel) }
             }
         }
         .frame(width: viewModel.currentPanelWidth)
-        .background {
-            ZStack {
-                Rectangle().fill(.regularMaterial)
-                AQDesign.ColorToken.panelTint
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AQDesign.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: AQDesign.cornerRadius)
-                .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: 1)
-        )
+        .panelGlass()
         .overlay(alignment: .topTrailing) {
             actionPopover
         }
@@ -316,18 +284,8 @@ struct OverlayView: View {
         // Chrome hugs the content: a `.frame(maxHeight:)` adopts the window's
         // proposal, so background applied outside it stretched into an empty
         // dark sheet whenever the window was tall.
-        .background {
-            ZStack {
-                Rectangle().fill(.regularMaterial)
-                AQDesign.ColorToken.panelTint
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius)
-                .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
+        .panelGlass(radius: AQDesign.cardCornerRadius)
+        .panelShadows()
         .frame(
             maxHeight: viewModel.activeItemActionForm?.minimumWindowHeight
                 .map { $0 - PanelSizing.inputHeight - PanelSizing.paneBottomMargin }
@@ -349,7 +307,7 @@ struct OverlayView: View {
         if viewModel.catalogScope == .screenHistory,
            !viewModel.isItemActionPanePresented,
            viewModel.launcherMatches.isEmpty {
-            Divider()
+            HouseDivider()
             ScreenHistoryEmptyState(viewModel: viewModel)
         }
         if viewModel.catalogScope == .screenHistory,
@@ -387,12 +345,10 @@ struct OverlayView: View {
 
     private var launcherList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(launcherSectionTitle)
-                .font(AQDesign.TypeToken.section)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+            SectionLabel(text: launcherSectionTitle)
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
 
             SelectableListPane(
                 items: viewModel.launcherMatches,
@@ -409,12 +365,13 @@ struct OverlayView: View {
                     position: index + 1,
                     total: viewModel.launcherMatches.count
                 )
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .modifier(ScreenHistoryRowFrame(result: result))
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 10)
+        .padding(.top, AQDesign.Space.standard)
+        .padding(.bottom, AQDesign.Space.standard)
         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
     }
 
@@ -456,14 +413,29 @@ struct OverlayView: View {
                 Label("Settings…", systemImage: "gear")
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(AQDesign.TypeToken.input)
-                .foregroundStyle(viewModel.isActionPalettePresented ? sendColor : .secondary)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(AQDesign.ColorToken.surfaceFill))
+            Image(systemName: "ellipsis")
+                .font(AQDesign.TypeToken.label)
+                .foregroundStyle(
+                    viewModel.isActionPalettePresented
+                        ? AQDesign.ColorToken.textPrimary
+                        : AQDesign.ColorToken.textSecondary
+                )
+                .frame(width: House.Control.compact, height: House.Control.compact)
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        // The tile is drawn around the menu, not inside its label: a
+        // borderless menu style discards a background set on the label.
+        .frame(width: House.Control.compact, height: House.Control.compact)
+        .background(
+            RoundedRectangle(cornerRadius: AQDesign.menuCornerRadius, style: .continuous)
+                .fill(AQDesign.ColorToken.surfaceFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AQDesign.menuCornerRadius, style: .continuous)
+                .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+        )
         .accessibilityLabel("More actions")
         .help("Actions, model, history, and settings")
     }
@@ -535,10 +507,13 @@ private struct ConversationTranscript: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(messages) { message in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(message.role == .user ? "You" : "Answer")
+                            Text((message.role == .user ? "You" : "Answer").uppercased())
                                 .font(AQDesign.TypeToken.section)
+                                .tracking(AQDesign.TypeToken.sectionTracking)
                                 .foregroundStyle(
-                                    message.role == .user ? AQDesign.ColorToken.emphasis : .secondary
+                                    message.role == .user
+                                        ? AQDesign.ColorToken.textPrimary
+                                        : AQDesign.ColorToken.textTertiary
                                 )
                             Text(String(message.content.prefix(2_000)))
                                 .font(AQDesign.TypeToken.detail)
@@ -574,30 +549,31 @@ private struct LauncherResultRow: View {
     var total: Int? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
-            icon.frame(width: 24, height: 24)
+        HStack(spacing: AQDesign.Space.row) {
+            icon
             if let screenHistoryRow {
                 screenHistoryRow
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: AQDesign.Space.standard) {
                     Text(title)
-                        .font(AQDesign.TypeToken.body.weight(.medium))
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if !detail.isEmpty {
                         Text(detail)
                             .font(AQDesign.TypeToken.metadata)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
                 }
             }
-            Spacer()
+            Spacer(minLength: AQDesign.Space.standard)
             if case .item(let item) = result, item.isPinned {
                 Image(systemName: "pin.fill")
                     .font(AQDesign.TypeToken.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .accessibilityLabel("Pinned")
             }
             if let hotkey {
@@ -608,31 +584,46 @@ private struct LauncherResultRow: View {
             } else if screenHistoryRow == nil {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .lineLimit(1)
             }
         }
+        .frame(minHeight: AQDesign.rowHeight)
         .accessibilityElement(children: .combine)
         .accessibilityValue(accessibilityValue)
     }
 
+    /// Every row glyph sits in the same 26 pt tile, so titles line up
+    /// whatever the symbol or icon width.
     @ViewBuilder private var icon: some View {
         switch result {
         case .application(let application):
-            Image(nsImage: AppIconCache.icon(forPath: application.url.path))
-                .resizable().scaledToFit()
+            IconTile(fillsTile: true) {
+                Image(nsImage: AppIconCache.icon(forPath: application.url.path))
+                    .resizable().scaledToFit()
+            }
         case .catalog(let scope, _):
-            Image(systemName: scope.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
+            IconTile {
+                Image(systemName: scope.systemImage)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            }
         case .item(let item):
             if item.kind == .emoji {
-                Text(item.value).font(AQDesign.TypeToken.glyph)
-            } else if item.kind == .screenshot, let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
-                Image(nsImage: thumbnail)
-                    .resizable().scaledToFill()
-                    .frame(width: 22, height: 22)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                IconTile {
+                    Text(item.value).font(AQDesign.TypeToken.body)
+                }
+            } else if item.kind == .screenshot,
+                      let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
+                IconTile(fillsTile: true) {
+                    Image(nsImage: thumbnail).resizable().scaledToFill()
+                }
             } else {
-                Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
+                IconTile {
+                    Image(systemName: item.systemImage)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                }
             }
         }
     }
@@ -737,14 +728,14 @@ private struct ItemActionPane: View {
             header
                 .padding(.horizontal, 20)
                 .frame(height: PanelSizing.paneHeaderHeight)
-            Divider()
+            HouseDivider()
             if let form = viewModel.activeItemActionForm {
                 formView(form)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
             } else {
                 list
-                Divider()
+                HouseDivider()
                 searchField
             }
         }
@@ -766,33 +757,38 @@ private struct ItemActionPane: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            icon.frame(width: 22, height: 22)
+        HStack(spacing: AQDesign.Space.row) {
+            icon
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(AQDesign.TypeToken.body.weight(.semibold))
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(subtitle)
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
-            Text(viewModel.activeItemActionForm == nil ? "Actions" : formTitle)
-                .font(AQDesign.TypeToken.label)
-                .foregroundStyle(.secondary)
+            SectionLabel(text: viewModel.activeItemActionForm == nil ? "Actions" : formTitle)
         }
     }
 
     @ViewBuilder private var icon: some View {
         if let application {
-            Image(nsImage: AppIconCache.icon(forPath: application.url.path))
-                .resizable().scaledToFit()
+            IconTile(fillsTile: true) {
+                Image(nsImage: AppIconCache.icon(forPath: application.url.path))
+                    .resizable().scaledToFit()
+            }
         } else if let item, item.kind == .emoji {
-            Text(item.value).font(AQDesign.TypeToken.glyph)
+            IconTile { Text(item.value).font(AQDesign.TypeToken.body) }
         } else if let item {
-            Image(systemName: item.systemImage).foregroundStyle(AQDesign.ColorToken.emphasis)
+            IconTile {
+                Image(systemName: item.systemImage)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            }
         }
     }
 
@@ -850,24 +846,30 @@ private struct ItemActionPane: View {
             onActivate: { action in
                 Task { await viewModel.perform(action, on: result) }
             }
-        ) { _, action, isSelected in
-            HStack(spacing: 10) {
-                Image(systemName: action.systemImage)
-                    .frame(width: 18)
+        ) { _, action, _ in
+            HStack(spacing: AQDesign.Space.row) {
+                IconTile {
+                    Image(systemName: action.systemImage)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(
+                            action.isDestructive
+                                ? AQDesign.ColorToken.danger
+                                : AQDesign.ColorToken.textPrimary
+                        )
+                }
+                Text(action.title)
+                    .font(AQDesign.TypeToken.label)
                     .foregroundStyle(
                         action.isDestructive
                             ? AQDesign.ColorToken.danger
-                            : (isSelected ? AQDesign.ColorToken.emphasis : .secondary)
+                            : AQDesign.ColorToken.textPrimary
                     )
-                Text(action.title)
-                    .font(AQDesign.TypeToken.body.weight(.medium))
-                    .foregroundStyle(action.isDestructive ? AQDesign.ColorToken.danger : .primary)
                 Spacer()
                 if let shortcut = action.shortcut {
                     KeyCapGroup(keys: shortcut.keyCaps)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
         }
         // Exactly as tall as its rows (capped at six): the pane hugs its
         // content instead of stretching into an empty dark sheet.
@@ -875,9 +877,10 @@ private struct ItemActionPane: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AQDesign.Space.row) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .font(AQDesign.TypeToken.label)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
             TextField("Search actions…", text: $viewModel.actionQuery)
                 .textFieldStyle(.plain)
                 .font(AQDesign.TypeToken.body)
@@ -905,7 +908,10 @@ private struct ItemActionPane: View {
                 TextEditor(text: $editedValue)
                     .font(.body.monospaced())
                     .frame(minHeight: 72, maxHeight: 130)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                            .stroke(AQDesign.ColorToken.fieldStroke, lineWidth: AQDesign.hairline)
+                    )
                     .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
                 HStack(spacing: AQDesign.Space.standard) {
                     Button {
@@ -914,12 +920,12 @@ private struct ItemActionPane: View {
                         Label("Save", systemImage: "checkmark")
                     }
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(InkButtonStyle())
                     Button("Cancel") { viewModel.dismissItemActionLayer() }
                     Spacer()
                     Text("⌘↩ saves · esc cancels")
                         .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }
             }
         case .alias:
@@ -936,7 +942,7 @@ private struct ItemActionPane: View {
                 HStack {
                     Text("An alias is a short word you type to reach this item first.")
                         .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     Spacer()
                     Button("Done") { viewModel.dismissItemActionLayer() }
                         .keyboardShortcut(.return, modifiers: [.command])
@@ -957,7 +963,7 @@ private struct ItemActionPane: View {
                 HStack {
                     Text("A global hotkey runs this item from anywhere.")
                         .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     Spacer()
                     Button("Done") { viewModel.dismissItemActionLayer() }
                         .keyboardShortcut(.return, modifiers: [.command])
@@ -1079,11 +1085,9 @@ private struct QuickActionPalette: View {
                     .onSubmit { runSelected() }
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onKeyPress(.upArrow) { move(-1); return .handled }
-                Text("⌘K")
-                    .font(AQDesign.TypeToken.hint.weight(.medium))
-                    .foregroundStyle(.secondary)
+                KeyCapGroup(keys: ["⌘", "K"])
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, AQDesign.Space.panel)
             .padding(.vertical, 10)
 
             SelectableListPane(
@@ -1107,16 +1111,16 @@ private struct QuickActionPalette: View {
             // placeholder row instead of a stretched dark sheet.
             .frame(height: PanelSizing.actionListHeight(rows: entries.count, padded: false))
 
-            HStack(spacing: 12) {
+            HStack(spacing: AQDesign.Space.row) {
                 Text("↑↓ Navigate")
                 Text("↩ Run")
                 Text("Tab completes aliases")
                 Spacer()
                 Text("Esc Close")
             }
-            .font(AQDesign.TypeToken.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 20)
+            .font(AQDesign.TypeToken.metadata)
+            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            .padding(.horizontal, AQDesign.Space.panel)
             .padding(.bottom, 10)
         }
         .onAppear {
@@ -1133,54 +1137,53 @@ private struct QuickActionPalette: View {
     private func row(for entry: Entry, isSelected: Bool) -> some View {
         switch entry {
         case .result(let action):
-            HStack(spacing: 10) {
-                Image(systemName: action.systemImage)
-                    .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(action.title)
-                        .font(AQDesign.TypeToken.body.weight(.medium))
-                    Text("Answer")
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+            paletteRow(symbol: action.systemImage, title: action.title, detail: "Answer") {
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
         case .command(let item):
-            HStack(spacing: 10) {
-                Image(systemName: item.systemImage)
-                    .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(AQDesign.TypeToken.body.weight(.medium))
-                    Text(item.detail)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer()
+            paletteRow(symbol: item.systemImage, title: item.title, detail: item.detail) {
+                EmptyView()
             }
         case .prompt(let action):
-            HStack(spacing: 10) {
-                Image(systemName: action.outputBehavior == .replaceSelection
-                      ? "text.cursor" : "sparkles")
-                    .frame(width: 18)
-                    .foregroundStyle(isSelected ? AQDesign.ColorToken.emphasis : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(action.name)
-                        .font(AQDesign.TypeToken.body.weight(.medium))
-                    Text("\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)")
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+            paletteRow(
+                symbol: action.outputBehavior == .replaceSelection ? "text.cursor" : "sparkles",
+                title: action.name,
+                detail: "\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)"
+            ) {
                 if let hotkey = action.hotkey {
                     KeyCapGroup(keys: hotkey.keyCaps)
                 }
             }
+        }
+    }
+
+    /// Every palette row is the same shape: tile, title, detail, keys.
+    @ViewBuilder
+    private func paletteRow<Trailing: View>(
+        symbol: String,
+        title: String,
+        detail: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(spacing: AQDesign.Space.row) {
+            IconTile {
+                Image(systemName: symbol)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: AQDesign.Space.standard) {
+                Text(title)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: AQDesign.Space.standard)
+            trailing()
         }
     }
 
@@ -1249,36 +1252,22 @@ private struct LauncherFooter: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
+            StatusDot(color: viewModel.isStreaming
+                ? AQDesign.ColorToken.warning
+                : AQDesign.ColorToken.success)
             Text(viewModel.footerContext)
-                .font(AQDesign.TypeToken.caption)
-                .foregroundStyle(.secondary)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 12)
-            HStack(spacing: 12) {
+            Spacer(minLength: AQDesign.Space.row)
+            HStack(spacing: 10) {
                 ForEach(visibleHints, id: \.label) { hint in
-                    HStack(spacing: 5) {
-                        Text(hint.label)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
-                        KeyCapGroup(keys: hint.keys)
-                    }
+                    KeyHint(label: hint.label, keys: hint.keys)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                    .fill(AQDesign.ColorToken.surfaceFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                    .strokeBorder(AQDesign.ColorToken.keyCapStroke, lineWidth: 0.5)
-            )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
         .modifier(ScreenHistoryFooterFrame(
             isActive: viewModel.catalogScope == .screenHistory,
             defaultMinHeight: AQDesign.footerHeight
@@ -1287,7 +1276,6 @@ private struct LauncherFooter: View {
     }
 }
 
-/// A short run of key caps such as ⌥ ⌘ ←.
 /// A coloured light and its word: "● On" in the success colour, "● Off" in
 /// the danger colour. Read at a glance before the row text is.
 struct StatusLightLabel: View {
@@ -1307,40 +1295,6 @@ struct StatusLightLabel: View {
     }
 }
 
-struct KeyCapGroup: View {
-    let keys: [String]
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
-                KeyCap(text: key)
-            }
-        }
-    }
-}
-
-struct KeyCap: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(AQDesign.TypeToken.keyCap)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, text.count > 1 ? 5 : 0)
-            .frame(minWidth: 18, minHeight: 18)
-            .background(
-                RoundedRectangle(cornerRadius: AQDesign.keyCapCornerRadius)
-                    .fill(AQDesign.ColorToken.keyCapFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AQDesign.keyCapCornerRadius)
-                    .strokeBorder(AQDesign.ColorToken.keyCapStroke, lineWidth: 0.5)
-            )
-    }
-}
-
-
-
 /// Three dots that breathe in turn: the model is working. Subtle on purpose.
 struct ThinkingIndicator: View {
     @State private var phase = 0
@@ -1351,7 +1305,7 @@ struct ThinkingIndicator: View {
         HStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(AQDesign.ColorToken.emphasis)
+                    .fill(AQDesign.ColorToken.textPrimary)
                     .frame(width: 5, height: 5)
                     .opacity(reduceMotion ? 0.55 : (index == phase ? 0.95 : 0.3))
             }

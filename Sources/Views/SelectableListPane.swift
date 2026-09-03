@@ -9,6 +9,11 @@ import SwiftUI
 /// selected row, the `isSelected` accessibility trait, an optional
 /// accessibility value per row, an optional empty-state placeholder row, and
 /// scrolling the selected row into view when the index changes.
+///
+/// Hover is not selection. Hover paints half the selection fill and no ring;
+/// selection paints the fill, an inset ring, and a 1 pt drop, and slides
+/// between rows over `Motion.select`. Reduce Motion turns the slide into a
+/// plain cut with no movement.
 struct SelectableListPane<Item: Identifiable, Row: View>: View {
     let items: [Item]
     @Binding var selectedIndex: Int
@@ -22,11 +27,17 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
     var emptyText: String? = nil
     /// Keeps the selected row visible while it moves under the keys.
     var scrollsToSelection = false
+    /// Corner radius of the selection and hover fills.
+    var rowCornerRadius: CGFloat = AQDesign.itemCornerRadius
     /// Accessibility value for the row at `index`, given whether it is selected.
     var accessibilityValue: ((Int, Bool) -> String)? = nil
     let onActivate: (Item) -> Void
     /// Row content for `(index, item, isSelected)`.
     @ViewBuilder let row: (Int, Item, Bool) -> Row
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selection
+    @State private var hoveredID: Item.ID?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -35,7 +46,7 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
                     if items.isEmpty, let emptyText {
                         Text(emptyText)
                             .font(AQDesign.TypeToken.body)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             .frame(maxWidth: .infinity)
                             .frame(height: PanelSizing.actionRowHeight)
                     }
@@ -46,13 +57,17 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
                         } label: {
                             row(index, item, isSelected)
                                 .frame(height: rowHeight)
-                                .background(
-                                    RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                        .fill(isSelected ? AQDesign.ColorToken.selectionFill : .clear)
-                                )
+                                .background { background(for: item, isSelected: isSelected) }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .onHover { hovering in
+                            if hovering {
+                                hoveredID = item.id
+                            } else if hoveredID == item.id {
+                                hoveredID = nil
+                            }
+                        }
                         .accessibilityAddTraits(isSelected ? .isSelected : [])
                         .modifier(OptionalAccessibilityValue(
                             value: accessibilityValue?(index, isSelected)
@@ -61,6 +76,8 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
                     }
                 }
                 .padding(listInsets)
+                .animation(selectionAnimation, value: selectedIndex)
+                .animation(hoverAnimation, value: hoveredID)
             }
             .scrollIndicators(.never)
             .onChange(of: selectedIndex) { _, index in
@@ -70,6 +87,27 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
         }
     }
 
+    /// The selected row's fill is one view that slides between rows; hover
+    /// paints its own quieter fill wherever the pointer is.
+    @ViewBuilder
+    private func background(for item: Item, isSelected: Bool) -> some View {
+        ZStack {
+            if isSelected {
+                RowHighlight(isSelected: true, radius: rowCornerRadius)
+                    .matchedGeometryEffect(id: "slate.selection", in: selection)
+            } else if hoveredID == item.id {
+                RowHighlight(isSelected: false, isHovering: true, radius: rowCornerRadius)
+            }
+        }
+    }
+
+    private var selectionAnimation: Animation? {
+        reduceMotion ? nil : .easeOut(duration: AQDesign.Motion.select)
+    }
+
+    private var hoverAnimation: Animation? {
+        reduceMotion ? nil : .easeOut(duration: AQDesign.Motion.hover)
+    }
 }
 
 /// Keyboard stepping shared by every `SelectableListPane` owner.

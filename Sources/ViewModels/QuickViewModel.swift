@@ -901,7 +901,10 @@ import Observation
         let measuredBody: CGFloat? = (!output.isEmpty || isStreaming)
             ? MarkdownRenderer.measuredHeight(
                 markdown: output,
-                width: currentPanelWidth - PanelSizing.answerHorizontalPadding
+                width: min(
+                    House.Layout.answerMaxWidth,
+                    currentPanelWidth - PanelSizing.answerHorizontalPadding
+                )
             )
             : nil
         let base = PanelSizing.panelHeight(

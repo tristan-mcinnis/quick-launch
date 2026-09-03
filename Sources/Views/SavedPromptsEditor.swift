@@ -1,21 +1,29 @@
 import SwiftUI
 
 /// Settings pane for managing saved prompts (aliases) and the command prefix.
+/// The list and the editor for the selected command are two cards.
 struct SavedPromptsEditor: View {
     @Bindable var viewModel: QuickViewModel
     @State private var selection: SavedPrompt.ID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("AI Commands")
-                    .font(AQDesign.TypeToken.heading)
-                Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
+                commandsCard
+                if let selection,
+                   let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
+                    detailCard(prompt)
+                }
             }
+            .padding(.horizontal, SettingsMetrics.paneInset)
+            .padding(.bottom, House.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-            HStack(spacing: 8) {
-                Text("Prefix:")
-                    .foregroundStyle(.secondary)
+    private var commandsCard: some View {
+        SettingsCard("Commands") {
+            SettingsRow(title: "Prefix", isFirst: true) {
                 TextField(
                     "/",
                     text: viewModel.settingsBinding(
@@ -23,126 +31,178 @@ struct SavedPromptsEditor: View {
                         set: { settings, value in settings.savedPromptPrefix = value.isEmpty ? "/" : value }
                     )
                 )
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 60)
-                Text("Aliases use fuzzy matching. Type /eml, then Tab or Return, to run /email.")
-                    .font(AQDesign.TypeToken.hint)
-                    .foregroundStyle(.secondary)
+                .textFieldStyle(.plain)
+                .font(AQDesign.TypeToken.body)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, AQDesign.Space.standard)
+                .frame(width: 60, height: House.Control.compact)
+                .background(fieldBackground)
+                .accessibilityLabel("Prefix")
             }
 
-            Table(viewModel.settings.savedPrompts, selection: $selection) {
-                TableColumn("Name") { prompt in
-                    TextField(
-                        "Action name",
-                        text: bindingForName(prompt.id)
-                    )
-                    .textFieldStyle(.plain)
-                }
-                .width(min: 100, max: 170)
-                TableColumn("Alias") { prompt in
-                    TextField(
-                        "alias",
-                        text: bindingForAlias(prompt.id)
-                    )
-                    .textFieldStyle(.plain)
-                }
-                .width(min: 80, max: 140)
+            CardNote {
+                CardText("Aliases use fuzzy matching. Type /eml, then Tab or Return, to run /email.")
             }
-            .frame(minHeight: 180)
 
-            if let selection,
-               let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
-                Divider()
-                Text("Prompt")
-                    .font(AQDesign.TypeToken.label)
-                TextEditor(text: bindingForPrompt(prompt.id))
-                    .font(AQDesign.TypeToken.detail)
-                    .frame(minHeight: 76, maxHeight: 100)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius)
-                            .stroke(AQDesign.ColorToken.fieldStroke)
-                    )
-                Text("Use {selection} where the selected or typed text should appear. If omitted, the text is appended.")
-                    .font(AQDesign.TypeToken.footnote)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    Text("Command:")
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "Executable, e.g. recall",
-                        text: bindingForCommandExecutable(prompt.id)
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
-                    TextField(
-                        "Arguments, e.g. search {input}",
-                        text: bindingForCommandArguments(prompt.id)
-                    )
-                    .textFieldStyle(.roundedBorder)
-                }
-                Text("Optional. With an executable set, the action runs it directly (no shell) instead of a model. {input} inserts the typed text as one argument.")
-                    .font(AQDesign.TypeToken.footnote)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 12) {
-                    Picker("Provider", selection: bindingForProvider(prompt.id)) {
-                        Text("Current provider").tag(nil as UUID?)
-                        ForEach(viewModel.settings.providers) { provider in
-                            Text(provider.name).tag(provider.id as UUID?)
-                        }
+            CardNote {
+                Table(viewModel.settings.savedPrompts, selection: $selection) {
+                    TableColumn("Name") { prompt in
+                        TextField(
+                            "Action name",
+                            text: bindingForName(prompt.id)
+                        )
+                        .textFieldStyle(.plain)
                     }
-                    .frame(maxWidth: 260)
-
-                    Picker("Model", selection: bindingForModel(prompt.id)) {
-                        Text("Provider default").tag(nil as String?)
-                        ForEach(modelsForPrompt(prompt), id: \.self) { model in
-                            Text(model).tag(model as String?)
-                        }
+                    .width(min: 100, max: 170)
+                    TableColumn("Alias") { prompt in
+                        TextField(
+                            "alias",
+                            text: bindingForAlias(prompt.id)
+                        )
+                        .textFieldStyle(.plain)
                     }
-                    .frame(maxWidth: 260)
-                    .disabled(prompt.providerID == nil)
+                    .width(min: 80, max: 140)
                 }
-                Text("Pin this action to a provider and model, or let it use the current choice.")
-                    .font(AQDesign.TypeToken.hint)
-                    .foregroundStyle(.secondary)
+                .frame(minHeight: 180)
+            }
 
+            CardNote {
+                HStack(spacing: AQDesign.Space.standard) {
+                    Button {
+                        addRow()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add command")
+                    Button {
+                        removeSelected()
+                    } label: {
+                        Image(systemName: "minus")
+                    }
+                    .disabled(selection == nil)
+                    .accessibilityLabel("Remove command")
+                    Spacer(minLength: House.Spacing.sm)
+                    Button("Restore defaults") {
+                        viewModel.updateSettings { $0.savedPrompts = SavedPrompt.defaults }
+                        NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .font(AQDesign.TypeToken.metadata)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func detailCard(_ prompt: SavedPrompt) -> some View {
+        SettingsCard("Selected command") {
+            CardNote(isFirst: true) {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    Text("Prompt")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    TextEditor(text: bindingForPrompt(prompt.id))
+                        .font(AQDesign.TypeToken.detail)
+                        .scrollContentBackground(.hidden)
+                        .padding(AQDesign.Space.standard)
+                        .frame(minHeight: 76, maxHeight: 100)
+                        .background(fieldBackground)
+                        .accessibilityLabel("Prompt")
+                    CardText("Use {selection} where the selected or typed text should appear. If omitted, the text is appended.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            CardNote {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    HStack(spacing: AQDesign.Space.standard) {
+                        Text("Command:")
+                            .font(AQDesign.TypeToken.label)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        TextField(
+                            "Executable, e.g. recall",
+                            text: bindingForCommandExecutable(prompt.id)
+                        )
+                        .textFieldStyle(.plain)
+                        .font(AQDesign.TypeToken.code)
+                        .padding(.horizontal, AQDesign.Space.standard)
+                        .frame(maxWidth: 180, minHeight: House.Control.compact)
+                        .background(fieldBackground)
+                        TextField(
+                            "Arguments, e.g. search {input}",
+                            text: bindingForCommandArguments(prompt.id)
+                        )
+                        .textFieldStyle(.plain)
+                        .font(AQDesign.TypeToken.code)
+                        .padding(.horizontal, AQDesign.Space.standard)
+                        .frame(minHeight: House.Control.compact)
+                        .background(fieldBackground)
+                    }
+                    CardText("Optional. With an executable set, the action runs it directly (no shell) instead of a model. {input} inserts the typed text as one argument.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            SettingsRow(title: "Provider") {
+                Picker("Provider", selection: bindingForProvider(prompt.id)) {
+                    Text("Current provider").tag(nil as UUID?)
+                    ForEach(viewModel.settings.providers) { provider in
+                        Text(provider.name).tag(provider.id as UUID?)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
+            }
+
+            SettingsRow(title: "Model") {
+                Picker("Model", selection: bindingForModel(prompt.id)) {
+                    Text("Provider default").tag(nil as String?)
+                    ForEach(modelsForPrompt(prompt), id: \.self) { model in
+                        Text(model).tag(model as String?)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
+                .disabled(prompt.providerID == nil)
+            }
+
+            CardNote {
+                CardText("Pin this action to a provider and model, or let it use the current choice.")
+            }
+
+            SettingsRow(title: "After running") {
                 Picker("After running", selection: bindingForOutputBehavior(prompt.id)) {
                     ForEach(ActionOutputBehavior.allCases, id: \.self) { behavior in
                         Text(behavior.displayName).tag(behavior)
                     }
                 }
-
-                ActionHotkeyRecorderView(hotkey: bindingForHotkey(prompt.id))
-                if let conflict = viewModel.settings.actionHotkeyConflict(for: prompt.id) {
-                    Text(conflict)
-                        .font(AQDesign.TypeToken.footnote)
-                        .foregroundStyle(AQDesign.ColorToken.danger)
-                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
             }
 
-            HStack {
-                Button {
-                    addRow()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                Button {
-                    removeSelected()
-                } label: {
-                    Image(systemName: "minus")
-                }
-                .disabled(selection == nil)
-                Spacer()
-                Button("Restore defaults") {
-                    viewModel.updateSettings { $0.savedPrompts = SavedPrompt.defaults }
-                    NotificationCenter.default.post(name: .actionHotkeysChanged, object: nil)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .font(AQDesign.TypeToken.hint)
+            SettingsRow(title: "Global hotkey") {
+                ActionHotkeyRecorderView(
+                    hotkey: bindingForHotkey(prompt.id),
+                    label: "Global hotkey",
+                    showsLabel: false
+                )
+            }
+            if let conflict = viewModel.settings.actionHotkeyConflict(for: prompt.id) {
+                CardNote { CardText(conflict, tone: AQDesign.ColorToken.danger) }
             }
         }
+    }
+
+    /// The house field ground: quiet fill plus a hairline, at `Radius.sm`.
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+            .fill(AQDesign.ColorToken.surfaceFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                    .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+            )
     }
 
     private func bindingForName(_ id: SavedPrompt.ID) -> Binding<String> {

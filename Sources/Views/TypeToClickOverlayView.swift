@@ -15,6 +15,10 @@ struct TypeToClickBadge: Equatable {
 }
 
 /// Draws named target badges and search status, and captures raw key events.
+///
+/// The HUD is painted from the house HUD tokens alone (`hudFill`, `hudStroke`,
+/// `hudText`, `hudMuted`), which are the same in light and dark by design, so
+/// nothing here branches on appearance.
 final class TypeToClickOverlayView: NSView {
     var badges: [TypeToClickBadge] = [] {
         didSet { needsDisplay = true }
@@ -34,6 +38,9 @@ final class TypeToClickOverlayView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// The house status dot: 6 pt, and never the only signal.
+    private static let statusDotDiameter: CGFloat = 6
+
     override func draw(_ dirtyRect: NSRect) {
         // Transparent retained windows do not reliably erase pixels that a
         // previous draw pass painted. Explicit clearing prevents old badges or
@@ -47,48 +54,61 @@ final class TypeToClickOverlayView: NSView {
         }
     }
 
-    /// Compact gold callouts expose actual control names instead of arbitrary
+    /// Compact HUD callouts expose actual control names instead of arbitrary
     /// letter codes. The tail points to the control's click location.
+    ///
+    /// Three states, told apart without leaning on colour: a resting badge is
+    /// a dark HUD chip in `meta`; the selected badge inverts to dark ink on
+    /// the HUD's light text colour and steps up to `label`; the badge being
+    /// clicked keeps that inversion and adds a `success` dot beside its name.
     private func drawBadge(_ badge: TypeToClickBadge) {
-        let fill = badge.isPulsing
-            ? NSColor.white
-            : NSColor(srgbRed: 0.97, green: 0.77, blue: 0.02, alpha: 0.96)
-        let stroke = badge.isPulsing
-            ? NSColor(srgbRed: 0.12, green: 0.78, blue: 0.32, alpha: 1)
-            : badge.isSelected
-                ? NSColor(srgbRed: 0.08, green: 0.07, blue: 0.03, alpha: 0.98)
-                : NSColor(srgbRed: 0.43, green: 0.31, blue: 0.01, alpha: 0.72)
+        let isEmphasised = badge.isSelected || badge.isPulsing
+        let fill = isEmphasised
+            ? House.NSColorToken.hudText
+            : House.NSColorToken.hudFill
+        let stroke = isEmphasised
+            ? House.NSColorToken.hudFill
+            : House.NSColorToken.hudStroke
         let displayLabel = badge.label.count > 28
             ? String(badge.label.prefix(27)) + "…"
             : badge.label
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(
-                ofSize: badge.isPulsing ? 13 : 12,
-                weight: .semibold
+                ofSize: isEmphasised
+                    ? House.TypeToken.Size.label
+                    : House.TypeToken.Size.meta,
+                weight: isEmphasised ? .medium : .regular
             ),
-            .foregroundColor: NSColor(srgbRed: 0.08, green: 0.07, blue: 0.03, alpha: 1),
+            .foregroundColor: isEmphasised
+                ? House.NSColorToken.hudFill
+                : House.NSColorToken.hudText,
         ]
         let string = NSAttributedString(string: displayLabel, attributes: attributes)
         let textSize = string.size()
-        let horizontalPadding: CGFloat = badge.isPulsing ? 9 : 7
-        let verticalPadding: CGFloat = badge.isPulsing ? 5 : 3
-        let tailWidth: CGFloat = 7
-        let tailHeight: CGFloat = 4
+        let horizontalPadding = House.Spacing.xs
+        let verticalPadding = House.Spacing.xxs
+        let dotGap = House.Spacing.xxs
+        // Only the badge being clicked carries the dot; it sits beside the
+        // control's own name, never alone.
+        let dotBlock = badge.isPulsing ? Self.statusDotDiameter + dotGap : 0
+        let edgeInset = House.Spacing.xxs
+        let tailWidth = House.Spacing.xs
+        let tailHeight = House.Spacing.xxs
         let chipSize = NSSize(
-            width: ceil(textSize.width) + horizontalPadding * 2,
+            width: ceil(textSize.width) + dotBlock + horizontalPadding * 2,
             height: ceil(textSize.height) + verticalPadding * 2
         )
         let proposedX = badge.rect.midX - chipSize.width / 2
         let chipX = min(
-            max(bounds.minX + 2, proposedX),
-            max(bounds.minX + 2, bounds.maxX - chipSize.width - 2)
+            max(bounds.minX + edgeInset, proposedX),
+            max(bounds.minX + edgeInset, bounds.maxX - chipSize.width - edgeInset)
         )
         let proposedY = badge.placement == .inside
             ? badge.rect.midY - chipSize.height / 2
             : badge.rect.maxY + tailHeight
         let chipY = min(
-            max(bounds.minY + tailHeight + 2, proposedY),
-            max(bounds.minY + tailHeight + 2, bounds.maxY - chipSize.height - 2)
+            max(bounds.minY + tailHeight + edgeInset, proposedY),
+            max(bounds.minY + tailHeight + edgeInset, bounds.maxY - chipSize.height - edgeInset)
         )
         let chip = NSRect(origin: NSPoint(x: chipX, y: chipY), size: chipSize)
         let tipX = min(max(badge.rect.midX, chip.minX + 4), chip.maxX - 4)
@@ -97,15 +117,21 @@ final class TypeToClickOverlayView: NSView {
         tail.line(to: NSPoint(x: tipX, y: chip.minY - tailHeight))
         tail.line(to: NSPoint(x: tipX + tailWidth / 2, y: chip.minY + 0.5))
         tail.close()
-        let rounded = NSBezierPath(roundedRect: chip, xRadius: 5, yRadius: 5)
+        let rounded = NSBezierPath(
+            roundedRect: chip,
+            xRadius: AQDesign.fieldCornerRadius,
+            yRadius: AQDesign.fieldCornerRadius
+        )
 
         NSGraphicsContext.saveGraphicsState()
+        // Depth comes from the house card shadow, not from stroke weight.
+        // The HUD is mode-independent, so it always uses the dark opacity.
         let shadow = NSShadow()
-        shadow.shadowColor = badge.isPulsing
-            ? NSColor(srgbRed: 0.12, green: 0.78, blue: 0.32, alpha: 0.95)
-            : NSColor.black.withAlphaComponent(0.28)
-        shadow.shadowBlurRadius = badge.isPulsing ? 10 : 3
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(
+            House.Shadow.card.opacity(dark: true)
+        )
+        shadow.shadowBlurRadius = House.Shadow.card.blur / 2
+        shadow.shadowOffset = NSSize(width: 0, height: -House.Shadow.card.y)
         shadow.set()
         fill.setFill()
         if badge.placement == .above { tail.fill() }
@@ -118,41 +144,109 @@ final class TypeToClickOverlayView: NSView {
         tailOutline.line(to: NSPoint(x: tipX + tailWidth / 2, y: chip.minY + 0.5))
         stroke.setStroke()
         if badge.placement == .above {
-            tailOutline.lineWidth = badge.isSelected || badge.isPulsing ? 1.5 : 0.75
+            tailOutline.lineWidth = House.hairline
             tailOutline.stroke()
         }
-        rounded.lineWidth = badge.isPulsing ? 3 : (badge.isSelected ? 2 : 0.75)
+        rounded.lineWidth = House.hairline
         rounded.stroke()
-        string.draw(at: NSPoint(
-            x: chip.midX - textSize.width / 2,
-            y: chip.midY - textSize.height / 2
-        ))
+
+        var textX = chip.minX + horizontalPadding
+        if badge.isPulsing {
+            let dot = NSRect(
+                x: textX,
+                y: chip.midY - Self.statusDotDiameter / 2,
+                width: Self.statusDotDiameter,
+                height: Self.statusDotDiameter
+            )
+            House.NSColorToken.success.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            textX = dot.maxX + dotGap
+        }
+        string.draw(at: NSPoint(x: textX, y: chip.midY - textSize.height / 2))
     }
 
+    /// The status line: one HUD pill with a status dot and the words that
+    /// explain it. Ready is `success`, work in progress is `hudMuted`, a
+    /// no-match or permission line is `danger`.
     private func drawStatus(_ text: String) {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
-            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: House.TypeToken.Size.label, weight: .medium),
+            .foregroundColor: House.NSColorToken.hudText,
         ]
         let string = NSAttributedString(string: text, attributes: attributes)
         let textSize = string.size()
+        let horizontalPadding = House.Spacing.md
+        let verticalPadding = House.Spacing.sm
+        let dotGap = House.Spacing.xs
         let anchor = statusAnchor ?? NSPoint(x: bounds.midX, y: bounds.midY)
-        let pill = NSRect(
-            x: anchor.x - (textSize.width + 32) / 2,
-            y: anchor.y - (textSize.height + 22) / 2,
-            width: textSize.width + 32,
-            height: textSize.height + 22
+        let pillSize = NSSize(
+            width: textSize.width + Self.statusDotDiameter + dotGap + horizontalPadding * 2,
+            height: textSize.height + verticalPadding * 2
         )
-        NSColor.black.withAlphaComponent(0.84).setFill()
-        NSBezierPath(roundedRect: pill, xRadius: 10, yRadius: 10).fill()
-        NSColor.white.withAlphaComponent(0.16).setStroke()
-        let border = NSBezierPath(roundedRect: pill, xRadius: 10, yRadius: 10)
-        border.lineWidth = 1
+        let pill = NSRect(
+            x: anchor.x - pillSize.width / 2,
+            y: anchor.y - pillSize.height / 2,
+            width: pillSize.width,
+            height: pillSize.height
+        )
+        House.NSColorToken.hudFill.setFill()
+        NSBezierPath(
+            roundedRect: pill,
+            xRadius: AQDesign.itemCornerRadius,
+            yRadius: AQDesign.itemCornerRadius
+        ).fill()
+        House.NSColorToken.hudStroke.setStroke()
+        let border = NSBezierPath(
+            roundedRect: pill,
+            xRadius: AQDesign.itemCornerRadius,
+            yRadius: AQDesign.itemCornerRadius
+        )
+        border.lineWidth = House.hairline
         border.stroke()
+
+        let dot = NSRect(
+            x: pill.minX + horizontalPadding,
+            y: pill.midY - Self.statusDotDiameter / 2,
+            width: Self.statusDotDiameter,
+            height: Self.statusDotDiameter
+        )
+        statusTone(for: text).color.setFill()
+        NSBezierPath(ovalIn: dot).fill()
+
         string.draw(at: NSPoint(
-            x: pill.midX - textSize.width / 2,
+            x: dot.maxX + dotGap,
             y: pill.midY - textSize.height / 2
         ))
+    }
+
+    /// The three tones a status line can carry. The dot never carries the
+    /// meaning alone: it always sits beside the words in the same pill.
+    private enum StatusTone {
+        case ready
+        case busy
+        case alert
+
+        var color: NSColor {
+            switch self {
+            case .ready: House.NSColorToken.success
+            case .busy: House.NSColorToken.hudMuted
+            case .alert: House.NSColorToken.danger
+            }
+        }
+    }
+
+    /// Reads the tone from the wording the controller already supplies: a
+    /// trailing ellipsis means a scan or a click is still running, a no-match,
+    /// permission, or changed-target line is an alert, and anything else is a
+    /// ready count of named targets.
+    private func statusTone(for text: String) -> StatusTone {
+        if text.hasPrefix("No match")
+            || text.contains("changed")
+            || text.contains("not visible yet")
+            || text.contains("Privacy & Security") {
+            return .alert
+        }
+        return text.hasSuffix("…") ? .busy : .ready
     }
 
     override func keyDown(with event: NSEvent) {

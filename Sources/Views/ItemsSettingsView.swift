@@ -4,11 +4,13 @@ import UniformTypeIdentifiers
 
 /// Every item that can carry an alias or a global hotkey, in one table you
 /// can read at a glance and edit in place: apps, snippets, quick links,
-/// window layouts, and commands. Modelled on Raycast's Extensions table.
+/// window layouts, and commands. The table sits in a raised card; rows are
+/// separated by house dividers and lit by the house hover fill.
 struct ItemsSettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var filter: Filter = .all
     @State private var query = ""
+    @State private var hoveredRow: String?
 
     enum Filter: String, CaseIterable, Identifiable {
         case all, apps, folders, snippets, quickLinks, windows, commands
@@ -99,56 +101,86 @@ struct ItemsSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Picker("", selection: $filter) {
-                    ForEach(Filter.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 520)
-                Spacer()
-                Menu {
-                    Button("Add Folder…") { addFolder() }
-                    Button("Add App…") { addApplication() }
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Add a folder or an app that is not in the list")
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search", text: $query)
-                        .textFieldStyle(.plain)
-                }
-                .padding(.horizontal, 8)
-                // Flexible: a fixed width made the toolbar wider than the
-                // window minimum and cropped the pane at both edges.
-                .frame(minWidth: 120, idealWidth: 200, maxWidth: 200)
-                .frame(height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 6).fill(AQDesign.ColorToken.keyCapFill)
-                )
-            }
+        VStack(alignment: .leading, spacing: House.Spacing.sm) {
+            toolbar
 
-            header
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(rows) { row in
-                        rowView(row)
-                        Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                HouseDivider()
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            if index > 0 { HouseDivider() }
+                            rowView(row)
+                        }
                     }
                 }
             }
+            .raisedCard()
+
             Text("\(rows.count) items. Aliases are words you type to reach an item first. Hotkeys run the item from anywhere.")
                 .font(AQDesign.TypeToken.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
         }
-        .padding(AQDesign.Space.window)
+        .padding(.horizontal, SettingsMetrics.paneInset)
+        .padding(.bottom, House.Spacing.md)
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: House.Spacing.sm) {
+            InkSegmentedControl(
+                selection: $filter,
+                options: Filter.allCases.map { InkSegment(value: $0, title: $0.title) }
+            )
+            .frame(maxWidth: 520)
+            Spacer()
+            Menu {
+                Button("Add Folder…") { addFolder() }
+                Button("Add App…") { addApplication() }
+            } label: {
+                Label("Add", systemImage: "plus")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Add a folder or an app that is not in the list")
+            searchField
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: AQDesign.Space.standard) {
+            Image(systemName: "magnifyingglass")
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            ZStack(alignment: .leading) {
+                if query.isEmpty {
+                    Text("Search")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .accessibilityLabel("Search")
+            }
+        }
+        .padding(.horizontal, AQDesign.Space.standard)
+        // Flexible: a fixed width made the toolbar wider than the
+        // window minimum and cropped the pane at both edges.
+        .frame(minWidth: 120, idealWidth: 200, maxWidth: 200)
+        .frame(height: House.Control.small)
+        .background(
+            RoundedRectangle(cornerRadius: AQDesign.menuCornerRadius, style: .continuous)
+                .fill(AQDesign.ColorToken.surfaceFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AQDesign.menuCornerRadius, style: .continuous)
+                .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+        )
     }
 
     private func addFolder() {
@@ -178,49 +210,73 @@ struct ItemsSettingsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Type").frame(width: 84, alignment: .leading)
-            Text("Alias").frame(width: 150, alignment: .leading)
-            Text("Hotkey").frame(width: 150, alignment: .leading)
+        HStack(spacing: House.Spacing.sm) {
+            SectionLabel(text: "Name").frame(maxWidth: .infinity, alignment: .leading)
+            SectionLabel(text: "Type").frame(width: 84, alignment: .leading)
+            SectionLabel(text: "Alias").frame(width: 150, alignment: .leading)
+            SectionLabel(text: "Hotkey").frame(width: 150, alignment: .leading)
         }
-        .font(AQDesign.TypeToken.label)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, House.Spacing.sm)
+        .frame(minHeight: House.Control.chip)
     }
 
     @ViewBuilder
     private func rowView(_ row: Row) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    icon(for: row).frame(width: 18, height: 18)
-                    Text(row.name).lineLimit(1).truncationMode(.middle)
+            HStack(spacing: House.Spacing.sm) {
+                HStack(spacing: AQDesign.Space.standard) {
+                    IconTile(fillsTile: isApplication(row)) { icon(for: row) }
+                    Text(row.name)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Text(row.typeLabel)
-                    .font(AQDesign.TypeToken.label)
-                    .foregroundStyle(.secondary)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     .frame(width: 84, alignment: .leading)
                 TextField("None", text: aliasBinding(for: row))
                     .textFieldStyle(.plain)
                     .font(AQDesign.TypeToken.body)
-                    .padding(.horizontal, 6)
-                    .frame(width: 150, height: 24)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(AQDesign.ColorToken.keyCapFill))
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .padding(.horizontal, AQDesign.Space.standard)
+                    .frame(width: 150, height: AQDesign.tileSize)
+                    .background(
+                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                            .fill(AQDesign.ColorToken.surfaceFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                            .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+                    )
                 CompactHotkeyRecorder(hotkey: hotkeyBinding(for: row))
                     .frame(width: 150, alignment: .leading)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 36)
+            .padding(.horizontal, House.Spacing.sm)
+            .frame(minHeight: House.Control.railRow)
             if let conflict = conflict(for: row) {
                 Text(conflict)
                     .font(AQDesign.TypeToken.caption)
                     .foregroundStyle(AQDesign.ColorToken.danger)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
+                    .padding(.horizontal, House.Spacing.sm)
+                    .padding(.bottom, AQDesign.Space.compact)
             }
         }
+        .background(RowHighlight(isSelected: false, isHovering: hoveredRow == row.id))
+        .onHover { inside in
+            if inside {
+                hoveredRow = row.id
+            } else if hoveredRow == row.id {
+                hoveredRow = nil
+            }
+        }
+    }
+
+    private func isApplication(_ row: Row) -> Bool {
+        if case .application = row { return true }
+        return false
     }
 
     @ViewBuilder
@@ -230,7 +286,9 @@ struct ItemsSettingsView: View {
             Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                 .resizable().scaledToFit()
         case .item(let item):
-            Image(systemName: item.systemImage).foregroundStyle(.secondary)
+            Image(systemName: item.systemImage)
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
         }
     }
 
@@ -286,12 +344,12 @@ struct CompactHotkeyRecorder: View {
     @State private var validationError: String?
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AQDesign.Space.standard) {
             if isRecording {
                 HotkeyCapture { captured in
                     let rawMods = captured.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
                     guard QuickSettings.isValidHotkey(keyCode: captured.keyCode, modifiers: rawMods) else {
-                        validationError = "Add ⌃, ⌥, or ⌘"
+                        validationError = "Add \u{2303}, \u{2325}, or \u{2318}"
                         isRecording = false
                         return
                     }
@@ -302,10 +360,13 @@ struct CompactHotkeyRecorder: View {
                 } onCancel: {
                     isRecording = false
                 }
-                .frame(width: 120, height: 24)
+                .frame(width: 120, height: AQDesign.tileSize)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(AQDesign.ColorToken.emphasis, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: AQDesign.keyCapCornerRadius, style: .continuous)
+                        .strokeBorder(
+                            AQDesign.ColorToken.panelStrokeStrong,
+                            lineWidth: AQDesign.hairline
+                        )
                 )
             } else {
                 Button {
@@ -317,11 +378,15 @@ struct CompactHotkeyRecorder: View {
                     } else {
                         Text(validationError ?? "Record")
                             .font(AQDesign.TypeToken.label)
-                            .foregroundStyle(validationError == nil ? .secondary : AQDesign.ColorToken.danger)
+                            .foregroundStyle(
+                                validationError == nil
+                                    ? AQDesign.ColorToken.textSecondary
+                                    : AQDesign.ColorToken.danger
+                            )
                     }
                 }
                 .buttonStyle(.plain)
-                .frame(height: 24)
+                .frame(height: AQDesign.tileSize)
                 .help("Click, then press the keys")
                 if hotkey != nil {
                     Button {
@@ -329,7 +394,7 @@ struct CompactHotkeyRecorder: View {
                         NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     }
                     .buttonStyle(.plain)
                     .help("Clear hotkey")

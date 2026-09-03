@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Provider configuration stays deliberately compact: choose a source, choose
-/// a model, and edit only the fields that source needs.
+/// a model, and edit only the fields that source needs. One card per group.
 struct ProviderSettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var apiKey = ""
@@ -27,18 +27,24 @@ struct ProviderSettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Text("Models").font(AQDesign.TypeToken.heading)
-                    Spacer()
-                    Button("Add endpoint") {
-                        _ = viewModel.addOpenAICompatibleProvider()
-                        loadKey()
-                    }
-                }
+            VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
+                providerCard
+                visionCard
+                webSearchCard
+                instructionCard
+            }
+            .padding(.horizontal, SettingsMetrics.paneInset)
+            .padding(.bottom, House.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { loadKey() }
+    }
 
-                LabeledContent("Provider") {
-                    Picker("", selection: selectedProviderID) {
+    private var providerCard: some View {
+        SettingsCard("Provider") {
+            SettingsRow(title: "Provider", isFirst: true) {
+                HStack(spacing: House.Spacing.sm) {
+                    Picker("Provider", selection: selectedProviderID) {
                         ForEach(viewModel.settings.providers) { item in
                             Label(
                                 item.name,
@@ -49,130 +55,163 @@ struct ProviderSettingsView: View {
                     }
                     .labelsHidden()
                     .frame(width: 330)
+                    Button("Add endpoint") {
+                        _ = viewModel.addOpenAICompatibleProvider()
+                        loadKey()
+                    }
                 }
-
-                if let provider, let selectedIndex {
-                    providerEditor(provider, index: selectedIndex)
-                }
-
-                Divider()
-
-                VisionModelPicker(viewModel: viewModel)
-
-                Divider()
-
-                Toggle(
-                    "Let the model search the web (SearXNG)",
-                    isOn: viewModel.settingsBinding(\.modelWebSearchEnabled)
-                )
-                Text("The model gets a search_web tool and decides when to use it: news, scores, prices, anything after its training. Works in follow-ups too.")
-                    .font(AQDesign.TypeToken.hint)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Text("Quick-action instruction")
-                    .font(AQDesign.TypeToken.subheading)
-                TextEditor(text: viewModel.settingsBinding(\.systemPrompt))
-                    .font(AQDesign.TypeToken.detail)
-                    .frame(minHeight: 82)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius)
-                            .stroke(AQDesign.ColorToken.fieldStroke)
-                    )
-                Text("This instruction applies to every provider. Saved actions add their own prompt.")
-                    .font(AQDesign.TypeToken.hint)
-                    .foregroundStyle(.secondary)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let provider, let selectedIndex {
+                providerEditor(provider, index: selectedIndex)
+            }
         }
-        .onAppear { loadKey() }
     }
 
     @ViewBuilder
     private func providerEditor(_ provider: InferenceProvider, index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if !provider.isBuiltIn {
-                LabeledContent("Name") {
-                    TextField("Provider name", text: providerBinding(index, \.name))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 330)
-                }
+        if !provider.isBuiltIn {
+            SettingsRow(title: "Name") {
+                TextField("Provider name", text: providerBinding(index, \.name))
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.body)
+                    .padding(.horizontal, AQDesign.Space.standard)
+                    .frame(width: 330, height: House.Control.compact)
+                    .background(fieldBackground)
             }
+        }
 
-            LabeledContent("Model") {
-                HStack(spacing: 8) {
-                    if !provider.models.isEmpty {
-                        Picker("", selection: modelBinding(provider.id)) {
-                            ForEach(provider.models, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
+        SettingsRow(title: "Model") {
+            HStack(spacing: AQDesign.Space.standard) {
+                if !provider.models.isEmpty {
+                    Picker("Model", selection: modelBinding(provider.id)) {
+                        ForEach(provider.models, id: \.self) { model in
+                            Text(model).tag(model)
                         }
-                        .labelsHidden()
-                        .frame(width: 245)
-                    } else {
-                        TextField("Model ID", text: customModelBinding(provider.id))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 245)
                     }
+                    .labelsHidden()
+                    .frame(width: 245)
+                } else {
+                    TextField("Model ID", text: customModelBinding(provider.id))
+                        .textFieldStyle(.plain)
+                        .font(AQDesign.TypeToken.body)
+                        .padding(.horizontal, AQDesign.Space.standard)
+                        .frame(width: 245, height: House.Control.compact)
+                        .background(fieldBackground)
+                }
 
-                    if provider.discovery != .none {
-                        Button {
-                            Task { await viewModel.refreshModels(providerID: provider.id) }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .help("Refresh models")
+                if provider.discovery != .none {
+                    Button {
+                        Task { await viewModel.refreshModels(providerID: provider.id) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     }
+                    .buttonStyle(.plain)
+                    .help("Refresh models")
                 }
             }
+        }
 
-            if provider.kind == .openAICompatible {
-                LabeledContent("Base URL") {
-                    TextField("https://host.example/v1", text: providerBinding(index, \.baseURL))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 330)
-                }
+        if provider.kind == .openAICompatible {
+            SettingsRow(title: "Base URL") {
+                TextField("https://host.example/v1", text: providerBinding(index, \.baseURL))
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.code)
+                    .padding(.horizontal, AQDesign.Space.standard)
+                    .frame(width: 330, height: House.Control.compact)
+                    .background(fieldBackground)
+            }
 
-                LabeledContent("API key") {
-                    HStack(spacing: 8) {
-                        SecureField("Optional for local servers", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 220)
-                        Button("Save") { saveKey(provider.id) }
-                        Button("Remove") {
-                            try? APIKeyStore.delete(providerID: provider.id)
-                            apiKey = ""
-                            keyStatus = "Key removed"
-                        }
-                        .disabled(apiKey.isEmpty && APIKeyStore.load(providerID: provider.id) == nil)
+            SettingsRow(title: "API key") {
+                HStack(spacing: AQDesign.Space.standard) {
+                    SecureField("Optional for local servers", text: $apiKey)
+                        .textFieldStyle(.plain)
+                        .font(AQDesign.TypeToken.body)
+                        .padding(.horizontal, AQDesign.Space.standard)
+                        .frame(width: 220, height: House.Control.compact)
+                        .background(fieldBackground)
+                    Button("Save") { saveKey(provider.id) }
+                    Button("Remove") {
+                        try? APIKeyStore.delete(providerID: provider.id)
+                        apiKey = ""
+                        keyStatus = "Key removed"
                     }
-                }
-            } else if provider.kind == .commandLine {
-                LabeledContent("Command") {
-                    Text(provider.command?.executable ?? "Not configured")
-                        .font(AQDesign.TypeToken.code)
-                        .foregroundStyle(
-                            provider.command.flatMap { ExecutableResolver.resolve($0.executable) } == nil
-                                ? AQDesign.ColorToken.danger : Color.secondary
-                        )
+                    .disabled(apiKey.isEmpty && APIKeyStore.load(providerID: provider.id) == nil)
                 }
             }
-
-            if let message = viewModel.modelRefreshMessage ?? keyStatus {
-                Text(message)
-                    .font(AQDesign.TypeToken.hint)
-                    .foregroundStyle(.secondary)
+        } else if provider.kind == .commandLine {
+            SettingsRow(title: "Command") {
+                Text(provider.command?.executable ?? "Not configured")
+                    .font(AQDesign.TypeToken.code)
+                    .foregroundStyle(
+                        provider.command.flatMap { ExecutableResolver.resolve($0.executable) } == nil
+                            ? AQDesign.ColorToken.danger
+                            : AQDesign.ColorToken.textSecondary
+                    )
             }
+        }
 
-            if !provider.isBuiltIn {
+        if let message = viewModel.modelRefreshMessage ?? keyStatus {
+            CardNote { CardText(message) }
+        }
+
+        if !provider.isBuiltIn {
+            CardNote {
                 Button("Remove endpoint", role: .destructive) {
                     viewModel.removeProvider(id: provider.id)
                     loadKey()
                 }
             }
         }
+    }
+
+    private var visionCard: some View {
+        SettingsCard("Vision") {
+            VisionModelPicker(viewModel: viewModel)
+        }
+    }
+
+    private var webSearchCard: some View {
+        SettingsCard("Web search") {
+            SettingsRow(title: "Let the model search the web (SearXNG)", isFirst: true) {
+                Toggle(
+                    "Let the model search the web (SearXNG)",
+                    isOn: viewModel.settingsBinding(\.modelWebSearchEnabled)
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            CardNote {
+                CardText("The model gets a search_web tool and decides when to use it: news, scores, prices, anything after its training. Works in follow-ups too.")
+            }
+        }
+    }
+
+    private var instructionCard: some View {
+        SettingsCard("Quick-action instruction") {
+            CardNote(isFirst: true) {
+                TextEditor(text: viewModel.settingsBinding(\.systemPrompt))
+                    .font(AQDesign.TypeToken.detail)
+                    .scrollContentBackground(.hidden)
+                    .padding(AQDesign.Space.standard)
+                    .frame(minHeight: 82)
+                    .background(fieldBackground)
+                    .accessibilityLabel("Quick-action instruction")
+            }
+            CardNote {
+                CardText("This instruction applies to every provider. Saved actions add their own prompt.")
+            }
+        }
+    }
+
+    /// The house field ground: quiet fill plus a hairline, at `Radius.sm`.
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+            .fill(AQDesign.ColorToken.surfaceFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                    .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+            )
     }
 
     private func providerBinding(
@@ -233,9 +272,9 @@ private struct VisionModelPicker: View {
             .filter { $0.kind == .openAICompatible }
             .flatMap { provider -> [Option] in
                 let current = provider.selectedModel.isEmpty ? "selected model" : provider.selectedModel
-                var list = [Option(id: "\(provider.id.uuidString)|", label: "\(provider.name) · \(current)")]
+                var list = [Option(id: "\(provider.id.uuidString)|", label: "\(provider.name) \u{00B7} \(current)")]
                 for model in provider.models where model != provider.selectedModel {
-                    list.append(Option(id: "\(provider.id.uuidString)|\(model)", label: "\(provider.name) · \(model)"))
+                    list.append(Option(id: "\(provider.id.uuidString)|\(model)", label: "\(provider.name) \u{00B7} \(model)"))
                 }
                 return list
             }
@@ -259,20 +298,17 @@ private struct VisionModelPicker: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LabeledContent("Vision model") {
-                Picker("", selection: selection) {
-                    ForEach(options) { option in
-                        Text(option.label).tag(option.id)
-                    }
+        SettingsRow(title: "Vision model", isFirst: true) {
+            Picker("Vision model", selection: selection) {
+                ForEach(options) { option in
+                    Text(option.label).tag(option.id)
                 }
-                .labelsHidden()
-                .frame(width: 330)
             }
-            Text("Screenshots attached with ⌘⇧S or ⌘⇧D go only to this model. A local model keeps the image on this Mac. Refresh a provider's models to see new vision models.")
-                .font(AQDesign.TypeToken.hint)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .labelsHidden()
+            .frame(width: 330)
+        }
+        CardNote {
+            CardText("Screenshots attached with \u{2318}\u{21E7}S or \u{2318}\u{21E7}D go only to this model. A local model keeps the image on this Mac. Refresh a provider's models to see new vision models.")
         }
     }
 }

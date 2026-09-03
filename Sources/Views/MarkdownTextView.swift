@@ -44,9 +44,10 @@ struct MarkdownTextView: NSViewRepresentable {
         coordinator.shownStreaming = isStreaming
         let newAttr = NSMutableAttributedString(attributedString: MarkdownRenderer.cachedRender(markdown))
         if isStreaming {
+            // The streaming caret is house ink at the prose size.
             let cursor = NSAttributedString(string: "\u{258B}", attributes: [
-                .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
+                .foregroundColor: House.NSColorToken.textPrimary,
             ])
             newAttr.append(cursor)
         }

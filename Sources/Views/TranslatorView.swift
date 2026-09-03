@@ -14,31 +14,18 @@ struct TranslatorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 20)
-                .frame(height: 48)
-            Divider()
+                .padding(.horizontal, AQDesign.Space.panel)
+                .frame(height: House.Control.xlarge)
+            HouseDivider()
             if model.isTargetPickerPresented {
                 targetPicker
             } else {
                 panes
             }
-            Divider()
-            footer
-                .padding(.horizontal, 20)
-                .frame(height: AQDesign.footerHeight)
+            FooterWell { footer }
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .background {
-            ZStack {
-                Rectangle().fill(.regularMaterial)
-                AQDesign.ColorToken.panelTint
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AQDesign.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: AQDesign.cornerRadius)
-                .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: 1)
-        )
+        .panelGlass()
         .onAppear { focusSource() }
         .onChange(of: model.isTargetPickerPresented) { _, presented in
             if presented { focusPicker() } else { focusSource() }
@@ -46,15 +33,18 @@ struct TranslatorView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AQDesign.Space.row) {
             Image(systemName: "character.bubble")
-                .foregroundStyle(AQDesign.ColorToken.emphasis)
+                .font(AQDesign.TypeToken.glyph)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .accessibilityHidden(true)
             Text("Translate")
-                .font(AQDesign.TypeToken.body.weight(.semibold))
+                .font(AQDesign.TypeToken.subheading)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
             if let detected = model.detectedSource {
                 Text("from \(detected.title)")
                     .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
             }
             Spacer()
             if model.isTranslating {
@@ -63,14 +53,22 @@ struct TranslatorView: View {
             Button {
                 model.isTargetPickerPresented.toggle()
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: AQDesign.Space.standard) {
                     Text("to \(model.target.title)")
                         .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     KeyCapGroup(keys: ["⌘", "P"])
                 }
-                .padding(.horizontal, 8)
-                .frame(height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).fill(AQDesign.ColorToken.keyCapFill))
+                .padding(.horizontal, AQDesign.Space.standard)
+                .frame(height: House.Control.chip)
+                .background(
+                    RoundedRectangle(
+                        cornerRadius: AQDesign.fieldCornerRadius,
+                        style: .continuous
+                    )
+                    .fill(AQDesign.ColorToken.chipFill)
+                )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Change target language (⌘P)")
@@ -79,15 +77,13 @@ struct TranslatorView: View {
 
     private var panes: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                 HStack {
-                    Text("Source")
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(.secondary)
+                    SectionLabel(text: "Source")
                     Spacer()
                     Text("\(model.source.count) characters")
                         .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }
                 TextEditor(text: $model.source)
                     .font(AQDesign.TypeToken.prose)
@@ -98,43 +94,45 @@ struct TranslatorView: View {
                         if model.source.isEmpty {
                             Text("Type or paste text. ⌘⇧V uses the clipboard.")
                                 .font(AQDesign.TypeToken.prose)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                                // Not spacing: these two match NSTextView's own
+                                // text-container inset so the placeholder sits
+                                // exactly where the typed glyphs will.
                                 .padding(.top, 1)
                                 .padding(.leading, 5)
                                 .allowsHitTesting(false)
                         }
                     }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.vertical, AQDesign.Space.row)
             .frame(maxHeight: .infinity)
 
-            Divider()
+            HouseDivider()
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                 HStack {
-                    Text(model.target.title)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(.secondary)
+                    SectionLabel(text: model.target.title)
                     Spacer()
                     if let message = model.message {
                         Text(message)
                             .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
                             .lineLimit(1)
                     }
                 }
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
                         Text(model.translation.isEmpty && !model.isTranslating ? " " : model.translation)
                             .font(AQDesign.TypeToken.input)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let pinyin = model.pinyin, !pinyin.isEmpty {
-                            Divider()
+                            HouseDivider()
                             Text(pinyin)
                                 .font(AQDesign.TypeToken.detail)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -142,19 +140,22 @@ struct TranslatorView: View {
                     .padding(.top, 2)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.vertical, AQDesign.Space.row)
             .frame(maxHeight: .infinity)
         }
     }
 
     private var targetPicker: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            HStack(spacing: AQDesign.Space.row) {
+                Image(systemName: "magnifyingglass")
+                    .font(AQDesign.TypeToken.glyph)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
                 TextField("Type a language", text: $model.targetQuery)
                     .textFieldStyle(.plain)
-                    .font(AQDesign.TypeToken.body)
+                    .font(AQDesign.TypeToken.input)
                     .focused($pickerFocused)
                     .onSubmit { choose(pickerIndex) }
                     .onKeyPress(.downArrow) { move(1); return .handled }
@@ -162,35 +163,52 @@ struct TranslatorView: View {
                     .onChange(of: model.targetQuery) { _, _ in pickerIndex = 0 }
                 KeyCapGroup(keys: ["esc"])
             }
-            .padding(.horizontal, 20)
-            .frame(height: PanelSizing.paneHeaderHeight)
-            Divider()
+            .padding(.horizontal, AQDesign.Space.panel)
+            .frame(height: AQDesign.inputHeight)
+            HouseDivider()
             SelectableListPane(
                 items: model.filteredTargets,
                 selectedIndex: $pickerIndex,
-                rowSpacing: 2,
-                rowHeight: 36,
-                listInsets: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8),
+                rowSpacing: PanelSizing.actionRowSpacing,
+                rowHeight: AQDesign.rowHeight,
+                listInsets: EdgeInsets(
+                    top: AQDesign.Space.standard,
+                    leading: AQDesign.Space.standard,
+                    bottom: AQDesign.Space.standard,
+                    trailing: AQDesign.Space.standard
+                ),
                 onActivate: { target in model.setTarget(target) }
             ) { _, item, _ in
-                HStack {
-                    Text(item.title).font(AQDesign.TypeToken.body.weight(.medium))
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: "globe")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(item.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     Spacer()
                     if item == model.target {
-                        Image(systemName: "checkmark").foregroundStyle(.secondary)
+                        Image(systemName: "checkmark")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, AQDesign.Space.row)
             }
         }
     }
 
     private var footer: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: AQDesign.Space.row) {
+            StatusDot(color: model.isTranslating
+                ? AQDesign.ColorToken.warning
+                : AQDesign.ColorToken.success)
             Text(model.isTargetPickerPresented ? "Target Language" : "Translator")
-                .font(AQDesign.TypeToken.label)
-                .foregroundStyle(.secondary)
-            Spacer()
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            Spacer(minLength: AQDesign.Space.row)
             if model.isTargetPickerPresented {
                 FooterHintView(label: "Choose", keys: ["↩"])
                 FooterHintView(label: "Back", keys: ["esc"])
@@ -225,18 +243,14 @@ struct TranslatorView: View {
     }
 }
 
-/// One "Label ⌘K" pair for footers outside the launcher.
+/// One "Label ⌘K" pair for footers outside the launcher: the house `KeyHint`,
+/// under the name this window and its tests already use.
 struct FooterHintView: View {
     let label: String
     let keys: [String]
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text(label)
-                .font(AQDesign.TypeToken.label)
-                .foregroundStyle(.secondary)
-            KeyCapGroup(keys: keys)
-        }
+        KeyHint(label: label, keys: keys)
     }
 }
 

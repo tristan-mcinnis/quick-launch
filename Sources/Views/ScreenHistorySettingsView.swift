@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 
 /// The Screen History settings tab: sources, Coast import, capture, and
-/// retention. Every action goes through `viewModel.screenHistory`.
+/// retention, one card per group. Every action goes through
+/// `viewModel.screenHistory`.
 struct ScreenHistorySettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @ScaledMetric(relativeTo: .body) private var exclusionEditorMinHeight: CGFloat = 110
@@ -27,127 +28,160 @@ struct ScreenHistorySettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Screen History").font(AQDesign.TypeToken.heading)
+            VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
+                introCard
+                sourcesCard
+                communicationCard
+                coastCard
+                captureCard
+                retentionCard
+                excludedApplicationsCard
+                excludedWebsitesCard
+                captureControlCard
+            }
+            .padding(.horizontal, SettingsMetrics.paneInset)
+            .padding(.bottom, House.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task {
+            viewModel.screenHistory.noteSettingsPresented()
+            await viewModel.screenHistory.applyCaptureSettings()
+            await viewModel.screenHistory.refreshCoastImportAvailability()
+            await viewModel.screenHistory.refreshCoastFreezeReceipt()
+            await viewModel.screenHistory.refreshRetirementReview()
+        }
+    }
+
+    private var introCard: some View {
+        SettingsCard {
+            CardNote(isFirst: true) {
                 Text("Screen History stays on this Mac. Only moments you save to Vault are copied out.")
                     .font(AQDesign.TypeToken.body)
-                    .foregroundStyle(.secondary)
-                Text("Capture is locked until the privacy review and seven-day test pass.")
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            CardNote {
+                CardText("Capture is locked until the privacy review and seven-day test pass.")
+            }
+        }
+    }
 
-                Toggle("Search existing Coast history", isOn: viewModel.settingsBinding(\.searchLegacyCoastHistory))
+    private var sourcesCard: some View {
+        SettingsCard("Sources") {
+            SettingsRow(title: "Search existing Coast history", isFirst: true) {
+                Toggle(
+                    "Search existing Coast history",
+                    isOn: viewModel.settingsBinding(\.searchLegacyCoastHistory)
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Communication history")
-                        .font(AQDesign.TypeToken.subheading)
-                    Text("Choose which sources can appear in Screen History search and Coast import.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                    VStack(spacing: 0) {
-                        ForEach(Self.communicationSources) { source in
-                            HStack(spacing: 10) {
-                                Image(systemName: source.systemImage)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(source.title)
-                                        .font(AQDesign.TypeToken.body.weight(.medium))
-                                    Text(source.detail)
-                                        .font(AQDesign.TypeToken.metadata)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Toggle(
-                                    "Include \(source.title)",
-                                    isOn: communicationBinding(source)
-                                )
-                                .labelsHidden()
-                            }
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 44)
-                            if source.id != Self.communicationSources.last?.id {
-                                Divider().padding(.leading, 42)
-                            }
+    private var communicationCard: some View {
+        SettingsCard("Communication history") {
+            CardNote(isFirst: true) {
+                CardText("Choose which sources can appear in Screen History search and Coast import.")
+            }
+            ForEach(Self.communicationSources) { source in
+                VStack(spacing: 0) {
+                    HouseDivider()
+                    HStack(spacing: House.Spacing.sm) {
+                        IconTile {
+                            Image(systemName: source.systemImage)
+                                .font(AQDesign.TypeToken.caption)
+                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
                         }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(source.title)
+                                .font(AQDesign.TypeToken.label)
+                                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                            Text(source.detail)
+                                .font(AQDesign.TypeToken.caption)
+                                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        }
+                        Spacer(minLength: House.Spacing.sm)
+                        Toggle(
+                            "Include \(source.title)",
+                            isOn: communicationBinding(source)
+                        )
+                        .toggleStyle(InkToggleStyle())
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius)
-                            .fill(AQDesign.ColorToken.surfaceFill)
+                    .frame(minHeight: AQDesign.rowHeight)
+                }
+            }
+        }
+    }
+
+    private var coastCard: some View {
+        SettingsCard("Import from Coast") {
+            CardNote(isFirst: true) {
+                CardText("Review the counts before importing. Quick Launch copies only allowed text and verified media. Coast stays unchanged.")
+            }
+
+            CardNote {
+                HStack(spacing: AQDesign.Space.standard) {
+                    Button("Freeze Coast source") {
+                        Task { await viewModel.screenHistory.freezeCoastSourceForImport() }
+                    }
+                    .disabled(
+                        viewModel.screenHistory.coastFreezeIsRunning
+                            || viewModel.screenHistory.coastImportIsRunning
                     )
-                }
-
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Import from Coast")
-                        .font(AQDesign.TypeToken.subheading)
-                    Text("Review the counts before importing. Quick Launch copies only allowed text and verified media. Coast stays unchanged.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Freeze Coast source") {
-                            Task { await viewModel.screenHistory.freezeCoastSourceForImport() }
-                        }
-                        .disabled(
-                            viewModel.screenHistory.coastFreezeIsRunning
-                                || viewModel.screenHistory.coastImportIsRunning
-                        )
-                        Button("Preview Coast import") {
-                            Task { await viewModel.screenHistory.previewCoastImport() }
-                        }
-                        .disabled(
-                            viewModel.screenHistory.coastImportIsRunning
-                                || viewModel.screenHistory.coastImportState == .unavailable
-                        )
-                        Button("Import reviewed Coast history") {
-                            Task { await viewModel.screenHistory.importCoastHistory() }
-                        }
-                        .disabled(
-                            viewModel.screenHistory.coastImportIsRunning
-                                || !viewModel.screenHistory.coastImportCanImport
-                        )
-                        if viewModel.screenHistory.coastImportIsRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                                .accessibilityLabel("Coast preview or import in progress")
-                        }
-                        Spacer()
+                    Button("Preview Coast import") {
+                        Task { await viewModel.screenHistory.previewCoastImport() }
                     }
-                    if let message = viewModel.screenHistory.coastFreezeMessage {
-                        Text(message)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("Coast freeze status")
+                    .disabled(
+                        viewModel.screenHistory.coastImportIsRunning
+                            || viewModel.screenHistory.coastImportState == .unavailable
+                    )
+                    Button("Import reviewed Coast history") {
+                        Task { await viewModel.screenHistory.importCoastHistory() }
                     }
-                    if let message = viewModel.screenHistory.coastImportMessage {
-                        Text(message)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("Coast import status")
-                    }
-                    HStack {
-                        Button("Review imported moments") {
-                            Task { await viewModel.screenHistory.openRetirementReview() }
-                        }
-                        .disabled(
-                            viewModel.screenHistory.retirementReviewSnapshot?.moments.isEmpty != false
-                        )
-                        Spacer()
-                    }
-                    if let message = viewModel.screenHistory.retirementReviewMessage {
-                        Text(message)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("Coast review status")
+                    .disabled(
+                        viewModel.screenHistory.coastImportIsRunning
+                            || !viewModel.screenHistory.coastImportCanImport
+                    )
+                    if viewModel.screenHistory.coastImportIsRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Coast preview or import in progress")
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-                Divider()
+            if let message = viewModel.screenHistory.coastFreezeMessage {
+                CardNote {
+                    CardText(message).accessibilityLabel("Coast freeze status")
+                }
+            }
+            if let message = viewModel.screenHistory.coastImportMessage {
+                CardNote {
+                    CardText(message).accessibilityLabel("Coast import status")
+                }
+            }
 
+            CardNote {
+                Button("Review imported moments") {
+                    Task { await viewModel.screenHistory.openRetirementReview() }
+                }
+                .disabled(
+                    viewModel.screenHistory.retirementReviewSnapshot?.moments.isEmpty != false
+                )
+            }
+            if let message = viewModel.screenHistory.retirementReviewMessage {
+                CardNote {
+                    CardText(message).accessibilityLabel("Coast review status")
+                }
+            }
+        }
+    }
+
+    private var captureCard: some View {
+        SettingsCard("Capture") {
+            SettingsRow(title: "Enable owned screen capture", isFirst: true) {
                 Toggle(
                     "Enable owned screen capture",
                     isOn: viewModel.settingsBinding(
@@ -159,42 +193,35 @@ struct ScreenHistorySettingsView: View {
                         onSet: { Task { await viewModel.screenHistory.applyCaptureSettings() } }
                     )
                 )
+                .toggleStyle(InkToggleStyle())
                 .disabled(!ScreenHistoryReleasePolicy.allowsOwnedCapture)
+            }
 
-                Text("Browser capture remains blocked.")
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            CardNote { CardText("Browser capture remains blocked.") }
 
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Status")
-                    Spacer()
-                    Label(captureStatus, systemImage: captureStatusIcon)
-                        .font(AQDesign.TypeToken.body)
-                        .foregroundStyle(.secondary)
-                }
+            SettingsRow(title: "Status") {
+                statusLine(captureStatus, dot: captureStatusTone)
+            }
 
-                HStack(alignment: .firstTextBaseline) {
-                    Text("FileVault")
-                    Spacer()
-                    Label(fileVaultStatus, systemImage: fileVaultStatusIcon)
-                        .font(AQDesign.TypeToken.body)
-                        .foregroundStyle(.secondary)
-                }
+            SettingsRow(title: "FileVault") {
+                statusLine(fileVaultStatus, dot: fileVaultStatusTone)
+            }
 
-                if let blocker = viewModel.screenHistory.captureStartBlocker {
-                    Label(blocker, systemImage: "lock.shield")
-                        .font(AQDesign.TypeToken.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if let blocker = viewModel.screenHistory.captureStartBlocker {
+                CardNote { CardText(blocker) }
+            }
 
-                if viewModel.screenHistory.captureStatus?.lastSkipReason == .screenRecordingNotAuthorized {
+            if viewModel.screenHistory.captureStatus?.lastSkipReason == .screenRecordingNotAuthorized {
+                CardNote {
                     Button("Allow Screen Recording") {
                         Task { await viewModel.screenHistory.requestScreenRecordingAuthorization() }
                     }
                 }
+            }
 
+            SettingsRow(
+                title: "I accept that other software running as my Mac user could read stored OCR"
+            ) {
                 Toggle(
                     "I accept that other software running as my Mac user could read stored OCR",
                     isOn: viewModel.settingsBinding(
@@ -206,102 +233,111 @@ struct ScreenHistorySettingsView: View {
                         onSet: { Task { await viewModel.screenHistory.applyCaptureSettings() } }
                     )
                 )
-                Text("Screen History files are private to your macOS account, but they are not app-encrypted.")
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .toggleStyle(InkToggleStyle())
+            }
 
-                if let message = viewModel.screenHistory.soakMessage {
-                    Label(message, systemImage: "calendar.badge.clock")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            CardNote {
+                CardText("Screen History files are private to your macOS account, but they are not app-encrypted.")
+            }
+
+            if let message = viewModel.screenHistory.soakMessage {
+                CardNote {
+                    CardText(message)
                         .accessibilityLabel("Screen History soak status. \(message)")
                 }
+            }
+        }
+    }
 
-                Divider()
+    private var retentionCard: some View {
+        SettingsCard("Retention") {
+            SettingsRow(title: "Keep history for", isFirst: true) {
+                Picker("Keep history for", selection: Binding(
+                    get: { viewModel.screenHistory.retentionDaysSelection },
+                    set: { viewModel.screenHistory.retentionDaysSelection = $0 }
+                )) {
+                    Text("7 days").tag(7)
+                    Text("14 days").tag(14)
+                    Text("30 days").tag(30)
+                    Text("60 days").tag(60)
+                    Text("90 days").tag(90)
+                }
+                .labelsHidden()
+                .frame(width: 140)
+            }
 
-                HStack {
-                    Text("Keep history for")
-                    Spacer()
-                    Picker("Keep history for", selection: Binding(
-                        get: { viewModel.screenHistory.retentionDaysSelection },
-                        set: { viewModel.screenHistory.retentionDaysSelection = $0 }
-                    )) {
-                        Text("7 days").tag(7)
-                        Text("14 days").tag(14)
-                        Text("30 days").tag(30)
-                        Text("60 days").tag(60)
-                        Text("90 days").tag(90)
-                    }
-                    .labelsHidden()
-                    .frame(width: 140)
+            SettingsRow(title: "Storage limit") {
+                Picker("Storage limit", selection: Binding(
+                    get: { viewModel.screenHistory.storageCapGBSelection },
+                    set: { viewModel.screenHistory.storageCapGBSelection = $0 }
+                )) {
+                    Text("5 GB").tag(5)
+                    Text("10 GB").tag(10)
+                    Text("20 GB").tag(20)
+                    Text("50 GB").tag(50)
                 }
+                .labelsHidden()
+                .frame(width: 140)
+            }
 
-                HStack {
-                    Text("Storage limit")
-                    Spacer()
-                    Picker("Storage limit", selection: Binding(
-                        get: { viewModel.screenHistory.storageCapGBSelection },
-                        set: { viewModel.screenHistory.storageCapGBSelection = $0 }
-                    )) {
-                        Text("5 GB").tag(5)
-                        Text("10 GB").tag(10)
-                        Text("20 GB").tag(20)
-                        Text("50 GB").tag(50)
-                    }
-                    .labelsHidden()
-                    .frame(width: 140)
-                }
-                if let message = viewModel.screenHistory.retentionMessage {
-                    Text(message)
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                }
+            if let message = viewModel.screenHistory.retentionMessage {
+                CardNote { CardText(message) }
+            }
+
+            CardNote {
                 Button("Apply reviewed retention limits") {
                     Task { await viewModel.screenHistory.applyReviewedRetention() }
                 }
                 .disabled(viewModel.screenHistory.pendingRetentionPolicy == nil)
+            }
+        }
+    }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Excluded applications")
-                        .font(AQDesign.TypeToken.subheading)
-                    Text("Add one app bundle ID per line, such as com.apple.Safari. Protected apps stay excluded.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
+    private var excludedApplicationsCard: some View {
+        SettingsCard("Excluded applications") {
+            CardNote(isFirst: true) {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    CardText("Add one app bundle ID per line, such as com.apple.Safari. Protected apps stay excluded.")
                     TextEditor(text: exclusionBinding)
                         .font(AQDesign.TypeToken.code)
+                        .scrollContentBackground(.hidden)
+                        .padding(AQDesign.Space.standard)
                         .frame(minHeight: exclusionEditorMinHeight)
-                        .padding(6)
-                        .background(RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius).fill(AQDesign.ColorToken.keyCapFill))
+                        .background(fieldBackground)
                         .accessibilityLabel("Excluded application bundle identifiers")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Excluded websites")
-                        .font(AQDesign.TypeToken.subheading)
-                    Text("Enter one domain per line. These rules filter existing history and legacy migration. Browser capture remains unavailable.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
+    private var excludedWebsitesCard: some View {
+        SettingsCard("Excluded websites") {
+            CardNote(isFirst: true) {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    CardText("Enter one domain per line. These rules filter existing history and legacy migration. Browser capture remains unavailable.")
                     TextEditor(text: domainExclusionBinding)
                         .font(AQDesign.TypeToken.code)
+                        .scrollContentBackground(.hidden)
+                        .padding(AQDesign.Space.standard)
                         .frame(minHeight: exclusionEditorMinHeight)
-                        .padding(6)
-                        .background(RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius).fill(AQDesign.ColorToken.keyCapFill))
+                        .background(fieldBackground)
                         .accessibilityLabel("Excluded website domains")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
-                Divider()
-
-                if ScreenHistoryReleasePolicy.allowsOwnedCapture {
-                    Text("Start only after you review the retention and exclusion rules above. Quick Launch asks again after every launch.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack {
+    @ViewBuilder
+    private var captureControlCard: some View {
+        SettingsCard {
+            if ScreenHistoryReleasePolicy.allowsOwnedCapture {
+                CardNote(isFirst: true) {
+                    CardText("Start only after you review the retention and exclusion rules above. Quick Launch asks again after every launch.")
+                }
+                CardNote {
+                    HStack(spacing: AQDesign.Space.standard) {
                         Button("Start capture") {
                             Task { await viewModel.screenHistory.confirmAndStartCapture() }
                         }
@@ -313,25 +349,38 @@ struct ScreenHistorySettingsView: View {
                             Task { await viewModel.screenHistory.stopCapture() }
                         }
                         .disabled(!viewModel.screenHistory.captureIsActive)
-                        Spacer()
                     }
-                } else {
-                    Text("Start and Stop controls will appear only after the live privacy and soak gates pass in a later release.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                CardNote(isFirst: true) {
+                    CardText("Start and Stop controls will appear only after the live privacy and soak gates pass in a later release.")
                 }
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task {
-            viewModel.screenHistory.noteSettingsPresented()
-            await viewModel.screenHistory.applyCaptureSettings()
-            await viewModel.screenHistory.refreshCoastImportAvailability()
-            await viewModel.screenHistory.refreshCoastFreezeReceipt()
-            await viewModel.screenHistory.refreshRetirementReview()
+    }
+
+    /// A status word with its dot. Never colour alone: the word carries it.
+    private func statusLine(_ text: String, dot: Color) -> some View {
+        HStack(spacing: AQDesign.Space.standard) {
+            StatusDot(color: dot)
+            Text(text)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(1)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
+    }
+
+    /// The house field ground: quiet fill plus a hairline, at `Radius.sm`.
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+            .fill(AQDesign.ColorToken.surfaceFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                    .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+            )
     }
 
     private var captureStatus: String {
@@ -366,19 +415,19 @@ struct ScreenHistorySettingsView: View {
         }
     }
 
-    private var fileVaultStatusIcon: String {
+    private var fileVaultStatusTone: Color {
         switch viewModel.screenHistory.captureStatus?.fileVaultStatus {
-        case .on: return "checkmark.shield"
-        case .off: return "xmark.shield"
-        case .unknown, nil: return "questionmark.diamond"
+        case .on: return AQDesign.ColorToken.success
+        case .off: return AQDesign.ColorToken.danger
+        case .unknown, nil: return AQDesign.ColorToken.warning
         }
     }
 
-    private var captureStatusIcon: String {
+    private var captureStatusTone: Color {
         switch viewModel.screenHistory.captureStatus?.state {
-        case .running: "record.circle"
-        case .pausedForInactivity: "pause.circle"
-        case .stopped, .disabled, nil: "stop.circle"
+        case .running: AQDesign.ColorToken.success
+        case .pausedForInactivity: AQDesign.ColorToken.warning
+        case .stopped, .disabled, nil: AQDesign.ColorToken.danger
         }
     }
 

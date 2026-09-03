@@ -22,7 +22,24 @@ enum MarkdownRenderer {
         let document = Document(parsing: markdown)
         var walker = AttributedStringWalker()
         walker.visit(document)
-        return walker.result
+        return applyProseLineHeight(walker.result)
+    }
+
+    /// The house answer line height (1.55) as leading, added in one pass at
+    /// the end so list hanging indents and paragraph spacing survive.
+    /// `measuredHeight` reads the same string, so the window cannot drift.
+    private static func applyProseLineHeight(_ text: NSAttributedString) -> NSAttributedString {
+        guard text.length > 0 else { return text }
+        let leading = House.TypeToken.Size.body * (House.TypeToken.LineHeight.body - 1)
+        let output = NSMutableAttributedString(attributedString: text)
+        let whole = NSRange(location: 0, length: output.length)
+        output.enumerateAttribute(.paragraphStyle, in: whole) { value, range, _ in
+            let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+                ?? NSMutableParagraphStyle()
+            style.lineSpacing = leading
+            output.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+        return output
     }
 
     @MainActor private static var heightCache: (source: String, width: CGFloat, height: CGFloat)?
@@ -101,7 +118,7 @@ private struct AttributedStringWalker: MarkupWalker {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: NSColor.labelColor,
-            .backgroundColor: NSColor.secondarySystemFill,
+            .backgroundColor: House.NSColorToken.surfaceTint,
         ]
         output.append(NSAttributedString(string: code, attributes: attrs))
     }
@@ -267,7 +284,7 @@ private struct AttributedStringWalker: MarkupWalker {
 
         if isMonospace {
             attrs[.font] = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-            attrs[.backgroundColor] = NSColor.secondarySystemFill
+            attrs[.backgroundColor] = House.NSColorToken.surfaceTint
         } else if headingLevel > 0 {
             let size: CGFloat = headingLevel == 1 ? 20 : headingLevel == 2 ? 17 : 15
             var descriptor = NSFont.systemFont(ofSize: size, weight: .bold).fontDescriptor
@@ -293,9 +310,9 @@ private struct AttributedStringWalker: MarkupWalker {
             attrs[.foregroundColor] = NSColor.linkColor
         }
 
-        // Blockquote styling
+        // Blockquote styling: supporting ink, not a second grey.
         if blockQuoteDepth > 0 {
-            attrs[.foregroundColor] = NSColor.secondaryLabelColor
+            attrs[.foregroundColor] = House.NSColorToken.textSecondary
         }
 
         // Strikethrough

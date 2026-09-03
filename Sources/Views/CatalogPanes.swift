@@ -1,32 +1,47 @@
 import AppKit
 import SwiftUI
 
+/// Media and text budgets inside the detail pane, written in row units so
+/// nothing here invents a size off the house control scale.
+private enum DetailMetrics {
+    /// A preview image, swatch, or placeholder at rest.
+    static let previewHeight = House.Control.row * 3
+    /// The tallest a preview or a scrolling block of text grows.
+    static let previewMaxHeight = House.Control.row * 5
+    /// A plain-text block under the Information group.
+    static let textMaxHeight = House.Control.row * 3
+}
+
 /// Emoji & Symbols as a grid: Frequently Used first, then everything that
 /// matches. Arrow keys move the highlight; Return pastes, ⌘↩ copies.
 struct EmojiGridView: View {
     @Bindable var viewModel: QuickViewModel
     static let columns = 9
-    static let cellHeight: CGFloat = 52
-    static let headerHeight: CGFloat = 24
+    /// One cell is a composer-height tile. `PanelSizing` measures the grid
+    /// with the same token, so the window and the view cannot drift.
+    static let cellHeight = House.Control.composer
+    /// A section header takes one spacing step of its own.
+    static let headerHeight = House.Spacing.xl
 
     var body: some View {
         let items = viewModel.launcherMatches
         let sections = viewModel.gridSections
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                HStack(spacing: 6) {
-                    Text(section.title)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: AQDesign.Space.standard) {
+                    SectionLabel(text: section.title)
                     Text("\(section.range.count)")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }
                 .frame(height: Self.headerHeight)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, House.Spacing.sm)
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: Self.columns),
-                    spacing: 4
+                    columns: Array(
+                        repeating: GridItem(.flexible(), spacing: AQDesign.Space.compact),
+                        count: Self.columns
+                    ),
+                    spacing: AQDesign.Space.compact
                 ) {
                     ForEach(section.range, id: \.self) { index in
                         if case .item(let item) = items[index] {
@@ -35,23 +50,15 @@ struct EmojiGridView: View {
                                 Task { await viewModel.performLauncherResult(items[index]) }
                             } label: {
                                 Text(item.value)
-                                    .font(.largeTitle)
+                                    .font(.system(size: House.TypeToken.Size.display))
                                     .frame(maxWidth: .infinity)
-                                    .frame(height: Self.cellHeight - 4)
+                                    .frame(height: Self.cellHeight - AQDesign.Space.compact)
+                                    // One selection language across the app:
+                                    // fill, inset ring, and a 1 pt drop.
                                     .background(
-                                        RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                            .fill(index == viewModel.applicationSelectionIndex
-                                                  ? AQDesign.ColorToken.selectionFill
-                                                  : AQDesign.ColorToken.keyCapFill.opacity(0.6))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: AQDesign.itemCornerRadius)
-                                            .strokeBorder(
-                                                index == viewModel.applicationSelectionIndex
-                                                    ? AQDesign.ColorToken.emphasis.opacity(0.6)
-                                                    : .clear,
-                                                lineWidth: 1
-                                            )
+                                        RowHighlight(
+                                            isSelected: index == viewModel.applicationSelectionIndex
+                                        )
                                     )
                                     .contentShape(Rectangle())
                             }
@@ -61,59 +68,30 @@ struct EmojiGridView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, AQDesign.Space.standard)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, AQDesign.Space.compact)
     }
 }
 
-/// Raycast-style detail beside a list: a preview and an Information block.
+/// Raycast-style detail beside a list: a preview and an Information block,
+/// each a raised card on the panel ground.
 struct CatalogDetailPane: View {
     @Bindable var viewModel: QuickViewModel
     let item: LauncherCatalogItem
     @ScaledMetric(relativeTo: .body) private var screenHistoryTextMaxHeight: CGFloat = 150
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: House.Spacing.sm) {
             preview
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Information")
-                    .font(item.kind == .screenHistory ? .caption.weight(.semibold) : AQDesign.TypeToken.label)
-                    .foregroundStyle(.secondary)
-                VStack(spacing: 6) {
-                    ForEach(rows, id: \.0) { row in
-                        HStack(alignment: .top) {
-                            Text(row.0)
-                                .font(item.kind == .screenHistory ? .caption : AQDesign.TypeToken.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer(minLength: 12)
-                            Text(row.1)
-                                .font(item.kind == .screenHistory ? .caption : AQDesign.TypeToken.caption)
-                                .multilineTextAlignment(.trailing)
-                                .lineLimit(item.kind == .screenHistory ? 3 : 2)
-                                .truncationMode(.middle)
-                        }
-                    }
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(ScreenHistoryAccessibilityPresentation.informationGroupName)
+            informationGroup
             if let text = longText {
-                Text(textTitle)
-                    .font(item.kind == .screenHistory ? .caption.weight(.semibold) : AQDesign.TypeToken.label)
-                    .foregroundStyle(.secondary)
-                ScrollView {
-                    Text(text)
-                        .font(item.kind == .screenHistory ? .body.monospaced() : .system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: item.kind == .screenHistory ? screenHistoryTextMaxHeight : 120)
+                textGroup(text)
             }
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(House.Spacing.md)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: item.id) {
             guard item.kind == .screenHistory,
@@ -122,6 +100,77 @@ struct CatalogDetailPane: View {
         }
     }
 
+    // MARK: - Groups
+
+    private var informationGroup: some View {
+        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+            groupLabel(ScreenHistoryAccessibilityPresentation.informationGroupName)
+            VStack(spacing: AQDesign.Space.compact) {
+                ForEach(rows, id: \.0) { row in
+                    HStack(alignment: .top, spacing: House.Spacing.sm) {
+                        Text(row.0)
+                            .font(detailFont)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        Spacer(minLength: House.Spacing.sm)
+                        Text(row.1)
+                            .font(detailFont)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(item.kind == .screenHistory ? 3 : 2)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+        }
+        .padding(House.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .raisedCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(ScreenHistoryAccessibilityPresentation.informationGroupName)
+    }
+
+    private func textGroup(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+            groupLabel(textTitle)
+            ScrollView {
+                Text(text)
+                    .font(item.kind == .screenHistory ? .body.monospaced() : AQDesign.TypeToken.code)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(
+                maxHeight: item.kind == .screenHistory
+                    ? screenHistoryTextMaxHeight
+                    : DetailMetrics.textMaxHeight
+            )
+        }
+        .padding(House.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .raisedCard()
+    }
+
+    /// The house section label. Screen History keeps Dynamic Type so its own
+    /// text-size control still grows the pane.
+    @ViewBuilder private func groupLabel(_ text: String) -> some View {
+        if item.kind == .screenHistory {
+            Text(text.uppercased())
+                .font(.caption.weight(.semibold))
+                .tracking(AQDesign.TypeToken.sectionTracking)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .accessibilityLabel(text)
+        } else {
+            SectionLabel(text: text)
+        }
+    }
+
+    /// Row detail is 12 pt metadata, or Dynamic Type in Screen History.
+    private var detailFont: Font {
+        item.kind == .screenHistory ? .caption : AQDesign.TypeToken.metadata
+    }
+
+    // MARK: - Preview
+
     @ViewBuilder private var preview: some View {
         switch item.kind {
         case .screenshot:
@@ -129,28 +178,35 @@ struct CatalogDetailPane: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AQDesign.ColorToken.panelStroke))
+                    .frame(maxWidth: .infinity, maxHeight: DetailMetrics.previewMaxHeight)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                            .strokeBorder(
+                                AQDesign.ColorToken.panelStroke,
+                                lineWidth: AQDesign.hairline
+                            )
+                    )
             } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(AQDesign.ColorToken.keyCapFill)
-                    .frame(height: 120)
-                    .overlay(Text("No preview").font(AQDesign.TypeToken.caption).foregroundStyle(.secondary))
+                placeholderCard(symbol: nil, text: "No preview")
             }
         case .clipboard, .snippet:
             ScrollView {
                 Text(item.value)
                     .font(AQDesign.TypeToken.code)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 200)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
+            .frame(maxHeight: DetailMetrics.previewMaxHeight)
+            .padding(House.Spacing.sm)
+            .raisedCard()
         case .color:
             if let color = viewModel.color(for: item) {
-                RoundedRectangle(cornerRadius: 8)
+                // The one place a colour is the content, not the chrome.
+                RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
                     .fill(Color(
                         .sRGB,
                         red: color.red,
@@ -158,31 +214,40 @@ struct CatalogDetailPane: View {
                         blue: color.blue,
                         opacity: color.alpha
                     ))
-                    .frame(height: 120)
+                    .frame(height: DetailMetrics.previewHeight)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(AQDesign.ColorToken.panelStroke)
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                            .strokeBorder(
+                                AQDesign.ColorToken.panelStroke,
+                                lineWidth: AQDesign.hairline
+                            )
                     )
                     .accessibilityLabel("\(color.name) swatch, \(color.hexString)")
             }
         case .quickLink:
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: item.requiresInput ? "text.cursor" : "link")
-                        .foregroundStyle(AQDesign.ColorToken.emphasis)
+            VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                HStack(spacing: AQDesign.Space.standard) {
+                    IconTile {
+                        Image(systemName: item.requiresInput ? "text.cursor" : "link")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
                     Text(item.title)
-                        .font(AQDesign.TypeToken.body.weight(.semibold))
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Text(item.value)
                     .font(AQDesign.TypeToken.code)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     .textSelection(.enabled)
                     .lineLimit(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(AQDesign.ColorToken.keyCapFill))
+            .padding(House.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .raisedCard()
         case .screenHistory:
             if let frame = viewModel.screenHistory.frame(for: item) {
                 ScreenHistoryMomentPreview(
@@ -191,22 +256,25 @@ struct CatalogDetailPane: View {
                     accessibilityLabel: screenHistoryPreviewLabel(frame)
                 )
             } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(AQDesign.ColorToken.keyCapFill)
-                    .frame(height: 120)
-                    .overlay(
-                        VStack(spacing: 6) {
-                            Image(systemName: "film")
-                            Text("Image preview unavailable")
-                        }
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                    )
+                placeholderCard(symbol: "film", text: "Image preview unavailable")
                     .accessibilityLabel("Screen moment preview unavailable")
             }
         default:
             EmptyView()
         }
+    }
+
+    /// A quiet raised block standing in for a preview that is not there.
+    private func placeholderCard(symbol: String?, text: String) -> some View {
+        VStack(spacing: AQDesign.Space.standard) {
+            if let symbol { Image(systemName: symbol) }
+            Text(text)
+        }
+        .font(AQDesign.TypeToken.caption)
+        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+        .frame(maxWidth: .infinity)
+        .frame(height: DetailMetrics.previewHeight)
+        .raisedCard()
     }
 
     private var rows: [(String, String)] {
@@ -328,26 +396,36 @@ private struct ScreenHistoryMomentPreview: View {
                         boxes: boxes
                     )
                 }
-                    .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AQDesign.ColorToken.panelStroke))
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: DetailMetrics.previewHeight,
+                        maxHeight: DetailMetrics.previewMaxHeight
+                    )
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                            .strokeBorder(
+                                AQDesign.ColorToken.panelStroke,
+                                lineWidth: AQDesign.hairline
+                            )
+                    )
                     .accessibilityLabel(accessibilityLabel)
             } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(AQDesign.ColorToken.keyCapFill)
-                    .frame(height: 120)
-                    .overlay(
-                        VStack(spacing: 6) {
-                            if !finished { ProgressView().controlSize(.small) }
-                            Image(systemName: finished ? "film" : "clock")
-                            Text(finished ? "Image preview unavailable" : "Loading local preview…")
-                        }
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                    )
-                    .accessibilityLabel(
-                        finished ? "Screen moment preview unavailable" : "Loading screen moment preview"
-                    )
+                VStack(spacing: AQDesign.Space.standard) {
+                    if !finished { ProgressView().controlSize(.small) }
+                    Image(systemName: finished ? "film" : "clock")
+                    Text(finished ? "Image preview unavailable" : "Loading local preview…")
+                }
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: DetailMetrics.previewHeight)
+                .raisedCard()
+                .accessibilityLabel(
+                    finished ? "Screen moment preview unavailable" : "Loading screen moment preview"
+                )
             }
         }
         .task(id: "\(frame.source.rawValue):\(frame.sourceIdentifier):\(frame.contentHash)") {
@@ -372,8 +450,10 @@ private struct ScreenHistoryOCRBoxOverlay: View {
                         displayGeometry: displayGeometry,
                         containerSize: geometry.size
                     )
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(AQDesign.ColorToken.emphasis.opacity(0.55), lineWidth: 1)
+                    // A text bounding box is a square mark, not a control:
+                    // ink at secondary strength, one hairline wide.
+                    Rectangle()
+                        .stroke(AQDesign.ColorToken.textSecondary, lineWidth: AQDesign.hairline)
                         .frame(
                             width: rect.width,
                             height: rect.height

@@ -2,150 +2,187 @@ import AppKit
 import SwiftUI
 
 /// Clipboard History retention and hotkey, plus where Quick Links open.
+/// One card per group, 40 pt rows, ink toggles.
 struct ClipboardLinksSettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var browsers: [LaunchableApplication] = []
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                section("Clipboard History") {
-                    Toggle(
-                        "Keep text clipboard history",
-                        isOn: viewModel.settingsBinding(\.clipboardHistoryEnabled) { _ in notifyClipboardSettingsChanged() }
-                    )
-                    Stepper(
-                        "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)",
-                        value: viewModel.settingsBinding(\.clipboardHistoryLimit) { _ in notifyClipboardSettingsChanged() },
-                        in: 10...200,
-                        step: 10
-                    )
-                    HStack {
-                        Text("Open Clipboard History")
-                        Spacer()
-                        HotkeyRecorderView(
-                            keyCode: viewModel.settingsBinding(\.clipboardHistoryHotkey.keyCode),
-                            modifiers: viewModel.settingsBinding(\.clipboardHistoryHotkey.modifiers),
-                            label: "",
-                            changeNotification: .clipboardHistorySettingsChanged
-                        )
-                        .frame(width: 200)
-                    }
-                    if let conflict = viewModel.settings.clipboardHistoryHotkeyConflict()
-                        ?? viewModel.clipboardHistoryHotkeyRegistrationError {
-                        Text(conflict).font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(AQDesign.ColorToken.danger)
-                    }
-                    HStack {
-                        Text("\(viewModel.clipboardEntries.count) saved text items")
-                            .font(AQDesign.TypeToken.label)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Clear Clipboard History", role: .destructive) {
-                            viewModel.clearClipboardHistory()
-                        }
-                    }
-                    Text("In the list: ⌘⇧P pins an entry, ⌘⇧N saves a snippet, ⌘⇧L creates a Quicklink, and ⌃X deletes it.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                section("Colors") {
-                    HStack {
-                        Text("Copy picked colors as")
-                        Spacer()
-                        Picker("", selection: colorFormatSelection) {
-                            ForEach(ColorFormat.allCases) { format in
-                                Text("\(format.title)  ·  \(format.sample)").tag(format)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 260)
-                    }
-                    Stepper(
-                        "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)",
-                        value: viewModel.settingsBinding(\.colorHistoryLimit),
-                        in: 10...200,
-                        step: 10
-                    )
-                    HStack {
-                        Text("\(viewModel.colorItems.count) saved colors")
-                            .font(AQDesign.TypeToken.label)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Clear Colors", role: .destructive) {
-                            viewModel.clearColorHistory()
-                        }
-                    }
-                    Text("Run \u{201C}Pick Color from Screen\u{201D} to magnify any pixel on any display. In the Colors list: ⌘1…⌘4 copy the other notations, ⌘⇧P pins, and ⌃X deletes.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                section("Emoji & Symbols") {
-                    HStack {
-                        Text("Skin tone")
-                        Spacer()
-                        Picker("", selection: skinToneSelection) {
-                            ForEach(Array(EmojiCatalog.skinToneTitles.enumerated()), id: \.offset) { index, title in
-                                Text("\(EmojiCatalog.applyingSkinTone(index, to: "\u{1F44D}"))  \(title)").tag(index)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                    }
-                    Text("Applies to the emoji that accept a tone. Symbols, flags, and objects are unchanged.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                section("Text from Screen") {
-                    Toggle("Keep line breaks in text read from the screen", isOn: viewModel.settingsBinding(\.ocrKeepLineBreaks))
-                    Text("Off joins the recognized lines into one paragraph, which suits prose. On keeps code and lists as they were laid out.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                section("Quicklinks") {
-                    HStack {
-                        Text("Open links in")
-                        Spacer()
-                        Picker("", selection: browserSelection) {
-                            Text("Default browser").tag("")
-                            ForEach(browsers) { browser in
-                                Text(browser.name).tag(browser.bundleIdentifier ?? "")
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 240)
-                    }
-                    Text("Applies to every Quicklink. Links with {{input}} ask for text first.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                section("Tuna stores") {
-                    HStack {
-                        Label("\(viewModel.snippets.count) snippets", systemImage: "text.quote")
-                        Label("\(viewModel.quickLinks.count) Quicklinks", systemImage: "link")
-                        Spacer()
-                        Button("Reload") { viewModel.reloadTunaCatalogs() }
-                    }
-                    .font(AQDesign.TypeToken.label)
-                    Text("Snippets and Quicklinks are read live from Tuna. Edits are written back with a backup.")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
+                clipboardCard
+                colorsCard
+                emojiCard
+                screenTextCard
+                quicklinksCard
+                tunaCard
             }
-            .padding(AQDesign.Space.window)
+            .padding(.horizontal, SettingsMetrics.paneInset)
+            .padding(.bottom, House.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { browsers = QuickViewModel.installedBrowsers }
+    }
+
+    private var clipboardCard: some View {
+        SettingsCard("Clipboard History") {
+            SettingsRow(title: "Keep text clipboard history", isFirst: true) {
+                Toggle(
+                    "Keep text clipboard history",
+                    isOn: viewModel.settingsBinding(\.clipboardHistoryEnabled) { _ in
+                        notifyClipboardSettingsChanged()
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+
+            SettingsRow(
+                title: "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)"
+            ) {
+                Stepper(
+                    "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)",
+                    value: viewModel.settingsBinding(\.clipboardHistoryLimit) { _ in
+                        notifyClipboardSettingsChanged()
+                    },
+                    in: 10...200,
+                    step: 10
+                )
+                .labelsHidden()
+            }
+
+            SettingsRow(title: "Open Clipboard History") {
+                HotkeyRecorderView(
+                    keyCode: viewModel.settingsBinding(\.clipboardHistoryHotkey.keyCode),
+                    modifiers: viewModel.settingsBinding(\.clipboardHistoryHotkey.modifiers),
+                    label: "Open Clipboard History",
+                    showsLabel: false,
+                    changeNotification: .clipboardHistorySettingsChanged
+                )
+            }
+            if let conflict = viewModel.settings.clipboardHistoryHotkeyConflict()
+                ?? viewModel.clipboardHistoryHotkeyRegistrationError {
+                CardNote { CardText(conflict, tone: AQDesign.ColorToken.danger) }
+            }
+
+            SettingsRow(title: "\(viewModel.clipboardEntries.count) saved text items") {
+                Button("Clear Clipboard History", role: .destructive) {
+                    viewModel.clearClipboardHistory()
+                }
+            }
+
+            CardNote {
+                CardText("In the list: \u{2318}\u{21E7}P pins an entry, \u{2318}\u{21E7}N saves a snippet, \u{2318}\u{21E7}L creates a Quicklink, and \u{2303}X deletes it.")
+            }
+        }
+    }
+
+    private var colorsCard: some View {
+        SettingsCard("Colors") {
+            SettingsRow(title: "Copy picked colors as", isFirst: true) {
+                Picker("Copy picked colors as", selection: colorFormatSelection) {
+                    ForEach(ColorFormat.allCases) { format in
+                        Text("\(format.title)  \u{00B7}  \(format.sample)").tag(format)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 260)
+            }
+
+            SettingsRow(
+                title: "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)"
+            ) {
+                Stepper(
+                    "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)",
+                    value: viewModel.settingsBinding(\.colorHistoryLimit),
+                    in: 10...200,
+                    step: 10
+                )
+                .labelsHidden()
+            }
+
+            SettingsRow(title: "\(viewModel.colorItems.count) saved colors") {
+                Button("Clear Colors", role: .destructive) {
+                    viewModel.clearColorHistory()
+                }
+            }
+
+            CardNote {
+                CardText("Run \u{201C}Pick Color from Screen\u{201D} to magnify any pixel on any display. In the Colors list: \u{2318}1…\u{2318}4 copy the other notations, \u{2318}\u{21E7}P pins, and \u{2303}X deletes.")
+            }
+        }
+    }
+
+    private var emojiCard: some View {
+        SettingsCard("Emoji & Symbols") {
+            SettingsRow(title: "Skin tone", isFirst: true) {
+                Picker("Skin tone", selection: skinToneSelection) {
+                    ForEach(Array(EmojiCatalog.skinToneTitles.enumerated()), id: \.offset) { index, title in
+                        Text("\(EmojiCatalog.applyingSkinTone(index, to: "\u{1F44D}"))  \(title)").tag(index)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 200)
+            }
+
+            CardNote {
+                CardText("Applies to the emoji that accept a tone. Symbols, flags, and objects are unchanged.")
+            }
+        }
+    }
+
+    private var screenTextCard: some View {
+        SettingsCard("Text from Screen") {
+            SettingsRow(title: "Keep line breaks in text read from the screen", isFirst: true) {
+                Toggle(
+                    "Keep line breaks in text read from the screen",
+                    isOn: viewModel.settingsBinding(\.ocrKeepLineBreaks)
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+
+            CardNote {
+                CardText("Off joins the recognized lines into one paragraph, which suits prose. On keeps code and lists as they were laid out.")
+            }
+        }
+    }
+
+    private var quicklinksCard: some View {
+        SettingsCard("Quicklinks") {
+            SettingsRow(title: "Open links in", isFirst: true) {
+                Picker("Open links in", selection: browserSelection) {
+                    Text("Default browser").tag("")
+                    ForEach(browsers) { browser in
+                        Text(browser.name).tag(browser.bundleIdentifier ?? "")
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 240)
+            }
+
+            CardNote {
+                CardText("Applies to every Quicklink. Links with {{input}} ask for text first.")
+            }
+        }
+    }
+
+    private var tunaCard: some View {
+        SettingsCard("Tuna stores") {
+            CardNote(isFirst: true) {
+                HStack(spacing: House.Spacing.md) {
+                    Label("\(viewModel.snippets.count) snippets", systemImage: "text.quote")
+                    Label("\(viewModel.quickLinks.count) Quicklinks", systemImage: "link")
+                    Spacer(minLength: House.Spacing.sm)
+                    Button("Reload") { viewModel.reloadTunaCatalogs() }
+                }
+                .font(AQDesign.TypeToken.label)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            CardNote {
+                CardText("Snippets and Quicklinks are read live from Tuna. Edits are written back with a backup.")
+            }
+        }
     }
 
     private var colorFormatSelection: Binding<ColorFormat> {
@@ -164,14 +201,6 @@ struct ClipboardLinksSettingsView: View {
             get: { $0.quickLinkBrowserBundleID ?? "" },
             set: { settings, value in settings.quickLinkBrowserBundleID = value.isEmpty ? nil : value }
         )
-    }
-
-    @ViewBuilder
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(AQDesign.TypeToken.heading)
-            content()
-        }
     }
 
     private func notifyClipboardSettingsChanged() {

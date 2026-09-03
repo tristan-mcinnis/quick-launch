@@ -532,12 +532,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.escapeHandler = { [weak viewModel] in
             viewModel?.handleEscapeKey() ?? false
         }
+        panel.appearance = viewModel.settings.appearance.nsAppearance
         panel.returnHandler = { [weak viewModel] in
             Task { @MainActor in await viewModel?.submitResolvingFuzzyAlias() }
         }
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 1)
         panel.isOpaque = false
         panel.backgroundColor = .clear
+        // The system drop shadow stands in for `Shadow.panelNear` and
+        // `Shadow.panelFar`: a borderless panel clips anything drawn outside
+        // its content rect, so drawing both in SwiftUI would need a
+        // transparent margin around the panel and new placement maths.
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false   // keep visible across app focus changes
@@ -622,6 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             panel.setFrame(frame, display: false)
         }
+        panel.appearance = viewModel?.settings.appearance.nsAppearance
         // No fade. The panel appears on the same frame as the hotkey, like
         // Raycast; a fade only adds perceived latency.
         panel.alphaValue = 1
@@ -890,6 +896,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
+        panel.appearance = viewModel?.settings.appearance.nsAppearance
         panel.contentViewController = NSHostingController(
             rootView: TranslatorView(model: model)
                 .preferredColorScheme(viewModel?.settings.appearance.swiftUIColorScheme)
@@ -1404,6 +1411,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         welcomePanel.title = "Welcome"
         welcomePanel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 2)
         welcomePanel.isReleasedWhenClosed = false
+        welcomePanel.isOpaque = false
+        welcomePanel.backgroundColor = .clear
+        welcomePanel.titlebarAppearsTransparent = true
+        welcomePanel.titleVisibility = .hidden
+        welcomePanel.appearance = vm.settings.appearance.nsAppearance
         welcomePanel.center()
 
         let hostingController = NSHostingController(

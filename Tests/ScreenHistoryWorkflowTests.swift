@@ -283,16 +283,27 @@ struct ScreenHistoryWorkflowTests {
         let unavailable = ScreenHistoryEmptyPresentation(state: .unavailable, query: "")
         #expect(unavailable.title == "Screen History is unavailable on this Mac.")
 
+        // A wide search window: the assertion is that "loading" shows up
+        // between the debounce and the results, and a narrow window turns
+        // that into a race with whatever else holds the main actor.
         let slowStore = FakeScreenHistoryStore(
             rows: [Self.frame(id: "slow", text: "coral")],
-            searchDelay: .milliseconds(240)
+            searchDelay: .milliseconds(1_200)
         )
         let vm = QuickViewModel(screenHistoryStore: slowStore)
         vm.enterCatalog(.screenHistory)
         let search = Task { await vm.screenHistory.load(query: "coral") }
         try await Task.sleep(for: .milliseconds(60))
         #expect(vm.screenHistory.loadState != .loading)
-        try await Task.sleep(for: .milliseconds(100))
+        // The debounce fires on the main actor, so a busy suite can push it
+        // past a fixed sleep. Wait for it instead, well inside the store's
+        // search: the point is that "loading" appears after the debounce and
+        // before the results, not that it appears at one exact millisecond.
+        var waited = 0
+        while vm.screenHistory.loadState != .loading, waited < 600 {
+            try await Task.sleep(for: .milliseconds(20))
+            waited += 20
+        }
         #expect(vm.screenHistory.loadState == .loading)
         await search.value
         #expect(vm.screenHistory.loadState == .ready)

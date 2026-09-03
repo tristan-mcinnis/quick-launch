@@ -9,6 +9,8 @@ enum ScreenHistorySaveLayout {
     /// Keeps the exact payload preview and its primary action visible. The
     /// payload body scrolls within this fixed production budget.
     static let minimumWindowHeight: CGFloat = 620
+    /// The scrolling payload preview inside the form, in row units.
+    static let previewScrollHeight = House.Control.row * 9
 }
 
 /// The two-line row a screen moment gets in the launcher list. `nil` for
@@ -50,30 +52,35 @@ struct ScreenHistoryResultRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        // A two-line row keeps the house roles: the title is the label
+        // weight, the detail is metadata. Dynamic Type stays, so the Screen
+        // History text-size control still grows both lines.
+        VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
             Text(item.title)
-                .font(.body.weight(.semibold))
+                .font(.body.weight(.medium))
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Text(item.detail)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 .lineLimit(2)
                 .truncationMode(.tail)
         }
     }
 }
 
-/// Screen History rows grow with Dynamic Type; every other row stays 42pt.
+/// Screen History rows grow with Dynamic Type; every other row stays the
+/// house row height.
 struct ScreenHistoryRowFrame: ViewModifier {
     let result: LauncherSearchResult
-    @ScaledMetric(relativeTo: .body) private var rowMinHeight: CGFloat = 58
+    @ScaledMetric(relativeTo: .body) private var rowMinHeight = House.Control.input
 
     func body(content: Content) -> some View {
         let isScreenHistory = ScreenHistoryResultRow.isScreenHistory(result)
         content.frame(
-            minHeight: isScreenHistory ? rowMinHeight : 42,
-            maxHeight: isScreenHistory ? nil : 42
+            minHeight: isScreenHistory ? rowMinHeight : AQDesign.rowHeight,
+            maxHeight: isScreenHistory ? nil : AQDesign.rowHeight
         )
     }
 }
@@ -83,7 +90,7 @@ struct ScreenHistoryRowFrame: ViewModifier {
 struct ScreenHistoryFooterFrame: ViewModifier {
     let isActive: Bool
     let defaultMinHeight: CGFloat
-    @ScaledMetric(relativeTo: .caption) private var footerMinHeight: CGFloat = 34
+    @ScaledMetric(relativeTo: .caption) private var footerMinHeight = House.Control.railRow
 
     func body(content: Content) -> some View {
         content.frame(minHeight: isActive ? footerMinHeight : defaultMinHeight)
@@ -92,24 +99,27 @@ struct ScreenHistoryFooterFrame: ViewModifier {
 
 struct ScreenHistoryEmptyState: View {
     @Bindable var viewModel: QuickViewModel
-    @ScaledMetric(relativeTo: .body) private var minimumHeight: CGFloat = 96
+    @ScaledMetric(relativeTo: .body) private var minimumHeight =
+        House.Spacing.xxxxl + House.Spacing.xxl
 
     var body: some View {
         let presentation = ScreenHistoryEmptyPresentation(
             state: viewModel.screenHistory.loadState,
             query: viewModel.input
         )
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: presentation.icon)
-                .font(AQDesign.TypeToken.glyph.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .top, spacing: House.Spacing.sm) {
+            IconTile {
+                Image(systemName: presentation.icon)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            }
+            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                 Text(presentation.title)
-                    .font(.body.weight(.semibold))
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
                 Text(presentation.detail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 if presentation.offersClearFilters {
                     Button("Clear filters") {
                         viewModel.input = ""
@@ -119,7 +129,7 @@ struct ScreenHistoryEmptyState: View {
             }
             Spacer()
         }
-        .padding(20)
+        .padding(House.Spacing.lg)
         .frame(minHeight: minimumHeight)
         .accessibilityElement(children: .combine)
     }
@@ -247,52 +257,69 @@ struct ScreenHistorySaveForm: View {
         if case .item(let item) = result,
            let frame = viewModel.screenHistory.frame(for: item) {
             let preview = ScreenHistorySavePreview(frame: frame)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: House.Spacing.sm) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: House.Spacing.sm) {
+                        VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                             LabeledContent("Source", value: preview.source)
                             LabeledContent("Local record ID", value: preview.localRecordID)
                             LabeledContent("Seen at", value: preview.seenAt)
                             LabeledContent("Application", value: preview.application)
                             LabeledContent("Window", value: preview.window)
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                                 Text("OCR excerpt saved to Vault")
                                     .font(AQDesign.TypeToken.scaledHint(textScale, weight: .semibold))
+                                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                                 Text(preview.ocrExcerpt.isEmpty ? "Empty" : preview.ocrExcerpt)
                                     .font(AQDesign.TypeToken.scaledHint(textScale))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(6)
+                                    .padding(AQDesign.Space.standard)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(AQDesign.ColorToken.keyCapFill)
+                                        RoundedRectangle(
+                                            cornerRadius: AQDesign.fieldCornerRadius,
+                                            style: .continuous
+                                        )
+                                        .fill(AQDesign.ColorToken.surfaceFill)
                                     )
                             }
                         }
                         .font(AQDesign.TypeToken.scaledBody(textScale))
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("Screen moment preview")
 
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                             Text("Project slug")
                                 .font(AQDesign.TypeToken.scaledHint(textScale))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             TextField("Optional, for example: acme-launch", text: $projectSlug)
                                 .textFieldStyle(.roundedBorder)
                                 .font(AQDesign.TypeToken.scaledBody(textScale))
                                 .focused(formFocused)
                                 .accessibilityLabel("Optional project slug")
                         }
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
                             Text("Note")
                                 .font(AQDesign.TypeToken.scaledHint(textScale))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             TextEditor(text: $note)
                                 .font(AQDesign.TypeToken.scaledBody(textScale))
-                                .frame(minHeight: 64, maxHeight: 110)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                                .frame(
+                                    minHeight: House.Spacing.xxxxl,
+                                    maxHeight: House.Control.row * 3
+                                )
+                                .overlay(
+                                    RoundedRectangle(
+                                        cornerRadius: AQDesign.fieldCornerRadius,
+                                        style: .continuous
+                                    )
+                                    .strokeBorder(
+                                        AQDesign.ColorToken.fieldStroke,
+                                        lineWidth: AQDesign.hairline
+                                    )
+                                )
                                 .accessibilityLabel("Optional note")
                         }
                         if let error = preview.validationError ?? viewModel.screenHistory.saveError {
@@ -305,7 +332,7 @@ struct ScreenHistorySaveForm: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 380)
+                .frame(maxHeight: ScreenHistorySaveLayout.previewScrollHeight)
                 HStack(spacing: AQDesign.Space.standard) {
                     Button("Save moment") {
                         Task {
@@ -316,7 +343,7 @@ struct ScreenHistorySaveForm: View {
                             )
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(InkButtonStyle())
                     .font(AQDesign.TypeToken.scaledBody(textScale, weight: .semibold))
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(preview.validationError != nil)
@@ -325,7 +352,7 @@ struct ScreenHistorySaveForm: View {
                     Spacer()
                     Text("⌘↩ saves · esc cancels")
                         .font(AQDesign.TypeToken.scaledHint(textScale))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }
             }
         } else {

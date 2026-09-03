@@ -1,4 +1,5 @@
 import CoreFoundation
+import SwiftUI
 
 /// Pure layout calculation for the Quick Launch overlay panel height.
 /// Extracted from AppDelegate so it can be unit-tested without AppKit
@@ -7,48 +8,56 @@ enum PanelSizing {
 
     // MARK: - Widths
 
-    /// Raycast Beta uses a calmer, wider search canvas. Keep enough room for
-    /// title, metadata, and two visible actions without crowding.
-    static let panelWidth: CGFloat = 720
+    /// The house launcher width.
+    static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
     static let panelWidthWithDetail: CGFloat = 960
     /// A Quick AI thread gets a little more room so answers read like a
     /// document rather than a strip.
-    static let panelWidthForAnswer: CGFloat = 800
+    static let panelWidthForAnswer = House.Layout.answerPanelWidth
 
     // MARK: - Heights
 
-    static let inputHeight: CGFloat = 60
+    static let inputHeight = House.Control.input
     static let maxBodyHeight: CGFloat = 640
     /// Horizontal padding around the answer body (20pt each side); the
     /// measured markdown width is the panel width minus this.
-    static let answerHorizontalPadding: CGFloat = 40
+    static let answerHorizontalPadding = House.Spacing.lg * 2
     /// Compact earlier-turns transcript shown above the latest answer.
     static let transcriptHeight: CGFloat = 240
-    static let errorBannerHeight: CGFloat = 40
-    static let attachmentHeight: CGFloat = 58
+    static let errorBannerHeight = House.Control.footer
+    static let attachmentHeight = House.Control.input
+    /// One row in the launcher list.
+    static let launcherRowHeight = House.Control.row
     /// One row in the ⌘K pane and the prompt palette.
-    static let actionRowHeight: CGFloat = 42
+    static let actionRowHeight = House.Control.row
     /// LazyVStack spacing between action rows.
     static let actionRowSpacing: CGFloat = 2
     /// Rows shown before the action list scrolls.
     static let actionVisibleRows = 6
     /// Title row at the top of the ⌘K item pane.
-    static let paneHeaderHeight: CGFloat = 44
+    static let paneHeaderHeight = House.Control.large
     /// Search field row at the bottom of the ⌘K item pane.
-    static let paneSearchRowHeight: CGFloat = 40
+    static let paneSearchRowHeight = House.Control.footer
     /// Gap between the floating pane's bottom edge and the window edge.
-    static let paneBottomMargin: CGFloat = 12
+    static let paneBottomMargin = House.Spacing.sm
     /// Footer row plus its divider.
-    static let footerHeight: CGFloat = AQDesign.footerHeight + 1
+    static let footerHeight = AQDesign.footerHeight + House.hairline
     /// Vertical inset around the launcher rows.
-    static let launcherListInset: CGFloat = 12
+    static let launcherListInset = House.Spacing.sm
+    /// The question chip above an answer, plus the gap under it.
+    static let questionChipBlock = House.Control.chip - 6 + House.Spacing.sm
     /// The launcher list's chrome above and below the rows: the section
     /// header ("Results") plus the bottom inset, as measured from the
     /// rendered view. Counting only the rows left the last one clipped.
-    static let launcherListChrome: CGFloat = 26
+    /// 8 top inset + (6 + label + 6) section block + 8 bottom inset.
+    /// `estimateCoversTheRenderedSingleResultWindow` measures the real view
+    /// against this, so it cannot drift.
+    static let launcherListChrome: CGFloat = 42
     /// The search row and footer stay pinned while long result sets scroll.
-    static let launcherListMaximumHeight: CGFloat = 504
+    /// Twelve whole rows plus the section block: the list scrolls rather
+    /// than cutting the thirteenth row in half.
+    static let launcherListMaximumHeight = launcherListChrome + 12 * House.Control.row
     /// A preview plus its Information block needs this much room.
     static let detailPaneMinimumHeight: CGFloat = 360
 
@@ -64,12 +73,14 @@ enum PanelSizing {
         let visible = max(1, min(rows, actionVisibleRows))
         return CGFloat(visible) * actionRowHeight
             + CGFloat(visible - 1) * actionRowSpacing
-            + (padded ? 12 : 0)
+            + (padded ? House.Spacing.sm : 0)
     }
 
-    /// ⌘K item pane: header 44 + divider + list + divider + search row 40.
+    /// ⌘K item pane: header + divider + list + divider + search row.
     static func itemActionPaneHeight(rows: Int) -> CGFloat {
-        paneHeaderHeight + 1 + actionListHeight(rows: rows) + 1 + paneSearchRowHeight
+        paneHeaderHeight + House.hairline
+            + actionListHeight(rows: rows)
+            + House.hairline + paneSearchRowHeight
     }
 
     /// ⌘K pane showing a form instead of the list. Each form knows its own
@@ -78,9 +89,11 @@ enum PanelSizing {
         form.minimumPaneHeight
     }
 
-    /// Prompt palette: search row 42 + spacing + list + spacing + hint row 26.
+    /// Prompt palette: search row + spacing + list + spacing + hint row.
     static func actionPaletteHeight(rows: Int) -> CGFloat {
-        42 + 8 + actionListHeight(rows: rows, padded: false) + 8 + 26
+        House.Control.row + House.Spacing.xs
+            + actionListHeight(rows: rows, padded: false)
+            + House.Spacing.xs + House.Control.tile
     }
 
     /// The window keeps its base height while a pane floats over it; it only
@@ -121,9 +134,11 @@ enum PanelSizing {
         var total = inputHeight
         if hasAttachment { total += attachmentHeight }
         if gridRows > 0 {
-            total += CGFloat(gridRows) * 52 + CGFloat(gridSections) * 24 + launcherListInset
+            total += CGFloat(gridRows) * House.Control.composer
+                + CGFloat(gridSections) * House.Spacing.xl
+                + launcherListInset
         } else if suggestionCount > 0 {
-            var block = min(CGFloat(suggestionCount), 12) * 42
+            var block = min(CGFloat(suggestionCount), 12) * launcherRowHeight
             if launcherRowCount > 0 {
                 // Header + inset, capped exactly like the rendered list.
                 block = min(block + launcherListChrome, launcherListMaximumHeight)
@@ -143,13 +158,13 @@ enum PanelSizing {
                 bodyHeight = min(maxBodyHeight, CGFloat(approxLines) * 22 + 40)
             }
             total += bodyHeight
-            if showsQuestion { total += 24 }
+            if showsQuestion { total += questionChipBlock }
         }
         if errorMessage != nil {
             total += errorBannerHeight
         }
         if showsResultActions {
-            total += AQDesign.controlHeight + 1
+            total += AQDesign.controlHeight + House.hairline
         }
         if showsFooter {
             total += footerHeight

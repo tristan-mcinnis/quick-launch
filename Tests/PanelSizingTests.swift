@@ -11,7 +11,7 @@ struct PanelSizingTests {
 
     @Test func testIdleHeightIsInputOnly() {
         let h = PanelSizing.panelHeight(output: "", isStreaming: false, errorMessage: nil)
-        #expect(h == 60)
+        #expect(h == PanelSizing.inputHeight)
     }
 
     // MARK: - Streaming with no output yet
@@ -19,16 +19,15 @@ struct PanelSizingTests {
     @Test func testStreamingEmptyOutputAddsBody() {
         let h = PanelSizing.panelHeight(output: "", isStreaming: true, errorMessage: nil)
         // approxLines = max(1, 0/60 + 1) = 1
-        // body = min(380, 22 + 40) = 62
-        // total = 60 + 62
-        #expect(h == 122)
+        // body = min(640, 22 + 40) = 62
+        #expect(h == PanelSizing.inputHeight + 62)
     }
 
     // MARK: - Output present, not streaming
 
     @Test func testShortOutputUsesOneLine() {
         let h = PanelSizing.panelHeight(output: "hello", isStreaming: false, errorMessage: nil)
-        #expect(h == 122)
+        #expect(h == PanelSizing.inputHeight + 62)
     }
 
     @Test func testLongOutputCapsAtMaxBodyHeight() {
@@ -78,12 +77,12 @@ struct PanelSizingTests {
 
     @Test func testErrorBannerAddsFourtyOnTopOfIdle() {
         let h = PanelSizing.panelHeight(output: "", isStreaming: false, errorMessage: "boom")
-        #expect(h == 100)
+        #expect(h == PanelSizing.inputHeight + PanelSizing.errorBannerHeight)
     }
 
     @Test func testErrorBannerStacksWithOutput() {
         let h = PanelSizing.panelHeight(output: "hi", isStreaming: false, errorMessage: "boom")
-        #expect(h == 162)
+        #expect(h == PanelSizing.inputHeight + 62 + PanelSizing.errorBannerHeight)
     }
 
     // MARK: - Idempotence: same inputs -> same output
@@ -95,8 +94,10 @@ struct PanelSizingTests {
     }
 
     @Test func testItemActionPaneHugsItsRowsAndCapsAtSix() {
-        // header 44 + divider 1 + list (3*42 + 2*2 + 12) + divider 1 + search 40
-        let threeRows: CGFloat = 44 + 1 + 142 + 1 + 40
+        // header + divider + list (3 rows + 2 gaps + 12 inset) + divider + search
+        let threeRows = PanelSizing.paneHeaderHeight + 1
+            + (3 * PanelSizing.actionRowHeight + 2 * PanelSizing.actionRowSpacing + 12)
+            + 1 + PanelSizing.paneSearchRowHeight
         #expect(PanelSizing.itemActionPaneHeight(rows: 3) == threeRows)
         // 20 rows scroll behind a six-row viewport.
         let six = PanelSizing.itemActionPaneHeight(rows: 6)
@@ -106,8 +107,10 @@ struct PanelSizingTests {
     }
 
     @Test func testPaletteHugsItsRows() {
-        // search 42 + spacing 8 + list (2*42 + 2) + spacing 8 + hints 26
-        let twoRows: CGFloat = 42 + 8 + 86 + 8 + 26
+        // search row + spacing + list (2 rows + 1 gap) + spacing + hint row
+        let twoRows = House.Control.row + 8
+            + (2 * PanelSizing.actionRowHeight + PanelSizing.actionRowSpacing)
+            + 8 + House.Control.tile
         #expect(PanelSizing.actionPaletteHeight(rows: 2) == twoRows)
         #expect(PanelSizing.actionPaletteHeight(rows: 0) == PanelSizing.actionPaletteHeight(rows: 1))
     }
@@ -129,8 +132,8 @@ struct PanelSizingTests {
         let many = PanelSizing.panelHeight(
             output: "", isStreaming: false, errorMessage: nil, suggestionCount: 20
         )
-        #expect(three == 186)
-        let expectedMany: CGFloat = 60 + 12 * 42
+        #expect(three == PanelSizing.inputHeight + 3 * PanelSizing.launcherRowHeight)
+        let expectedMany = PanelSizing.inputHeight + 12 * PanelSizing.launcherRowHeight
         #expect(many == expectedMany)
     }
 
@@ -141,7 +144,7 @@ struct PanelSizingTests {
             errorMessage: nil,
             showsResultActions: true
         )
-        #expect(height == 167)
+        #expect(height == PanelSizing.inputHeight + 62 + AQDesign.controlHeight + 1)
     }
 
     @Test func testScreenshotAttachmentAddsCompactPreviewRow() {
@@ -151,7 +154,7 @@ struct PanelSizingTests {
             errorMessage: nil,
             hasAttachment: true
         )
-        #expect(height == 118)
+        #expect(height == PanelSizing.inputHeight + PanelSizing.attachmentHeight)
     }
 
     // MARK: - Footer and launcher rows
@@ -160,7 +163,7 @@ struct PanelSizingTests {
         let h = PanelSizing.panelHeight(
             output: "", isStreaming: false, errorMessage: nil, showsFooter: true
         )
-        let expected: CGFloat = 60 + AQDesign.footerHeight + 1
+        let expected = PanelSizing.inputHeight + AQDesign.footerHeight + 1
         #expect(h == expected)
     }
 
@@ -172,7 +175,7 @@ struct PanelSizingTests {
             output: "", isStreaming: false, errorMessage: nil,
             suggestionCount: 3, launcherRowCount: 3
         )
-        let expectedPlain: CGFloat = 60 + 3 * 42
+        let expectedPlain = PanelSizing.inputHeight + 3 * PanelSizing.launcherRowHeight
         #expect(plain == expectedPlain)
         let expectedLauncher: CGFloat = plain + PanelSizing.launcherListChrome
         #expect(launcher == expectedLauncher)
@@ -181,7 +184,7 @@ struct PanelSizingTests {
             output: "", isStreaming: false, errorMessage: nil,
             suggestionCount: 20, launcherRowCount: 20
         )
-        let expectedFull: CGFloat = 60 + PanelSizing.launcherListMaximumHeight
+        let expectedFull = PanelSizing.inputHeight + PanelSizing.launcherListMaximumHeight
         #expect(full == expectedFull)
     }
 
