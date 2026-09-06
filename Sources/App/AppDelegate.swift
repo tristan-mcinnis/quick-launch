@@ -597,6 +597,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayRetentionID = nil
         if captureSelectionTarget {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
+            // Capture the background selection before the panel becomes key
+            // and steals focus, so ad-hoc Quick AI sees what the user selected.
+            viewModel?.captureLaunchSelection()
             viewModel?.captureImageFromClipboard()
         }
         applicationCatalog.refreshIfNeeded()
@@ -644,6 +647,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderOut(nil)
         viewModel?.reset(.layers)
         viewModel?.rememberSelectionTarget(nil)
+        // Dismissal drops the launch-scoped selection so a non-capture reopen
+        // never re-attaches a stale selection or writes back to a stale target.
+        viewModel?.clearLaunchScopedState()
 
         overlayClearTask?.cancel()
         guard let viewModel else { return }
@@ -981,6 +987,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         vm.rememberSelectionTarget(selectedTextService.currentExternalTarget())
+        // Capture before activation so the action runs on the user's actual
+        // selection, not re-read after the overlay stole focus.
+        vm.captureLaunchSelection()
         showOverlay(captureSelectionTarget: false)
         Task { await vm.perform(action: action) }
     }

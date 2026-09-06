@@ -11,7 +11,7 @@ struct OverlayView: View {
             // button. No send circle and no accent anywhere — Return sends.
             HStack(spacing: AQDesign.Space.row) {
                 Image(systemName: viewModel.isAnswerActive ? "sparkles" : "magnifyingglass")
-                    .font(.system(size: 18))
+                    .font(AQDesign.TypeToken.glyph)
                     .foregroundStyle(
                         viewModel.isAnswerActive
                             ? AQDesign.ColorToken.textSecondary
@@ -90,6 +90,38 @@ struct OverlayView: View {
             }
             .padding(.horizontal, AQDesign.Space.panel)
             .frame(minHeight: AQDesign.inputHeight)
+
+            if viewModel.launchSelection != nil {
+                HouseDivider()
+                HStack(spacing: AQDesign.Space.standard) {
+                    Image(systemName: "text.cursor")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
+                        Text(viewModel.launchSelectionTitle)
+                            .font(AQDesign.TypeToken.label)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(viewModel.launchSelectionPreview)
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: AQDesign.Space.standard)
+                    Button {
+                        viewModel.clearLaunchSelection()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove selected text")
+                    .help("Remove the selected text from the next request")
+                }
+                .padding(.horizontal, AQDesign.Space.panel)
+                .padding(.vertical, AQDesign.Space.standard)
+            }
 
             if viewModel.hasPendingAttachment {
                 HouseDivider()

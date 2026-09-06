@@ -193,6 +193,412 @@ struct QuickActionWorkflowTests {
         #expect(!vm.isCaffeinating)
         #expect(!vm.settings.caffeinateEnabled)
     }
+
+    // MARK: - Launch-scoped background selection
+
+    @Test func captureLaunchSelectionSnapshotsBackgroundText() {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+
+        vm.captureLaunchSelection()
+
+        #expect(vm.launchSelection?.text == "background passage")
+        #expect(vm.launchSelection?.appName == "Editor")
+        #expect(vm.launchSelectionTitle == "Selected text from Editor")
+    }
+
+    @Test func captureLaunchSelectionIsSilentWhenNoSelection() {
+        let selection = FakeSelectedTextService(text: nil)
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+
+        vm.captureLaunchSelection()
+
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func backgroundSelectionReachesAdHocRequest() async {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Parsed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "What does this say?"
+
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("background passage") == true)
+        #expect(messages.last?.content.contains("What does this say?") == true)
+    }
+
+    @Test func backgroundSelectionIsConsumedAfterFirstRequest() async {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Parsed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection != nil)
+        vm.input = "What does this say?"
+
+        await vm.submit()
+
+        #expect(vm.launchSelection == nil)
+
+        // A follow-up in the same chat must not re-attach the selection.
+        vm.output = "Parsed"
+        vm.isStreaming = false
+        vm.input = "And again?"
+        await vm.submit()
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("background passage") == false)
+    }
+
+    @Test func adHocWithoutSelectionSendsNoContext() async {
+        let selection = FakeSelectedTextService(text: nil)
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Hi", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "Hello"
+
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content == "Hello")
+    }
+
+    @Test func freshLaunchReplacesStaleSnapshot() {
+        let selection = FakeSelectedTextService(text: "first selection")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection?.text == "first selection")
+
+        // A fresh launch re-captures and invalidates the old snapshot.
+        selection.selectedText = "second selection"
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection?.text == "second selection")
+
+        // A launch with no selection clears the stale snapshot entirely.
+        selection.selectedText = nil
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func removingLaunchSelectionDropsContext() async {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Parsed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.clearLaunchSelection()
+        vm.input = "Hello"
+
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content == "Hello")
+    }
+
+    @Test func launchSelectionFeedsSavedActionSource() async {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Polished", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "grammar" })!
+        await vm.perform(action: action)
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("background passage") == true)
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func performActionNeverUsesStaleOutputAsSource() async {
+        let selection = FakeSelectedTextService(text: "current selection")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Answer", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        // A previous answer is on screen - it must never become the source.
+        vm.output = "an earlier, unrelated answer"
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "tldr" })!
+        await vm.perform(action: action)
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("current selection") == true)
+        #expect(messages.last?.content.contains("an earlier, unrelated answer") == false)
+    }
+
+    // MARK: - Review findings
+
+    @Test func typedAliasContextBeatsLaunchSnapshot() async {
+        let selection = FakeSelectedTextService(text: "auto snapshot")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "/improve typed words"
+
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("typed words") == true)
+        #expect(messages.last?.content.contains("auto snapshot") == false)
+    }
+
+    @Test func performTypedInputBeatsLaunchSnapshot() async {
+        let selection = FakeSelectedTextService(text: "auto snapshot")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "typed words"
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
+        await vm.perform(action: action)
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("typed words") == true)
+        #expect(messages.last?.content.contains("auto snapshot") == false)
+    }
+
+    @Test func launchCaptureRetainsContextForResultReplacement() async {
+        let selection = FakeSelectedTextService(text: "rough words")
+        // The launch read succeeds once; any later re-read would go nil.
+        selection.capturesRemaining = 1
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Polished", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "grammar" })!
+        await vm.perform(action: action)
+
+        // The replace went back to the launch-captured target, no re-read.
+        #expect(selection.replacedContext?.target == target)
+        #expect(selection.replacedContext?.text == "rough words")
+        #expect(selection.replacedText == "Polished")
+    }
+
+    @Test func removingChipSuppressesSavedActionRecapture() async {
+        let selection = FakeSelectedTextService(text: "old selection")
+        let service = MockQuickService()
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.clearLaunchSelection()
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
+        await vm.perform(action: action)
+
+        #expect(vm.errorMessage?.isEmpty == false)
+        #expect(await service.sendCallCount == 0)
+    }
+
+    @Test func savedActionHonorsExplicitContextWithoutDuplicatingSelection() async {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Done", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service)
+        var context = CaptureContext(appName: "Safari", selectedText: "sel text", appText: "readable text")
+        vm.pendingContext = context
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
+        await vm.perform(action: action)
+
+        let message = (await service.lastMessages).last?.content ?? ""
+        #expect(message.contains("Context from Safari") == true)
+        #expect(message.contains("readable text") == true)
+        #expect(message.contains("sel text") == true)
+        // The selection appears exactly once (as the {selection} source), and
+        // the preamble does not repeat a "Selected text:" block.
+        #expect(message.components(separatedBy: "sel text").count - 1 == 1)
+        #expect(message.contains("Selected text:") == false)
+    }
+
+    @Test func commandActionConsumesLaunchChip() async {
+        let selection = FakeSelectedTextService(text: "command input")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.settings.savedPrompts.append(SavedPrompt(
+            alias: "cmd",
+            prompt: "run",
+            commandExecutable: "/bin/echo",
+            commandArguments: ["{input}"]
+        ))
+        vm.input = "/cmd"
+
+        await vm.submit()
+
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func performCommandConsumesLaunchChip() async {
+        let selection = FakeSelectedTextService(text: "command input")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.settings.savedPrompts.append(SavedPrompt(
+            alias: "cmd",
+            prompt: "run",
+            commandExecutable: "/bin/echo",
+            commandArguments: ["{input}"]
+        ))
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "cmd" })!
+
+        await vm.perform(action: action)
+
+        // perform() stashed the snapshot in pendingActionSource; the command
+        // branch must still consume the chip.
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func removeThenExplicitAttachReArmsSelection() {
+        let selection = FakeSelectedTextService(text: "fresh selection")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        // Removing the chip suppresses automatic re-capture and invalidates
+        // the cached context.
+        vm.clearLaunchSelection()
+        #expect(vm.launchSelection == nil)
+
+        let attached = vm.attachSelectedText()
+
+        // An explicit Selected Text capture re-arms the read and works.
+        #expect(attached)
+        #expect(vm.pendingContext?.selectedText == "fresh selection")
+        #expect(vm.launchSelection == nil)
+    }
+
+    @Test func resetAttachmentsClearsLaunchScopedState() {
+        let selection = FakeSelectedTextService(text: "sel")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection != nil)
+
+        vm.reset([.attachments])
+
+        #expect(vm.launchSelection == nil)
+        #expect(vm.selectedTextContext == nil)
+    }
+
+    @Test func clearAttachmentsClearsLaunchScopedState() {
+        let selection = FakeSelectedTextService(text: "sel")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        vm.clearAttachments()
+
+        #expect(vm.launchSelection == nil)
+        #expect(vm.selectedTextContext == nil)
+    }
+
+    @Test func freshLaunchReArmsSelectionAfterDismissal() {
+        let selection = FakeSelectedTextService(text: "fresh")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.clearLaunchScopedState()
+        #expect(vm.launchSelection == nil)
+
+        vm.captureLaunchSelection()
+
+        #expect(vm.launchSelection?.text == "fresh")
+    }
+
+    @Test func newChatDoesNotReattachConsumedSelection() async {
+        let selection = FakeSelectedTextService(text: "background passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "A", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "Q1"
+        await vm.submit()
+        #expect(vm.launchSelection == nil)
+
+        vm.startNewConversation()
+        vm.input = "Q2"
+        await vm.submit()
+
+        let messages = await service.lastMessages
+        #expect(messages.last?.content.contains("background passage") == false)
+    }
 }
 
 @MainActor
@@ -241,6 +647,10 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     var wasPreparedWhenPasted = false
     var pasteSucceeds = true
     var openedSettings = false
+    /// Number of future `capture(from:)` calls that still return a selection.
+    /// Default `.max` keeps existing behaviour; set to 1 to model a capture
+    /// that succeeds once (the launch read) and then goes nil.
+    var capturesRemaining = Int.max
 
     init(text: String?, trusted: Bool = true) {
         selectedText = text
@@ -254,6 +664,8 @@ private final class FakeSelectedTextService: SelectedTextServicing {
         promptForPermission: Bool
     ) -> SelectedTextContext? {
         guard isAccessibilityTrusted, let selectedText else { return nil }
+        guard capturesRemaining > 0 else { return nil }
+        capturesRemaining -= 1
         return SelectedTextContext(target: target, text: selectedText)
     }
 

@@ -94,7 +94,7 @@ struct CoreFeatureTests {
         {"configurationVersion":13,"savedPrompts":[{"alias":"translate","prompt":"x {selection}"}]}
         """#
         let migrated = try JSONDecoder().decode(QuickSettings.self, from: Data(legacy.utf8))
-        #expect(migrated.savedPrompts.map(\.alias) == ["translate", "zh"])
+        #expect(migrated.savedPrompts.map(\.alias) == ["translate", "zh", "improve"])
     }
 
     // MARK: Caffeinate

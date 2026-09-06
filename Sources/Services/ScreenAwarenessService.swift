@@ -40,13 +40,15 @@ struct CaptureContext: Equatable, Sendable {
 
     /// Text block placed before the question so a text-only model still
     /// knows what the user is looking at. Bounded so it never swamps the prompt.
-    func promptPreamble(limit: Int = 6_000) -> String {
+    /// Pass `includeSelectedText: false` when the selection already travels as
+    /// a `{selection}` source, so it is not sent twice.
+    func promptPreamble(limit: Int = 6_000, includeSelectedText: Bool = true) -> String {
         var lines: [String] = []
         var header = "Context from \(appName)"
         if let windowTitle, !windowTitle.isEmpty { header += " (window: \(windowTitle))" }
         if let pageURL, !pageURL.isEmpty { header += ", page: \(pageURL)" }
         lines.append(header + ".")
-        if let selectedText, !selectedText.isEmpty {
+        if includeSelectedText, let selectedText, !selectedText.isEmpty {
             lines.append("Selected text:\n\(selectedText)")
         }
         if let focusedValue, !focusedValue.isEmpty, focusedValue != selectedText {

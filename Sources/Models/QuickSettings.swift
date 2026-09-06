@@ -15,7 +15,7 @@ enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 19
+    var configurationVersion: Int = 20
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -133,7 +133,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 19
+        configurationVersion = 20
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -343,6 +343,13 @@ struct QuickSettings: Codable, Sendable {
             // The overlay moved to a dark, monochrome look. Settings that never
             // chose an appearance follow it; an explicit light choice stays.
             appearance = .dark
+        }
+        if decodedConfigurationVersion < 20,
+           !savedPrompts.contains(where: { $0.alias == "improve" }),
+           let improve = SavedPrompt.defaults.first(where: { $0.alias == "improve" }) {
+            // Add the Raycast-style Improve Writing action without disturbing
+            // any action the user already customized.
+            savedPrompts.append(improve)
         }
     }
 

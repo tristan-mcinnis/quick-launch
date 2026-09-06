@@ -183,6 +183,37 @@ selection. Summarize opens the result for follow-up. `Control+Option+S` runs
 Summarize directly. macOS asks for Accessibility access the first time a
 selected-text action needs it.
 
+### Selected text and saved actions
+
+- **Automatic selection.** Select text in another app, then open Quick Launch.
+  The selection is captured once, before the panel takes focus, and appears as
+  a removable chip under the input row. Press `×` to drop it. The text rides
+  with the next request only, so a follow-up or a brand-new chat never re-sends
+  it. Reading uses macOS Accessibility on the current selection alone — no
+  screen recording, no clipboard, never the whole screen.
+- **Run a saved action three ways.** By name from `Command+K` (the Quick AI
+  action chooser, which searches each action's name and alias), by slash alias
+  (`/improve`, `/grammar`, `/tldr`, `/translate`), or by a global hotkey
+  (Summarize is `⌃⌥S`). `/improve` rewrites the selected text and replaces it.
+  Aliases are fuzzy, so `/eml` finds `/email`.
+- **Prompt, output, and context.** A saved action's `prompt` takes
+  `{selection}` where the text lands (otherwise it is appended). Its output is
+  **Show in Quick Launch** (result stays for a follow-up) or **Replace selected
+  text** (the result overwrites the selection). Use the explicit focused-context
+  commands — `⌘⇧S` Send Focused Window, Send Screen Area, Send Selected Text —
+  when you want the window/app context attached beyond a bare selection; the
+  attachment card lists exactly what is included.
+- **Configure a custom action.** **Settings → Prompts** sets its name, fuzzy
+  alias, prompt, output behavior, optional global hotkey, and optional
+  provider/model.
+
+Raycast parity reference: AI Commands (saved templates) are selected by
+name/alias from the root search or a global hotkey, `{selection}` is read via
+Accessibility without touching the clipboard, and the output is shown in the
+overlay or replaces the selection. Sources:
+`manual.raycast.com/ai/ai-commands`, `/ai/quick-ai`, `/ai/screen-awareness`,
+`/command-aliases-and-hotkeys`.
+
 Slash aliases are fuzzy. `/eml` finds `/email`. Press `Tab` to complete the
 alias or `Return` to run the best match. With no alias match, `Tab` switches
 the typed text to Ask AI, so `hi` then `Tab` then `Return` asks the model

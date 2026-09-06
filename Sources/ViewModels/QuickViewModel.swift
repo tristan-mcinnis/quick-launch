@@ -72,6 +72,9 @@ import Observation
     }
     /// Screen Awareness: what was read from the window behind the overlay.
     var pendingContext: CaptureContext?
+    /// Auto-captured selected text from the app behind the overlay, captured
+    /// at launch before the overlay took focus. Drives the removable chip.
+    var launchSelection: LaunchSelection?
     var screenshotIndexProgress = ScreenshotTextIndex.Progress()
     /// What the user typed for the answer on screen, shown above it.
     var lastQuestion: String?
@@ -101,6 +104,15 @@ import Observation
         /// the Ask AI row, or its hotkey.
         case askAI
         case vaultSearch(VaultSearchMode)
+    }
+
+    /// A snapshot of selected text captured from the background app when the
+    /// overlay opened, before the overlay stole focus. Immutable for the
+    /// session; shown as a removable chip and attached to exactly one request
+    /// so it never leaks into later follow-ups or a new conversation.
+    struct LaunchSelection: Equatable, Sendable {
+        let text: String
+        let appName: String
     }
 
     // MARK: - Dependencies
@@ -170,6 +182,14 @@ import Observation
     @ObservationIgnored let currentVersion: String
     @ObservationIgnored private(set) var selectionTarget: SelectionTarget?
     @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
+    /// Text an action dispatch (picker/hotkey) resolved explicitly, so a
+    /// multi-line selection is never whitespace-collapsed by alias context.
+    @ObservationIgnored private var pendingActionSource: String?
+    /// True after the user removes a launch selection: suppresses the
+    /// automatic re-capture of `{selection}` for a saved action until a fresh
+    /// launch or an explicit attachment, so a dismissed chip is not silently
+    /// re-read.
+    @ObservationIgnored private var selectionRecaptureSuppressed = false
     /// Image of the current thread, kept in memory only so follow-ups can
     /// refer to it. Never written to history or disk.
     @ObservationIgnored private(set) var conversationImages: [QuickImageAttachment] = []
@@ -2502,6 +2522,11 @@ import Observation
             requestInputFocus()
             return false
         }
+        // An explicit Selected Text capture re-arms the selection read: a
+        // prior "remove chip" must not suppress it, and the cached context is
+        // refreshed rather than reused.
+        selectionRecaptureSuppressed = false
+        selectedTextContext = nil
         guard let selected = captureSelectedText(promptForPermission: true)?.text
                 .trimmingCharacters(in: .whitespacesAndNewlines), !selected.isEmpty else {
             errorMessage = selectedTextService?.isAccessibilityTrusted == false
@@ -2517,6 +2542,9 @@ import Observation
         context.focusedValue = nil
         pendingContext = context
         pendingImage = nil
+        // An explicit Selected Text capture supersedes the auto-captured
+        // launch selection, so the two are never sent twice.
+        launchSelection = nil
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
@@ -2689,6 +2717,9 @@ import Observation
     func clearAttachments() {
         pendingImages.removeAll()
         pendingContext = nil
+        // A cleared attachment strip also drops the launch-scoped selection
+        // so it cannot ride a later request.
+        clearLaunchScopedState()
     }
 
     /// One line under the attachment saying where the image goes.
@@ -3157,6 +3188,66 @@ import Observation
     func rememberSelectionTarget(_ target: SelectionTarget?) {
         selectionTarget = target
         selectedTextContext = nil
+    }
+
+    /// Capture the selected text in the background app now, before the
+    /// overlay takes focus, as an immutable launch-scoped snapshot. Silent:
+    /// never prompts for Accessibility permission. No-op when the app is not
+    /// trusted, has no selection, or the overlay opened on the menu bar.
+    ///
+    /// The full `SelectedTextContext` is retained so a saved action that
+    /// replaces the selection can write back to the captured target without
+    /// re-reading (the app may no longer be frontmost by then).
+    func captureLaunchSelection() {
+        launchSelection = nil
+        selectionRecaptureSuppressed = false
+        guard let selectionTarget, let selectedTextService else { return }
+        guard let captured = selectedTextService.capture(
+            from: selectionTarget,
+            promptForPermission: false
+        ),
+        !captured.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Kept for `replace` at completion and for the `{selection}` re-use
+        // path; only a fresh capture (or `rememberSelectionTarget`) resets it.
+        selectedTextContext = captured
+        launchSelection = LaunchSelection(
+            text: captured.text,
+            appName: selectionTarget.applicationName
+        )
+    }
+
+    /// Remove the launch-scoped selection: invalidate the snapshot, forget the
+    /// cached context (so a result is not written back to a stale target), and
+    /// suppress any automatic re-capture until a fresh launch or an explicit
+    /// attachment.
+    func clearLaunchSelection() {
+        launchSelection = nil
+        selectedTextContext = nil
+        selectionRecaptureSuppressed = true
+    }
+
+    /// Clear every piece of launch-scoped selection state. Used when the user
+    /// clears attachments and when the overlay is dismissed, so a stale
+    /// selection or chip cannot survive into a later request or a reopen.
+    func clearLaunchScopedState() {
+        launchSelection = nil
+        pendingActionSource = nil
+        selectedTextContext = nil
+        selectionRecaptureSuppressed = true
+    }
+
+    /// Chip heading: where the captured text came from.
+    var launchSelectionTitle: String {
+        guard let appName = launchSelection?.appName else { return "Selected text" }
+        return "Selected text from \(appName)"
+    }
+
+    /// Single-line preview of the captured selection, bounded for the chip.
+    var launchSelectionPreview: String {
+        guard let text = launchSelection?.text else { return "" }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        return trimmed.count > 120 ? trimmed.prefix(117) + "…" : trimmed
     }
 
     func toggleActionPalette() {
@@ -4042,11 +4133,20 @@ import Observation
 
     func perform(action: SavedPrompt) async {
         let source: String
-        if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            source = input
-        } else if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            source = output
-        } else if let selected = captureSelectedText(promptForPermission: true) {
+        // Explicit Screen Awareness selection, then text typed into the
+        // launcher, then the launch-scoped background selection, then a fresh
+        // capture. Typed text beats the auto-captured snapshot; stale
+        // on-screen output is never used as the source.
+        if let attached = pendingContext?.selectedText,
+           !attached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = attached
+        } else if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let launchSelection,
+                  !launchSelection.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = launchSelection.text
+        } else if let selected = captureSelectedText(promptForPermission: true),
+                  !selected.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             source = selected.text
         } else {
             closeActionPalette()
@@ -4057,9 +4157,12 @@ import Observation
             return
         }
 
+        pendingActionSource = source
         isActionPalettePresented = false
         actionQuery = ""
-        input = settings.savedPromptPrefix + action.alias + " " + source
+        // Bare alias; the source travels via pendingActionSource so a
+        // multi-line selection is never whitespace-collapsed by alias context.
+        input = settings.savedPromptPrefix + action.alias
         await submit()
     }
 
@@ -4073,6 +4176,10 @@ import Observation
 
     private func captureSelectedText(promptForPermission: Bool) -> SelectedTextContext? {
         if let selectedTextContext { return selectedTextContext }
+        // The user removed the chip: do not silently re-capture a selection
+        // the user chose to drop, until a fresh launch or an explicit
+        // attachment re-arms the selection.
+        guard !selectionRecaptureSuppressed else { return nil }
         guard let selectionTarget, let selectedTextService else { return nil }
         let captured = selectedTextService.capture(
             from: selectionTarget,
@@ -4080,6 +4187,37 @@ import Observation
         )
         selectedTextContext = captured
         return captured
+    }
+
+    /// The text an action operates on, in precedence order: the explicit
+    /// source stashed by a picker/hotkey dispatch, an explicitly attached
+    /// Screen Awareness selection, the text typed after the alias, and only
+    /// then the launch-scoped background selection snapshot. Typed or
+    /// explicitly attached text always beats the auto-captured snapshot.
+    private func resolvedActionSource(
+        action: SavedPromptResolver.Resolution,
+        launchText: String?
+    ) -> String {
+        if let explicit = pendingActionSource,
+           !explicit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return explicit
+        }
+        if let attached = pendingContext?.selectedText,
+           !attached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return attached
+        }
+        // Typed `/alias context` beats the launch snapshot: the user typed
+        // it for this invocation, so it is the strongest intent.
+        if !action.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return action.context
+        }
+        if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Consume the snapshot: a command or model action that used it
+            // must not re-send it to a later request.
+            launchSelection = nil
+            return launchText
+        }
+        return action.context
     }
 
     /// One Return, prepared for a provider: the prompt the model receives
@@ -4127,44 +4265,97 @@ import Observation
             savedPrompts: settings.savedPrompts
         )
 
+        // The launch-scoped selection is a single-use snapshot captured before
+        // the overlay took focus. Read it once so every branch below uses the
+        // same immutable text, and clear it once a model-bound request is
+        // built so it never leaks into a later follow-up or a new chat.
+        let launchText = launchSelection?.text
+
         // Command actions run a local executable directly and never reach a
         // model provider.
         if let action,
            let definition = settings.savedPrompts.first(where: { $0.id == action.actionID }),
            let executable = definition.commandExecutable,
            !executable.isEmpty {
+            let source = resolvedActionSource(action: action, launchText: launchText)
+            pendingActionSource = nil
+            // A dispatched command consumed the launch snapshot (whether the
+            // source came via pendingActionSource or the launchText branch):
+            // clear the chip so it cannot ride a later request.
+            if launchSelection != nil { launchSelection = nil }
             await runCommandAction(
                 definition: definition,
                 executable: executable,
-                context: action.context
+                context: source
             )
             return nil
         }
 
-        var effectivePrompt = action?.prompt ?? input
-        if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           submittedImage != nil {
-            effectivePrompt = "Describe this screenshot and answer the most likely useful question about it."
-        }
-        let submittedContext = pendingContext
-        if let submittedContext, action == nil {
-            let preamble = submittedContext.promptPreamble()
+        var effectivePrompt: String
+        if let action,
+           let definition = settings.savedPrompts.first(where: { $0.id == action.actionID }) {
+            let source = resolvedActionSource(action: action, launchText: launchText)
+            pendingActionSource = nil
+            // Consume the single-use chip once a saved action uses the
+            // selection (perform() may have stashed the snapshot in
+            // pendingActionSource, which the resolver returns unchanged).
+            if launchSelection != nil { launchSelection = nil }
+            // Explicit Screen Awareness context is honored for saved actions
+            // too: the window/app/page preamble is prepended, minus the
+            // selection (which the action carries via `{selection}` or the
+            // appended source) so it is not sent twice.
+            var preambleParts: [String] = []
+            if let submittedContext = pendingContext {
+                let preamble = submittedContext.promptPreamble(includeSelectedText: false)
+                if !preamble.isEmpty { preambleParts.append(preamble) }
+            }
+            // Keep `{selection}` intact when no source is supplied, so the
+            // branch below can capture it fresh instead of blanking it.
+            effectivePrompt = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? definition.prompt
+                : SavedPromptResolver.prompt(for: definition, source: source)
+            if effectivePrompt.contains("{selection}") {
+                guard let selected = captureSelectedText(promptForPermission: true) else {
+                    errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                        ? "Allow Accessibility in System Settings, then select text and try again."
+                        : "This action needs selected text."
+                    requestInputFocus()
+                    return nil
+                }
+                effectivePrompt = effectivePrompt.replacingOccurrences(
+                    of: "{selection}",
+                    with: selected.text
+                )
+            }
+            let preamble = preambleParts.joined(separator: "\n\n")
+            if !preamble.isEmpty {
+                effectivePrompt = preamble + "\n\n" + effectivePrompt
+            }
+        } else {
+            effectivePrompt = input
+            if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               submittedImage != nil {
+                effectivePrompt = "Describe this screenshot and answer the most likely useful question about it."
+            }
+            // Screen Awareness context plus the launch-scoped background
+            // selection become context for this question.
+            var preambleParts: [String] = []
+            if let submittedContext = pendingContext {
+                let preamble = submittedContext.promptPreamble()
+                if !preamble.isEmpty { preambleParts.append(preamble) }
+            }
+            if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var context = CaptureContext(
+                    appName: launchSelection?.appName ?? "the background"
+                )
+                context.selectedText = launchText
+                let preamble = context.promptPreamble()
+                if !preamble.isEmpty { preambleParts.append(preamble) }
+            }
+            let preamble = preambleParts.joined(separator: "\n\n")
             if !preamble.isEmpty {
                 effectivePrompt = preamble + "\n\nQuestion: " + effectivePrompt
             }
-        }
-        if action != nil, effectivePrompt.contains("{selection}") {
-            guard let selected = captureSelectedText(promptForPermission: true) else {
-                errorMessage = selectedTextService?.isAccessibilityTrusted == false
-                    ? "Allow Accessibility in System Settings, then select text and try again."
-                    : "This action needs selected text."
-                requestInputFocus()
-                return nil
-            }
-            effectivePrompt = effectivePrompt.replacingOccurrences(
-                of: "{selection}",
-                with: selected.text
-            )
         }
 
         // Math, conversions, dates, system facts: the same deterministic
@@ -4197,6 +4388,12 @@ import Observation
         let actionDefinition = action.flatMap { resolution in
             settings.savedPrompts.first(where: { $0.id == resolution.actionID })
         }
+
+        // The launch-scoped background selection rides with exactly one model
+        // request; consume it here so it never leaks into a later follow-up
+        // or a brand-new conversation. Local answers return above and keep it.
+        if launchSelection != nil { launchSelection = nil }
+
         return PreparedRequest(
             submittedInput: submittedInput,
             submittedImages: submittedImages,
@@ -4864,6 +5061,7 @@ import Observation
         if scope.contains(.attachments) {
             pendingImages.removeAll()
             pendingContext = nil
+            clearLaunchScopedState()
         }
         if scope.contains(.thread) {
             streamTask?.cancel()

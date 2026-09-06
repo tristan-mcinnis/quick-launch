@@ -302,4 +302,34 @@ struct QuickSettingsSavedPromptsTests {
         #expect(s.savedPromptPrefix == "/")
         #expect(s.savedPrompts.count >= 3)
     }
+
+    @Test func testImproveWritingIsASeededDefault() {
+        let improve = SavedPrompt.defaults.first(where: { $0.alias == "improve" })
+        #expect(improve != nil)
+        #expect(improve?.name == "Improve Writing")
+        #expect(improve?.prompt.contains("{selection}") == true)
+        #expect(improve?.outputBehavior == .replaceSelection)
+    }
+
+    @Test func testVersion20MigrationAddsImproveWritingButKeepsCustomizations() throws {
+        var s = QuickSettings()
+        s.configurationVersion = 19
+        // A user customization from before the Improve Writing default.
+        s.savedPrompts = [SavedPrompt(alias: "custom", prompt: "Do the thing:")]
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+
+        #expect(back.savedPrompts.contains(where: { $0.alias == "improve" }))
+        #expect(back.savedPrompts.contains(where: { $0.alias == "custom" }))
+    }
+
+    @Test func testVersion20DoesNotDuplicateImproveWriting() throws {
+        var s = QuickSettings()
+        s.configurationVersion = 20
+        s.savedPrompts = [SavedPrompt(alias: "improve", prompt: "already present")]
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+
+        #expect(back.savedPrompts.filter { $0.alias == "improve" }.count == 1)
+    }
 }

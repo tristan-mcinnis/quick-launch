@@ -117,6 +117,12 @@ extension SavedPrompt {
             outputBehavior: .replaceSelection
         ),
         SavedPrompt(
+            name: "Improve Writing",
+            alias: "improve",
+            prompt: "Improve the writing of the following text. Fix any spelling and grammar mistakes and improve the clarity and concision. Return only the improved text, no explanations.\n\n{selection}",
+            outputBehavior: .replaceSelection
+        ),
+        SavedPrompt(
             name: "Summarize",
             alias: "tldr",
             prompt: "Summarize the following clearly and concisely. Preserve important facts and numbers.\n\n{selection}",

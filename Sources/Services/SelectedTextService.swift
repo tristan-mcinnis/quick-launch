@@ -23,6 +23,15 @@ final class SelectedTextService: SelectedTextServicing {
     private var lastTarget: SelectionTarget?
     private var activationObserver: NSObjectProtocol?
 
+    /// Bounded AX messaging wait, in seconds, so an unresponsive target app
+    /// cannot hang the panel while Quick Launch reads or replaces a selection.
+    /// AX calls are synchronous and cannot be cancelled mid-call, so the
+    /// messaging timeout is the supported lever. The launch-time selection
+    /// read must stay on the main thread: the panel takes focus immediately
+    /// after, so deferring the read off-main would race the focus steal and
+    /// read the wrong (or no) selection.
+    private static let axMessagingTimeout: Float = 0.5
+
     init() {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
         rememberIfExternal(NSWorkspace.shared.frontmostApplication)
@@ -91,7 +100,11 @@ final class SelectedTextService: SelectedTextServicing {
         guard AXIsProcessTrustedWithOptions(options) else { return nil }
 
         let application = AXUIElementCreateApplication(target.processIdentifier)
+        // Bound every AX read here so a hung app returns quickly rather than
+        // blocking the launch-time capture (see `axMessagingTimeout`).
+        AXUIElementSetMessagingTimeout(application, Self.axMessagingTimeout)
         guard let focused = focusedElement(in: application) else { return nil }
+        AXUIElementSetMessagingTimeout(focused, Self.axMessagingTimeout)
         var selectedValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             focused,
@@ -137,6 +150,7 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     private func focusedElement(in application: AXUIElement) -> AXUIElement? {
+        AXUIElementSetMessagingTimeout(application, Self.axMessagingTimeout)
         var focusedValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             application,
