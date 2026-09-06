@@ -136,13 +136,13 @@ struct ScreenHistoryMenuBarPresentation: Equatable, Sendable {
             )
         case .pausedForInactivity:
             Self(
-                symbolName: "pause.circle.fill",
+                symbolName: "pause.circle",
                 accessibilityName: "Quick Launch, Screen History paused",
                 forcesVisibility: true
             )
         case .stopped, .disabled, nil:
             Self(
-                symbolName: "bolt.fill",
+                symbolName: "bolt",
                 accessibilityName: "Quick Launch",
                 forcesVisibility: false
             )

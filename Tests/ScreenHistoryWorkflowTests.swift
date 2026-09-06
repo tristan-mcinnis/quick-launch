@@ -475,7 +475,7 @@ struct ScreenHistoryWorkflowTests {
         #expect(running.accessibilityName == "Quick Launch, Screen History running")
         #expect(running.forcesVisibility)
         let stopped = ScreenHistoryMenuBarPresentation.make(status: nil)
-        #expect(stopped.symbolName == "bolt.fill")
+        #expect(stopped.symbolName == "bolt")
         #expect(stopped.accessibilityName == "Quick Launch")
         #expect(!stopped.forcesVisibility)
     }

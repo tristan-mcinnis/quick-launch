@@ -1098,10 +1098,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard let button = statusItem?.button else { return }
-        button.image = NSImage(
+        // Status item (DESIGN.md): the app-icon glyph as a template image at
+        // `Control.statusGlyph`, medium weight; outline idle, `.fill` = on.
+        let image = NSImage(
             systemSymbolName: presentation.symbolName,
             accessibilityDescription: presentation.accessibilityName
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: House.Control.statusGlyph, weight: .medium)
         )
+        image?.isTemplate = true
+        button.image = image
         button.setAccessibilityLabel(presentation.accessibilityName)
     }
 
