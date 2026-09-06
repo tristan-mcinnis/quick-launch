@@ -75,16 +75,14 @@ routed locally, but must never be persisted in settings or history.
   tests, and website metadata consistent when changing product identity.
 - Do not remove or overwrite unrelated user changes in a dirty worktree.
 
-## Concurrency
+## Swift rule
 
-One rule. A service that owns I/O (files, SQLite, Keychain, child processes,
-the network) is an `actor`. State the UI reads is a `@MainActor final class`.
-A `@MainActor` store that hands its disk work to `JSONFileStore` (clipboard,
-color, launcher usage, chat history) satisfies the rule: the file store
-serialises the I/O off the main thread. `@unchecked Sendable` needs a comment
-on the type naming what guards the state; a type whose stored properties are
-all `Sendable` takes plain `Sendable`. View models reach AppKit singletons
-only through the seams in `Sources/Protocols/SystemServicing.swift`.
+The house rule is `../design-system/SWIFT.md`; this repo is its reference
+implementation (floor **macOS 26, swift-tools 6.2, Swift Testing**). Local
+application: a `@MainActor` store that hands its disk work to `JSONFileStore`
+(clipboard, color, launcher usage, chat history) satisfies the actor rule, since
+the file store serialises the I/O off the main thread. View models reach AppKit
+singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 
 ## Verification
 
