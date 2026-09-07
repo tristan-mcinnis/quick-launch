@@ -35,6 +35,10 @@ struct OverlayView: View {
                         viewModel.handleTab() ? .handled : .ignored
                     }
                     .onKeyPress(.downArrow) {
+                        if viewModel.isTransformChooserPresented {
+                            viewModel.moveTransformChooserSelection(1)
+                            return .handled
+                        }
                         if viewModel.isAnswerActive, viewModel.input.isEmpty {
                             viewModel.browseConversations(1)
                             return .handled
@@ -44,6 +48,10 @@ struct OverlayView: View {
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
+                        if viewModel.isTransformChooserPresented {
+                            viewModel.moveTransformChooserSelection(-1)
+                            return .handled
+                        }
                         if viewModel.isAnswerActive, viewModel.input.isEmpty {
                             viewModel.browseConversations(-1)
                             return .handled
@@ -109,6 +117,28 @@ struct OverlayView: View {
                             .truncationMode(.middle)
                     }
                     Spacer(minLength: AQDesign.Space.standard)
+                    if !viewModel.chipTransformOptions.isEmpty {
+                        Button {
+                            viewModel.toggleTransformChooser()
+                        } label: {
+                            Label("Transform", systemImage: "wand.and.stars")
+                                .font(AQDesign.TypeToken.metadata)
+                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                                .padding(.horizontal, AQDesign.Space.standard)
+                                .frame(height: AQDesign.controlHeight)
+                                .background(
+                                    RoundedRectangle(
+                                        cornerRadius: AQDesign.fieldCornerRadius,
+                                        style: .continuous
+                                    )
+                                    .fill(AQDesign.ColorToken.chipFill)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Transform selected text")
+                        .help("Transform the selected text (⌘⌥T)")
+                    }
                     Button {
                         viewModel.clearLaunchSelection()
                     } label: {
@@ -121,6 +151,10 @@ struct OverlayView: View {
                 }
                 .padding(.horizontal, AQDesign.Space.panel)
                 .padding(.vertical, AQDesign.Space.standard)
+
+                if viewModel.isTransformChooserPresented {
+                    transformChooser
+                }
             }
 
             if viewModel.hasPendingAttachment {
@@ -166,7 +200,7 @@ struct OverlayView: View {
                 .padding(.vertical, 8)
             }
 
-            if !viewModel.launcherMatches.isEmpty {
+            if !viewModel.isTransformChooserPresented, !viewModel.launcherMatches.isEmpty {
                 HouseDivider()
                 if viewModel.isGridCatalog {
                     EmojiGridView(viewModel: viewModel)
@@ -187,6 +221,7 @@ struct OverlayView: View {
             // Saved-prompt autocomplete
             if !viewModel.isApplicationActionPanePresented,
                !viewModel.isCatalogActionPanePresented,
+               !viewModel.isTransformChooserPresented,
                !viewModel.savedPromptMatches.isEmpty {
                 HouseDivider()
                 VStack(alignment: .leading, spacing: 0) {
@@ -405,6 +440,54 @@ struct OverlayView: View {
         .padding(.top, AQDesign.Space.standard)
         .padding(.bottom, AQDesign.Space.standard)
         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
+    }
+
+    /// Keyboard-first Transform chooser: ↑↓ move, Return runs, Esc closes.
+    /// Opened by the Transform chip or ⌘⇧D. Every row is a saved rewrite action
+    /// (or the Translator) acting on the captured selection snapshot.
+    private var transformChooser: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Transform selected text")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Run", keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.chipTransformOptions,
+                selectedIndex: $viewModel.transformChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                onActivate: { _ in
+                    Task { await viewModel.runTransformChooserSelection() }
+                }
+            ) { _, option, isSelected in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: option.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private var launcherSectionTitle: String {
@@ -1169,7 +1252,7 @@ private struct QuickActionPalette: View {
     private func row(for entry: Entry, isSelected: Bool) -> some View {
         switch entry {
         case .result(let action):
-            paletteRow(symbol: action.systemImage, title: action.title, detail: "Answer") {
+            paletteRow(symbol: action.systemImage, title: action.title, detail: viewModel.resultActionDetail(action) ?? "Answer") {
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
         case .command(let item):
@@ -1278,7 +1361,11 @@ private struct LauncherFooter: View {
         }
         guard let primary = hints.first else { return [] }
         if let actions = hints.first(where: { $0.label == "Actions" }) {
-            return [primary, actions]
+            // Show the primary destination, the next concrete action (the
+            // paste/copy destination), then Actions — so a selection transform's
+            // Replace and Paste destinations are both visible, not just ⌘K.
+            let others = hints.filter { $0.label != "Actions" }
+            return Array(([primary] + others.dropFirst()).prefix(2) + [actions])
         }
         return Array(hints.prefix(2))
     }

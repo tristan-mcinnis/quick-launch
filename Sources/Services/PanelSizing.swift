@@ -54,6 +54,19 @@ enum PanelSizing {
     /// `estimateCoversTheRenderedSingleResultWindow` measures the real view
     /// against this, so it cannot drift.
     static let launcherListChrome: CGFloat = 42
+
+    /// The launch-selection chip row: divider + vertical padding + a control
+    /// height of content. Inline content, so the window must include it.
+    static let selectionChipHeight = House.hairline + House.Spacing.xs * 2 + House.Control.row
+
+    /// Chrome around the chooser's row list: header row plus top/bottom padding.
+    static let chooserChrome: CGFloat = House.Control.chip + House.Spacing.xs * 2
+
+    /// The Transform chooser block height for `rows` options (the chooser
+    /// replaces the launcher list while open).
+    static func chooserBlockHeight(rows: Int) -> CGFloat {
+        chooserChrome + actionListHeight(rows: rows, padded: false)
+    }
     /// The search row and footer stay pinned while long result sets scroll.
     /// Twelve whole rows plus the section block: the list scrolls rather
     /// than cutting the thirteenth row in half.

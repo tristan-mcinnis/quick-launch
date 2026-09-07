@@ -24,7 +24,7 @@ struct QuickSettingsTests {
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
-        #expect(settings.configurationVersion == 20)
+        #expect(settings.configurationVersion == 21)
         #expect(!settings.screenHistorySameUserAccessRiskAccepted)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
@@ -168,7 +168,7 @@ struct QuickSettingsTests {
             from: JSONEncoder().encode(LegacySettings())
         )
 
-        #expect(decoded.configurationVersion == 20)
+        #expect(decoded.configurationVersion == 21)
         #expect(decoded.screenHistoryExcludedBundleIDs == ["com.example.private"])
         #expect(decoded.screenHistoryExcludedDomains == ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted())
     }

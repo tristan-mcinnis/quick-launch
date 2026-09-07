@@ -32,6 +32,29 @@ struct OverlayRenderProofTests {
         try Self.save(image, name: "overlay-actions-dark.png")
     }
 
+    @Test func rendersTransformChooserNoClip() throws {
+        // Real OverlayView with a captured selection (chip) and the transform
+        // chooser open, rendered at the computed window height. The chooser
+        // must replace the launcher list and the window must be tall enough
+        // (no clipping), which is exactly the sizing bug being guarded.
+        let vm = Self.makeViewModel(appearance: .dark)
+        let selection = PreviewSelectedTextService(text: "The quick brown fox jumps over the lazy dog. A longer selection for transform testing.")
+        vm.selectedTextService = selection
+        vm.rememberSelectionTarget(SelectionTarget(processIdentifier: 42, applicationName: "TextEdit"))
+        vm.captureLaunchSelection()
+        vm.openTransformChooser()
+        #expect(vm.isTransformChooserPresented)
+        #expect(vm.chipTransformOptions.count == 5)
+        let image = try Self.renderFixedHeight(
+            viewModel: vm,
+            appearance: .darkAqua,
+            height: vm.estimatedWindowHeight
+        )
+        try Self.save(image, name: "overlay-transform-chooser-dark.png")
+        // The chooser's five rows must all fit inside the computed height.
+        #expect(image.size.height >= vm.estimatedWindowHeight - 1)
+    }
+
     @Test func rendersDarkAnswerState() async throws {
         let vm = Self.makeViewModel(appearance: .dark)
         let mock = MockQuickService()
@@ -703,4 +726,19 @@ private final class ProofLauncherCatalog: LauncherCatalogServicing {
     func reload() {}
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {}
     func deleteSnippet(_ item: LauncherCatalogItem) throws {}
+}
+
+@MainActor
+private final class PreviewSelectedTextService: SelectedTextServicing {
+    let text: String
+    var isAccessibilityTrusted: Bool { true }
+    init(text: String) { self.text = text }
+    func currentExternalTarget() -> SelectionTarget? { nil }
+    func capture(from target: SelectionTarget, promptForPermission: Bool) -> SelectedTextContext? {
+        SelectedTextContext(target: target, text: text)
+    }
+    func replace(_ text: String, in context: SelectedTextContext) async -> Bool { true }
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool { true }
+    func pastePasteboard(to target: SelectionTarget) async -> Bool { true }
+    func openAccessibilitySettings() {}
 }

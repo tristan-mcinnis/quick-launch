@@ -308,7 +308,7 @@ struct QuickSettingsSavedPromptsTests {
         #expect(improve != nil)
         #expect(improve?.name == "Improve Writing")
         #expect(improve?.prompt.contains("{selection}") == true)
-        #expect(improve?.outputBehavior == .replaceSelection)
+        #expect(improve?.outputBehavior == .showInOverlay)
     }
 
     @Test func testVersion20MigrationAddsImproveWritingButKeepsCustomizations() throws {
@@ -331,5 +331,72 @@ struct QuickSettingsSavedPromptsTests {
         let back = try JSONDecoder().decode(QuickSettings.self, from: data)
 
         #expect(back.savedPrompts.filter { $0.alias == "improve" }.count == 1)
+    }
+
+    @Test func testVersion21MigrationAddsShorterAndBullets() throws {
+        var s = QuickSettings()
+        s.configurationVersion = 20
+        s.savedPrompts = [SavedPrompt(alias: "translate", prompt: "x {selection}")]
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+
+        #expect(back.savedPrompts.contains(where: { $0.alias == "shorter" }))
+        #expect(back.savedPrompts.contains(where: { $0.alias == "bullets" }))
+        #expect(back.savedPrompts.contains(where: { $0.alias == "translate" }))
+    }
+
+    @Test func testVersion21DoesNotDuplicateShorterOrBullets() throws {
+        var s = QuickSettings()
+        s.configurationVersion = 20
+        s.savedPrompts = [
+            SavedPrompt(alias: "shorter", prompt: "custom shorter"),
+            SavedPrompt(alias: "bullets", prompt: "custom bullets"),
+        ]
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+
+        // A user's own rewrite actions are preserved, not seeded over.
+        #expect(back.savedPrompts.filter { $0.alias == "shorter" }.count == 1)
+        #expect(back.savedPrompts.filter { $0.alias == "bullets" }.count == 1)
+        #expect(back.savedPrompts.first(where: { $0.alias == "shorter" })?.prompt == "custom shorter")
+    }
+
+    @Test func testRewriteDefaultsArePreviewStyledAndDistinct() {
+        let shorter = SavedPrompt.defaults.first(where: { $0.alias == "shorter" })!
+        let bullets = SavedPrompt.defaults.first(where: { $0.alias == "bullets" })!
+        let improve = SavedPrompt.defaults.first(where: { $0.alias == "improve" })!
+        // The built-in rewrite set previews (shows in the overlay) and never
+        // auto-writes; each keeps its own prompt.
+        #expect(shorter.outputBehavior == .showInOverlay)
+        #expect(bullets.outputBehavior == .showInOverlay)
+        #expect(improve.outputBehavior == .showInOverlay)
+        #expect(shorter.prompt.contains("{selection}"))
+        #expect(bullets.prompt.contains("{selection}"))
+        #expect(shorter.prompt != bullets.prompt)
+    }
+
+    @Test func testVersion21FlipsUntouchedStockRewritesButKeepsCustomized() throws {
+        // A user who kept an untouched stock rewrite gets it flipped to preview.
+        let stockGrammar = SavedPrompt(
+            alias: "grammar",
+            prompt: "Fix grammar and spelling. Return only the corrected text, no explanations.\n\n{selection}",
+            outputBehavior: .replaceSelection
+        )
+        // A user who customized the prompt keeps their stored behavior.
+        let customGrammar = SavedPrompt(
+            alias: "grammar",
+            prompt: "My own grammar gizmo: {selection}",
+            outputBehavior: .replaceSelection
+        )
+        var s = QuickSettings()
+        s.configurationVersion = 20
+        s.savedPrompts = [stockGrammar, customGrammar]
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(QuickSettings.self, from: data)
+
+        let stock = back.savedPrompts.first(where: { $0.prompt.hasPrefix("Fix grammar and spelling") })!
+        let custom = back.savedPrompts.first(where: { $0.prompt.hasPrefix("My own") })!
+        #expect(stock.outputBehavior == .showInOverlay)
+        #expect(custom.outputBehavior == .replaceSelection)
     }
 }

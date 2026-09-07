@@ -29,7 +29,7 @@ struct QuickActionWorkflowTests {
         #expect(vm.output == "Short summary")
     }
 
-    @Test func replaceActionWritesBackToCapturedSelection() async {
+    @Test func rewriteActionPreviewsThenExplicitlyReplacesSelection() async {
         let selection = FakeSelectedTextService(text: "rough words")
         let service = MockQuickService()
         await service.setResponses([StreamDelta(text: "Polished words", finishReason: "stop")])
@@ -46,6 +46,12 @@ struct QuickActionWorkflowTests {
         let action = vm.settings.savedPrompts.first(where: { $0.alias == "grammar" })!
         await vm.perform(action: action)
 
+        // Preview-first: the result stays on screen and never auto-writes.
+        #expect(vm.output == "Polished words")
+        #expect(selection.replacedText == nil)
+
+        // The user's explicit Replace Selection writes back to the captured text.
+        #expect(await vm.replaceOutputInCapturedSelection())
         #expect(selection.replacedText == "Polished words")
         #expect(selection.replacedContext?.text == "rough words")
     }
@@ -431,17 +437,27 @@ struct QuickActionWorkflowTests {
         var settings = QuickSettings()
         settings.autoCopy = false
         settings.historyEnabled = false
-        let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection,
+            pasteboard: pasteboard
+        )
         vm.rememberSelectionTarget(target)
         vm.captureLaunchSelection()
 
         let action = vm.settings.savedPrompts.first(where: { $0.alias == "grammar" })!
         await vm.perform(action: action)
 
-        // The replace went back to the launch-captured target, no re-read.
-        #expect(selection.replacedContext?.target == target)
-        #expect(selection.replacedContext?.text == "rough words")
-        #expect(selection.replacedText == "Polished")
+        // Preview-first: no auto-write, the result stays on screen.
+        #expect(selection.replacedText == nil)
+        // Fail closed: the live selection cannot be re-read (capture is nil), so
+        // we copy instead of risking overwriting text we cannot confirm is the
+        // original. Nothing is written back through the service.
+        #expect(!(await vm.replaceOutputInCapturedSelection()))
+        #expect(pasteboard.string == "Polished")
+        #expect(selection.replacedText == nil)
     }
 
     @Test func removingChipSuppressesSavedActionRecapture() async {
@@ -599,6 +615,439 @@ struct QuickActionWorkflowTests {
         let messages = await service.lastMessages
         #expect(messages.last?.content.contains("background passage") == false)
     }
+
+    // MARK: - Preview-first rewrite actions
+
+    @Test func builtInRewriteActionsPreviewNeverAutoWrite() async {
+        for alias in ["shorter", "bullets", "improve"] {
+            let selection = FakeSelectedTextService(text: "long text to rewrite")
+            let service = MockQuickService()
+            await service.setResponses([StreamDelta(text: "rewritten", finishReason: "stop")])
+            var settings = QuickSettings()
+            settings.autoCopy = false
+            settings.historyEnabled = false
+            let vm = QuickViewModel(
+                settings: settings,
+                service: service,
+                selectedTextService: selection
+            )
+            vm.rememberSelectionTarget(target)
+            vm.captureLaunchSelection()
+
+            let action = vm.settings.savedPrompts.first(where: { $0.alias == alias })!
+            await vm.perform(action: action)
+
+            #expect(vm.output == "rewritten", "\(alias) should stay on screen")
+            #expect(selection.replacedText == nil, "\(alias) must not auto-write")
+        }
+    }
+
+    @Test func customReplaceSelectionActionStillAutoWrites() async {
+        let selection = FakeSelectedTextService(text: "raw text")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.settings.savedPrompts.append(SavedPrompt(
+            alias: "myrewrite",
+            prompt: "Rewrite this:\n\n{selection}",
+            outputBehavior: .replaceSelection
+        ))
+
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "myrewrite" })!
+        await vm.perform(action: action)
+
+        // A custom action outside the preview-first set keeps its auto-write.
+        #expect(selection.replacedText == "fixed")
+    }
+
+    @Test func customReplaceActionFailsClosedWhenLiveSelectionUnreadable() async {
+        let selection = FakeSelectedTextService(text: "original")
+        // The launch read succeeds once; the validation re-read goes nil.
+        selection.capturesRemaining = 1
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let pasteboard = FakePasteboard()
+        settings.savedPrompts = [SavedPrompt(
+            alias: "myrewrite",
+            prompt: "Rewrite: {selection}",
+            outputBehavior: .replaceSelection
+        )]
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection,
+            pasteboard: pasteboard
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "myrewrite" })!
+        await vm.perform(action: action)
+
+        // A custom auto-write still fails closed: it cannot confirm the live
+        // selection, so it copies instead of writing.
+        #expect(selection.replacedText == nil)
+        #expect(pasteboard.string == "fixed")
+        #expect(vm.errorMessage?.contains("Could not read the current selection") == true)
+    }
+
+    @Test func customReplaceActionFailsClosedWhenSelectionChanged() async {
+        let selection = FakeSelectedTextService(text: "original")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let pasteboard = FakePasteboard()
+        settings.savedPrompts = [SavedPrompt(
+            alias: "myrewrite",
+            prompt: "Rewrite: {selection}",
+            outputBehavior: .replaceSelection
+        )]
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection,
+            pasteboard: pasteboard
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        // The selection changed after the snapshot: the auto-write copies.
+        selection.selectedText = "changed"
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "myrewrite" })!
+        await vm.perform(action: action)
+
+        #expect(selection.replacedText == nil)
+        #expect(pasteboard.string == "fixed")
+        #expect(vm.errorMessage?.contains("selection changed") == true)
+    }
+
+    @Test func sameAliasCustomActionHonorsStoredReplaceBehavior() async {
+        let selection = FakeSelectedTextService(text: "raw")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "fixed", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        // Only the user's customized improve is present, so the alias resolves
+        // to it (no stock default to shadow). Alias-only preview would force a
+        // preview; the stored behavior must win.
+        settings.savedPrompts = [SavedPrompt(
+            alias: "improve",
+            prompt: "Custom improve: {selection}",
+            outputBehavior: .replaceSelection
+        )]
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
+        await vm.perform(action: action)
+
+        #expect(selection.replacedText == "fixed")
+    }
+
+    @Test func replaceSelectionActionOfferedForRetainedContext() async {
+        let selection = FakeSelectedTextService(text: "long text")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "shorter" })!
+        await vm.perform(action: action)
+
+        // The precise destination (replace the captured selection) is offered
+        // first, and both destination rows name their app.
+        #expect(vm.resultActions.first == .replaceSelection)
+        #expect(vm.resultActions.contains(.pasteBack))
+        #expect(vm.resultActionDetail(.replaceSelection) == "Replace in Editor")
+        #expect(vm.resultActionDetail(.pasteBack) == "Paste into Editor")
+    }
+
+    @Test func followUpDoesNotOfferReplaceSelectionForPriorTransform() async {
+        let selection = FakeSelectedTextService(text: "background text")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "shorter" })!
+        await vm.perform(action: action)
+        #expect(vm.resultActions.contains(.replaceSelection))
+
+        // A follow-up in the same chat must not offer to replace the prior
+        // transform's selection — the answer is not a rewrite of that text.
+        vm.output = "short"
+        vm.isStreaming = false
+        vm.input = "And then?"
+        await vm.submit()
+        #expect(!vm.resultActions.contains(.replaceSelection))
+    }
+
+    @Test func replaceFailsSafeToCopyWhenSelectionChanged() async {
+        let selection = FakeSelectedTextService(text: "original")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection,
+            pasteboard: pasteboard
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "shorter" })!
+        await vm.perform(action: action)
+        #expect(vm.output == "short")
+
+        // The user edited the selection elsewhere: fail safe to Copy.
+        selection.selectedText = "changed"
+        let replaced = await vm.replaceOutputInCapturedSelection()
+        #expect(!replaced)
+        #expect(pasteboard.string == "short")
+        #expect(vm.errorMessage?.contains("selection changed") == true)
+    }
+
+    // MARK: - Chip transform routing
+
+    @Test func chipTransformOptionsListTheRewriteSet() {
+        let selection = FakeSelectedTextService(text: "some text")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        let options = vm.chipTransformOptions
+        #expect(options.count == 5)
+        #expect(options[0].title == "Make Shorter")
+        #expect(options.last?.id == "translator")
+        for option in options {
+            if case .saved(let id) = option.kind {
+                #expect(vm.settings.savedPrompts.contains { $0.id == id })
+            }
+        }
+    }
+
+    @Test func chipTransformOptionsEmptyWithoutLaunchSelection() {
+        let selection = FakeSelectedTextService(text: nil)
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        #expect(vm.chipTransformOptions.isEmpty)
+    }
+
+    @Test func runChipTransformRunsSavedRewriteAction() async {
+        let selection = FakeSelectedTextService(text: "some text")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        let shorter = vm.chipTransformOptions.first { $0.title == "Make Shorter" }!
+        await vm.runChipTransform(shorter)
+        #expect(vm.output == "short")
+        #expect(selection.replacedText == nil)
+    }
+
+    @Test func runChipTransformRoutesTranslateToTranslator() async {
+        let selection = FakeSelectedTextService(text: "some text")
+        let vm = QuickViewModel(selectedTextService: selection)
+        let recorder = RecordingOverlayPresenter()
+        vm.overlayPresenter = recorder
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        let translate = vm.chipTransformOptions.first { $0.id == "translator" }!
+        await vm.runChipTransform(translate)
+        #expect(recorder.openedTranslator)
+        #expect(recorder.handedOffSelection == "some text")
+    }
+
+    @Test func chipTransformUsesSnapshotNotTypedInput() async {
+        let selection = FakeSelectedTextService(text: "selected passage")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "shrunk", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.input = "unrelated typed text"
+        let shorter = vm.chipTransformOptions.first { $0.title == "Make Shorter" }!
+        await vm.runChipTransform(shorter)
+
+        let messages = await service.lastMessages
+        // The transform acts on the captured selection, never on typed input.
+        #expect(messages.last?.content.contains("selected passage") == true)
+        #expect(messages.last?.content.contains("unrelated typed text") == false)
+    }
+
+    @Test func transformChooserOpenMoveWrapAndEscape() {
+        let selection = FakeSelectedTextService(text: "para")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+
+        vm.openTransformChooser()
+        #expect(vm.isTransformChooserPresented)
+        #expect(vm.transformChooserIndex == 0)
+        vm.moveTransformChooserSelection(1)
+        #expect(vm.transformChooserIndex == 1)
+        vm.moveTransformChooserSelection(-2)
+        #expect(vm.transformChooserIndex == vm.chipTransformOptions.count - 1)
+
+        // Escape walks the same layer stack and closes the chooser.
+        #expect(vm.popTopLayer())
+        #expect(!vm.isTransformChooserPresented)
+
+        // The shortcut toggles it back open.
+        vm.toggleTransformChooser()
+        #expect(vm.isTransformChooserPresented)
+    }
+
+    @Test func transformChooserRunClosesAndExecutesSelected() async {
+        let selection = FakeSelectedTextService(text: "para")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.openTransformChooser()
+        vm.transformChooserIndex = 0  // Make Shorter (saved rewrite action)
+        await vm.runTransformChooserSelection()
+        #expect(!vm.isTransformChooserPresented)
+        #expect(vm.output == "short")
+    }
+
+    @Test func transformRequiresSelection() async {
+        let selection = FakeSelectedTextService(text: nil)
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
+        await vm.performTransform(action: action)
+        #expect(vm.errorMessage?.isEmpty == false)
+    }
+
+    @Test func transformChooserShortcutToggles() {
+        let selection = FakeSelectedTextService(text: "para")
+        let vm = QuickViewModel(selectedTextService: selection)
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        let flags = NSEvent.ModifierFlags([.command, .option])
+        #expect(vm.performShortcut(characters: "t", keyCode: 17, modifiers: flags))
+        #expect(vm.isTransformChooserPresented)
+        #expect(vm.performShortcut(characters: "t", keyCode: 17, modifiers: flags))
+        #expect(!vm.isTransformChooserPresented)
+    }
+
+    @Test func transformShortcutDoesNotReuseReservedPanelKeys() {
+        // ⌘⇧D is the panel's screenshot-display key and ⌘⇧T the translator
+        // global hotkey; both are consumed before `performShortcut`, so the
+        // chooser must not use them. Guard against a regression back onto a
+        // reserved combo (the AppDelegate routing is exercised via the panel's
+        // `performKeyEquivalent`, which sends non-reserved combos to
+        // `performShortcut`).
+        let screenshotDisplay = KeyShortcut.commandShift("d")
+        let translator = KeyShortcut.commandShift("t")
+        #expect(screenshotDisplay.matches(characters: "d", keyCode: 2, modifiers: [.command, .shift]))
+        #expect(translator.matches(characters: "t", keyCode: 17, modifiers: [.command, .shift]))
+        #expect(QuickViewModel.transformChooserShortcut == .commandOption("t"))
+        #expect(QuickViewModel.transformChooserShortcut != screenshotDisplay)
+        #expect(QuickViewModel.transformChooserShortcut != translator)
+    }
+
+    @Test func returnRunsFocusedTransformWhenChooserOpen() async {
+        let selection = FakeSelectedTextService(text: "para")
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "short", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection
+        )
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.openTransformChooser()
+        vm.transformChooserIndex = 0
+        await vm.submitResolvingFuzzyAlias()
+        #expect(vm.output == "short")
+        #expect(!vm.isTransformChooserPresented)
+    }
+
+    @Test func translatorHandoffSurvivesLaunchStateClear() {
+        let selection = FakeSelectedTextService(text: "launch snapshot")
+        let vm = QuickViewModel(selectedTextService: selection)
+        let recorder = RecordingOverlayPresenter()
+        vm.overlayPresenter = recorder
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        #expect(vm.launchSelection?.text == "launch snapshot")
+
+        vm.openTranslatorWithSelection()
+        // The retained selection is handed to the presenter before any
+        // dismissal beats it; a destructive clear of launch-scoped state (as
+        // hideOverlay does) cannot take it back.
+        #expect(recorder.handedOffSelection == "launch snapshot")
+        vm.clearLaunchScopedState()
+        #expect(vm.launchSelection == nil)
+        #expect(recorder.handedOffSelection == "launch snapshot")
+    }
 }
 
 @MainActor
@@ -683,4 +1132,21 @@ private final class FakeSelectedTextService: SelectedTextServicing {
     }
 
     func openAccessibilitySettings() { openedSettings = true }
+}
+
+@MainActor
+private final class RecordingOverlayPresenter: OverlayPresenting {
+    var presented = false
+    var dismissed = false
+    var openedTranslator = false
+    var handedOffSelection: String?
+    func presentOverlay() { presented = true }
+    func dismissOverlay() { dismissed = true }
+    func openSettings() {}
+    func openTranslator() { openedTranslator = true }
+    func openTranslator(retainedSelection: String?) {
+        openedTranslator = true
+        handedOffSelection = retainedSelection
+    }
+    func openTypeToClick() {}
 }

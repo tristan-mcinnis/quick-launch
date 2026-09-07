@@ -364,6 +364,7 @@ enum ItemActionForm: Equatable, Sendable {
 /// Raycast's Quick AI: Return pastes, ⌘N new chat, ⌘R regenerate,
 /// ⌘[ and ⌘] browse recent chats.
 enum ResultAction: String, CaseIterable, Identifiable, Sendable {
+    case replaceSelection
     case pasteBack
     case copy
     case readAloud
@@ -382,7 +383,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .pasteBack: "Paste Answer Back"
+        case .replaceSelection: "Replace Selection"
+        case .pasteBack: "Paste into Previous App"
         case .copy: "Copy Answer"
         case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
@@ -400,6 +402,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
+        case .replaceSelection: "text.cursor"
         case .pasteBack: "arrow.turn.down.right"
         case .copy: "doc.on.doc"
         case .readAloud: "speaker.wave.2"
@@ -418,6 +421,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
 
     var shortcut: KeyShortcut {
         switch self {
+        case .replaceSelection: .commandShift("r")
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
         case .readAloud: .command("l")

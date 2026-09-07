@@ -10,7 +10,20 @@ protocol OverlayPresenting: AnyObject {
     func dismissOverlay()
     func openSettings()
     func openTranslator()
+    /// Opens the Translator with the launch-time selected text handed over
+    /// explicitly, so it survives the overlay closing (which clears the
+    /// launch-scoped selection).
+    func openTranslator(retainedSelection: String?)
     func openTypeToClick()
+}
+
+extension OverlayPresenting {
+    /// Default: ignore the handed-over text and forward to `openTranslator()`.
+    /// The app presenter overrides it to seed the Translator's retained
+    /// selection.
+    func openTranslator(retainedSelection: String?) {
+        openTranslator()
+    }
 }
 
 /// Default presenter: posts the legacy notifications so any observer that has

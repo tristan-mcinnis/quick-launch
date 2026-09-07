@@ -102,25 +102,37 @@ extension SavedPrompt {
             name: "Translate to English",
             alias: "translate",
             prompt: "Translate the following text to English. Return only the translation, no preamble.\n\n{selection}",
-            outputBehavior: .replaceSelection
+            outputBehavior: .showInOverlay
         ),
         SavedPrompt(
             name: "Translate to Chinese",
             alias: "zh",
             prompt: "Translate the following text to Simplified Chinese. Keep names, numbers, and formatting. Return only the translation, no preamble.\n\n{selection}",
-            outputBehavior: .replaceSelection
+            outputBehavior: .showInOverlay
         ),
         SavedPrompt(
             name: "Clean Up",
             alias: "grammar",
             prompt: "Fix grammar and spelling. Return only the corrected text, no explanations.\n\n{selection}",
-            outputBehavior: .replaceSelection
+            outputBehavior: .showInOverlay
         ),
         SavedPrompt(
             name: "Improve Writing",
             alias: "improve",
-            prompt: "Improve the writing of the following text. Fix any spelling and grammar mistakes and improve the clarity and concision. Return only the improved text, no explanations.\n\n{selection}",
-            outputBehavior: .replaceSelection
+            prompt: "Improve the writing of the following text: fix grammar, spelling, and punctuation, and make it clearer. Do not change the meaning, the tone, or the language it is in. Return only the improved text, no commentary. If the text is already correct, return it unchanged.\n\n{selection}",
+            outputBehavior: .showInOverlay
+        ),
+        SavedPrompt(
+            name: "Make Shorter",
+            alias: "shorter",
+            prompt: "Make the following text shorter while keeping everything that matters: the meaning, the style, the tone, the language it is in, and any key facts, names, numbers, and URLs. Cut redundancy and filler only. Return only the shorter text, no commentary.\n\n{selection}",
+            outputBehavior: .showInOverlay
+        ),
+        SavedPrompt(
+            name: "Turn into Bullets",
+            alias: "bullets",
+            prompt: "Restructure the following text into a bulleted list that keeps every substantive detail, fact, name, and number. Do not drop content or add anything new; preserve the tone and the language. Return only the bullets, no commentary.\n\n{selection}",
+            outputBehavior: .showInOverlay
         ),
         SavedPrompt(
             name: "Summarize",

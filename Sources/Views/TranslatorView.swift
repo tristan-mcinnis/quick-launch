@@ -81,6 +81,20 @@ struct TranslatorView: View {
                 HStack {
                     SectionLabel(text: "Source")
                     Spacer()
+                    if model.hasRetainedSelection {
+                        Button {
+                            model.useRetainedSelection()
+                        } label: {
+                            HStack(spacing: AQDesign.Space.compact) {
+                                Image(systemName: "text.cursor")
+                                Text("Use selected text")
+                            }
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Import the text that was selected when Quick Launch opened")
+                    }
                     Text("\(model.source.count) characters")
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(AQDesign.ColorToken.textTertiary)

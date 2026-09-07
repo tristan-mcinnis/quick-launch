@@ -144,6 +144,16 @@ final class TranslatorModel {
     /// Set by Swap: the language of the swapped-in text is known, not guessed.
     @ObservationIgnored private var knownSourceOfSwappedText: TranslationTarget?
     @ObservationIgnored private var lastTranslatedSource = ""
+    /// The launch-time selected text, retained so "Use selected text" can fill
+    /// the source even after the original app lost focus. Never auto-applied
+    /// after the window is open — that would erase a manually typed source.
+    @ObservationIgnored private var retainedSelection: String?
+
+    /// Whether a retained launch selection is available to the "Use selected
+    /// text" button.
+    var hasRetainedSelection: Bool {
+        !(retainedSelection ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     init(
         lastTarget: TranslationTarget = .simplifiedChinese,
@@ -156,14 +166,43 @@ final class TranslatorModel {
     }
 
     /// Open: remember the app behind the window and start from its selection.
-    func prepare(target selectionTarget: SelectionTarget?, selectedText: String?) {
+    /// `retainedSelection` is the Quick Launch launch snapshot, kept so the
+    /// user can re-import it with "Use selected text" after focus moves on.
+    func prepare(
+        target selectionTarget: SelectionTarget?,
+        selectedText: String?,
+        retainedSelection: String? = nil
+    ) {
         pasteTarget = selectionTarget
         knownSourceOfSwappedText = nil
+        self.retainedSelection = retainedSelection
         if let selectedText, !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             source = selectedText
             chooseTargetAutomatically()
             translateNow()
         }
+    }
+
+    /// Explicit "Use selected text": import the retained launch snapshot as the
+    /// source. Only ever triggered by the button; never erases manual typing.
+    func useRetainedSelection() {
+        guard let text = retainedSelection,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        source = text
+        sourceChanged()
+        message = "Using selected text"
+    }
+
+    /// A handoff from the launcher's Translate transform: import the retained
+    /// selection as the source and keep it for "Use selected text". Called when
+    /// the window is already open, so a chip Translate fronts it and translates
+    /// the selected text rather than toggling the window shut.
+    func retainLaunchSelection(_ text: String?) {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        retainedSelection = text
+        source = text
+        chooseTargetAutomatically()
+        translateNow()
     }
 
     var filteredTargets: [TranslationTarget] {

@@ -15,7 +15,7 @@ enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 20
+    var configurationVersion: Int = 21
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -133,7 +133,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 20
+        configurationVersion = 21
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -350,6 +350,36 @@ struct QuickSettings: Codable, Sendable {
             // Add the Raycast-style Improve Writing action without disturbing
             // any action the user already customized.
             savedPrompts.append(improve)
+        }
+        if decodedConfigurationVersion < 21 {
+            // The built-in rewrite-the-selection actions preview first: the
+            // result stays on screen, then the user picks Replace Selection or
+            // Copy. Flip the *untouched stock defaults* to Show in Quick Launch
+            // only; a prompted action the user customised keeps its own setting.
+            // Prompt match is the provenance check (a renamed alias alone does
+            // not make an action a rewrite, and sharing an alias with a
+            // customized prompt is left as the user configured it).
+            let legacyRewriteStocks: [(alias: String, prompt: String)] = [
+                ("translate", "Translate the following text to English. Return only the translation, no preamble.\n\n{selection}"),
+                ("zh", "Translate the following text to Simplified Chinese. Keep names, numbers, and formatting. Return only the translation, no preamble.\n\n{selection}"),
+                ("grammar", "Fix grammar and spelling. Return only the corrected text, no explanations.\n\n{selection}"),
+                ("improve", "Improve the writing of the following text. Fix any spelling and grammar mistakes and improve the clarity and concision. Return only the improved text, no explanations.\n\n{selection}"),
+            ]
+            for stock in legacyRewriteStocks {
+                if let index = savedPrompts.firstIndex(where: {
+                    $0.alias == stock.alias && $0.prompt == stock.prompt
+                }) {
+                    savedPrompts[index].outputBehavior = .showInOverlay
+                }
+            }
+            // Add the two new rewrite defaults without disturbing any action
+            // the user already customized or deleted.
+            for alias in ["shorter", "bullets"] where
+                !savedPrompts.contains(where: { $0.alias == alias }) {
+                if let seed = SavedPrompt.defaults.first(where: { $0.alias == alias }) {
+                    savedPrompts.append(seed)
+                }
+            }
         }
     }
 

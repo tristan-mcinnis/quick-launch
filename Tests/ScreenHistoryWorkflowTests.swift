@@ -283,31 +283,28 @@ struct ScreenHistoryWorkflowTests {
         let unavailable = ScreenHistoryEmptyPresentation(state: .unavailable, query: "")
         #expect(unavailable.title == "Screen History is unavailable on this Mac.")
 
-        // A wide search window: the assertion is that "loading" shows up
-        // between the debounce and the results, and a narrow window turns
-        // that into a race with whatever else holds the main actor.
-        let slowStore = FakeScreenHistoryStore(
-            rows: [Self.frame(id: "slow", text: "coral")],
-            searchDelay: .milliseconds(3_000)
-        )
+        // A gated search: the store holds it open until released, so the
+        // controller's "loading" state is guaranteed to appear before the
+        // results. No fixed-timeout race — the search cannot complete until
+        // the gate is released, so "loading" always lands and stays.
+        let slowStore = FakeScreenHistoryStore(rows: [Self.frame(id: "slow", text: "coral")])
         let vm = QuickViewModel(screenHistoryStore: slowStore)
         vm.enterCatalog(.screenHistory)
+        await slowStore.armGate()
         let search = Task { await vm.screenHistory.load(query: "coral") }
-        try await Task.sleep(for: .milliseconds(60))
-        #expect(vm.screenHistory.loadState != .loading)
-        // The debounce fires on the main actor, so a busy suite can push it
-        // past a fixed sleep. Wait for it instead, well inside the store's
-        // search: the point is that "loading" appears after the debounce and
-        // before the results, not that it appears at one exact millisecond.
+        // Deterministically wait until the store's search is actually blocked.
+        await slowStore.waitUntilSearchBlocked()
+        // The search is held open, so the state is not ready yet, and the
+        // controller's "loading" state appears (and stays) before results.
+        #expect(vm.screenHistory.loadState != .ready)
         var waited = 0
-        // Under a full parallel suite the debounce has been seen to land
-        // late by whole seconds, so the store's search is 3 s and the wait
-        // is 2 s: still far inside the search, no longer a coin toss.
         while vm.screenHistory.loadState != .loading, waited < 2_000 {
             try await Task.sleep(for: .milliseconds(20))
             waited += 20
         }
         #expect(vm.screenHistory.loadState == .loading)
+        // Release the gate: the store returns, and the state becomes ready.
+        await slowStore.releaseSearch()
         await search.value
         #expect(vm.screenHistory.loadState == .ready)
     }
@@ -665,16 +662,48 @@ private actor FakeScreenHistoryStore: ScreenHistoryStoring {
     let rows: [ScreenHistoryFrame]
     let searchDelay: Duration
     private(set) var searchCalls = 0
+    /// When armed, the next `search` blocks until `releaseSearch()` is called,
+    /// so the test controls when results land instead of sleeping a fixed
+    /// timeout. Deterministic synchronization: no timing race.
+    private var gateArmed = false
+    private var gateHeld = false
+    private var gateHeldContinuation: CheckedContinuation<Void, Never>?
+    private var gateReleaseContinuation: CheckedContinuation<Void, Never>?
 
     init(rows: [ScreenHistoryFrame], searchDelay: Duration = .zero) {
         self.rows = rows
         self.searchDelay = searchDelay
     }
+
+    /// Arm the gate so the next search blocks until released.
+    func armGate() { gateArmed = true }
+
+    /// Resolves once a gated search is actually blocked, so the test can wait
+    /// deterministically for the store to be mid-search (no fixed sleep).
+    func waitUntilSearchBlocked() async {
+        if gateHeld { return }
+        await withCheckedContinuation { gateHeldContinuation = $0 }
+    }
+
+    /// Release a gated search so it returns its rows.
+    func releaseSearch() {
+        gateArmed = false
+        gateReleaseContinuation?.resume()
+        gateReleaseContinuation = nil
+    }
+
     func record(_ frame: ScreenHistoryFrameInput) throws -> Int64 { 1 }
     func record(_ frames: [ScreenHistoryFrameInput]) throws -> Int { frames.count }
     func search(_ query: ScreenHistorySearchQuery) async throws -> [ScreenHistoryFrame] {
         searchCalls += 1
         if searchDelay != .zero { try await Task.sleep(for: searchDelay) }
+        if gateArmed {
+            gateHeld = true
+            gateHeldContinuation?.resume()
+            gateHeldContinuation = nil
+            await withCheckedContinuation { gateReleaseContinuation = $0 }
+            gateHeld = false
+        }
         return rows.filter { frame in
             let text = query.text.lowercased()
             return text.isEmpty || frame.ocrText.lowercased().contains(text)

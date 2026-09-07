@@ -182,6 +182,12 @@ import Observation
     @ObservationIgnored let currentVersion: String
     @ObservationIgnored private(set) var selectionTarget: SelectionTarget?
     @ObservationIgnored private(set) var selectedTextContext: SelectedTextContext?
+    /// The captured selection a preview-first rewrite action produced for the
+    /// answer now on screen, so the Replace Selection result action is offered
+    /// only for an answer that actually rewrote a captured selection — never
+    /// for a later follow-up or an unrelated ad-hoc answer. Cleared when a new
+    /// request begins.
+    @ObservationIgnored private(set) var replaceableSelectionContext: SelectedTextContext?
     /// Text an action dispatch (picker/hotkey) resolved explicitly, so a
     /// multi-line selection is never whitespace-collapsed by alias context.
     @ObservationIgnored private var pendingActionSource: String?
@@ -1058,15 +1064,18 @@ import Observation
                 )
             )
             : nil
+        let showsChooser = isTransformChooserPresented
         let base = PanelSizing.panelHeight(
             output: output,
             isStreaming: isStreaming,
             errorMessage: errorMessage,
-            suggestionCount: max(launcherMatches.count, savedPromptMatches.count),
+            // The Transform chooser replaces the launcher list while open, so
+            // the launcher block is not counted then.
+            suggestionCount: showsChooser ? 0 : max(launcherMatches.count, savedPromptMatches.count),
             showsResultActions: false,
             hasAttachment: hasPendingAttachment,
             showsFooter: showsLauncherFooter,
-            launcherRowCount: launcherMatches.count,
+            launcherRowCount: showsChooser ? 0 : launcherMatches.count,
             showsQuestion: (lastQuestion?.isEmpty == false) && !isConversationHistoryPresented,
             gridRows: isGridCatalog
                 ? Int((Double(launcherMatches.count) / Double(Self.gridColumns)).rounded(.up))
@@ -1079,6 +1088,14 @@ import Observation
                 messageCount: conversationMessages.count
             )
         )
+        // The launch-selection chip and an open chooser are inline content
+        // (they sit in the VStack flow), not a floating pane: add their
+        // heights so the window cannot clip them. Previously the chooser was
+        // treated as a `max(base, pane)` overlay, which left the inline
+        // chip + chooser taller than the window and cut off the bottom.
+        var total = base
+        if launchSelection != nil { total += PanelSizing.selectionChipHeight }
+        if showsChooser { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
         var pane: CGFloat?
         if isItemActionPanePresented {
             pane = activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
@@ -1086,8 +1103,8 @@ import Observation
         } else if isActionPalettePresented {
             pane = PanelSizing.actionPaletteHeight(rows: actionPaletteEntryCount)
         }
-        var total = PanelSizing.windowHeight(
-            base: base,
+        total = PanelSizing.windowHeight(
+            base: total,
             paneHeight: pane,
             paneTop: PanelSizing.inputHeight
                 + (hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
@@ -1543,12 +1560,20 @@ import Observation
             return hints
         }
         if !output.isEmpty {
-            var hints = [
-                input.trimmingCharacters(in: .whitespaces).isEmpty
-                    ? FooterHint(label: "Paste back", keys: ["↩"])
-                    : FooterHint(label: "Follow up", keys: ["↩"]),
-                FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps),
-            ]
+            var hints: [FooterHint] = []
+            if let detail = resultActionDetail(.replaceSelection) {
+                hints.append(FooterHint(label: detail, keys: ResultAction.replaceSelection.shortcut.keyCaps))
+            }
+            if let detail = resultActionDetail(.pasteBack) {
+                hints.append(FooterHint(label: detail, keys: ResultAction.pasteBack.shortcut.keyCaps))
+            } else {
+                hints.append(
+                    input.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? FooterHint(label: "Paste back", keys: ResultAction.pasteBack.shortcut.keyCaps)
+                        : FooterHint(label: "Follow up", keys: ["↩"])
+                )
+            }
+            hints.append(FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps))
             if history.count > 1 { hints.append(FooterHint(label: "Chats", keys: ["⌘", "[", "]"])) }
             hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
             return hints
@@ -1772,6 +1797,11 @@ import Observation
     }
 
     func submitResolvingFuzzyAlias() async {
+        if isTransformChooserPresented {
+            // Return runs the focused transform in the keyboard-first chooser.
+            await runTransformChooserSelection()
+            return
+        }
         switch classifySubmit() {
         case .attachment, .commandAlias, .prompt:
             await submit()
@@ -2306,7 +2336,13 @@ import Observation
     /// Actions available on the answer on screen.
     var resultActions: [ResultAction] {
         guard !output.isEmpty, !isStreaming else { return [] }
-        var actions: [ResultAction] = [.pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb, .regenerate, .newChat]
+        // Replace Selection is the precise action after a selection transform:
+        // it writes back to the originally captured selection (retained across
+        // the request). Paste into Previous App is the broader fallback. Both
+        // fail safe to Copy with a truthful error when the target is gone.
+        var actions: [ResultAction] = []
+        if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
+        actions.append(contentsOf: [.pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb, .regenerate, .newChat])
         if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
@@ -2315,8 +2351,23 @@ import Observation
         return actions
     }
 
+    /// The app name a destination answer action targets, for the palette row's
+    /// detail so the user never guesses which app receives the output.
+    func resultActionDetail(_ action: ResultAction) -> String? {
+        switch action {
+        case .replaceSelection:
+            replaceableSelectionContext.map { "Replace in \($0.target.applicationName)" }
+        case .pasteBack:
+            selectionTarget.map { "Paste into \($0.applicationName)" }
+        default:
+            nil
+        }
+    }
+
     func performResultAction(_ action: ResultAction) async {
         switch action {
+        case .replaceSelection:
+            _ = await replaceOutputInCapturedSelection()
         case .pasteBack:
             _ = await pasteOutputToPreviousApp()
         case .copy:
@@ -3250,6 +3301,161 @@ import Observation
         return trimmed.count > 120 ? trimmed.prefix(117) + "…" : trimmed
     }
 
+    // MARK: - Chip selected-text transforms
+
+    /// The compact rewrite actions offered beside the chip. Order and
+    /// membership are fixed, so the menu is discoverable and stable; each
+    /// entry maps to a saved action by alias, or to the Translator window
+    /// (which carries its own target picker rather than hard-coding a
+    /// language).
+    struct ChipTransformOption: Identifiable, Equatable, Sendable {
+        enum Kind: Equatable, Sendable {
+            case saved(UUID)
+            case translator
+        }
+        let kind: Kind
+        let title: String
+        let systemImage: String
+
+        var id: String {
+            switch kind {
+            case .saved(let id): "saved:\(id.uuidString)"
+            case .translator: "translator"
+            }
+        }
+    }
+
+    /// The fixed quick-transform order: alias (or the translator) plus glyph.
+    static let chipTransformOrder: [(value: String, image: String)] = [
+        ("shorter", "arrow.down.right.and.arrow.up.left"),
+        ("bullets", "list.bullet"),
+        ("improve", "sparkles"),
+        ("tldr", "text.alignleft"),
+        ("translate", "character.bubble"),
+    ]
+
+    /// The transforms that act on the retained launch selection. Translate
+    /// always opens the Translator; the rest resolve to their saved prompt
+    /// (so the user's edited name, prompt, and hotkey are honored). Absent
+    /// aliases are dropped, so a defunct action simply doesn't appear.
+    var chipTransformOptions: [ChipTransformOption] {
+        guard launchSelection != nil else { return [] }
+        return Self.chipTransformOrder.compactMap { entry in
+            if entry.value == "translate" {
+                return ChipTransformOption(
+                    kind: .translator,
+                    title: "Translate",
+                    systemImage: entry.image
+                )
+            }
+            guard let action = settings.savedPrompts.first(where: { $0.alias == entry.value }) else {
+                return nil
+            }
+            return ChipTransformOption(
+                kind: .saved(action.id),
+                title: action.name,
+                systemImage: entry.image
+            )
+        }
+    }
+
+    /// Run a transform from the chip menu. Saved actions go through
+    /// `performTransform`, which sources from the captured selection snapshot
+    /// (not the input field) and previews the result before any write.
+    func runChipTransform(_ option: ChipTransformOption) async {
+        switch option.kind {
+        case .translator:
+            openTranslatorWithSelection()
+        case .saved(let id):
+            guard let action = settings.savedPrompts.first(where: { $0.id == id }) else { return }
+            await performTransform(action: action)
+        }
+    }
+
+    /// Run a quick transform. Always acts on the captured selection snapshot,
+    /// never on whatever is typed in the input field, so the rewrite targets
+    /// the text the user selected. This is the keyboard-first path for the
+    /// Transform chooser and the chip menu.
+    func performTransform(action: SavedPrompt) async {
+        let snapshot = launchSelection?.text
+            ?? captureSelectedText(promptForPermission: true)?.text
+        guard let snapshot,
+              !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            closeActionPalette()
+            errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                ? "Allow Accessibility in System Settings, then select text and try again."
+                : "Select some text first, then run this transform."
+            requestInputFocus()
+            return
+        }
+        pendingActionSource = snapshot
+        isActionPalettePresented = false
+        actionQuery = ""
+        input = settings.savedPromptPrefix + action.alias
+        await submit()
+    }
+
+    // MARK: - Transform chooser (keyboard-first)
+
+    /// The shortcut that opens/closes the keyboard-first Transform chooser.
+    /// `⌘⌥T` (Transform). Deliberately not `⌘⇧D` (owned by the panel's
+    /// screenshot-display handler) and not `⌘⇧T` (the translator global
+    /// hotkey) — those are consumed before `performShortcut` is reached.
+    static let transformChooserShortcut: KeyShortcut = .commandOption("t")
+
+    /// True while the Transform chooser is open (opened by the Transform chip
+    /// or its shortcut). ↑↓ move, Return runs, Esc closes. Keyboard-first:
+    /// no mouse is needed to reach any transform.
+    var isTransformChooserPresented = false
+    var transformChooserIndex = 0
+
+    func openTransformChooser() {
+        guard !chipTransformOptions.isEmpty else { return }
+        isTransformChooserPresented = true
+        transformChooserIndex = 0
+        isActionPalettePresented = false
+        isApplicationActionPanePresented = false
+        isCatalogActionPanePresented = false
+        activeItemActionForm = nil
+        requestInputFocus()
+    }
+
+    func closeTransformChooser() {
+        isTransformChooserPresented = false
+        requestInputFocus()
+    }
+
+    func toggleTransformChooser() {
+        if isTransformChooserPresented { closeTransformChooser() } else { openTransformChooser() }
+    }
+
+    func moveTransformChooserSelection(_ delta: Int) {
+        let count = chipTransformOptions.count
+        guard count > 0 else { return }
+        transformChooserIndex = (transformChooserIndex + delta + count) % count
+    }
+
+    func runTransformChooserSelection() async {
+        let options = chipTransformOptions
+        guard options.indices.contains(transformChooserIndex) else { return }
+        isTransformChooserPresented = false
+        await runChipTransform(options[transformChooserIndex])
+    }
+
+    /// Open the Translator with the retained launch selection available to its
+    /// "Use selected text" button, so the import survives the focus moving on.
+    func openTranslatorWithSelection() {
+        input = ""
+        errorMessage = nil
+        // Hand the retained selection to the presenter seam *before* any
+        // dismissal, because dismissing the overlay clears launch-scoped state
+        // (and with it `launchSelection`). The presenter passes it to the
+        // Translator so "Use selected text" can import it even after focus
+        // moves on.
+        let retained = launchSelection?.text
+        overlayPresenter.openTranslator(retainedSelection: retained)
+    }
+
     func toggleActionPalette() {
         isApplicationActionPanePresented = false
         contextualApplicationID = nil
@@ -3448,6 +3654,7 @@ import Observation
         case itemActionForm
         case itemActionPane
         case actionPalette
+        case transformChooser
         case streaming
         case attachment
         case typedText
@@ -3463,6 +3670,7 @@ import Observation
             return activeItemActionForm != nil ? .itemActionForm : .itemActionPane
         }
         if isActionPalettePresented { return .actionPalette }
+        if isTransformChooserPresented { return .transformChooser }
         if isStreaming { return .streaming }
         if !input.isEmpty { return .typedText }
         if hasPendingAttachment { return .attachment }
@@ -3482,6 +3690,8 @@ import Observation
             dismissItemActionLayer()
         case .actionPalette:
             closeActionPalette()
+        case .transformChooser:
+            closeTransformChooser()
         case .streaming:
             cancel()
         case .typedText:
@@ -3556,6 +3766,12 @@ import Observation
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
     func performShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        // ⌘⌥T toggles the keyboard-first Transform chooser (reachable without a
+        // mouse); while it is open ↑↓ and Return drive it in the view.
+        if Self.transformChooserShortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers) {
+            toggleTransformChooser()
+            return true
+        }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
            let action = resultActions.first(where: {
                $0.shortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
@@ -4249,6 +4465,8 @@ import Observation
     /// `nil` when the request was handled here or could not proceed.
     func prepareRequest() async -> PreparedRequest? {
         guard !input.isEmpty || pendingImage != nil else { return nil }
+        // A new request supersedes any prior answer's replaceable selection.
+        replaceableSelectionContext = nil
         isConversationHistoryPresented = false
         let submittedInput = input
         let submittedImages = !pendingImages.isEmpty
@@ -4474,6 +4692,7 @@ import Observation
         let submittedImages = request.submittedImages
         let submittedImage = request.submittedImage
         let action = request.action
+        let actionDefinition = request.actionDefinition
         let effectivePrompt = request.effectivePrompt
         let usedWebSearch = request.usedWebSearch
         let usedPageRead = request.usedPageRead
@@ -4573,11 +4792,16 @@ import Observation
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
                 }
+                var didAutoWrite = false
                 if action?.outputBehavior == .replaceSelection, !output.isEmpty {
-                    if let context = captureSelectedText(promptForPermission: false),
-                       let selectedTextService,
-                       await selectedTextService.replace(output, in: context) {
-                        overlayPresenter.dismissOverlay()
+                    didAutoWrite = true
+                    let context = captureSelectedText(promptForPermission: false)
+                    if let selectedTextService {
+                        _ = await writeBackValidated(
+                            output: output,
+                            in: context,
+                            service: selectedTextService
+                        )
                     } else {
                         copyOutput()
                         markJustCopied()
@@ -4586,6 +4810,15 @@ import Observation
                 } else if settings.autoCopy && !output.isEmpty {
                     copyOutput()
                     markJustCopied()
+                }
+                // A saved action that ran on a captured selection and left its
+                // result on screen is replaceable: offer Replace Selection so the
+                // user can write it back explicitly. Scoped to this answer, never
+                // inherited by a follow-up or an unrelated ad-hoc answer.
+                if !didAutoWrite,
+                   actionDefinition != nil,
+                   let context = selectedTextContext {
+                    replaceableSelectionContext = context
                 }
                 requestInputFocus()
             } catch is CancellationError {
@@ -4641,11 +4874,17 @@ import Observation
             )
             isStreaming = false
             output = result
-            if definition.outputBehavior == .replaceSelection, !output.isEmpty {
-                if let selectionContext = captureSelectedText(promptForPermission: false),
-                   let selectedTextService,
-                   await selectedTextService.replace(output, in: selectionContext) {
-                    overlayPresenter.dismissOverlay()
+            var didAutoWrite = false
+            if definition.outputBehavior == .replaceSelection,
+               !output.isEmpty {
+                didAutoWrite = true
+                let context = captureSelectedText(promptForPermission: false)
+                if let selectedTextService {
+                    _ = await writeBackValidated(
+                        output: output,
+                        in: context,
+                        service: selectedTextService
+                    )
                 } else {
                     copyOutput()
                     markJustCopied()
@@ -4654,6 +4893,9 @@ import Observation
             } else if settings.autoCopy && !output.isEmpty {
                 copyOutput()
                 markJustCopied()
+            }
+            if !didAutoWrite, let selectionContext = selectedTextContext {
+                replaceableSelectionContext = selectionContext
             }
         } catch {
             isStreaming = false
@@ -4986,6 +5228,76 @@ import Observation
         markJustCopied()
     }
 
+    /// Replace the originally captured selection with the current output.
+    /// Only ever called by an explicit user action: a saved action that used a
+    /// captured selection leaves its result on screen, then the user picks
+    /// Replace Selection (here) or Copy. The captured target and text are
+    /// retained across the request, so the write goes back to the snapshot the
+    /// action ran on, not the app that happens to be frontmost now. Before
+    /// writing we re-read the live selection and fail **closed** to Copy: if the
+    /// selection changed or cannot be read at all, we never overwrite what we
+    /// cannot confirm is the original, and we say so truthfully.
+    @discardableResult
+    func replaceOutputInCapturedSelection() async -> Bool {
+        guard !output.isEmpty else { return false }
+        guard let selectedTextService else { return false }
+        guard let context = replaceableSelectionContext else {
+            copyOutputAndMark()
+            errorMessage = "The current answer did not replace a captured selection. The result was copied instead."
+            requestInputFocus()
+            return false
+        }
+        return await writeBackValidated(output: output, in: context, service: selectedTextService)
+    }
+
+    /// Shared fail-closed write-back: re-reads the live selection and only
+    /// writes when it still matches the captured one. Used by both the explicit
+    /// Replace Selection action and a custom `.replaceSelection` saved action's
+    /// auto-write, so a stale or unreadable selection is never overwritten.
+    /// On any failure it copies the output and reports why, truthfully.
+    private func writeBackValidated(
+        output text: String,
+        in context: SelectedTextContext?,
+        service selectedTextService: any SelectedTextServicing
+    ) async -> Bool {
+        guard let context, !text.isEmpty else {
+            copyOutputAndMark()
+            errorMessage = "Could not replace the selection. The result was copied instead."
+            requestInputFocus()
+            return false
+        }
+        // Fail closed: if the live selection cannot be read, we cannot confirm
+        // it is still the original, so copy instead of risk overwriting it.
+        guard let live = selectedTextService.capture(
+            from: context.target,
+            promptForPermission: false
+        ) else {
+            copyOutputAndMark()
+            errorMessage = "Could not read the current selection in \(context.target.applicationName). The result was copied instead."
+            requestInputFocus()
+            return false
+        }
+        if live.text != context.text {
+            copyOutputAndMark()
+            errorMessage = "The selection changed. The result was copied instead of replacing."
+            requestInputFocus()
+            return false
+        }
+        prepareForExternalAction?()
+        await Task.yield()
+        guard await selectedTextService.replace(text, in: context) else {
+            copyOutputAndMark()
+            errorMessage = selectedTextService.isAccessibilityTrusted
+                ? "Could not replace the selection in \(context.target.applicationName). The result was copied instead."
+                : "Allow Accessibility in System Settings, then try again. The result was copied."
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        overlayPresenter.dismissOverlay()
+        return true
+    }
+
     @discardableResult
     func pasteOutputToPreviousApp() async -> Bool {
         guard !output.isEmpty else { return false }
@@ -5072,6 +5384,7 @@ import Observation
             output = ""
             errorMessage = nil
             lastQuestion = nil
+            replaceableSelectionContext = nil
             currentConversation = nil
             conversationImages = []
             isConversationHistoryPresented = false

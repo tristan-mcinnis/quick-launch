@@ -190,19 +190,29 @@ selected-text action needs it.
   a removable chip under the input row. Press `×` to drop it. The text rides
   with the next request only, so a follow-up or a brand-new chat never re-sends
   it. Reading uses macOS Accessibility on the current selection alone — no
-  screen recording, no clipboard, never the whole screen.
+  screen recording, no clipboard, never the whole screen. A compact transform
+  control beside the chip offers the built-in rewrites — **Make Shorter**,
+  **Turn into Bullets**, **Improve Writing**, **Summarize** — plus **Translate**,
+  which opens the Translator window with its own target picker. It's fully
+  keyboard-first: `⌘⌥T` opens the Transform chooser, `↑`/`↓` move, `↩` runs,
+  `esc` closes — or run any transform by its alias (`/shorter`, `/bullets`,
+  `/improve`, `/tldr`) or by the `/translate` command.
 - **Run a saved action three ways.** By name from `Command+K` (the Quick AI
   action chooser, which searches each action's name and alias), by slash alias
   (`/improve`, `/grammar`, `/tldr`, `/translate`), or by a global hotkey
-  (Summarize is `⌃⌥S`). `/improve` rewrites the selected text and replaces it.
-  Aliases are fuzzy, so `/eml` finds `/email`.
+  (Summarize is `⌃⌥S`). Aliases are fuzzy, so `/eml` finds `/email`.
 - **Prompt, output, and context.** A saved action's `prompt` takes
-  `{selection}` where the text lands (otherwise it is appended). Its output is
-  **Show in Quick Launch** (result stays for a follow-up) or **Replace selected
-  text** (the result overwrites the selection). Use the explicit focused-context
+  `{selection}` where the text lands (otherwise it is appended). Rewrite actions
+  always **preview first**: the result stays on screen, then you explicitly pick
+  **Replace Selection** (writes back to the original captured selection,
+  verified against the current one) or **Copy**, or paste into the previous app.
+  They never auto-write. Other prompts honour their own output behavior —
+  **Show in Quick Launch** or **Replace selected text** — and a custom action
+  you define keeps whatever it is set to. Use the explicit focused-context
   commands — `⌘⇧S` Send Focused Window, Send Screen Area, Send Selected Text —
   when you want the window/app context attached beyond a bare selection; the
-  attachment card lists exactly what is included.
+  attachment card lists exactly what is included. The rewrite prompts are
+  adapted from [ray.so's prompt catalog](https://github.com/raycast/ray-so/blob/main/app/(navigation)/prompts/prompts.ts).
 - **Configure a custom action.** **Settings → Prompts** sets its name, fuzzy
   alias, prompt, output behavior, optional global hotkey, and optional
   provider/model.

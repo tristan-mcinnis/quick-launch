@@ -804,9 +804,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The Translator window: opened from ⇧⌘T or the Translate item. Arrives
     /// with the selection of the app behind it; toggles closed on repeat.
-    func showTranslator() {
+    func showTranslator(retainedSelection handedOffSelection: String? = nil) {
         guard let vm = viewModel else { return }
         if let panel = translatorPanel, panel.isVisible {
+            // A handoff means the user asked to translate a selection: bring the
+            // existing window forward and import it, don't toggle it shut.
+            if handedOffSelection != nil {
+                translatorModel?.retainLaunchSelection(handedOffSelection)
+                panel.makeKey()
+                panel.orderFrontRegardless()
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
             hideTranslator()
             return
         }
@@ -814,7 +823,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selected = target.flatMap { selectedTextService.capture(from: $0, promptForPermission: false)?.text }
         let model = translatorModel ?? makeTranslatorModel(for: vm)
         translatorModel = model
-        model.prepare(target: target, selectedText: selected)
+        // Retain the launch snapshot (handed off before the overlay closed) and
+        // fall back to the fresh capture, so "Use selected text" works even
+        // when the translator is opened directly (⇧⌘T) and no snapshot exists.
+        model.prepare(
+            target: target,
+            selectedText: selected,
+            retainedSelection: handedOffSelection ?? vm.launchSelection?.text ?? selected
+        )
         let panel = translatorPanel ?? makeTranslatorPanel(model: model)
         translatorPanel = panel
         if let screen = screenContainingMouse() {
@@ -1240,6 +1256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.isStreaming
             _ = viewModel.errorMessage
             _ = viewModel.isActionPalettePresented
+            _ = viewModel.isTransformChooserPresented
             _ = viewModel.isApplicationActionPanePresented
             _ = viewModel.isCatalogActionPanePresented
             _ = viewModel.catalogScope
@@ -1504,5 +1521,6 @@ extension AppDelegate: OverlayPresenting {
     func dismissOverlay() { hideOverlay() }
     func openSettings() { showSettingsPanel() }
     func openTranslator() { showTranslator() }
+    func openTranslator(retainedSelection: String?) { showTranslator(retainedSelection: retainedSelection) }
     func openTypeToClick() { showTypeToClick() }
 }

@@ -135,6 +135,39 @@ struct TranslatorModelTests {
         #expect(remembered == .japanese)
         #expect(!model.isTargetPickerPresented && model.targetQuery.isEmpty)
     }
+
+    @Test func retainedLaunchSelectionIsImportedOnlyOnExplicitClick() async {
+        let (model, mock, _) = await makeModel()
+        let target = SelectionTarget(processIdentifier: 9, applicationName: "Notes")
+
+        // Open with a launch snapshot retained but no fresh selection: the
+        // source stays empty (nothing is invented) and the button is available.
+        model.prepare(target: target, selectedText: nil, retainedSelection: "hello world")
+        #expect(model.hasRetainedSelection)
+        #expect(model.source.isEmpty)
+        #expect(await mock.sendCallCount == 0)
+
+        // The explicit button imports the retained snapshot.
+        model.useRetainedSelection()
+        #expect(model.source == "hello world")
+
+        // A fresh actual selection on open still auto-captures as before,
+        // and never erases manual typing without the explicit click.
+        model.source = "manual"
+        model.sourceChanged()
+        model.prepare(target: target, selectedText: "fresh selection", retainedSelection: "hello world")
+        #expect(model.source == "fresh selection")
+    }
+
+    @Test func retainLaunchSelectionImportsWhenWindowAlreadyOpen() async {
+        let (model, _, _) = await makeModel()
+        model.setTarget(.simplifiedChinese)
+        model.source = "manual"
+        model.sourceChanged()
+        model.retainLaunchSelection("原文")
+        #expect(model.source == "原文")
+        #expect(model.hasRetainedSelection)
+    }
 }
 
 @MainActor
