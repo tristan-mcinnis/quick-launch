@@ -42,8 +42,13 @@ protocol ClipboardHistoryServicing: AnyObject {
     /// Pinned entries stay at the top and are never pruned by the limit.
     func togglePin(_ item: LauncherCatalogItem)
     func clear()
+    /// The full clipboard payload for a stored item, with its raw items loaded
+    /// from the blob (in-memory cache first, disk off-main on a miss). Used by
+    /// previews and restore.
+    func payload(for item: LauncherCatalogItem) async -> ClipboardPayload?
 }
 
 extension ClipboardHistoryServicing {
     func togglePin(_ item: LauncherCatalogItem) {}
+    func payload(for item: LauncherCatalogItem) async -> ClipboardPayload? { nil }
 }

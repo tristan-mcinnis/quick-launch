@@ -165,17 +165,28 @@ enum ItemActionCatalog {
                 ItemAction(kind: .delete, title: "Delete Snippet", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
             ]
         case .clipboard:
+            let isText = (item.clipboardPayload?.kind ?? .text) == .text
+            let isImage = item.clipboardPayload?.kind == .image
             var actions = [
-                ItemAction(kind: .primary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .returnKey),
-                ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
+                ItemAction(
+                    kind: .primary,
+                    title: isImage
+                        ? (pasteTarget.map { "Paste Image to \($0)" } ?? "Paste Image")
+                        : pasteTitle,
+                    systemImage: "arrow.turn.down.right",
+                    shortcut: .returnKey
+                ),
+                ItemAction(kind: .secondary, title: isImage ? "Copy Image" : "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
                 pinAction(for: item),
-                ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")),
             ]
-            if looksLikeURL(item.value) {
-                actions.append(ItemAction(kind: .saveAsQuickLink, title: "Create Quicklink", systemImage: "link.badge.plus", shortcut: .commandShift("l")))
-                if URLCleaner.hasTrackingParameters(item.value) {
-                    actions.append(cleanLinkAction)
+            if isText {
+                actions.append(ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")))
+                if looksLikeURL(item.value) {
+                    actions.append(ItemAction(kind: .saveAsQuickLink, title: "Create Quicklink", systemImage: "link.badge.plus", shortcut: .commandShift("l")))
+                    if URLCleaner.hasTrackingParameters(item.value) {
+                        actions.append(cleanLinkAction)
+                    }
                 }
             }
             actions.append(ItemAction(kind: .delete, title: "Delete Entry", systemImage: "trash", shortcut: .control("x"), isDestructive: true))

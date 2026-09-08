@@ -61,8 +61,13 @@ outside the core until they have explicit interaction, permission, and safety
 designs. Screen capture exists only as the owned Screen History capture: opt-in,
 off by default, enabled by "Enable owned screen capture" in its own Settings
 tab, local only, and hard-locked in the current build until its privacy review
-and soak test pass. A user-copied screenshot may be attached to one request and
-routed locally, but must never be persisted in settings or history.
+and soak test pass. A user-copied screenshot attached to an AI request is
+ephemeral: it is routed locally and never persisted in settings or conversation
+history. The single local exception is the Clipboard History, which may keep the
+user's copy (text, image, rich text, or a file URL) on this Mac so it can be
+restored later; it honours concealed/transient pasteboard markers, stays
+owner-only, and is bounded by the history limit plus a total-byte budget. AI
+request attachments are never written to the Clipboard History.
 
 ## Development
 

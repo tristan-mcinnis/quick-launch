@@ -413,6 +413,13 @@ import Observation
     var quickLinks: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.quickLinks ?? []) }
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
 
+    /// The full clipboard payload for an item, with its raw items loaded from
+    /// the blob (in-memory cache first, disk off-main on a miss). Used by
+    /// previews and restore; returns nil when the entry is gone.
+    func fullClipboardPayload(for item: LauncherCatalogItem) async -> ClipboardPayload? {
+        await clipboardHistory?.payload(for: item)
+    }
+
     /// Picked colors, pinned first, as launcher items.
     var colorItems: [LauncherCatalogItem] { colorHistory?.entries ?? [] }
 
@@ -2129,13 +2136,32 @@ import Observation
         guard !matches.isEmpty else { return }
         let index = min(applicationSelectionIndex, matches.count - 1)
         guard case .item(let item) = matches[index] else { return }
-        pasteboard.writeString(item.value)
-        markJustCopied()
+        Task { @MainActor in await copyLauncherItem(item) }
     }
 
-    func copyLauncherItem(_ item: LauncherCatalogItem) {
-        pasteboard.writeString(item.value)
+    @discardableResult
+    func copyLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
+        if let payload = item.clipboardPayload {
+            if payload.isPlainTextOnly {
+                pasteboard.writeString(payload.text)
+                markJustCopied()
+                return true
+            }
+            // Restore the full representation (image, rich text, file, or a
+            // custom format) from the blob, not just the string. Loads are
+            // async (cache-first, disk off-main); a missing blob reports as
+            // unavailable instead of clearing the user's clipboard.
+            let full = await clipboardHistory?.payload(for: item) ?? payload
+            guard full.write(to: .general) else {
+                errorMessage = "That clipboard item is no longer available on this Mac."
+                requestInputFocus()
+                return false
+            }
+        } else {
+            pasteboard.writeString(item.value)
+        }
         markJustCopied()
+        return true
     }
 
     @discardableResult
@@ -2157,7 +2183,7 @@ import Observation
             }
         }
         guard let target, let selectedTextService else {
-            copyLauncherItem(item)
+            _ = await copyLauncherItem(item)
             errorMessage = "No text field was available behind Quick Launch. The item was copied instead."
             requestInputFocus()
             return false
@@ -2167,8 +2193,29 @@ import Observation
         // until after paste lets it retain/retake keyboard focus.
         prepareForExternalAction?()
         await Task.yield()
+        if let payload = item.clipboardPayload, !payload.isPlainTextOnly {
+            // Image, rich text, file, or a custom format: restore the original
+            // representation onto the pasteboard, then Command-V it in. Loads are
+            // async (cache-first, disk off-main).
+            let full = await clipboardHistory?.payload(for: item) ?? payload
+            guard full.write(to: .general) else {
+                recoverFromExternalActionFailure?()
+                errorMessage = "That clipboard item is no longer available on this Mac."
+                return false
+            }
+            guard await selectedTextService.pastePasteboard(to: target) else {
+                _ = await copyLauncherItem(item)
+                errorMessage = selectedTextService.isAccessibilityTrusted
+                    ? "Could not paste into \(target.applicationName). The item was copied instead."
+                    : "Allow Quick Launch in Privacy & Security → Accessibility, then try again. The item was copied."
+                recoverFromExternalActionFailure?()
+                requestInputFocus()
+                return false
+            }
+            return true
+        }
         guard await selectedTextService.paste(item.value, to: target) else {
-            copyLauncherItem(item)
+            _ = await copyLauncherItem(item)
             errorMessage = selectedTextService.isAccessibilityTrusted
                 ? "Could not paste into \(target.applicationName). The item was copied instead."
                 : "Allow Quick Launch in Privacy & Security → Accessibility, then try again. The item was copied."
@@ -2182,7 +2229,7 @@ import Observation
     @discardableResult
     func copyAndPasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
         let pasted = await pasteLauncherItem(item)
-        copyLauncherItem(item)
+        _ = await copyLauncherItem(item)
         return pasted
     }
 
@@ -2222,7 +2269,7 @@ import Observation
                 requestInputFocus()
             }
         case .answer:
-            copyLauncherItem(item)
+            _ = await copyLauncherItem(item)
             input = ""
             overlayPresenter.dismissOverlay()
         case .screenHistory:
@@ -3081,7 +3128,7 @@ import Observation
             invalidateLauncherRanking()
             return
         }
-        copyLauncherItem(item)
+        _ = await copyLauncherItem(item)
         errorMessage = nil
         invalidateLauncherRanking()
         overlayPresenter.dismissOverlay()
@@ -3889,10 +3936,10 @@ import Observation
                     requestInputFocus()
                 }
             case .item(let item) where item.kind == .screenHistory:
-                copyLauncherItem(item)
+                Task { @MainActor in _ = await copyLauncherItem(item) }
                 closeItemActionPane()
             case .item(let item):
-                copyLauncherItem(item)
+                Task { @MainActor in _ = await copyLauncherItem(item) }
                 closeItemActionPane()
                 input = ""
                 overlayPresenter.dismissOverlay()

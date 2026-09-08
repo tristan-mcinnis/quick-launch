@@ -44,7 +44,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - `⌘K` on a result: save as snippet, search the web for it, copy, or paste it back
 - Several screenshots can ride on one question; Backspace drops the newest, the × clears all
 - The panel opens with its input row on the centre line of the display under the pointer
-- Local, bounded, clearable text clipboard history on `Command+Shift+V`
+- Local, bounded, clearable clipboard history (text, images, rich text, files) on `Command+Shift+V`
 - Opens on the display that contains the mouse pointer
 - Window management, Raycast's full set: Maximize, Almost Maximize, Maximize Height/Width, Reasonable Size, Center, Left/Center/Right/Top/Bottom Half, four Quarters, Thirds and Two Thirds, Fourths, six Sixths, Make Smaller/Larger, Move Left/Right/Up/Down, Restore, Toggle Fullscreen, Move to Next/Previous Display. Left and Right Half cycle half → two thirds → third on repeat. Every command takes an alias and a hotkey in Settings › Items › Windows
 - Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
@@ -285,8 +285,17 @@ OpenAI-compatible providers do not have a tool-calling loop.
 - There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
-- Text clipboard history is local, optional, deduplicated, and bounded. It is
-  stored in `~/Library/Application Support/Quick Launch/clipboard-history.json`.
+- The clipboard history is local, optional, deduplicated, and bounded. It keeps
+  the full copy (text, an image, rich text, or a file URL) so a later paste
+  restores the original representation. It honours concealed/transient
+  pasteboard markers, stays owner-only, and is stored in
+  `~/Library/Application Support/Quick Launch/clipboard-history.json` (metadata)
+  and the adjacent `ClipboardBlobs/` directory (original copy data). Copies over
+  20 MB total, images over 12 MB, rich text over 5 MB, or text over 200 KB are
+  skipped. History payloads are capped at 200 MB, including pins. Text
+  recognized from copied images (on-device Apple Vision) is indexed so the
+  clipboard catalog matches words inside images; recognition never changes the
+  stored image.
 - Picked colours are local and bounded, stored as numbers (no pixels, no
   screenshots) in `~/Library/Application Support/Quick Launch/color-history.json`.
   The eyedropper uses AppKit's own colour sampler, so it needs no screen
@@ -306,7 +315,7 @@ OverlayView
   → QuickViewModel
       → cached local application catalogue, including Finder
       → live Tuna snippet and Quick Link catalogues
-      → bounded local text clipboard history
+      → bounded local clipboard history
       → bounded SearXNG snippet bundle
       → OpenAI-compatible SSE service
       → one-shot CLI service (Claude Code or Pi)

@@ -140,7 +140,7 @@ struct QuickActionWorkflowTests {
             value: "Hello there"
         )
 
-        vm.copyLauncherItem(item)
+        await vm.copyLauncherItem(item)
         #expect(pasteboard.string == "Hello there")
         #expect(await vm.pasteLauncherItem(item))
         #expect(selection.pastedText == "Hello there")

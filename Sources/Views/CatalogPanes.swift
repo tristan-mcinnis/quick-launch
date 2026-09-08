@@ -81,6 +81,8 @@ struct CatalogDetailPane: View {
     @Bindable var viewModel: QuickViewModel
     let item: LauncherCatalogItem
     @ScaledMetric(relativeTo: .body) private var screenHistoryTextMaxHeight: CGFloat = 150
+    /// Clipboard image payload, loaded off-main (no disk IO in the body).
+    @State private var previewPayload: ClipboardPayload?
 
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.sm) {
@@ -94,9 +96,15 @@ struct CatalogDetailPane: View {
         .padding(House.Spacing.md)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: item.id) {
-            guard item.kind == .screenHistory,
-                  let frame = viewModel.screenHistory.frame(for: item) else { return }
-            await viewModel.screenHistory.loadOCRBoxes(for: frame)
+            previewPayload = nil
+            if item.kind == .screenHistory, let frame = viewModel.screenHistory.frame(for: item) {
+                await viewModel.screenHistory.loadOCRBoxes(for: frame)
+            }
+            if item.kind == .clipboard, item.clipboardPayload?.kind == .image {
+                let loaded = await viewModel.fullClipboardPayload(for: item)
+                guard !Task.isCancelled else { return }
+                previewPayload = loaded
+            }
         }
     }
 
@@ -192,7 +200,38 @@ struct CatalogDetailPane: View {
             } else {
                 placeholderCard(symbol: nil, text: "No preview")
             }
-        case .clipboard, .snippet:
+        case .clipboard:
+            if let payload = previewPayload ?? item.clipboardPayload,
+               payload.kind == .image,
+               let data = payload.imageData,
+               let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: DetailMetrics.previewMaxHeight)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                            .strokeBorder(
+                                AQDesign.ColorToken.panelStroke,
+                                lineWidth: AQDesign.hairline
+                            )
+                    )
+            } else {
+                ScrollView {
+                    Text(item.value)
+                        .font(AQDesign.TypeToken.code)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: DetailMetrics.previewMaxHeight)
+                .padding(House.Spacing.sm)
+                .raisedCard()
+            }
+        case .snippet:
             ScrollView {
                 Text(item.value)
                     .font(AQDesign.TypeToken.code)
@@ -291,6 +330,31 @@ struct CatalogDetailPane: View {
             if item.isPinned { list.append(("Pinned", "Yes")) }
             return list
         case .clipboard:
+            if let payload = item.clipboardPayload, payload.kind == .image {
+                var list: [(String, String)] = [("Type", "Image")]
+                if let w = payload.imageWidth, let h = payload.imageHeight {
+                    list.append(("Dimensions", "\(w) × \(h)"))
+                }
+                list.append(("Copied", item.detail.replacingOccurrences(of: "Pinned · ", with: "")))
+                if item.isPinned { list.append(("Pinned", "Yes")) }
+                return list
+            }
+            if let payload = item.clipboardPayload, payload.kind == .fileURL {
+                var list: [(String, String)] = [("Type", "File")]
+                if !payload.fileURLs.isEmpty {
+                    let firstName = (payload.fileURLs.first as? NSString)
+                        .map { $0.lastPathComponent } ?? ""
+                    if payload.fileURLs.count > 1 {
+                        list.append(("Files", "\(payload.fileURLs.count)"))
+                        list.append(("First", firstName))
+                    } else {
+                        list.append(("Name", firstName))
+                    }
+                }
+                list.append(("Copied", item.detail.replacingOccurrences(of: "Pinned · ", with: "")))
+                if item.isPinned { list.append(("Pinned", "Yes")) }
+                return list
+            }
             let words = item.value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
             var list: [(String, String)] = [
                 ("Characters", "\(item.value.count)"),

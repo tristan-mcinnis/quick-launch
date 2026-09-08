@@ -31,6 +31,10 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     /// A live on/off state the row shows as a coloured light with a word,
     /// in place of its type label. Caffeinate uses it.
     var statusLight: LauncherStatusLight?
+    /// Clipboard entries: the full multi-type contents so the UI can preview
+    /// and restore the original representation. Nil for plain-text entries
+    /// and for every non-clipboard kind.
+    var clipboardPayload: ClipboardPayload? = nil
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
@@ -80,7 +84,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .application: return "app"
         case .snippet: return "text.quote"
         case .quickLink: return "link"
-        case .clipboard: return "clipboard"
+        case .clipboard: return clipboardPayload?.kind == .image ? "photo" : "clipboard"
         case .command:
             if let icon = Self.helperCommandIcons[value] { return icon }
             if value.hasPrefix("vault.") { return "magnifyingglass" }
@@ -194,5 +198,43 @@ enum StableIdentifier {
             hash &*= 1_099_511_628_211
         }
         return String(hash, radix: 16)
+    }
+
+    /// Same FNV-1a over raw bytes, so image and rich-content entries get a
+    /// stable, content-derived identity for de-duplication and pinning.
+    static func make(_ data: Data) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
+    }
+
+    /// Text entries keep the old string id only when they are plain text (so
+    /// existing history and pins still match). Non-text, or text with a
+    /// retained non-text representation, hashes every representation with item
+    /// boundaries so re-copying the same content de-duplicates faithfully.
+    static func make(_ payload: ClipboardPayload) -> String {
+        if payload.isPlainTextOnly {
+            return make(payload.text)
+        }
+        if let items = payload.items {
+            return make(items)
+        }
+        return payload.blobKey ?? make(payload.text)
+    }
+
+    /// FNV-1a over an ordered list of pasteboard items, hashing each represent-
+    /// ation's type and bytes so item boundaries are preserved.
+    static func make(_ items: [[ClipboardRawItem]]) -> String {
+        var data = Data()
+        for item in items {
+            for rep in item {
+                data.append(Data(rep.type.utf8))
+                data.append(rep.data)
+            }
+        }
+        return make(data)
     }
 }
