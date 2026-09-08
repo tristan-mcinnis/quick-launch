@@ -205,14 +205,45 @@ final class ClipboardBlobStore: @unchecked Sendable {
 
 /// Convenience accessors for file URL parsing shared by the store and the UI.
 enum ClipboardFileReference {
-    /// Finds the display name of a file URL string ("file:///tmp/a.txt" or a
-    /// bare path) without double-encoding the scheme.
+    /// Image file types we can safely thumbnail via ImageIO (memory-mapped,
+    /// downscaled, so a huge or unusual image is never decoded in full). Kept
+    /// case-insensitive by comparing the lowercased extension.
+    static let imagePathExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "heif", "gif", "tif", "tiff",
+    ]
+
+    /// Finds a human-facing display name for a file URL string
+    /// ("file:///tmp/a.txt" or a bare path). Any percent-encoding is decoded,
+    /// so "Screenshot%202026.png" shows as "Screenshot 2026.png". This is a
+    /// display helper only — it never mutates the stored file URL.
     static func fileName(from urlString: String) -> String? {
+        guard !urlString.isEmpty else { return nil }
+        // URL.lastPathComponent already percent-decodes a real (file) URL.
         if let url = URL(string: urlString) {
             let name = url.lastPathComponent
             if !name.isEmpty { return name }
         }
-        let path = (urlString as NSString).lastPathComponent
+        // Bare path that URL(string:) could not split into components:
+        // take the last component and decode any percent-encoding.
+        let raw = (urlString as NSString).lastPathComponent
+        guard !raw.isEmpty else { return nil }
+        return raw.removingPercentEncoding ?? raw
+    }
+
+    /// The on-disk local path for a file URL string, percent-decoded, for
+    /// reading the file's bytes (e.g. a thumbnail). Returns nil for a non-file
+    /// URL so the caller never tries to read a remote URL as a local file.
+    static func localFilePath(from urlString: String) -> String? {
+        guard let url = URL(string: urlString), url.isFileURL else { return nil }
+        let path = url.path
         return path.isEmpty ? nil : path
+    }
+
+    /// True when a local path points at one of the image file types we can
+    /// safely thumbnail. Uses the file extension, then lets ImageIO validate
+    /// the actual contents (a mismatched extension simply decodes to nil).
+    static func isImageFile(atPath path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return imagePathExtensions.contains(ext)
     }
 }

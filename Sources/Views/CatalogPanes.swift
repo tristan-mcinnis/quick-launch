@@ -83,6 +83,9 @@ struct CatalogDetailPane: View {
     @ScaledMetric(relativeTo: .body) private var screenHistoryTextMaxHeight: CGFloat = 150
     /// Clipboard image payload, loaded off-main (no disk IO in the body).
     @State private var previewPayload: ClipboardPayload?
+    /// Thumbnail for a clipboard entry that is a reference to an image file on
+    /// disk (a Finder/screenshot file URL), loaded off-main in the task.
+    @State private var filePreviewImage: NSImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.sm) {
@@ -97,13 +100,20 @@ struct CatalogDetailPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: item.id) {
             previewPayload = nil
+            filePreviewImage = nil
             if item.kind == .screenHistory, let frame = viewModel.screenHistory.frame(for: item) {
                 await viewModel.screenHistory.loadOCRBoxes(for: frame)
             }
-            if item.kind == .clipboard, item.clipboardPayload?.kind == .image {
-                let loaded = await viewModel.fullClipboardPayload(for: item)
-                guard !Task.isCancelled else { return }
-                previewPayload = loaded
+            if item.kind == .clipboard {
+                if item.clipboardPayload?.kind == .image {
+                    let loaded = await viewModel.fullClipboardPayload(for: item)
+                    guard !Task.isCancelled else { return }
+                    previewPayload = loaded
+                } else if let urlString = item.clipboardPayload?.fileURLs.first {
+                    let image = await Self.fileReferenceThumbnail(from: urlString)
+                    guard !Task.isCancelled else { return }
+                    filePreviewImage = image
+                }
             }
         }
     }
@@ -205,20 +215,9 @@ struct CatalogDetailPane: View {
                payload.kind == .image,
                let data = payload.imageData,
                let image = NSImage(data: data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: DetailMetrics.previewMaxHeight)
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
-                            .strokeBorder(
-                                AQDesign.ColorToken.panelStroke,
-                                lineWidth: AQDesign.hairline
-                            )
-                    )
+                clipboardImagePreview(image)
+            } else if let image = filePreviewImage {
+                clipboardImagePreview(image)
             } else {
                 ScrollView {
                     Text(item.value)
@@ -316,6 +315,40 @@ struct CatalogDetailPane: View {
         .raisedCard()
     }
 
+    /// The clipboard detail preview card: a fitted image inside a rounded,
+    /// stroked card. Shared by inline image payloads and file-reference
+    /// thumbnails so both render identically.
+    private func clipboardImagePreview(_ image: NSImage) -> some View {
+        Image(nsImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: .infinity, maxHeight: DetailMetrics.previewMaxHeight)
+            .clipShape(
+                RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                    .strokeBorder(
+                        AQDesign.ColorToken.panelStroke,
+                        lineWidth: AQDesign.hairline
+                    )
+            )
+    }
+
+    /// Off-main decode of a clipboard file reference's image bytes for the
+    /// detail preview. Reads the first file URL that is a supported image on
+    /// disk and returns a downscaled NSImage; returns nil for a non-image file
+    /// or a missing/unreadable file so the row falls back to the text card.
+    nonisolated private static func fileReferenceThumbnail(from urlString: String) async -> NSImage? {
+        guard let path = ClipboardFileReference.localFilePath(from: urlString),
+              ClipboardFileReference.isImageFile(atPath: path) else { return nil }
+        let cgImage = await Task.detached(priority: .utility) {
+            ScreenshotTextIndex.downsampledImage(atPath: path, maximumPixels: 640)
+        }.value
+        guard let cgImage else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
     private var rows: [(String, String)] {
         switch item.kind {
         case .screenshot:
@@ -342,8 +375,7 @@ struct CatalogDetailPane: View {
             if let payload = item.clipboardPayload, payload.kind == .fileURL {
                 var list: [(String, String)] = [("Type", "File")]
                 if !payload.fileURLs.isEmpty {
-                    let firstName = (payload.fileURLs.first as? NSString)
-                        .map { $0.lastPathComponent } ?? ""
+                    let firstName = ClipboardFileReference.fileName(from: payload.fileURLs.first ?? "") ?? ""
                     if payload.fileURLs.count > 1 {
                         list.append(("Files", "\(payload.fileURLs.count)"))
                         list.append(("First", firstName))
