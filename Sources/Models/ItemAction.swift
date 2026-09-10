@@ -382,6 +382,10 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case saveSnippet
     case searchWeb
     case regenerate
+    /// `⇧⌘R`: pick a model, then answer the last question again on it.
+    case regenerateWithModel
+    /// `⌘⇧O`: make the picked model the active one, without answering again.
+    case changeModel
     case newChat
     case chatHistory
     case previousChat
@@ -401,6 +405,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
+        case .regenerateWithModel: "Regenerate with Model…"
+        case .changeModel: "Change Model"
         case .newChat: "New Chat"
         case .chatHistory: "Browse Chat History"
         case .previousChat: "Previous Chat"
@@ -420,6 +426,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
         case .regenerate: "arrow.clockwise"
+        case .regenerateWithModel: "arrow.clockwise.circle"
+        case .changeModel: "cpu"
         case .newChat: "plus.bubble"
         case .chatHistory: "clock.arrow.circlepath"
         case .previousChat: "chevron.left"
@@ -432,13 +440,17 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
 
     var shortcut: KeyShortcut {
         switch self {
-        case .replaceSelection: .commandShift("r")
+        // Replace Selection moved off `⇧⌘R` when that became Regenerate with
+        // Model, which Raycast's Quick AI owns.
+        case .replaceSelection: .commandShift("v")
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")
+        case .regenerateWithModel: .commandShift("r")
+        case .changeModel: .commandShift("o")
         case .newChat: .command("n")
         case .chatHistory: .command("h")
         case .previousChat: .command("[")

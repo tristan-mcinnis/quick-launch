@@ -6,6 +6,11 @@ struct ProviderSettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var apiKey = ""
     @State private var keyStatus: String?
+    @State private var showingManageModels = false
+
+    /// The shared model profiles. A parameter would be better, but this pane
+    /// is built by `SettingsView`, which owns the pane list.
+    private var preferences: ModelPreferenceStore { .shared }
 
     private var selectedProviderID: Binding<UUID> {
         Binding(
@@ -26,6 +31,16 @@ struct ProviderSettingsView: View {
     }
 
     var body: some View {
+        Group {
+            if showingManageModels {
+                ManageModelsView(viewModel: viewModel) { showingManageModels = false }
+            } else {
+                providerPane
+            }
+        }
+    }
+
+    private var providerPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 providerCard
@@ -65,6 +80,15 @@ struct ProviderSettingsView: View {
             if let provider, let selectedIndex {
                 providerEditor(provider, index: selectedIndex)
             }
+
+            CardNote {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    Button("Manage models") { showingManageModels = true }
+                        .accessibilityLabel("Manage models")
+                    CardText("Every model from every provider, with the switch that hides it from the pickers and its reasoning effort.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -85,7 +109,7 @@ struct ProviderSettingsView: View {
             HStack(spacing: AQDesign.Space.standard) {
                 if !provider.models.isEmpty {
                     Picker("Model", selection: modelBinding(provider.id)) {
-                        ForEach(provider.models, id: \.self) { model in
+                        ForEach(visibleModels(for: provider), id: \.self) { model in
                             Text(model).tag(model)
                         }
                     }
@@ -224,12 +248,26 @@ struct ProviderSettingsView: View {
         )
     }
 
+    /// The models this picker may offer: the provider's, minus the ones turned
+    /// off on the Manage Models screen, plus the current selection so the
+    /// picker can always show what is chosen.
+    private func visibleModels(for provider: InferenceProvider) -> [String] {
+        ModelCatalogService.visibleModels(
+            for: provider,
+            currentModel: provider.selectedModel,
+            preferences: preferences
+        )
+    }
+
     private func modelBinding(_ providerID: UUID) -> Binding<String> {
         Binding(
             get: {
                 viewModel.settings.providers.first(where: { $0.id == providerID })?.selectedModel ?? ""
             },
-            set: { viewModel.selectModel(providerID: providerID, model: $0) }
+            set: {
+                viewModel.selectModel(providerID: providerID, model: $0)
+                preferences.noteModelSelection(providerID: providerID, model: $0)
+            }
         )
     }
 
@@ -273,7 +311,11 @@ private struct VisionModelPicker: View {
             .flatMap { provider -> [Option] in
                 let current = provider.selectedModel.isEmpty ? "selected model" : provider.selectedModel
                 var list = [Option(id: "\(provider.id.uuidString)|", label: "\(provider.name) \u{00B7} \(current)")]
-                for model in provider.models where model != provider.selectedModel {
+                let models = ModelCatalogService.visibleModels(
+                    for: provider,
+                    currentModel: provider.selectedModel
+                )
+                for model in models where model != provider.selectedModel {
                     list.append(Option(id: "\(provider.id.uuidString)|\(model)", label: "\(provider.name) \u{00B7} \(model)"))
                 }
                 return list

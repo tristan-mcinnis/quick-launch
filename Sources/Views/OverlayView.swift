@@ -7,9 +7,28 @@ struct OverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(spacing: 0) {
-            // Input row: a leading glyph, the field, and one square menu
-            // button. No send circle and no accent anywhere — Return sends.
+            // Input row: the Add Context control, a leading glyph, the field,
+            // and one square menu button. No send circle and no accent
+            // anywhere — Return sends.
             HStack(spacing: AQDesign.Space.row) {
+                Button {
+                    viewModel.toggleAddContextMenu()
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(AQDesign.TypeToken.glyph)
+                        .foregroundStyle(
+                            viewModel.isAddContextMenuPresented
+                                ? AQDesign.ColorToken.textPrimary
+                                : AQDesign.ColorToken.textTertiary
+                        )
+                        .frame(width: House.Control.tile, height: House.Control.tile)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add Context")
+                .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
+                .help("Add context: a window, a selection, an area, or a screen (or type @)")
+
                 Image(systemName: viewModel.isAnswerActive ? "sparkles" : "magnifyingglass")
                     .font(AQDesign.TypeToken.glyph)
                     .foregroundStyle(
@@ -35,8 +54,24 @@ struct OverlayView: View {
                         viewModel.handleTab() ? .handled : .ignored
                     }
                     .onKeyPress(.downArrow) {
+                        if viewModel.isAskQuestionActive {
+                            viewModel.moveAskQuestionSelection(1)
+                            return .handled
+                        }
                         if viewModel.isTransformChooserPresented {
                             viewModel.moveTransformChooserSelection(1)
+                            return .handled
+                        }
+                        if viewModel.isModelChooserPresented {
+                            viewModel.moveModelChooserSelection(1)
+                            return .handled
+                        }
+                        if viewModel.isAddContextMenuPresented {
+                            viewModel.moveAddContextSelection(1)
+                            return .handled
+                        }
+                        if viewModel.isConversationViewPresented, viewModel.input.isEmpty {
+                            viewModel.moveConversationViewSelection(1)
                             return .handled
                         }
                         if viewModel.isAnswerActive, viewModel.input.isEmpty {
@@ -48,8 +83,24 @@ struct OverlayView: View {
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
+                        if viewModel.isAskQuestionActive {
+                            viewModel.moveAskQuestionSelection(-1)
+                            return .handled
+                        }
                         if viewModel.isTransformChooserPresented {
                             viewModel.moveTransformChooserSelection(-1)
+                            return .handled
+                        }
+                        if viewModel.isModelChooserPresented {
+                            viewModel.moveModelChooserSelection(-1)
+                            return .handled
+                        }
+                        if viewModel.isAddContextMenuPresented {
+                            viewModel.moveAddContextSelection(-1)
+                            return .handled
+                        }
+                        if viewModel.isConversationViewPresented, viewModel.input.isEmpty {
+                            viewModel.moveConversationViewSelection(-1)
                             return .handled
                         }
                         if viewModel.isAnswerActive, viewModel.input.isEmpty {
@@ -70,12 +121,15 @@ struct OverlayView: View {
                         viewModel.moveApplicationSelection(-1)
                         return .handled
                     }
-                    .onChange(of: viewModel.input) { _, _ in
+                    .onChange(of: viewModel.input) { _, newValue in
                         viewModel.resetApplicationSelection()
                         viewModel.noteInteraction()
                         viewModel.screenHistory.inputDidChange()
+                        // Typing `@` opens the same Add Context menu the
+                        // control left of the field does.
+                        viewModel.addContextTriggerDidChange(newValue)
                     }
-                    .disabled(viewModel.isStreaming)
+                    .disabled(viewModel.isStreaming && !viewModel.isAskQuestionActive)
 
                 // Working / copied lives in the same slot; at rest the row
                 // carries one control, the menu, exactly as the design does.
@@ -157,6 +211,16 @@ struct OverlayView: View {
                 }
             }
 
+            if viewModel.isModelChooserPresented {
+                HouseDivider()
+                modelChooser
+            }
+
+            if viewModel.isAddContextMenuPresented {
+                HouseDivider()
+                addContextMenu
+            }
+
             if viewModel.hasPendingAttachment {
                 HouseDivider()
                 HStack(spacing: AQDesign.Space.standard) {
@@ -200,7 +264,16 @@ struct OverlayView: View {
                 .padding(.vertical, 8)
             }
 
-            if !viewModel.isTransformChooserPresented, !viewModel.launcherMatches.isEmpty {
+            if viewModel.isConversationViewPresented {
+                HouseDivider()
+                ConversationView(viewModel: viewModel)
+            }
+
+            if !viewModel.isTransformChooserPresented,
+               !viewModel.isModelChooserPresented,
+               !viewModel.isAddContextMenuPresented,
+               !viewModel.isConversationViewPresented,
+               !viewModel.launcherMatches.isEmpty {
                 HouseDivider()
                 if viewModel.isGridCatalog {
                     EmojiGridView(viewModel: viewModel)
@@ -248,12 +321,16 @@ struct OverlayView: View {
                 }
             }
 
-            if !viewModel.output.isEmpty || viewModel.isStreaming {
+            if !viewModel.isConversationViewPresented,
+               (!viewModel.output.isEmpty || viewModel.isStreaming) {
                 HouseDivider()
                 VStack(alignment: .leading, spacing: 8) {
                     if viewModel.conversationMessages.count > 2 {
                         // Earlier turns, compact; the latest answer follows in full.
-                        ConversationTranscript(messages: Array(viewModel.conversationMessages.dropLast(2)))
+                        ConversationTranscript(
+                            messages: Array(viewModel.conversationMessages.dropLast(2)),
+                            viewModel: viewModel
+                        )
                             .frame(maxHeight: PanelSizing.transcriptHeight)
                         HouseDivider()
                     }
@@ -261,7 +338,20 @@ struct OverlayView: View {
                         HouseChip(text: question)
                             .accessibilityLabel("Question: \(question)")
                     }
-                    if viewModel.isStreaming, viewModel.output.isEmpty {
+                    // The model paused to ask. The card is live until an
+                    // option is picked, then stays in the thread as the record.
+                    if let ask = viewModel.pendingAskQuestion {
+                        AskUserQuestionCard(
+                            question: ask,
+                            selectedIndex: viewModel.askQuestionSelectionIndex,
+                            isInteractive: !ask.isAnswered,
+                            onMove: { viewModel.moveAskQuestionSelection($0) },
+                            onPick: { viewModel.answerAskQuestion(index: $0) }
+                        )
+                    }
+                    if viewModel.isStreaming,
+                       viewModel.output.isEmpty,
+                       viewModel.pendingAskQuestion == nil {
                         HStack(spacing: 8) {
                             ThinkingIndicator()
                                 .frame(width: 18, height: 18)
@@ -270,6 +360,10 @@ struct OverlayView: View {
                                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
                         }
                         .frame(height: 28)
+                    } else if viewModel.pendingAskQuestion != nil, viewModel.output.isEmpty {
+                        // The card is the only thing to show; an empty answer
+                        // body would draw a bare streaming caret under it.
+                        EmptyView()
                     } else {
                         MarkdownTextView(
                             markdown: viewModel.output,
@@ -490,6 +584,116 @@ struct OverlayView: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var modelChooser: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text(viewModel.modelChooserPurpose.title)
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: viewModel.modelChooserPurpose.confirmTitle, keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.modelChooserOptions,
+                selectedIndex: $viewModel.modelChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { _ in
+                    Task { await viewModel.runModelChooserSelection() }
+                }
+            ) { _, option, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: "cpu")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(option.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(
+                    rows: viewModel.modelChooserOptions.count,
+                    padded: false
+                )
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(viewModel.modelChooserPurpose.title)
+    }
+
+    private var addContextMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Add Context")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Add", keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.addContextOptions,
+                selectedIndex: $viewModel.addContextIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { entry in
+                    Task { await viewModel.addContext(entry) }
+                }
+            ) { _, entry, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: entry.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(entry.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(entry.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(
+                    rows: viewModel.addContextOptions.count,
+                    padded: false
+                )
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Add Context")
+    }
+
     private var launcherSectionTitle: String {
         if let scope = viewModel.catalogScope { return scope.title }
         return viewModel.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -561,17 +765,17 @@ struct OverlayView: View {
             Divider()
             ForEach(viewModel.settings.providers) { provider in
                 Menu(provider.name) {
-                    if provider.models.isEmpty {
+                    let models = viewModel.visibleModels(for: provider)
+                    if models.isEmpty {
                         Button("Refresh models") {
                             Task { await viewModel.refreshModels(providerID: provider.id) }
                         }
                     } else {
-                        ForEach(provider.models, id: \.self) { model in
+                        ForEach(models, id: \.self) { model in
                             Button {
                                 viewModel.selectModel(providerID: provider.id, model: model)
                             } label: {
-                                if provider.id == viewModel.settings.selectedProviderID,
-                                   model == provider.selectedModel {
+                                if viewModel.isActiveModel(provider: provider, model: model) {
                                     Label(model, systemImage: "checkmark")
                                 } else {
                                     Text(model)
@@ -615,6 +819,7 @@ struct OverlayView: View {
 
 private struct ConversationTranscript: View {
     let messages: [QuickMessage]
+    @Bindable var viewModel: QuickViewModel
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -630,11 +835,17 @@ private struct ConversationTranscript: View {
                                         ? AQDesign.ColorToken.textPrimary
                                         : AQDesign.ColorToken.textTertiary
                                 )
-                            Text(String(message.content.prefix(2_000)))
-                                .font(AQDesign.TypeToken.detail)
-                                .lineLimit(message.role == .user ? 3 : 8)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if let question = message.askUserQuestion {
+                                // The record of a question the model asked and
+                                // the option the user picked.
+                                AskUserQuestionCard(question: question, isInteractive: false)
+                            } else {
+                                CollapsibleMessageText(
+                                    state: viewModel.collapseState(for: message)
+                                ) {
+                                    viewModel.toggleTranscriptMessage(message.id)
+                                }
+                            }
                         }
                         .id(message.id)
                     }

@@ -393,6 +393,10 @@ private struct GeneralTab: View {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 hotkeysCard
                 behaviourCard
+                // High in the pane: these are behaviour settings, and the
+                // cards under them (Learning & Review especially) are long.
+                QuickAISettingsView(viewModel: viewModel)
+                FallbackCommandsView(viewModel: viewModel)
                 learningAndReviewCard
                 historyCard
                 appearanceCard
@@ -809,17 +813,6 @@ private struct GeneralTab: View {
                 Button("Clear history", role: .destructive) {
                     viewModel.clearHistory()
                 }
-            }
-
-            SettingsRow(title: "Start a new thread after") {
-                Picker("Start a new thread after", selection: viewModel.settingsBinding(\.newConversationAfterMinutes)) {
-                    Text("5 minutes").tag(5)
-                    Text("15 minutes").tag(15)
-                    Text("30 minutes").tag(30)
-                    Text("1 hour").tag(60)
-                }
-                .labelsHidden()
-                .frame(width: 140)
             }
 
             SettingsRow(title: "Keep my place after closing") {

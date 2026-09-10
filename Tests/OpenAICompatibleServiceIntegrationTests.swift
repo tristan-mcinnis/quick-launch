@@ -84,6 +84,32 @@ struct OpenAICompatibleServiceIntegrationTests {
             // Any error is fine — the service should surface the failure
         }
     }
+
+    // MARK: — The chosen reasoning effort reaches the server
+
+    @Test func testReasoningEffortIsSentOnTheWire() async throws {
+        let server = try LocalHTTPServer(
+            responseBody: "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"index\":0}]}\r\n\r\ndata: [DONE]\r\n\r\n",
+            bodyValidator: { body in
+                guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                    return false
+                }
+                return json["reasoning_effort"] as? String == "high"
+                    && json["model"] as? String == "test-model"
+            }
+        )
+        defer { Task { await server.stop() } }
+        let port = try await server.start()
+
+        let service = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!,
+            modelName: "test-model",
+            reasoningEffort: .high
+        )
+        for try await _ in service.send(prompt: "hi") {}
+
+        #expect(await server.bodyWasValid == true)
+    }
 }
 
 // MARK: — Tiny atomic flag for cross-thread one-shot signalling

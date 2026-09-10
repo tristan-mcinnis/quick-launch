@@ -30,4 +30,9 @@ enum AppPaths {
     static func directory(_ name: String) -> URL {
         applicationSupportDirectory.appendingPathComponent(name, isDirectory: true)
     }
+
+    /// Per-model profiles: which models are on, and their reasoning effort.
+    static var modelPreferencesFile: URL {
+        file("model-preferences.json")
+    }
 }

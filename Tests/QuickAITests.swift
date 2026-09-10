@@ -36,7 +36,7 @@ struct QuickAITests {
         #expect(!vm.hasPendingAttachment)
     }
 
-    @Test func returnOnAnAnswerDoesNothingAndCommandReturnPastesItBack() async {
+    @Test func returnOnAnAnswerRunsThePrimaryActionAndCommandReturnPastesItBack() async {
         let mock = MockQuickService()
         let selection = PasteRecorder()
         let vm = QuickViewModel(service: mock, selectedTextService: selection)
@@ -44,10 +44,13 @@ struct QuickAITests {
         vm.rememberSelectionTarget(SelectionTarget(processIdentifier: 1, applicationName: "Notes"))
         await ask(vm, mock, "hello", reply: "Bonjour")
         vm.input = ""
+        // Return with an empty composer runs the Quick AI primary action,
+        // which is Paste to active app by default.
         await vm.submitResolvingFuzzyAlias()
-        #expect(selection.pasted == nil)
+        #expect(selection.pasted == "Bonjour")
         #expect(await mock.sendCallCount == 1)
-        // ⌘↩ is the one paste-back shortcut, the same as every result action.
+        selection.clear()
+        // ⌘↩ is the explicit paste-back, the same as every result action.
         #expect(vm.performShortcut(characters: nil, keyCode: VirtualKey.return.rawValue, modifiers: [.command]))
         try? await Task.sleep(for: .milliseconds(50))
         #expect(selection.pasted == "Bonjour")
@@ -57,7 +60,7 @@ struct QuickAITests {
         let mock = MockQuickService()
         let vm = QuickViewModel(service: mock)
         vm.settings.autoCopy = false
-        vm.settings.newConversationAfterMinutes = 60
+        vm.settings.newChatInterval = .oneHour
         await ask(vm, mock, "first question", reply: "First answer")
         vm.startNewConversation()
         await ask(vm, mock, "second question", reply: "Second answer")
@@ -112,7 +115,7 @@ struct QuickAITests {
         let mock = MockQuickService()
         let vm = QuickViewModel(service: mock)
         vm.settings.autoCopy = false
-        vm.settings.newConversationAfterMinutes = 60
+        vm.settings.newChatInterval = .oneHour
         await ask(vm, mock, "older question", reply: "Older answer")
         vm.startNewConversation()
         await ask(vm, mock, "newer question", reply: "Newer answer")
@@ -170,4 +173,5 @@ private final class PasteRecorder: SelectedTextServicing {
     func replace(_ text: String, in context: SelectedTextContext) async -> Bool { true }
     func paste(_ text: String, to target: SelectionTarget) async -> Bool { pasted = text; return true }
     func openAccessibilitySettings() {}
+    func clear() { pasted = nil }
 }

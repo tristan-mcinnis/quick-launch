@@ -1,19 +1,78 @@
 import Foundation
 
+/// How a chosen reasoning effort is written into a chat-completions body.
+///
+/// "OpenAI-compatible" endpoints do not agree on this field, so the shape
+/// belongs to the endpoint rather than to one global key. Each case follows
+/// its own vendor's documented request:
+///
+/// - `.openAI`: a top-level `reasoning_effort` string (OpenAI's reasoning
+///   models, and the compatible servers that copy that parameter).
+/// - `.deepSeek`: DeepSeek's thinking-mode example sends a top-level
+///   `reasoning_effort` string beside `thinking: {"type": "enabled"}`. The
+///   `thinking` object reaches the body through the OpenAI SDK's
+///   `extra_body` in their sample, which is the same place it lands here.
+///   DeepSeek maps `low` to `low` and `high` to `high`.
+enum ReasoningEffortWireFormat: Sendable, Hashable, CaseIterable {
+    case openAI
+    case deepSeek
+
+    /// The shape the endpoint at `baseURL` speaks. DeepSeek's own host takes
+    /// DeepSeek's shape; every other OpenAI-compatible endpoint — the local
+    /// models daemon among them — takes the OpenAI one. A caller that knows
+    /// better can pass a shape explicitly to the service.
+    static func forEndpoint(_ baseURL: URL) -> Self {
+        let host = baseURL.host()?.lowercased() ?? ""
+        return host.contains("deepseek") ? .deepSeek : .openAI
+    }
+
+    /// The body fields a chosen effort adds. Empty when there is no effort to
+    /// send, which is what leaves the request body exactly as it was before
+    /// the setting existed.
+    func fields(for effort: ReasoningEffort?) -> [String: Any] {
+        guard let effort, effort != .modelDefault else { return [:] }
+        switch self {
+        case .openAI:
+            return ["reasoning_effort": effort.rawValue]
+        case .deepSeek:
+            return [
+                "thinking": ["type": "enabled"],
+                "reasoning_effort": effort.rawValue,
+            ]
+        }
+    }
+}
+
 /// Streaming OpenAI Chat Completions client. One instance per request;
 /// it holds no connection state between calls.
 ///
-/// When `webSearch` is set, the request offers the model one function tool
-/// (`search_web`). The service runs the tool loop itself: a `tool_calls`
-/// finish executes the searches, feeds the results back as `tool` messages,
-/// and streams the next round, up to `maxToolRounds`. Callers keep the same
-/// one-stream interface; tool progress arrives as `StreamDelta.status`.
+/// Two function tools can be offered to the model, each only when its
+/// backing closure exists: `search_web` when `webSearch` is set, and
+/// `ask_user_question` when `askUserQuestion` is set. The service runs the
+/// tool loop itself: a `tool_calls` finish executes the searches (or asks
+/// the user through the closure, which suspends until they pick), feeds the
+/// results back as `tool` messages, and streams the next round, up to
+/// `maxToolRounds`. Callers keep the same one-stream interface; tool
+/// progress arrives as `StreamDelta.status`, and a paused question arrives
+/// as `StreamDelta.question`.
+///
+/// `reasoningEffort` is passed in by the caller, which is the layer that
+/// knows the model's profile; the service only writes it onto the wire. A
+/// `nil` effort, or `.modelDefault`, adds nothing to the body.
 struct OpenAICompatibleService: QuickService, Sendable {
     let baseURL: URL
     let modelName: String
     let apiKey: String?
     let systemPrompt: String
     let webSearch: (@Sendable (String) async throws -> String)?
+    /// Asks the user a multiple-choice question and suspends until they
+    /// pick. Nil answer means they dismissed it.
+    let askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
+    /// The chosen reasoning effort, or `nil` for "send nothing".
+    let reasoningEffort: ReasoningEffort?
+    /// How this endpoint spells that effort. Defaults to the endpoint's own
+    /// shape, so a caller only has to pass the effort itself.
+    let reasoningEffortFormat: ReasoningEffortWireFormat
     private let session: URLSession
 
     static let systemPrompt = QuickSettings.defaultSystemPrompt
@@ -27,6 +86,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
         apiKey: String? = nil,
         systemPrompt: String = QuickSettings.defaultSystemPrompt,
         webSearch: (@Sendable (String) async throws -> String)? = nil,
+        askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)? = nil,
+        reasoningEffort: ReasoningEffort? = nil,
+        reasoningEffortFormat: ReasoningEffortWireFormat? = nil,
         session: URLSession = .shared
     ) {
         self.baseURL = baseURL
@@ -34,6 +96,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
         self.apiKey = apiKey
         self.systemPrompt = systemPrompt
         self.webSearch = webSearch
+        self.askUserQuestion = askUserQuestion
+        self.reasoningEffort = reasoningEffort
+        self.reasoningEffortFormat = reasoningEffortFormat ?? .forEndpoint(baseURL)
         self.session = session
     }
 
@@ -103,8 +168,14 @@ struct OpenAICompatibleService: QuickService, Sendable {
             "stream": true,
             "messages": wireMessages,
         ]
-        if webSearch != nil {
-            body["tools"] = [Self.searchToolDefinition]
+        var tools: [[String: Any]] = []
+        if webSearch != nil { tools.append(Self.searchToolDefinition) }
+        if askUserQuestion != nil { tools.append(Self.askUserQuestionToolDefinition) }
+        if !tools.isEmpty { body["tools"] = tools }
+        // Nothing is added when there is no effort to send, so an unset
+        // effort produces the same body this service always produced.
+        for (key, value) in reasoningEffortFormat.fields(for: reasoningEffort) {
+            body[key] = value
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
@@ -124,6 +195,48 @@ struct OpenAICompatibleService: QuickService, Sendable {
                     ]
                 ],
                 "required": ["query"],
+            ],
+        ],
+    ] }
+
+    /// The multiple-choice question tool. The description is the trigger:
+    /// Raycast's manual notes the reliable way to get a question is naming
+    /// the tool or describing the flow, so the model has to recognise
+    /// ambiguity from this text alone.
+    static var askUserQuestionToolDefinition: [String: Any] { [
+        "type": "function",
+        "function": [
+            "name": "ask_user_question",
+            "description": "Ask the user a short multiple-choice question when the request is ambiguous, when a decision is theirs to make, or when they asked you to offer options. The question appears inline in the conversation; the user picks one option with the keyboard and you continue with that answer. Ask one question at a time, with 2 to 5 short options. Prefer this over guessing.",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "question": [
+                        "type": "string",
+                        "description": "The question to ask, one short sentence.",
+                    ],
+                    "options": [
+                        "type": "array",
+                        "minItems": AskUserQuestion.minimumOptions,
+                        "maxItems": AskUserQuestion.maximumOptions,
+                        "description": "The choices, in the order they should be shown. 2 to 5 of them.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "label": [
+                                    "type": "string",
+                                    "description": "Short option text, one to four words.",
+                                ],
+                                "detail": [
+                                    "type": "string",
+                                    "description": "Optional one-line explanation of what this option means.",
+                                ],
+                            ],
+                            "required": ["label"],
+                        ],
+                    ],
+                ],
+                "required": ["question", "options"],
             ],
         ],
     ] }
@@ -152,28 +265,77 @@ struct OpenAICompatibleService: QuickService, Sendable {
                             transcript: transcript,
                             continuation: continuation
                         )
-                        guard let webSearch, !toolCalls.isEmpty, round < Self.maxToolRounds else {
+                        guard !toolCalls.isEmpty, round < Self.maxToolRounds else {
                             break
                         }
                         transcript.append(Self.assistantToolCallMessage(toolCalls))
                         for call in toolCalls {
-                            continuation.yield(StreamDelta(
-                                text: nil,
-                                finishReason: nil,
-                                status: "Searching the web…"
-                            ))
-                            let query = Self.queryArgument(from: call.arguments)
-                            let result: String
-                            do {
-                                result = try await webSearch(query)
-                            } catch {
-                                result = "Search failed: \(error.localizedDescription)"
+                            switch call.name {
+                            case "search_web":
+                                guard let webSearch else {
+                                    transcript.append(Self.toolResult(
+                                        call,
+                                        content: "The search_web tool is unavailable."
+                                    ))
+                                    continue
+                                }
+                                continuation.yield(StreamDelta(
+                                    text: nil,
+                                    finishReason: nil,
+                                    status: "Searching the web…"
+                                ))
+                                let query = Self.queryArgument(from: call.arguments)
+                                let result: String
+                                do {
+                                    result = try await webSearch(query)
+                                } catch {
+                                    result = "Search failed: \(error.localizedDescription)"
+                                }
+                                transcript.append(Self.toolResult(
+                                    call,
+                                    content: Self.wrappedSearchResult(result)
+                                ))
+                            case "ask_user_question":
+                                // A malformed call, or one with fewer than two
+                                // usable options, never ends the turn: the
+                                // reason goes back and the model answers.
+                                guard let askUserQuestion else {
+                                    transcript.append(Self.toolResult(
+                                        call,
+                                        content: AskUserQuestionResult.unusable("the tool is unavailable")
+                                    ))
+                                    continue
+                                }
+                                guard let question = AskUserQuestionParser.parse(
+                                    arguments: call.arguments
+                                ) else {
+                                    transcript.append(Self.toolResult(
+                                        call,
+                                        content: AskUserQuestionResult.unusable(
+                                            "it needs a question and at least two options with labels"
+                                        )
+                                    ))
+                                    continue
+                                }
+                                continuation.yield(StreamDelta(
+                                    text: nil,
+                                    finishReason: nil,
+                                    status: "Waiting for your answer…",
+                                    question: question
+                                ))
+                                let answer = await askUserQuestion(question)
+                                transcript.append(Self.toolResult(
+                                    call,
+                                    content: answer.map {
+                                        AskUserQuestionResult.picked($0, in: question)
+                                    } ?? AskUserQuestionResult.dismissed
+                                ))
+                            default:
+                                transcript.append(Self.toolResult(
+                                    call,
+                                    content: "The \(call.name) tool is unavailable."
+                                ))
                             }
-                            transcript.append([
-                                "role": "tool",
-                                "tool_call_id": call.id,
-                                "content": Self.wrappedSearchResult(result),
-                            ])
                         }
                     }
                     continuation.finish()
@@ -243,7 +405,19 @@ struct OpenAICompatibleService: QuickService, Sendable {
         guard sawToolFinish || !pending.isEmpty else { return [] }
         return pending.sorted { $0.key < $1.key }
             .map(\.value)
-            .filter { $0.name == "search_web" && !$0.id.isEmpty }
+            .filter { Self.toolNames.contains($0.name) && !$0.id.isEmpty }
+    }
+
+    static let toolNames: Set<String> = ["search_web", "ask_user_question"]
+
+    /// One tool result message. Every tool answers with plain text; the
+    /// model reads it as the observation for that call.
+    private static func toolResult(_ call: PendingToolCall, content: String) -> [String: Any] {
+        [
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": content,
+        ]
     }
 
     private static func assistantToolCallMessage(_ calls: [PendingToolCall]) -> [String: Any] {

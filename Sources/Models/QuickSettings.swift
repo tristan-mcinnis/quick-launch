@@ -13,9 +13,114 @@ enum TypeToClickContinuation: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// What Return does on a finished Quick AI answer with the composer empty.
+/// The answer is already on screen either way: this is delivery, not
+/// generation, and it never touches how an answer is produced.
+enum QuickAIPrimaryAction: String, Codable, CaseIterable, Sendable {
+    case pasteToActiveApp
+    case copyToClipboard
+
+    var displayName: String {
+        switch self {
+        case .pasteToActiveApp: "Paste to active app"
+        case .copyToClipboard: "Copy to clipboard"
+        }
+    }
+
+    /// One line on what Return will do, for the settings row's detail.
+    var detail: String {
+        switch self {
+        case .pasteToActiveApp:
+            "Return pastes the answer into the app behind Quick Launch. Where there is no app to paste into, it says so and leaves the answer on screen."
+        case .copyToClipboard:
+            "Return copies the answer. Paste it yourself wherever it is needed."
+        }
+    }
+}
+
+/// When the current chat is replaced by a new one. Supersedes the raw minute
+/// count that used to live in `newConversationAfterMinutes`.
+///
+/// The timed options are the old behaviour with a wider menu. `always` starts
+/// a fresh chat for every question. `never` keeps the one thread until the
+/// user starts a new chat by hand.
+enum NewChatInterval: String, Codable, CaseIterable, Sendable, Identifiable {
+    case fiveMinutes
+    case tenMinutes
+    case fifteenMinutes
+    case thirtyMinutes
+    case oneHour
+    case always
+    case never
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fiveMinutes: "5 minutes"
+        case .tenMinutes: "10 minutes"
+        case .fifteenMinutes: "15 minutes"
+        case .thirtyMinutes: "30 minutes"
+        case .oneHour: "1 hour"
+        case .always: "Always"
+        case .never: "Never"
+        }
+    }
+
+    /// The inactivity window in minutes. Nil for `always` and `never`, which
+    /// are not windows.
+    var minutes: Int? {
+        switch self {
+        case .fiveMinutes: 5
+        case .tenMinutes: 10
+        case .fifteenMinutes: 15
+        case .thirtyMinutes: 30
+        case .oneHour: 60
+        case .always, .never: nil
+        }
+    }
+
+    /// The nearest timed option to a legacy minute count. Ties go to the
+    /// shorter window, so 7 minutes reads as 5 and 45 as 30.
+    static func nearest(toMinutes minutes: Int) -> NewChatInterval {
+        let options = allCases.filter { $0.minutes != nil }
+        var best = options[0]
+        for option in options {
+            guard let candidate = option.minutes, let current = best.minutes else { continue }
+            if abs(minutes - candidate) < abs(minutes - current) { best = option }
+        }
+        return best
+    }
+}
+
+/// Identity of one entry in the Fallback Commands list.
+///
+/// An identifier, never a stored object: a command the user later deletes
+/// leaves a stale id, which the runner reports instead of crashing.
+enum FallbackCommandID {
+    /// The Ask AI row: unmatched text streams to the model. The default.
+    static let askAI = "askAI:ask"
+
+    static func savedPrompt(_ id: UUID) -> String { "prompt:\(id.uuidString)" }
+    static func command(_ itemID: String) -> String { "command:\(itemID)" }
+
+    /// The saved AI command behind an identifier, or nil for another kind.
+    static func savedPromptUUID(from identifier: String) -> UUID? {
+        guard identifier.hasPrefix("prompt:") else { return nil }
+        return UUID(uuidString: String(identifier.dropFirst("prompt:".count)))
+    }
+
+    /// The command catalog item id behind an identifier, or nil for another kind.
+    static func commandItemID(from identifier: String) -> String? {
+        guard identifier.hasPrefix("command:") else { return nil }
+        let itemID = String(identifier.dropFirst("command:".count))
+        return itemID.isEmpty ? nil : itemID
+    }
+}
+
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 21
+    var configurationVersion: Int = 22
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -122,14 +227,36 @@ struct QuickSettings: Codable, Sendable {
     // Lightweight follow-up history
     var historyEnabled: Bool = true
     var historyLimit: Int = 20
-    var newConversationAfterMinutes: Int = 15
+    /// When a new chat replaces the last one. Replaces the old
+    /// `newConversationAfterMinutes` count; the migration maps it.
+    var newChatInterval: NewChatInterval = .fiveMinutes
     var reopenRetentionSeconds: Int = 10
+
+    // Quick AI
+    /// What Return does on a finished answer with the composer empty.
+    /// Automatic copy (`autoCopy`) is untouched by this: it still governs
+    /// what happens the moment a result arrives.
+    var quickAIPrimaryAction: QuickAIPrimaryAction = .pasteToActiveApp
+    /// Draw the ⇥ hint in root search. Tab opens Quick AI either way.
+    var tabShortcutHintVisible: Bool = true
+    /// The provider and model the Quick AI surface answers with. Unset means
+    /// the current selection, so the two can never disagree by accident.
+    var quickAIProviderID: UUID?
+    var quickAIModel: String = ""
+    /// The commands unmatched root-search text runs on Return, in order. The
+    /// first one runs. An empty list means Return runs nothing at all.
+    var fallbackCommandIDs: [String] = [FallbackCommandID.askAI]
     /// Offer the model a `search_web` tool (backed by SearXNG) so it can
     /// look things up mid-answer instead of guessing from training data.
     var modelWebSearchEnabled: Bool = true
 
     // Persistence key
     static let defaultsKey = "QuickSettings"
+
+    /// A key an earlier version wrote that this version reads once and maps.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case newConversationAfterMinutes
+    }
 
     // Custom decoder so settings blobs written before a field was added
     // still load cleanly, falling back to each field's default.
@@ -139,7 +266,12 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 21
+        configurationVersion = 22
+        // Read before the migration at the end: the old key is gone from this
+        // version's keys, so it needs its own container.
+        let legacyNewConversationAfterMinutes = try decoder.container(
+            keyedBy: LegacyCodingKeys.self
+        ).decodeIfPresent(Int.self, forKey: .newConversationAfterMinutes)
         hotkeyKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .hotkeyKeyCode) ?? 49
         hotkeyModifiers = try c.decodeIfPresent(UInt.self, forKey: .hotkeyModifiers) ?? 524288
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
@@ -239,7 +371,22 @@ struct QuickSettings: Codable, Sendable {
             ?? Self.defaultSystemPrompt
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
         historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 20
-        newConversationAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .newConversationAfterMinutes) ?? 15
+        newChatInterval = try c.decodeIfPresent(NewChatInterval.self, forKey: .newChatInterval)
+            ?? .fiveMinutes
+        quickAIPrimaryAction = try c.decodeIfPresent(
+            QuickAIPrimaryAction.self,
+            forKey: .quickAIPrimaryAction
+        ) ?? .pasteToActiveApp
+        tabShortcutHintVisible = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .tabShortcutHintVisible
+        ) ?? true
+        quickAIProviderID = try c.decodeIfPresent(UUID.self, forKey: .quickAIProviderID)
+        quickAIModel = try c.decodeIfPresent(String.self, forKey: .quickAIModel) ?? ""
+        fallbackCommandIDs = try c.decodeIfPresent(
+            [String].self,
+            forKey: .fallbackCommandIDs
+        ) ?? [FallbackCommandID.askAI]
         reopenRetentionSeconds = try c.decodeIfPresent(
             Int.self,
             forKey: .reopenRetentionSeconds
@@ -368,6 +515,23 @@ struct QuickSettings: Codable, Sendable {
             // Add the Raycast-style Improve Writing action without disturbing
             // any action the user already customized.
             savedPrompts.append(improve)
+        }
+        if decodedConfigurationVersion < 22,
+           let legacyNewConversationAfterMinutes {
+            // "Start a new thread after" was a raw minute count behind a
+            // 5/15/30/60 menu. Move the stored number onto its nearest option
+            // so every existing window keeps roughly its meaning. A blob with
+            // no count at all keeps the new 5 minute default.
+            newChatInterval = NewChatInterval.nearest(
+                toMinutes: legacyNewConversationAfterMinutes
+            )
+        }
+        if let quickAIProviderID,
+           !providers.contains(where: { $0.id == quickAIProviderID }) {
+            // A remembered Quick AI default that is no longer installed falls
+            // back to the current selection rather than pinning a dead provider.
+            self.quickAIProviderID = nil
+            quickAIModel = ""
         }
         if decodedConfigurationVersion < 21 {
             // The built-in rewrite-the-selection actions preview first: the
@@ -506,6 +670,26 @@ extension QuickSettings {
     var selectedModel: String {
         selectedProvider?.selectedModel ?? ""
     }
+
+    /// The provider Quick AI answers with: the explicit default when it is
+    /// still installed, otherwise the current selection.
+    var quickAIProvider: InferenceProvider? {
+        guard let quickAIProviderID,
+              let provider = providers.first(where: { $0.id == quickAIProviderID })
+        else { return selectedProvider }
+        return provider
+    }
+
+    /// The model override for Quick AI on `providerID`, or nil when that
+    /// provider's own selected model stands (which is what "unset" means).
+    func quickAIModelOverride(for providerID: UUID) -> String? {
+        guard quickAIProviderID == providerID, !quickAIModel.isEmpty else { return nil }
+        return quickAIModel
+    }
+
+    /// The command unmatched root-search text runs on Return. Nil when the
+    /// user has removed every fallback: Return then runs nothing.
+    var firstFallbackCommandID: String? { fallbackCommandIDs.first }
 
     mutating func select(providerID: UUID, model: String? = nil) {
         guard let index = providers.firstIndex(where: { $0.id == providerID }) else { return }

@@ -84,6 +84,32 @@ struct ModelCatalogService: Sendable {
         return Self.parsePiModels(result.stdoutText)
     }
 
+    // MARK: - Visibility
+
+    /// The models a picker may offer: everything the provider reports, minus
+    /// the models the user turned off on the Manage Models screen. This is
+    /// the one filter every model picker in the app goes through.
+    ///
+    /// `currentModel` stays in the list even when it is disabled, so a picker
+    /// can always render what is selected. Pass nothing for a bare list.
+    @MainActor
+    static func visibleModels(
+        for provider: InferenceProvider,
+        currentModel: String? = nil,
+        preferences: ModelPreferenceStore = .shared
+    ) -> [String] {
+        var models = provider.models.filter {
+            preferences.isEnabled(providerID: provider.id, model: $0)
+        }
+        if let currentModel,
+           !currentModel.isEmpty,
+           provider.models.contains(currentModel),
+           !models.contains(currentModel) {
+            models.append(currentModel)
+        }
+        return models
+    }
+
     static func refreshFailureMessage(status: Int, providerName: String, hasAPIKey: Bool) -> String {
         switch status {
         case 401 where !hasAPIKey:

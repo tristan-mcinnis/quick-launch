@@ -78,6 +78,14 @@ import Observation
     var screenshotIndexProgress = ScreenshotTextIndex.Progress()
     /// What the user typed for the answer on screen, shown above it.
     var lastQuestion: String?
+    /// The model's live multiple-choice question, nil when none is waiting.
+    /// Kept after the pick (with `selectedIndex` set) until the answer
+    /// finishes, so the card never blinks out of the thread mid-stream.
+    var pendingAskQuestion: AskUserQuestion?
+    /// The option the ↑/↓ keys are on while the card is live.
+    var askQuestionSelectionIndex: Int = 0
+    /// Resumes the service's tool call once the user picks.
+    private var askQuestionContinuation: CheckedContinuation<AskUserQuestionAnswer?, Never>?
     var isCaffeinating: Bool = false
     /// End of a timed Caffeinate session, for the command title.
     var caffeinateEndsAt: Date?
@@ -905,20 +913,56 @@ import Observation
     /// The one row that sends the typed text to the model. Same record as
     /// every other item: it can be pinned, aliased, given a hotkey, and it
     /// learns from use.
+    ///
+    /// Two things can change what the row says. Return on unmatched text runs
+    /// the first Fallback Command, so when that is not Ask AI the row names
+    /// what Return will really do. And the ⇥ hint is drawn only while the Tab
+    /// Shortcut setting is on.
     func askAIItem(query: String) -> LauncherCatalogItem {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var item = LauncherCatalogItem(
-            kind: .askAI,
-            itemID: Self.askAIItemID,
+        var item = makeAskAIItem(
             title: "Ask AI",
-            detail: trimmed.isEmpty
-                ? "Ask \(activeModelDisplay) anything. ⇥ switches to AI from any search"
-                : "\u{201C}\(trimmed)\u{201D} to \(activeModelDisplay)",
-            value: trimmed,
-            keywords: "ai ask chat question prompt"
+            detail: askAIDetail(for: trimmed),
+            value: trimmed
         )
         item.isPinned = isLauncherItemPinned(item)
-        return item
+        guard !trimmed.isEmpty, !item.isPinned, let fallback = rootFallbackRowCopy else {
+            return item
+        }
+        return makeAskAIItem(title: fallback.title, detail: fallback.detail, value: trimmed)
+    }
+
+    /// What the Ask AI row says under its title. The ⇥ hint is drawn only
+    /// while the Tab Shortcut setting is on; Tab itself is never conditional.
+    private func askAIDetail(for trimmed: String) -> String {
+        let base = trimmed.isEmpty
+            ? "Ask \(activeModelDisplay) anything"
+            : "\u{201C}\(trimmed)\u{201D} to \(activeModelDisplay)"
+        // What Tab actually does from root search: it hands the typed text to
+        // Quick AI. A matching saved-prompt alias completes first, which is
+        // that alias row's own behaviour, not this row's.
+        return showsTabShortcutHint ? base + ". ⇥ opens Quick AI" : base
+    }
+
+    private func makeAskAIItem(title: String, detail: String, value: String) -> LauncherCatalogItem {
+        LauncherCatalogItem(
+            kind: .askAI,
+            itemID: Self.askAIItemID,
+            title: title,
+            detail: detail,
+            value: value,
+            keywords: "ai ask chat question prompt"
+        )
+    }
+
+    /// What Return on unmatched root-search text will actually run, when the
+    /// first Fallback Command is not Ask AI. The row and the key agree.
+    private var rootFallbackRowCopy: (title: String, detail: String)? {
+        guard let identifier = settings.firstFallbackCommandID,
+              identifier != FallbackCommandID.askAI
+        else { return nil }
+        let entry = fallbackCommandEntry(for: identifier)
+        return (entry.title, entry.detail)
     }
 
     var catalogItems: [LauncherCatalogItem] {
@@ -1074,6 +1118,7 @@ import Observation
     }
 
     var currentPanelWidth: CGFloat {
+        if isConversationViewPresented { return ConversationViewLayout.panelWidth }
         if showsDetailPane { return PanelSizing.panelWidthWithDetail }
         if isAnswerActive { return PanelSizing.panelWidthForAnswer }
         return PanelSizing.panelWidth
@@ -1085,6 +1130,9 @@ import Observation
     /// measured from the markdown actually rendered, not guessed from
     /// character counts — the guess left long answers clipped at the bottom.
     var estimatedWindowHeight: CGFloat {
+        // The conversation view is a fixed full-height surface: the panel
+        // stops measuring the answer block the moment it opens.
+        if isConversationViewPresented { return ConversationViewLayout.panelHeight }
         let measuredBody: CGFloat? = (!output.isEmpty || isStreaming)
             ? MarkdownRenderer.measuredHeight(
                 markdown: output,
@@ -1125,7 +1173,21 @@ import Observation
         // chip + chooser taller than the window and cut off the bottom.
         var total = base
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
+        // The live question card is inline content in the answer block, so
+        // the window has to grow for it or the last option is clipped.
+        if let question = pendingAskQuestion {
+            total += AskUserQuestionCard.blockHeight(
+                optionCount: question.options.count,
+                isInteractive: !question.isAnswered
+            )
+        }
         if showsChooser { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
+        if isModelChooserPresented {
+            total += PanelSizing.chooserBlockHeight(rows: modelChooserOptions.count)
+        }
+        if isAddContextMenuPresented {
+            total += PanelSizing.chooserBlockHeight(rows: addContextOptions.count)
+        }
         var pane: CGFloat?
         if isItemActionPanePresented {
             pane = activeItemActionForm.map(PanelSizing.itemActionFormPaneHeight)
@@ -1307,6 +1369,10 @@ import Observation
         parts.append(String(launcherRankingVersion))
         parts.append(String(applicationCatalog?.version ?? 0))
         parts.append(activeModelDisplay)
+        // The Ask AI row carries the Tab hint and, when the first Fallback
+        // Command is not Ask AI, that command's name: both change the row.
+        parts.append(settings.tabShortcutHintVisible ? "hint" : "nohint")
+        parts.append(settings.fallbackCommandIDs.joined(separator: ","))
         return parts.joined(separator: "\u{1F}")
     }
 
@@ -1597,14 +1663,20 @@ import Observation
             if let detail = resultActionDetail(.replaceSelection) {
                 hints.append(FooterHint(label: detail, keys: ResultAction.replaceSelection.shortcut.keyCaps))
             }
-            if let detail = resultActionDetail(.pasteBack) {
-                hints.append(FooterHint(label: detail, keys: ResultAction.pasteBack.shortcut.keyCaps))
+            if !input.trimmingCharacters(in: .whitespaces).isEmpty {
+                hints.append(FooterHint(label: "Follow up", keys: ["↩"]))
             } else {
-                hints.append(
-                    input.trimmingCharacters(in: .whitespaces).isEmpty
-                        ? FooterHint(label: "Paste back", keys: ResultAction.pasteBack.shortcut.keyCaps)
-                        : FooterHint(label: "Follow up", keys: ["↩"])
-                )
+                // Return runs the Quick AI primary action, so the hint has to
+                // name that action rather than always saying paste.
+                switch settings.quickAIPrimaryAction {
+                case .pasteToActiveApp:
+                    hints.append(FooterHint(
+                        label: resultActionDetail(.pasteBack) ?? "Paste back",
+                        keys: ResultAction.pasteBack.shortcut.keyCaps
+                    ))
+                case .copyToClipboard:
+                    hints.append(FooterHint(label: "Copy answer", keys: ["↩"]))
+                }
             }
             hints.append(FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps))
             if history.count > 1 { hints.append(FooterHint(label: "Chats", keys: ["⌘", "[", "]"])) }
@@ -1903,12 +1975,17 @@ import Observation
         return isFollowUp ? "Ask a follow-up…" : "Search for apps and commands…"
     }
 
-    var activeProvider: InferenceProvider? { settings.selectedProvider }
+    var activeProvider: InferenceProvider? { settings.quickAIProvider }
     var activeModelDisplay: String {
         if pendingImage != nil { return visionDisplayName }
         guard let provider = activeProvider else { return "No model" }
-        return provider.selectedModel.isEmpty ? provider.name : provider.selectedModel
+        let model = settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
+        return model.isEmpty ? provider.name : model
     }
+
+    /// Whether the ⇥ hint is drawn in root search. The key itself is not
+    /// conditional: `handleTab()` always opens Quick AI.
+    var showsTabShortcutHint: Bool { settings.tabShortcutHintVisible }
 
     var isFollowUp: Bool { !(currentConversation?.messages.isEmpty ?? true) }
     var conversationMessages: [QuickMessage] { currentConversation?.messages ?? [] }
@@ -1960,6 +2037,9 @@ import Observation
         case launcherRow(Int)
         /// A bare `/ali` that fuzzy-matches one saved prompt: complete and run.
         case fuzzyAliasCompletion
+        /// Unmatched root-search text: it runs the first Fallback Command.
+        /// `nil` is the empty list, where Return runs nothing.
+        case fallbackCommand(String?)
         /// Everything else: saved prompt alias with context, or a free prompt.
         case prompt
     }
@@ -1975,11 +2055,31 @@ import Observation
         }
         if pendingQuickLink != nil { return .quickLinkInput }
         let matches = launcherMatches
-        if !matches.isEmpty { return .launcherRow(min(applicationSelectionIndex, matches.count - 1)) }
+        if !matches.isEmpty {
+            let index = min(applicationSelectionIndex, matches.count - 1)
+            if isRootFallbackRow(matches[index], query: trimmed) {
+                return .fallbackCommand(settings.firstFallbackCommandID)
+            }
+            return .launcherRow(index)
+        }
         if exactSavedPromptAction() == nil, isBareAliasQuery, savedPromptMatches.first != nil {
             return .fuzzyAliasCompletion
         }
         return .prompt
+    }
+
+    /// The always-present Ask AI row that carries the typed text is the row
+    /// the Fallback Commands list replaces. A row the user pinned or asked for
+    /// by its alias is an explicit choice and still asks the model.
+    private func isRootFallbackRow(_ result: LauncherSearchResult, query: String) -> Bool {
+        guard case .item(let item) = result,
+              item.kind == .askAI,
+              !item.value.isEmpty,
+              !item.isPinned
+        else { return false }
+        let alias = launcherItemAlias(for: item)
+        if !alias.isEmpty, FuzzyMatcher.fold(alias) == FuzzyMatcher.fold(query) { return false }
+        return true
     }
 
     /// The saved prompt an exact `/alias` names, resolved once per Return.
@@ -1999,6 +2099,28 @@ import Observation
     }
 
     func submitResolvingFuzzyAlias() async {
+        // While a question is waiting, Return picks the highlighted option:
+        // the pick folds back into the thread and the model continues.
+        if let question = pendingAskQuestion, !question.isAnswered {
+            answerAskQuestion(index: askQuestionSelectionIndex)
+            return
+        }
+        if isConversationViewPresented, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // An empty composer in the conversation view: Return continues
+            // the highlighted chat instead of repeating a primary action.
+            openSelectedConversationFromView()
+            return
+        }
+        if isModelChooserPresented {
+            // Return in the model chooser picks the model the keys are on.
+            await runModelChooserSelection()
+            return
+        }
+        if isAddContextMenuPresented {
+            // Return in Add Context attaches the highlighted entry.
+            await runAddContextSelection()
+            return
+        }
         if isTransformChooserPresented {
             // Return runs the focused transform in the keyboard-first chooser.
             await runTransformChooserSelection()
@@ -2012,9 +2134,12 @@ import Observation
         case .vaultFollowUp(let mode):
             await submitVaultSearch(mode: mode, followUp: true)
         case .answerIdle:
-            // Paste-back is ⌘↩ via `resultActions`, the same rule as every
-            // other result action. Bare Return does nothing.
-            return
+            // Return on a finished answer runs the Quick AI primary action:
+            // paste into the app behind the overlay, or copy. ⌘↩ stays the
+            // explicit paste, exactly as every other result action.
+            await runPrimaryAnswerAction()
+        case .fallbackCommand(let identifier):
+            await runRootFallback(identifier)
         case .quickLinkInput:
             if let pendingQuickLink { openQuickLink(pendingQuickLink, input: input) }
         case .launcherRow(let index):
@@ -2537,6 +2662,200 @@ import Observation
         }
     }
 
+    // MARK: - Fallback Commands
+
+    /// Return on unmatched root-search text. `nil` is the empty fallback list:
+    /// nothing runs and the typed text stays a search.
+    func runRootFallback(_ identifier: String?) async {
+        guard let identifier else {
+            requestInputFocus()
+            return
+        }
+        await runFallbackCommand(identifier, text: input)
+    }
+
+    /// Runs one configured Fallback Command with the text the user typed.
+    /// Tab is never part of this: `handleTab()` always opens Quick AI.
+    func runFallbackCommand(_ identifier: String, text: String) async {
+        if identifier == FallbackCommandID.askAI {
+            // The Ask AI row itself, so the learned ranking and the journal
+            // see exactly what they saw when the row was the only path.
+            await performLauncherResult(.item(askAIItem(query: text)))
+            return
+        }
+        if let promptID = FallbackCommandID.savedPromptUUID(from: identifier) {
+            guard let prompt = settings.savedPrompts.first(where: { $0.id == promptID }) else {
+                errorMessage = "That fallback command is no longer available."
+                requestInputFocus()
+                return
+            }
+            // The same shape `/alias text` has, so the command lane, the model
+            // lane, and `{selection}` behave exactly as they do when the alias
+            // is typed by hand.
+            input = settings.savedPromptPrefix + prompt.alias + " " + text
+            inputMode = nil
+            await submit()
+            return
+        }
+        if let itemID = FallbackCommandID.commandItemID(from: identifier),
+           let item = fallbackCommandItems.first(where: { $0.itemID == itemID }) {
+            input = text
+            inputMode = nil
+            await performLauncherItem(item)
+            return
+        }
+        errorMessage = "That fallback command is no longer available."
+        requestInputFocus()
+    }
+
+    /// One row of the Fallback Commands card.
+    struct FallbackCommandEntry: Identifiable, Equatable, Sendable {
+        let id: String
+        let title: String
+        let detail: String
+        let systemImage: String
+    }
+
+    /// The configured Fallback Commands, in order, resolved against the
+    /// commands that still exist.
+    var fallbackCommandEntries: [FallbackCommandEntry] {
+        settings.fallbackCommandIDs.map(fallbackCommandEntry(for:))
+    }
+
+    /// What one identifier names. A command the user later deleted resolves to
+    /// a row that says so rather than vanishing silently.
+    func fallbackCommandEntry(for identifier: String) -> FallbackCommandEntry {
+        if identifier == FallbackCommandID.askAI {
+            return FallbackCommandEntry(
+                id: identifier,
+                title: "Ask AI",
+                detail: "Send the text to \(activeModelDisplay)",
+                systemImage: "sparkles"
+            )
+        }
+        if let promptID = FallbackCommandID.savedPromptUUID(from: identifier) {
+            guard let prompt = settings.savedPrompts.first(where: { $0.id == promptID }) else {
+                return FallbackCommandEntry(
+                    id: identifier,
+                    title: "Missing command",
+                    detail: "This saved AI command was deleted. Remove the row.",
+                    systemImage: "questionmark.circle"
+                )
+            }
+            return FallbackCommandEntry(
+                id: identifier,
+                title: prompt.name,
+                detail: "Saved AI command \(settings.savedPromptPrefix)\(prompt.alias)",
+                systemImage: "text.quote"
+            )
+        }
+        if let itemID = FallbackCommandID.commandItemID(from: identifier),
+           let item = fallbackCommandItems.first(where: { $0.itemID == itemID }) {
+            return FallbackCommandEntry(
+                id: identifier,
+                title: item.title,
+                detail: item.detail,
+                systemImage: item.systemImage
+            )
+        }
+        return FallbackCommandEntry(
+            id: identifier,
+            title: "Missing command",
+            detail: "This command is no longer available. Remove the row.",
+            systemImage: "questionmark.circle"
+        )
+    }
+
+    /// The app's own command catalogs, as the Fallback Commands card offers
+    /// them.
+    var fallbackCommandItems: [LauncherCatalogItem] { systemCommands + vaultSearchItems }
+
+    /// One command the Fallback Commands card can add.
+    struct FallbackCommandChoice: Identifiable, Equatable, Sendable {
+        let id: String
+        let title: String
+        let detail: String
+    }
+
+    struct FallbackCommandChoiceGroup: Identifiable, Sendable {
+        let id: String
+        let title: String
+        let choices: [FallbackCommandChoice]
+    }
+
+    /// Everything the card can add, in groups, minus what it already holds.
+    var fallbackCommandChoiceGroups: [FallbackCommandChoiceGroup] {
+        let configured = Set(settings.fallbackCommandIDs)
+        var groups: [FallbackCommandChoiceGroup] = []
+        if !configured.contains(FallbackCommandID.askAI) {
+            groups.append(FallbackCommandChoiceGroup(
+                id: "askAI",
+                title: "Quick AI",
+                choices: [FallbackCommandChoice(
+                    id: FallbackCommandID.askAI,
+                    title: "Ask AI",
+                    detail: "Send the text to \(activeModelDisplay)"
+                )]
+            ))
+        }
+        let prompts = settings.savedPrompts.compactMap { prompt -> FallbackCommandChoice? in
+            let id = FallbackCommandID.savedPrompt(prompt.id)
+            guard !configured.contains(id) else { return nil }
+            return FallbackCommandChoice(
+                id: id,
+                title: prompt.name,
+                detail: "Saved AI command \(settings.savedPromptPrefix)\(prompt.alias)"
+            )
+        }
+        if !prompts.isEmpty {
+            groups.append(FallbackCommandChoiceGroup(
+                id: "prompts",
+                title: "AI Commands",
+                choices: prompts
+            ))
+        }
+        let commands = fallbackCommandItems.compactMap { item -> FallbackCommandChoice? in
+            let id = FallbackCommandID.command(item.itemID)
+            guard !configured.contains(id) else { return nil }
+            return FallbackCommandChoice(id: id, title: item.title, detail: item.detail)
+        }
+        if !commands.isEmpty {
+            groups.append(FallbackCommandChoiceGroup(
+                id: "commands",
+                title: "Commands",
+                choices: commands
+            ))
+        }
+        return groups
+    }
+
+    /// Add one command to the end of the Fallback Commands list.
+    func addFallbackCommand(_ identifier: String) {
+        guard !settings.fallbackCommandIDs.contains(identifier) else { return }
+        updateSettings { $0.fallbackCommandIDs.append(identifier) }
+    }
+
+    /// Remove one command. Removing the last one is allowed: unmatched text
+    /// then runs nothing on Return.
+    func removeFallbackCommand(_ identifier: String) {
+        updateSettings { settings in
+            settings.fallbackCommandIDs.removeAll { $0 == identifier }
+        }
+    }
+
+    /// Move a command to a new position, used by the card's drag handle and by
+    /// its keyboard move buttons.
+    func moveFallbackCommand(_ identifier: String, toIndex index: Int) {
+        updateSettings { settings in
+            guard let from = settings.fallbackCommandIDs.firstIndex(of: identifier) else { return }
+            let item = settings.fallbackCommandIDs.remove(at: from)
+            settings.fallbackCommandIDs.insert(
+                item,
+                at: min(max(index, 0), settings.fallbackCommandIDs.count)
+            )
+        }
+    }
+
     // MARK: - Screenshots
 
     /// Capture a screenshot and attach it to the next question.
@@ -2594,7 +2913,10 @@ import Observation
         // fail safe to Copy with a truthful error when the target is gone.
         var actions: [ResultAction] = []
         if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
-        actions.append(contentsOf: [.pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb, .regenerate, .newChat])
+        actions.append(contentsOf: [
+            .pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb,
+            .regenerate, .regenerateWithModel, .changeModel, .newChat,
+        ])
         if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
@@ -2611,6 +2933,10 @@ import Observation
             replaceableSelectionContext.map { "Replace in \($0.target.applicationName)" }
         case .pasteBack:
             selectionTarget.map { "Paste into \($0.applicationName)" }
+        case .changeModel:
+            "Using \(activeModelDisplay)"
+        case .regenerateWithModel:
+            "Run this question again on another model"
         default:
             nil
         }
@@ -2636,6 +2962,13 @@ import Observation
         case .regenerate:
             isActionPalettePresented = false
             await regenerateLastAnswer()
+        case .regenerateWithModel:
+            // `⇧⌘R`: choose first, then answer the same question again.
+            openModelChooser(.regenerate)
+        case .changeModel:
+            // Switching model mid-conversation sends nothing: the next
+            // question simply goes to the new model.
+            openModelChooser(.change)
         case .newChat:
             isActionPalettePresented = false
             startNewConversation()
@@ -2662,6 +2995,193 @@ import Observation
             isActionPalettePresented = false
             deleteConversation(id: id)
         }
+    }
+
+    // MARK: - Model chooser
+
+    /// True while the keyboard model chooser is open. ↑↓ move, Return picks,
+    /// Escape closes. Opened by `⇧⌘R` and by Change Model.
+    var isModelChooserPresented = false
+    var modelChooserPurpose: ModelChooserPurpose = .change
+    var modelChooserIndex = 0
+    var modelChooserOptions: [ModelChooserOption] = []
+
+    /// Opens the chooser for the last answer. Every provider's visible models
+    /// are offered, and the row for the model already in use starts selected.
+    func openModelChooser(_ purpose: ModelChooserPurpose) {
+        let options = modelChooserEntries()
+        guard !options.isEmpty else {
+            errorMessage = "No model is available. Add a provider in Settings › Models."
+            requestInputFocus()
+            return
+        }
+        modelChooserOptions = options
+        modelChooserPurpose = purpose
+        modelChooserIndex = options.firstIndex { $0.model == activeModelDisplay } ?? 0
+        isModelChooserPresented = true
+        isActionPalettePresented = false
+        closeItemActionPane()
+        isApplicationActionPanePresented = false
+        isCatalogActionPanePresented = false
+        actionQuery = ""
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    func closeModelChooser() {
+        guard isModelChooserPresented else { return }
+        isModelChooserPresented = false
+        requestInputFocus()
+    }
+
+    func moveModelChooserSelection(_ delta: Int) {
+        guard !modelChooserOptions.isEmpty else { return }
+        modelChooserIndex = ListSelection.wrappedIndex(
+            modelChooserIndex,
+            by: delta,
+            count: modelChooserOptions.count
+        )
+    }
+
+    /// Return in the open chooser: make the pick active, then regenerate when
+    /// the chooser was opened by `⇧⌘R`.
+    func runModelChooserSelection() async {
+        guard modelChooserOptions.indices.contains(modelChooserIndex) else { return }
+        let option = modelChooserOptions[modelChooserIndex]
+        let purpose = modelChooserPurpose
+        isModelChooserPresented = false
+        setActiveModel(providerID: option.providerID, model: option.model)
+        switch purpose {
+        case .change:
+            requestInputFocus()
+        case .regenerate:
+            await regenerateLastAnswer()
+        }
+    }
+
+    /// Every row the chooser may offer: each installed provider's visible
+    /// models, in provider order.
+    func modelChooserEntries() -> [ModelChooserOption] {
+        settings.providers.flatMap { provider in
+            visibleModels(for: provider).map { model in
+                ModelChooserOption(
+                    providerID: provider.id,
+                    providerName: provider.name,
+                    model: model
+                )
+            }
+        }
+    }
+
+    /// Change Model, and the model half of `⇧⌘R`: the Quick AI surface
+    /// answers with this provider and model from here on, and the open
+    /// conversation records it. Nothing is sent.
+    func setActiveModel(providerID: UUID, model: String) {
+        settings.select(providerID: providerID, model: model)
+        settings.quickAIProviderID = providerID
+        settings.quickAIModel = model
+        settings.save()
+        currentConversation?.providerID = providerID
+        currentConversation?.model = model
+        modelRefreshMessage = nil
+        NotificationCenter.default.post(name: .providerChanged, object: nil)
+        noteInteraction()
+    }
+
+    // MARK: - Add Context
+
+    /// True while the Add Context menu is open. The same menu opens from the
+    /// control left of the composer and from typing `@` in it.
+    var isAddContextMenuPresented = false
+    var addContextIndex = 0
+
+    /// The four capture paths, in the order the menu lists them.
+    var addContextOptions: [AddContextEntry] { AddContextEntry.allCases }
+
+    func openAddContextMenu() {
+        guard !isStreaming else { return }
+        isAddContextMenuPresented = true
+        addContextIndex = 0
+        isModelChooserPresented = false
+        isActionPalettePresented = false
+        closeItemActionPane()
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    func toggleAddContextMenu() {
+        if isAddContextMenuPresented {
+            closeAddContextMenu()
+        } else {
+            openAddContextMenu()
+        }
+    }
+
+    func closeAddContextMenu() {
+        guard isAddContextMenuPresented else { return }
+        isAddContextMenuPresented = false
+        requestInputFocus()
+    }
+
+    func moveAddContextSelection(_ delta: Int) {
+        let options = addContextOptions
+        guard !options.isEmpty else { return }
+        addContextIndex = ListSelection.wrappedIndex(
+            addContextIndex,
+            by: delta,
+            count: options.count
+        )
+    }
+
+    /// Return in the open Add Context menu.
+    func runAddContextSelection() async {
+        let options = addContextOptions
+        guard options.indices.contains(addContextIndex) else { return }
+        await addContext(options[addContextIndex])
+    }
+
+    /// Runs one entry through the capture path it already had. The half-typed
+    /// question survives: an entry adds context to it, it never replaces it.
+    func addContext(_ entry: AddContextEntry) async {
+        isAddContextMenuPresented = false
+        actionQuery = ""
+        let typed = input
+        switch entry {
+        case .focusedWindow:
+            await attachScreenshot(.window, clearingInput: false)
+        case .selectedText:
+            _ = attachSelectedText()
+        case .selectedArea:
+            await attachScreenArea()
+        case .entireScreen:
+            await attachScreenshot(.display, clearingInput: false)
+        }
+        // Selected Text and Selected Area clear the field to make room for a
+        // fresh question; from this menu the typed question comes back.
+        if input.isEmpty, !typed.isEmpty { input = typed }
+        requestInputFocus()
+    }
+
+    /// Typing `@` opens the same menu the control does. The `@` is a trigger,
+    /// not content, so it is dropped; a `@` inside a word (an address) never
+    /// opens the menu. Returns whether it opened.
+    @discardableResult
+    func addContextTriggerDidChange(_ newValue: String) -> Bool {
+        guard !isAddContextMenuPresented,
+              !isStreaming,
+              !isItemActionPanePresented,
+              // Only the root and answer composers: inside a catalog search or
+              // a typed command an `@` is part of what is being typed.
+              catalogScope == nil,
+              inputMode == nil,
+              pendingQuickLinkID == nil,
+              newValue.hasSuffix("@")
+        else { return false }
+        let head = newValue.dropLast()
+        guard head.isEmpty || head.last?.isWhitespace == true else { return false }
+        input = String(head)
+        openAddContextMenu()
+        return true
     }
 
     /// Save the current result as a new snippet, then open its ⌘K pane so
@@ -3907,6 +4427,9 @@ import Observation
         case itemActionPane
         case actionPalette
         case transformChooser
+        case modelChooser
+        case addContextMenu
+        case conversationView
         case streaming
         case attachment
         case typedText
@@ -3923,6 +4446,9 @@ import Observation
         }
         if isActionPalettePresented { return .actionPalette }
         if isTransformChooserPresented { return .transformChooser }
+        if isModelChooserPresented { return .modelChooser }
+        if isAddContextMenuPresented { return .addContextMenu }
+        if isConversationViewPresented { return .conversationView }
         if isStreaming { return .streaming }
         if !input.isEmpty { return .typedText }
         if hasPendingAttachment { return .attachment }
@@ -3944,6 +4470,12 @@ import Observation
             closeActionPalette()
         case .transformChooser:
             closeTransformChooser()
+        case .modelChooser:
+            closeModelChooser()
+        case .addContextMenu:
+            closeAddContextMenu()
+        case .conversationView:
+            closeConversationView()
         case .streaming:
             cancel()
         case .typedText:
@@ -3970,6 +4502,14 @@ import Observation
     @discardableResult
     func popLayerForEmptyBackspace() -> Bool {
         guard input.isEmpty, !isItemActionPanePresented, !isActionPalettePresented else { return false }
+        if isModelChooserPresented {
+            closeModelChooser()
+            return true
+        }
+        if isAddContextMenuPresented {
+            closeAddContextMenu()
+            return true
+        }
         return popTopLayer()
     }
 
@@ -4018,10 +4558,26 @@ import Observation
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
     func performShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        if Self.conversationViewShortcut.matches(
+            characters: characters,
+            keyCode: keyCode,
+            modifiers: modifiers
+        ) {
+            toggleConversationView()
+            return true
+        }
         // ⌘⌥T toggles the keyboard-first Transform chooser (reachable without a
         // mouse); while it is open ↑↓ and Return drive it in the view.
         if Self.transformChooserShortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers) {
             toggleTransformChooser()
+            return true
+        }
+        if Self.transcriptCollapseShortcut.matches(
+            characters: characters,
+            keyCode: keyCode,
+            modifiers: modifiers
+        ), let id = keyboardToggleMessageID {
+            toggleTranscriptMessage(id)
             return true
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
@@ -4960,7 +5516,7 @@ import Observation
                 for: provider,
                 override: submittedImage != nil
                     ? (settings.visionModel.isEmpty ? nil : settings.visionModel)
-                    : action?.model
+                    : (action?.model ?? settings.quickAIModelOverride(for: provider.id))
               )
         else {
             errorMessage = submittedImage != nil
@@ -5033,6 +5589,9 @@ import Observation
         streamWasCancelled = false
 
         streamTask = Task {
+            // A stream that ends for any reason cannot still be waiting on a
+            // question: resume it with no answer and take the card down.
+            defer { clearAskQuestion(with: nil) }
             do {
                 for try await delta in stream {
                     if Task.isCancelled { break }
@@ -5326,6 +5885,28 @@ import Observation
 
     // MARK: - Provider and model routing
 
+    /// The models a picker may offer for one provider: everything it reports
+    /// minus the models turned off on Manage Models. The provider's current
+    /// model stays listed so the picker can always render what is selected.
+    func visibleModels(for provider: InferenceProvider) -> [String] {
+        ModelCatalogService.visibleModels(
+            for: provider,
+            currentModel: modelInUse(for: provider)
+        )
+    }
+
+    /// The model the Quick AI surface would send to for this provider.
+    private func modelInUse(for provider: InferenceProvider) -> String? {
+        guard activeProvider?.id == provider.id else { return provider.selectedModel }
+        return settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
+    }
+
+    /// Whether this provider and model are the pair the surface would use
+    /// right now; a model picker ticks exactly this row.
+    func isActiveModel(provider: InferenceProvider, model: String) -> Bool {
+        activeProvider?.id == provider.id && modelInUse(for: provider) == model
+    }
+
     func selectModel(providerID: UUID, model: String) {
         settings.select(providerID: providerID, model: model)
         settings.save()
@@ -5391,7 +5972,11 @@ import Observation
             settings.providers[index].models = models
             if settings.providers[index].selectedModel.isEmpty ||
                 !models.contains(settings.providers[index].selectedModel) {
-                settings.providers[index].selectedModel = models.first ?? ""
+                // Land on the first model that is still offered, never on one
+                // the user turned off on Manage Models.
+                settings.providers[index].selectedModel = Self.refreshFallbackModel(
+                    for: settings.providers[index]
+                )
             }
             settings.save()
             modelRefreshMessage = models.isEmpty
@@ -5400,6 +5985,13 @@ import Observation
         } catch {
             modelRefreshMessage = error.localizedDescription
         }
+    }
+
+    /// The model a refresh falls back to when the recorded one is gone or
+    /// blank: the first model that is still offered, never one the user
+    /// turned off on Manage Models.
+    static func refreshFallbackModel(for provider: InferenceProvider) -> String {
+        ModelCatalogService.visibleModels(for: provider).first ?? ""
     }
 
     func refreshDetectedModels() async {
@@ -5419,6 +6011,12 @@ import Observation
         if let overrideID,
            let provider = settings.providers.first(where: { $0.id == overrideID }) {
             return provider
+        }
+        // A default model for the Quick AI surface only answers when nothing
+        // more specific applies: a saved action's own provider and an
+        // attachment's vision provider both win.
+        if overrideID == nil, settings.quickAIProviderID != nil {
+            return settings.quickAIProvider
         }
         return settings.selectedProvider
     }
@@ -5455,12 +6053,21 @@ import Observation
             if settings.modelWebSearchEnabled, let webSearchService {
                 webSearch = { query in try await webSearchService.search(query) }
             }
+            // Ask User Question has no setting: Raycast's card is always on.
+            let askUserQuestion: @Sendable (AskUserQuestion) async -> AskUserQuestionAnswer? = { [weak self] question in
+                guard let self else { return nil }
+                return await self.awaitAskQuestionAnswer(question)
+            }
             return OpenAICompatibleService(
                 baseURL: url,
                 modelName: model,
                 apiKey: apiKeyProvider(provider.id),
                 systemPrompt: settings.systemPrompt,
-                webSearch: webSearch
+                webSearch: webSearch,
+                askUserQuestion: askUserQuestion,
+                reasoningEffort: ModelPreferenceStore.shared
+                    .profile(providerID: provider.id, model: model)
+                    .reasoningEffort
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
@@ -5483,6 +6090,7 @@ import Observation
         let wasStreaming = isStreaming
         let cancelledModelRequest = wasStreaming && streamTask != nil
         if cancelledModelRequest { streamWasCancelled = true }
+        clearAskQuestion(with: nil)
         streamTask?.cancel()
         streamTask = nil
         commandTask?.cancel()
@@ -5628,6 +6236,115 @@ import Observation
         return true
     }
 
+    /// Return with an empty composer on a finished answer runs the Quick AI
+    /// primary action. Automatic copy is untouched: `autoCopy` still decides
+    /// what happens the moment an answer arrives.
+    func runPrimaryAnswerAction() async {
+        guard !output.isEmpty, !isStreaming else { return }
+        switch settings.quickAIPrimaryAction {
+        case .pasteToActiveApp:
+            // Fails safe: it copies and explains when there is no target.
+            _ = await pasteOutputToPreviousApp()
+        case .copyToClipboard:
+            copyOutputAndMark()
+        }
+    }
+
+    // MARK: - Ask User Question
+
+    /// True while the model is waiting for an option to be picked.
+    var isAskQuestionActive: Bool { pendingAskQuestion?.isAnswered == false }
+
+    /// ↑/↓ walk the options and wrap at both ends, so a wrong nudge never
+    /// dead-ends the keyboard.
+    func moveAskQuestionSelection(_ delta: Int) {
+        guard let question = pendingAskQuestion, !question.isAnswered else { return }
+        let count = question.options.count
+        guard count > 0 else { return }
+        askQuestionSelectionIndex = ((askQuestionSelectionIndex + delta) % count + count) % count
+    }
+
+    /// Return picks the highlighted option, or a click picks its own. The
+    /// choice folds back into the thread as the user's answer and the model
+    /// continues with it.
+    func answerAskQuestion(index: Int) {
+        guard let question = pendingAskQuestion,
+              !question.isAnswered,
+              question.options.indices.contains(index)
+        else { return }
+        let chosen = question.options[index]
+        askQuestionSelectionIndex = index
+        var answered = question
+        answered.selectedIndex = index
+        pendingAskQuestion = answered
+        recordAskQuestion(answered)
+        resumeAskQuestion(with: AskUserQuestionAnswer(label: chosen.label, detail: chosen.detail))
+    }
+
+    /// The tool loop's side of the card: show it, then suspend the request
+    /// until the user picks. Nil means they dismissed it (or the request was
+    /// cancelled); the model answers normally either way.
+    private func awaitAskQuestionAnswer(_ question: AskUserQuestion) async -> AskUserQuestionAnswer? {
+        guard !Task.isCancelled else { return nil }
+        presentAskQuestion(question)
+        let answer = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<AskUserQuestionAnswer?, Never>) in
+                if Task.isCancelled {
+                    continuation.resume(returning: nil)
+                } else {
+                    askQuestionContinuation = continuation
+                }
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in self?.clearAskQuestion(with: nil) }
+        }
+        pendingAskQuestion = nil
+        askQuestionSelectionIndex = 0
+        return answer
+    }
+
+    /// Puts the card on screen with its first option selected. Split from the
+    /// wait so the state change and the suspension are separate: the tool
+    /// loop calls both, and a test can assert the card without a live stream.
+    func presentAskQuestion(_ question: AskUserQuestion) {
+        askQuestionSelectionIndex = 0
+        pendingAskQuestion = question
+        streamingStatus = nil
+        // The composer was disabled while the model worked, so its focus
+        // needs reclaiming for the Return fallback path.
+        requestInputFocus()
+    }
+
+    /// Hands the pick (or a dismissal) to the suspended tool call. Resumes
+    /// at most once: a second call finds no continuation and only clears.
+    private func resumeAskQuestion(with answer: AskUserQuestionAnswer?) {
+        let continuation = askQuestionContinuation
+        askQuestionContinuation = nil
+        continuation?.resume(returning: answer)
+    }
+
+    /// Takes a waiting card down without an answer: Escape, cancel, reset, or
+    /// the end of the stream.
+    private func clearAskQuestion(with answer: AskUserQuestionAnswer?) {
+        resumeAskQuestion(with: answer)
+        pendingAskQuestion = nil
+        askQuestionSelectionIndex = 0
+    }
+
+    /// The transcript record: the question as it was asked, with the picked
+    /// option marked, and the pick folded in as the user's turn.
+    private func recordAskQuestion(_ question: AskUserQuestion) {
+        currentConversation?.messages.append(QuickMessage(
+            role: .assistant,
+            content: question.question,
+            askUserQuestion: question
+        ))
+        if let chosen = question.chosenLabel {
+            currentConversation?.messages.append(QuickMessage(role: .user, content: chosen))
+        }
+        currentConversation?.updatedAt = Date()
+    }
+
     // MARK: - Just-copied flash
 
     func markJustCopied() {
@@ -5696,6 +6413,7 @@ import Observation
             output = ""
             errorMessage = nil
             lastQuestion = nil
+            clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
             conversationImages = []
@@ -5743,12 +6461,130 @@ import Observation
         requestInputFocus()
     }
 
+    // MARK: - Conversation view (⌘J)
+
+    /// `⌘J`: the current thread at full height, with the chat history list
+    /// beside it. It stays inside the one overlay window.
+    static let conversationViewShortcut: KeyShortcut = .command("j")
+
+    var isConversationViewPresented = false
+    /// Highlighted row of the conversation view's chat list.
+    var conversationViewHistoryIndex = 0
+
+    /// Opens the conversation view on the current thread. The thread, the
+    /// model, and any attachments are already in state, so they carry over
+    /// untouched; this only changes what is drawn.
+    func openConversationView() {
+        guard currentConversation != nil || !output.isEmpty else {
+            errorMessage = "Ask a question first, then continue the thread here."
+            requestInputFocus()
+            return
+        }
+        isConversationViewPresented = true
+        isConversationHistoryPresented = false
+        isActionPalettePresented = false
+        isModelChooserPresented = false
+        isAddContextMenuPresented = false
+        closeItemActionPane()
+        actionQuery = ""
+        errorMessage = nil
+        conversationViewHistoryIndex = currentConversation
+            .flatMap { conversation in history.firstIndex { $0.id == conversation.id } } ?? 0
+        requestInputFocus()
+    }
+
+    func closeConversationView() {
+        guard isConversationViewPresented else { return }
+        isConversationViewPresented = false
+        requestInputFocus()
+    }
+
+    func toggleConversationView() {
+        if isConversationViewPresented {
+            closeConversationView()
+        } else {
+            openConversationView()
+        }
+    }
+
+    func moveConversationViewSelection(_ delta: Int) {
+        guard !history.isEmpty else { return }
+        conversationViewHistoryIndex = ListSelection.wrappedIndex(
+            conversationViewHistoryIndex,
+            by: delta,
+            count: history.count
+        )
+    }
+
+    /// Return on an empty composer in the conversation view: continue the
+    /// highlighted chat, without leaving the view.
+    func openSelectedConversationFromView() {
+        guard history.indices.contains(conversationViewHistoryIndex) else { return }
+        loadConversation(id: history[conversationViewHistoryIndex].id)
+        conversationViewHistoryIndex = history.firstIndex {
+            $0.id == currentConversation?.id
+        } ?? conversationViewHistoryIndex
+    }
+
+    // MARK: - Collapsed transcript messages
+
+    /// `⌘⇧M`: expand or collapse the newest long message in the transcript,
+    /// for a reader who never leaves the composer. The control under the
+    /// message carries the same key caps.
+    static let transcriptCollapseShortcut: KeyShortcut = .commandShift("m")
+
+    /// Message ids the reader expanded out of the collapsed state. A message
+    /// is collapsed when it is long enough and its id is not in here.
+    var expandedTranscriptMessageIDs: Set<UUID> = []
+
+    /// What the transcript draws for one message.
+    func collapseState(for message: QuickMessage) -> MessageCollapseState {
+        MessageCollapseState(
+            text: message.content,
+            isExpanded: expandedTranscriptMessageIDs.contains(message.id)
+        )
+    }
+
+    /// The newest on-screen message that has a Show more control, the one the
+    /// keyboard shortcut acts on. The overlay's transcript block stops two
+    /// turns short of the end; the conversation view shows them all.
+    var keyboardToggleMessageID: UUID? {
+        let visible = isConversationViewPresented
+            ? conversationMessages
+            : Array(conversationMessages.dropLast(2))
+        return visible.last { MessageCollapsePolicy.shouldCollapse($0.content) }?.id
+    }
+
+    /// Toggles one message between collapsed and expanded. Returns `false`
+    /// when the id is not part of the open conversation.
+    @discardableResult
+    func toggleTranscriptMessage(_ id: UUID) -> Bool {
+        guard conversationMessages.contains(where: { $0.id == id }) else { return false }
+        if expandedTranscriptMessageIDs.contains(id) {
+            expandedTranscriptMessageIDs.remove(id)
+        } else {
+            expandedTranscriptMessageIDs.insert(id)
+        }
+        noteInteraction()
+        return true
+    }
+
     // MARK: - Lightweight follow-up history
 
+    /// Whether the next question starts a fresh chat. "Always" and "Never"
+    /// are not windows: one starts a new chat every time, the other keeps the
+    /// thread until the user starts a new chat by hand.
     private var shouldStartNewConversation: Bool {
         guard let updatedAt = currentConversation?.updatedAt else { return false }
-        return Date().timeIntervalSince(updatedAt)
-            > Double(max(1, settings.newConversationAfterMinutes) * 60)
+        switch settings.newChatInterval {
+        case .always:
+            return true
+        case .never:
+            return false
+        case let option:
+            guard let minutes = option.minutes else { return false }
+            return Date().timeIntervalSince(updatedAt) > Double(minutes) * 60
+        }
     }
 
     func loadHistory() {
@@ -5756,10 +6592,10 @@ import Observation
     }
 
     func startNewConversation() {
+        expandedTranscriptMessageIDs.removeAll()
         reset([.thread, .input])
         requestInputFocus()
     }
-
     func clearHistory() {
         history = []
         currentConversation = nil
@@ -5774,6 +6610,7 @@ import Observation
     func loadConversation(id: UUID) {
         guard let conversation = history.first(where: { $0.id == id }) else { return }
         currentConversation = conversation
+        expandedTranscriptMessageIDs.removeAll()
         isConversationHistoryPresented = false
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
         settings.select(providerID: conversation.providerID, model: conversation.model)

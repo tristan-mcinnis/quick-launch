@@ -30,6 +30,7 @@ struct AppPathsTests {
     @Test func storesUseTheSharedDirectory() {
         let base = AppPaths.applicationSupportDirectory.path
         #expect(LauncherUsageStore.defaultFileURL().path == base + "/launcher-usage.json")
+        #expect(ModelPreferenceStore.defaultFileURL().path == base + "/model-preferences.json")
         #expect(ScreenshotTextIndex.defaultStoreURL().path == base + "/screenshot-text-index.json")
         #expect(TranslationHistoryStore.defaultURL().path == base + "/translation-history.json")
         #expect(QuickHistoryStore.defaultFileURL().path == base + "/chat-history.json")

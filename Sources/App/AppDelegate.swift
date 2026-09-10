@@ -1267,6 +1267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.errorMessage
             _ = viewModel.isActionPalettePresented
             _ = viewModel.isTransformChooserPresented
+            // The model chooser, the Add Context menu, and the ⌘J conversation
+            // view are inline blocks: each one changes the window height.
+            _ = viewModel.isModelChooserPresented
+            _ = viewModel.isAddContextMenuPresented
+            _ = viewModel.isConversationViewPresented
+            _ = viewModel.modelChooserOptions.count
+            _ = viewModel.addContextOptions.count
             _ = viewModel.isApplicationActionPanePresented
             _ = viewModel.isCatalogActionPanePresented
             _ = viewModel.catalogScope

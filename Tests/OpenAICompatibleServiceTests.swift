@@ -190,4 +190,168 @@ struct OpenAICompatibleServiceTests {
         let urlString = request.url?.absoluteString ?? ""
         #expect(urlString.contains("11451"))
     }
+
+    // MARK: - 11. Reasoning effort
+    //
+    // The endpoints agree on `reasoning_effort` and disagree on everything
+    // else: DeepSeek's thinking-mode example also sends `thinking`.
+
+    private func body(of service: OpenAICompatibleService) throws -> [String: Any] {
+        let request = try service.buildRequest(prompt: "hello")
+        let data = try #require(request.httpBody)
+        return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func bodyData(of service: OpenAICompatibleService) throws -> Data {
+        try #require(try service.buildRequest(prompt: "hello").httpBody)
+    }
+
+    /// The body's JSON with keys sorted. JSON object key order is not part of
+    /// the contract — and `JSONSerialization` does not promise one — so the
+    /// content is compared in canonical order.
+    private func canonicalBody(of service: OpenAICompatibleService) throws -> Data {
+        let object = try JSONSerialization.jsonObject(with: try bodyData(of: service))
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private func service(
+        baseURL: String,
+        model: String = "test-model",
+        effort: ReasoningEffort?,
+        format: ReasoningEffortWireFormat? = nil
+    ) -> OpenAICompatibleService {
+        OpenAICompatibleService(
+            baseURL: URL(string: baseURL)!,
+            modelName: model,
+            reasoningEffort: effort,
+            reasoningEffortFormat: format
+        )
+    }
+
+    @Test func testReasoningEffortIsSentToAnOpenAIEndpoint() throws {
+        let json = try body(of: service(
+            baseURL: "https://api.openai.com/v1",
+            model: "gpt-5",
+            effort: .high
+        ))
+
+        #expect(json["reasoning_effort"] as? String == "high")
+        #expect(json["thinking"] == nil)
+        #expect(Set(json.keys) == ["model", "stream", "messages", "reasoning_effort"])
+    }
+
+    @Test func testLowEffortIsSentVerbatim() throws {
+        let json = try body(of: service(
+            baseURL: "https://api.openai.com/v1",
+            model: "gpt-5",
+            effort: .low
+        ))
+
+        #expect(json["reasoning_effort"] as? String == "low")
+    }
+
+    @Test func testMoonshotEndpointGetsTheFlatShapeOnly() throws {
+        // Kimi K3 takes a top-level `reasoning_effort` and rejects the
+        // `thinking` object its K2.x predecessors used.
+        let json = try body(of: service(
+            baseURL: "https://api.moonshot.ai/v1",
+            model: "kimi-k3",
+            effort: .high
+        ))
+
+        #expect(json["reasoning_effort"] as? String == "high")
+        #expect(json["thinking"] == nil)
+    }
+
+    @Test func testDeepSeekEndpointGetsItsOwnShape() throws {
+        let json = try body(of: service(
+            baseURL: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+            effort: .high
+        ))
+
+        let thinking = try #require(json["thinking"] as? [String: Any])
+        #expect(thinking["type"] as? String == "enabled")
+        #expect(json["reasoning_effort"] as? String == "high")
+    }
+
+    @Test func testEndpointShapeCanBeOverridden() throws {
+        // A proxy in front of DeepSeek speaks the same shape on a different
+        // host, and a plain OpenAI-shaped server can sit on a DeepSeek host.
+        let deepSeekBehindAProxy = try body(of: service(
+            baseURL: "http://127.0.0.1:8078/v1",
+            model: "deepseek-v4-flash",
+            effort: .high,
+            format: .deepSeek
+        ))
+        #expect(deepSeekBehindAProxy["thinking"] != nil)
+
+        let plainServerOnADeepSeekHost = try body(of: service(
+            baseURL: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+            effort: .high,
+            format: .openAI
+        ))
+        #expect(plainServerOnADeepSeekHost["thinking"] == nil)
+        #expect(plainServerOnADeepSeekHost["reasoning_effort"] as? String == "high")
+    }
+
+    @Test func testNoEffortLeavesTheBodyExactlyAsItWas() throws {
+        // The body this service built before the setting existed, from a
+        // service that was never told about effort at all.
+        let today = try canonicalBody(of: makeService())
+
+        let explicitNil = try canonicalBody(of: service(baseURL: "http://127.0.0.1:11450/v1", effort: nil))
+        let modelDefault = try canonicalBody(of: service(baseURL: "http://127.0.0.1:11450/v1", effort: .modelDefault))
+        let deepSeekDefault = try canonicalBody(of: service(baseURL: "https://api.deepseek.com", effort: .modelDefault))
+
+        #expect(today == explicitNil)
+        #expect(today == modelDefault)
+        #expect(today == deepSeekDefault)
+
+        let json = try body(of: makeService())
+        #expect(Set(json.keys) == ["model", "stream", "messages"])
+    }
+
+    @Test func testNoEffortLeavesTheBodyExactlyAsItWasWithTools() throws {
+        // The same constraint on the tool-calling shape, which is the other
+        // body this service can send.
+        let plain = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:11450/v1")!,
+            modelName: "test-model",
+            webSearch: { _ in "" }
+        )
+        let unset = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:11450/v1")!,
+            modelName: "test-model",
+            webSearch: { _ in "" },
+            reasoningEffort: .modelDefault
+        )
+
+        #expect(try canonicalBody(of: plain) == canonicalBody(of: unset))
+        #expect(try body(of: plain)["reasoning_effort"] == nil)
+    }
+
+    /// The gate the caller applies before it reaches the service: a model the
+    /// curated table gives no effort control reads back as `.modelDefault`,
+    /// whatever the user chose, and the service then sends nothing.
+    @Test @MainActor func testEffortIsAbsentForAModelThatDoesNotSupportIt() throws {
+        let providerID = UUID()
+        let preferences = ModelPreferenceStore(fileURL: nil)
+        preferences.setReasoningEffort(.high, providerID: providerID, model: "gemma-it")
+        let profile = preferences.profile(providerID: providerID, model: "gemma-it")
+
+        #expect(!profile.supportsReasoningEffort)
+        #expect(profile.reasoningEffort == .modelDefault)
+
+        let json = try body(of: service(
+            baseURL: "http://127.0.0.1:8078/v1",
+            model: "gemma-it",
+            effort: profile.reasoningEffort
+        ))
+
+        #expect(json["reasoning_effort"] == nil)
+        #expect(json["thinking"] == nil)
+        #expect(Set(json.keys) == ["model", "stream", "messages"])
+    }
 }

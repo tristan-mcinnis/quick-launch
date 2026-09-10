@@ -6,6 +6,10 @@ struct SavedPromptsEditor: View {
     @Bindable var viewModel: QuickViewModel
     @State private var selection: SavedPrompt.ID?
 
+    /// The shared model profiles. A parameter would be better, but this pane
+    /// is built by `SettingsView`, which owns the pane list.
+    private var preferences: ModelPreferenceStore { .shared }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
@@ -168,6 +172,25 @@ struct SavedPromptsEditor: View {
                 .disabled(prompt.providerID == nil)
             }
 
+            // Only a command that pins one model can pin an effort for it.
+            if let pinned = pinnedModel(prompt),
+               preferences.profile(providerID: pinned.providerID, model: pinned.model)
+                   .supportsReasoningEffort {
+                SettingsRow(title: "Reasoning effort") {
+                    Picker("Reasoning effort", selection: bindingForEffort(prompt.id)) {
+                        ForEach(ReasoningEffort.allCases) { effort in
+                            Text(effort.title).tag(effort)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 260)
+                    .accessibilityLabel("Reasoning effort")
+                }
+                CardNote {
+                    CardText("Model default lets the provider decide. The choice carries over to the next model that supports it.")
+                }
+            }
+
             CardNote {
                 CardText("Pin this action to a provider and model, or let it use the current choice.")
             }
@@ -308,14 +331,57 @@ struct SavedPromptsEditor: View {
         Binding(
             get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.model },
             set: { newValue in
+                let providerID = viewModel.settings.savedPrompts
+                    .first(where: { $0.id == id })?.providerID
                 update(id) { $0.model = newValue }
+                if let providerID, let newValue {
+                    preferences.noteModelSelection(providerID: providerID, model: newValue)
+                }
+            }
+        )
+    }
+
+    /// The provider and model a command pins, when it pins both. An effort
+    /// only means something against one specific model.
+    private func pinnedModel(_ prompt: SavedPrompt) -> (providerID: UUID, model: String)? {
+        guard let providerID = prompt.providerID,
+              let model = prompt.model,
+              !model.isEmpty
+        else { return nil }
+        return (providerID, model)
+    }
+
+    private func bindingForEffort(_ id: SavedPrompt.ID) -> Binding<ReasoningEffort> {
+        Binding(
+            get: {
+                guard let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == id }),
+                      let pinned = pinnedModel(prompt)
+                else { return .modelDefault }
+                return preferences.profile(providerID: pinned.providerID, model: pinned.model)
+                    .reasoningEffort
+            },
+            set: { newValue in
+                guard let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == id }),
+                      let pinned = pinnedModel(prompt)
+                else { return }
+                preferences.setReasoningEffort(
+                    newValue,
+                    providerID: pinned.providerID,
+                    model: pinned.model
+                )
             }
         )
     }
 
     private func modelsForPrompt(_ prompt: SavedPrompt) -> [String] {
-        guard let providerID = prompt.providerID else { return [] }
-        return viewModel.settings.providers.first(where: { $0.id == providerID })?.models ?? []
+        guard let providerID = prompt.providerID,
+              let provider = viewModel.settings.providers.first(where: { $0.id == providerID })
+        else { return [] }
+        return ModelCatalogService.visibleModels(
+            for: provider,
+            currentModel: prompt.model,
+            preferences: preferences
+        )
     }
 
     private func addRow() {

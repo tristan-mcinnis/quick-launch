@@ -2,21 +2,169 @@ import Foundation
 import AppKit
 import Markdown
 
+/// One slice of an assistant answer: a run of markdown, or a fenced code
+/// block lifted out of the prose stream so it can draw as its own block.
+struct AnswerSegment: Identifiable, Equatable {
+    enum Content: Equatable {
+        /// A run of markdown between code blocks.
+        case prose(String)
+        /// A fenced code block, with the language and code its fence carried.
+        case code(CodeBlockContent)
+    }
+
+    /// Position in the answer. Stable while text streams onto the end.
+    let id: Int
+    let content: Content
+}
+
 /// Converts a markdown string to an NSAttributedString using swift-markdown's AST.
 enum MarkdownRenderer {
 
+    /// The vertical gap between two segments in the answer stack. The view
+    /// reads this and so does `measuredHeight`, so the drawn stack and the
+    /// measured window cannot drift.
+    static let segmentSpacing: CGFloat = House.Spacing.xs
+
+    // MARK: - Segments
+
+    @MainActor private static var segmentsCache: (source: String, segments: [AnswerSegment])?
+
+    /// The answer split at its fenced code blocks, cached for the view and
+    /// for `measuredHeight`.
+    @MainActor static func cachedSegments(_ markdown: String) -> [AnswerSegment] {
+        if let segmentsCache, segmentsCache.source == markdown { return segmentsCache.segments }
+        let segments = segments(markdown)
+        segmentsCache = (markdown, segments)
+        return segments
+    }
+
+    /// The answer split at its fenced code blocks: prose, code, prose, in
+    /// document order. A document with no fenced code block is one prose
+    /// segment, so a code-free answer renders exactly as it always did.
+    static func segments(_ markdown: String) -> [AnswerSegment] {
+        guard !markdown.isEmpty else { return [] }
+        let bytes = Array(markdown.utf8)
+        let lineStarts = utf8LineStarts(bytes)
+        let spans = codeSpans(
+            in: Document(parsing: markdown),
+            bytes: bytes,
+            lineStarts: lineStarts
+        )
+        guard !spans.isEmpty else {
+            return [AnswerSegment(id: 0, content: .prose(markdown))]
+        }
+
+        var segments: [AnswerSegment] = []
+        var cursor = 0
+        for span in spans {
+            // A code block inside a block already taken is part of the outer
+            // block's code text, not a segment of its own.
+            guard span.range.lowerBound >= cursor else { continue }
+            appendProse(
+                markdown,
+                bytes: bytes,
+                range: cursor..<span.range.lowerBound,
+                into: &segments
+            )
+            segments.append(AnswerSegment(id: segments.count, content: .code(span.content)))
+            cursor = span.range.upperBound
+        }
+        appendProse(markdown, bytes: bytes, range: cursor..<bytes.count, into: &segments)
+        return segments
+    }
+
+    /// A fenced code block's byte range in the source, and what it carries.
+    private struct CodeSpan {
+        let range: Range<Int>
+        let content: CodeBlockContent
+    }
+
+    private static func codeSpans(
+        in document: Markup,
+        bytes: [UInt8],
+        lineStarts: [Int]
+    ) -> [CodeSpan] {
+        var blocks: [CodeBlock] = []
+        collectCodeBlocks(document, into: &blocks)
+        return blocks.compactMap { block in
+            guard let source = block.range,
+                  let lower = utf8Offset(of: source.lowerBound, lineStarts: lineStarts),
+                  let upper = utf8Offset(of: source.upperBound, lineStarts: lineStarts),
+                  lower < upper, upper <= bytes.count
+            else { return nil }
+            return CodeSpan(
+                range: lower..<upper,
+                content: CodeBlockContent(infoString: block.language, code: codeText(block))
+            )
+        }
+        .sorted { $0.range.lowerBound < $1.range.lowerBound }
+    }
+
+    private static func collectCodeBlocks(_ markup: Markup, into blocks: inout [CodeBlock]) {
+        if let block = markup as? CodeBlock {
+            blocks.append(block)
+            return
+        }
+        for child in markup.children {
+            collectCodeBlocks(child, into: &blocks)
+        }
+    }
+
+    /// The code a fenced block wraps, without the fence's trailing newline.
+    private static func codeText(_ block: CodeBlock) -> String {
+        block.code.hasSuffix("\n") ? String(block.code.dropLast()) : block.code
+    }
+
+    /// The parser reports a line and a UTF-8 byte column, so turning a source
+    /// location into a byte offset needs the offset each line starts at.
+    private static func utf8LineStarts(_ bytes: [UInt8]) -> [Int] {
+        var starts = [0]
+        for (offset, byte) in bytes.enumerated() where byte == 0x0A {
+            starts.append(offset + 1)
+        }
+        return starts
+    }
+
+    private static func utf8Offset(of location: SourceLocation, lineStarts: [Int]) -> Int? {
+        guard location.line >= 1, location.line <= lineStarts.count else { return nil }
+        return lineStarts[location.line - 1] + max(0, location.column - 1)
+    }
+
+    private static func appendProse(
+        _ markdown: String,
+        bytes: [UInt8],
+        range: Range<Int>,
+        into segments: inout [AnswerSegment]
+    ) {
+        guard !range.isEmpty else { return }
+        let source = String(decoding: bytes[range], as: UTF8.self)
+        // The blank lines around a fence are not a segment of their own.
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        segments.append(AnswerSegment(id: segments.count, content: .prose(source)))
+    }
+
+    // MARK: - Rendering
+
     /// The overlay re-evaluates its body for every state change, not only
-    /// when the answer text changes; one entry is enough to make a repeat
-    /// render free.
-    @MainActor private static var cache: (source: String, rendered: NSAttributedString)?
+    /// when the answer text changes; a small cache makes a repeat render
+    /// free. Keyed by source: an answer is several prose runs around its code
+    /// blocks, and while streaming only the last one changes.
+    @MainActor private static var renderCache: [(source: String, rendered: NSAttributedString)] = []
+    private static let renderCacheLimit = 24
 
     @MainActor static func cachedRender(_ markdown: String) -> NSAttributedString {
-        if let cache, cache.source == markdown { return cache.rendered }
+        if let hit = renderCache.first(where: { $0.source == markdown }) { return hit.rendered }
         let rendered = render(markdown)
-        cache = (markdown, rendered)
+        renderCache.append((markdown, rendered))
+        if renderCache.count > renderCacheLimit {
+            renderCache.removeFirst(renderCache.count - renderCacheLimit)
+        }
         return rendered
     }
 
+    /// Renders a whole markdown document into one attributed string. The
+    /// answer body draws each prose segment from `segments(_:)` instead, so
+    /// fenced code gets its own block; this stays the document renderer.
     static func render(_ markdown: String) -> NSAttributedString {
         guard !markdown.isEmpty else { return NSAttributedString() }
         let document = Document(parsing: markdown)
@@ -42,24 +190,48 @@ enum MarkdownRenderer {
         return output
     }
 
-    @MainActor private static var heightCache: (source: String, width: CGFloat, height: CGFloat)?
+    @MainActor private static var heightCache: [(source: String, width: CGFloat, height: CGFloat)] = []
+    private static let heightCacheLimit = 24
 
-    /// Height the rendered markdown needs at `width`, for window sizing.
-    /// Replaces the old character-count guess, which under-estimated headed
-    /// or code-heavy answers and left the last lines clipped.
-    @MainActor static func measuredHeight(markdown: String, width: CGFloat) -> CGFloat {
+    /// Height one prose run needs at `width`. Reads the same string the text
+    /// view draws, so the measurement cannot drift from the render.
+    @MainActor static func proseHeight(markdown: String, width: CGFloat) -> CGFloat {
         guard !markdown.isEmpty, width > 0 else { return 0 }
-        if let heightCache, heightCache.source == markdown, heightCache.width == width {
-            return heightCache.height
+        if let hit = heightCache.first(where: { $0.source == markdown && $0.width == width }) {
+            return hit.height
         }
         let rect = cachedRender(markdown).boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-        // A little slack: NSTextView's layout rounds line fragments up.
-        let height = rect.height.rounded(.up) + 4
-        heightCache = (markdown, width, height)
+        let height = rect.height.rounded(.up)
+        heightCache.append((markdown, width, height))
+        if heightCache.count > heightCacheLimit {
+            heightCache.removeFirst(heightCache.count - heightCacheLimit)
+        }
         return height
+    }
+
+    /// Height the answer needs at `width`, for window sizing: prose measured
+    /// from the string it renders, code blocks from their own chrome and
+    /// lines. Replaces the old character-count guess, which under-estimated
+    /// headed or code-heavy answers and left the last lines clipped.
+    @MainActor static func measuredHeight(markdown: String, width: CGFloat) -> CGFloat {
+        guard !markdown.isEmpty, width > 0 else { return 0 }
+        let segments = cachedSegments(markdown)
+        guard !segments.isEmpty else { return 0 }
+        var height: CGFloat = 0
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { height += segmentSpacing }
+            switch segment.content {
+            case .prose(let source):
+                height += proseHeight(markdown: source, width: width)
+            case .code(let content):
+                height += CodeBlockMetrics.height(of: content, width: width)
+            }
+        }
+        // A little slack: NSTextView's layout rounds line fragments up.
+        return height.rounded(.up) + 4
     }
 }
 

@@ -1,0 +1,793 @@
+// QuickAIKeyboardTests — keyboard routing proof for the Quick AI overlay.
+//
+// Every other suite that covers a shortcut calls the view-model method the key
+// is supposed to reach (`performShortcut`, `handleEscapeKey`, `handleTab`).
+// That proves the destination works and proves nothing about the routing.
+//
+// This suite builds a real `KeyablePanel` wired with the closures
+// `AppDelegate.makePanel` installs (Sources/App/AppDelegate.swift:514-544),
+// builds real `NSEvent`s, and pushes them through the panel's own
+// `performKeyEquivalent(with:)` / `sendEvent(_:)`. Assertions read only
+// observable state: which layer is on top, what the action list holds, what
+// the composer holds, what the fake pasteboard or selection service received.
+//
+// Three key sources cannot be driven from a real `NSEvent` in-process, because
+// they are SwiftUI handlers on the composer's `TextField`, not window-level key
+// handling:
+//   * Tab (OverlayView.swift:53-55) calls `viewModel.handleTab()`
+//   * the `@` trigger (OverlayView.swift:125-131) calls
+//     `viewModel.addContextTriggerDidChange(newValue)`
+//   * plain Return (OverlayView.swift:52 `.onSubmit`) calls
+//     `viewModel.submitResolvingFuzzyAlias()`. The panel's `returnHandler` is
+//     only reached by ⇧↩ with no translation direction (AppDelegate.swift:67-77),
+//     which lands on that identical entry point — one test proves that route
+//     with a real event.
+// Those are driven at that call, with the same argument the view passes, which
+// is one level below the key press. Everything else in this suite is a real
+// event through the real panel.
+
+import AppKit
+import Foundation
+import SwiftUI
+import Testing
+
+@testable import QuickLaunch
+
+@Suite("Quick AI keyboard routing", .serialized)
+@MainActor
+struct QuickAIKeyboardTests {
+
+    // MARK: - Fixtures
+
+    private let target = SelectionTarget(processIdentifier: 4242, applicationName: "Editor")
+
+    /// Test defaults: no auto-copy so a copied answer is only ever the one the
+    /// key asked for, and no history file so nothing leaks between runs.
+    private func settings(_ configure: (inout QuickSettings) -> Void = { _ in }) -> QuickSettings {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        configure(&settings)
+        return settings
+    }
+
+    /// A panel sitting on a finished answer, the state every answer-layer
+    /// shortcut is defined against.
+    private func answered(
+        reply: String = "An answer.",
+        settings configure: (inout QuickSettings) -> Void = { _ in }
+    ) async throws -> (KeyboardOverlay, MockQuickService) {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: reply, finishReason: "stop")])
+        let overlay = KeyboardOverlay(settings: settings(configure), service: service)
+        overlay.viewModel.input = "what happened"
+        await overlay.viewModel.submit()
+        #expect(overlay.viewModel.topLayer == .answer)
+        return (overlay, service)
+    }
+
+    /// The panel's handlers start async work in `Task { @MainActor … }` closures,
+    /// exactly as the running overlay does. Wait for the observable outcome to
+    /// land rather than assuming a scheduling order; the deadline reports a
+    /// failure instead of hanging.
+    private func waitFor(
+        _ timeout: Duration = .seconds(5),
+        _ condition: @MainActor () async -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return await condition()
+    }
+
+    // MARK: - 1. Answer-layer shortcuts
+
+    @Test func shiftCommandROpensTheRegenerateModelChooser() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+
+        #expect(try overlay.press("r", keyCode: 15, [.command, .shift]))
+        #expect(await waitFor { viewModel.isModelChooserPresented })
+
+        #expect(viewModel.modelChooserPurpose == .regenerate)
+        #expect(viewModel.topLayer == .modelChooser)
+        #expect(!viewModel.modelChooserOptions.isEmpty)
+        #expect(viewModel.output == "An answer.", "opening the chooser changes nothing else")
+    }
+
+    @Test func commandShiftOOpensChangeModelWithoutAskingAgain() async throws {
+        let (overlay, service) = try await answered()
+        let viewModel = overlay.viewModel
+
+        #expect(try overlay.press("o", keyCode: 31, [.command, .shift]))
+        #expect(await waitFor { viewModel.isModelChooserPresented })
+
+        #expect(viewModel.modelChooserPurpose == .change)
+        #expect(viewModel.topLayer == .modelChooser)
+        #expect(await service.sendCallCount == 1, "Change Model picks, it never re-asks")
+    }
+
+    @Test func commandShiftVRunsReplaceSelectionOnTheRetainedSelection() async throws {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "shorter text", finishReason: "stop")])
+        let overlay = KeyboardOverlay(
+            settings: settings(),
+            service: service,
+            selectionText: "a much longer passage"
+        )
+        let viewModel = overlay.viewModel
+        viewModel.rememberSelectionTarget(target)
+        viewModel.captureLaunchSelection()
+        viewModel.input = "/shorter"
+        await overlay.submitLikeReturn()
+        #expect(viewModel.resultActions.contains(.replaceSelection), "the selection is still replaceable")
+        let answer = viewModel.output
+
+        #expect(try overlay.press("v", keyCode: 9, [.command, .shift]))
+
+        #expect(await waitFor { overlay.selection.replacedText == answer })
+        #expect(overlay.selection.replacedText == answer)
+        #expect(viewModel.output == answer)
+    }
+
+    @Test func commandRRegeneratesOnTheSameModel() async throws {
+        let (overlay, service) = try await answered()
+        let viewModel = overlay.viewModel
+        let model = viewModel.activeModelDisplay
+        await service.setResponses([StreamDelta(text: "Second answer.", finishReason: "stop")])
+
+        #expect(try overlay.press("r", keyCode: 15, [.command]))
+
+        #expect(await waitFor { await service.sendCallCount == 2 })
+        #expect(await waitFor { viewModel.output == "Second answer." })
+        #expect(await service.lastPrompt == "what happened", "the same question goes out again")
+        #expect(viewModel.activeModelDisplay == model, "⌘R stays on the model in use")
+    }
+
+    @Test func commandNStartsANewChat() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+
+        #expect(try overlay.press("n", keyCode: 45, [.command]))
+
+        #expect(await waitFor { viewModel.currentConversation == nil })
+        #expect(viewModel.output.isEmpty)
+        #expect(viewModel.topLayer == .root)
+    }
+
+    @Test func commandBracketsStepThroughChats() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        let current = try #require(viewModel.currentConversation)
+        let older = QuickConversation(
+            updatedAt: current.updatedAt.addingTimeInterval(-120),
+            providerID: InferenceProvider.deepSeekID,
+            model: "older-model",
+            messages: [
+                QuickMessage(role: .user, content: "older question"),
+                QuickMessage(role: .assistant, content: "older answer"),
+            ]
+        )
+        viewModel.history = [older, current]
+        #expect(viewModel.resultActions.contains(.previousChat))
+        #expect(viewModel.resultActions.contains(.nextChat))
+
+        #expect(try overlay.press("[", keyCode: 33, [.command]))
+        #expect(await waitFor { viewModel.currentConversation?.id == older.id })
+        #expect(viewModel.output == "older answer", "the older chat's answer comes with it")
+        #expect(viewModel.activeModelDisplay == "older-model")
+
+        #expect(try overlay.press("]", keyCode: 30, [.command]))
+        #expect(await waitFor { viewModel.currentConversation?.id == current.id })
+        #expect(viewModel.output == "An answer.")
+    }
+
+    @Test func commandJOpensAndClosesTheConversationView() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(viewModel.isConversationViewPresented)
+        #expect(viewModel.topLayer == .conversationView)
+        #expect(!viewModel.conversationMessages.isEmpty)
+
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(!viewModel.isConversationViewPresented)
+        #expect(viewModel.output == "An answer.", "leaving the view keeps the thread")
+        #expect(viewModel.currentConversation != nil)
+    }
+
+    @Test func commandKOpensAndClosesTheActionPanel() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+
+        #expect(try overlay.press("k", keyCode: 40, [.command]))
+        #expect(viewModel.isActionPalettePresented)
+        #expect(viewModel.topLayer == .actionPalette)
+        #expect(viewModel.paletteResultActions.contains(.regenerate))
+        #expect(viewModel.paletteResultActions.contains(.newChat))
+
+        #expect(try overlay.press("k", keyCode: 40, [.command]))
+        #expect(!viewModel.isActionPalettePresented)
+        #expect(viewModel.output == "An answer.")
+    }
+
+    // MARK: - 2. Escape closes exactly one layer
+
+    @Test func escapeClosesTheModelChooserFirstAndNothingElse() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        #expect(try overlay.press("r", keyCode: 15, [.command, .shift]))
+        #expect(await waitFor { viewModel.topLayer == .modelChooser })
+
+        try overlay.pressEscape()
+
+        #expect(!viewModel.isModelChooserPresented)
+        #expect(viewModel.topLayer == .answer, "the answer layer was underneath all along")
+        #expect(viewModel.output == "An answer.")
+        #expect(viewModel.currentConversation != nil)
+        #expect(overlay.presenter.dismissCount == 0, "Escape never reaches past the top layer")
+    }
+
+    @Test func escapeClosesACommandKItemPane() async throws {
+        let overlay = KeyboardOverlay(
+            settings: settings(),
+            applicationCatalog: KeyboardApplicationCatalog()
+        )
+        let viewModel = overlay.viewModel
+        viewModel.input = "saf"
+        #expect(!viewModel.launcherMatches.isEmpty)
+
+        #expect(try overlay.press("k", keyCode: 40, [.command]))
+        #expect(viewModel.isItemActionPanePresented)
+        #expect(viewModel.topLayer == .itemActionPane)
+        #expect(viewModel.focusedItemActions.map(\.title).contains("Set Alias…"))
+
+        try overlay.pressEscape()
+
+        #expect(!viewModel.isItemActionPanePresented)
+        #expect(!viewModel.launcherMatches.isEmpty, "the list underneath is untouched")
+        #expect(viewModel.input == "saf")
+        #expect(overlay.presenter.dismissCount == 0)
+    }
+
+    @Test func escapeLeavesAFormBackOnTheActionListBeforeClosingThePane() async throws {
+        let overlay = KeyboardOverlay(
+            settings: settings(),
+            applicationCatalog: KeyboardApplicationCatalog()
+        )
+        let viewModel = overlay.viewModel
+        viewModel.input = "saf"
+        #expect(try overlay.press("k", keyCode: 40, [.command]))
+        #expect(try overlay.press("a", keyCode: 0, [.command, .shift]))
+        #expect(viewModel.activeItemActionForm == .alias)
+        #expect(viewModel.topLayer == .itemActionForm)
+
+        try overlay.pressEscape()
+
+        #expect(viewModel.activeItemActionForm == nil)
+        #expect(viewModel.isItemActionPanePresented, "the pane, and its action list, survive")
+        #expect(viewModel.topLayer == .itemActionPane)
+        #expect(viewModel.focusedItemActions.map(\.title).contains("Set Hotkey…"))
+
+        try overlay.pressEscape()
+
+        #expect(!viewModel.isItemActionPanePresented)
+        #expect(viewModel.input == "saf", "the typed query is still in the composer")
+        #expect(viewModel.topLayer == .typedText)
+        #expect(overlay.presenter.dismissCount == 0)
+    }
+
+    @Test func escapeClosesTheConversationViewAndKeepsTheThread() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(viewModel.topLayer == .conversationView)
+
+        try overlay.pressEscape()
+
+        #expect(!viewModel.isConversationViewPresented)
+        #expect(viewModel.output == "An answer.")
+        #expect(viewModel.currentConversation != nil)
+        #expect(overlay.presenter.dismissCount == 0)
+    }
+
+    @Test func escapeWalksTheWholeStackOneLayerAtATimeAndNeverRestartsTheChat() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        let conversation = try #require(viewModel.currentConversation)
+
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("r", keyCode: 15, [.command, .shift]))
+        #expect(await waitFor { viewModel.topLayer == .modelChooser })
+
+        try overlay.pressEscape()
+        #expect(viewModel.topLayer == .conversationView, "the chooser goes, the view stays")
+
+        try overlay.pressEscape()
+        #expect(!viewModel.isConversationViewPresented)
+        #expect(viewModel.topLayer == .answer)
+        #expect(viewModel.currentConversation?.id == conversation.id)
+
+        try overlay.pressEscape()
+        #expect(overlay.presenter.dismissCount == 1, "only the last Escape hides the overlay")
+        #expect(viewModel.output == "An answer.", "Escape never discards the thread")
+        #expect(viewModel.currentConversation?.id == conversation.id)
+    }
+
+    @Test func escapeOnAnAnswerHidesTheOverlayInsteadOfDiscardingIt() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        #expect(viewModel.topLayer == .answer)
+
+        try overlay.pressEscape()
+
+        #expect(overlay.presenter.dismissCount == 1)
+        #expect(overlay.presenter.presentCount == 0)
+        #expect(viewModel.topLayer == .answer, "the overlay hides; the answer layer stays")
+        #expect(viewModel.output == "An answer.")
+    }
+
+    @Test func escapeAtAnEmptyRootHidesTheOverlay() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        #expect(overlay.viewModel.topLayer == .root)
+
+        try overlay.pressEscape()
+
+        #expect(overlay.presenter.dismissCount == 1)
+        #expect(overlay.viewModel.topLayer == .root)
+    }
+
+    // MARK: - 3. The `@` trigger
+
+    /// The composer routes every keystroke through `.onChange(of: viewModel.input)`
+    /// (OverlayView.swift:125-131), which calls `addContextTriggerDidChange`
+    /// with the new field value. A test cannot type into the SwiftUI field
+    /// editor, so the trigger is driven with the value the view would pass.
+    @discardableResult
+    private func type(_ text: String, into viewModel: QuickViewModel) -> Bool {
+        viewModel.input = text
+        return viewModel.addContextTriggerDidChange(text)
+    }
+
+    @Test func typingAtOpensTheContextMenuAndDropsTheAt() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+        viewModel.input = "summarize this "
+
+        #expect(type("summarize this @", into: viewModel))
+
+        #expect(viewModel.isAddContextMenuPresented)
+        #expect(viewModel.topLayer == .addContextMenu)
+        #expect(viewModel.input == "summarize this ", "the @ is a trigger, not content")
+        #expect(viewModel.addContextOptions == AddContextEntry.allCases)
+        #expect(viewModel.addContextOptions.map(\.title) == [
+            "Focused Window", "Selected Text", "Selected Area", "Entire Screen",
+        ])
+    }
+
+    @Test func anAtInsideAWordOrAddressNeverOpensTheMenu() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+
+        for typed in ["me@", "alice@", "user@", "a@b", "https://example.com/@", "https://x.com?q=@"] {
+            viewModel.input = ""
+            #expect(!type(typed, into: viewModel), "\(typed) must not open Add Context")
+            #expect(!viewModel.isAddContextMenuPresented)
+            #expect(viewModel.input == typed, "\(typed) keeps its @")
+        }
+    }
+
+    @Test func anAtOnItsOwnIsStillATrigger() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+
+        #expect(type("@", into: viewModel))
+        #expect(viewModel.isAddContextMenuPresented)
+        #expect(viewModel.input.isEmpty)
+    }
+
+    // MARK: - 4. Tab in root search
+
+    /// Tab arrives from the composer's `.onKeyPress(.tab)` (OverlayView.swift:53-55),
+    /// which calls `handleTab()` and consumes the key when it returns true.
+    @Test func tabCompletesAFuzzySavedPromptAliasWhenOneMatches() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+        viewModel.input = "/gr"
+        #expect(!viewModel.savedPromptMatches.isEmpty)
+
+        #expect(viewModel.handleTab())
+
+        #expect(viewModel.inputMode == nil, "completion does not switch to Ask AI")
+        #expect(viewModel.input.hasPrefix("/grammar"))
+        #expect(viewModel.topLayer != .inputMode)
+    }
+
+    @Test func tabEntersAskAIWithTheTypedText() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+        viewModel.input = "hi"
+
+        #expect(viewModel.handleTab())
+
+        #expect(viewModel.inputMode == .askAI)
+        #expect(viewModel.input == "hi", "the typed text comes along")
+        #expect(viewModel.launcherMatches.isEmpty, "the launcher rows step aside")
+        // The layer is still the typed-text one because the text survived; the
+        // mode is what tells Return to send it to the model.
+        #expect(viewModel.topLayer == .typedText)
+        #expect(viewModel.classifySubmit() == .inputMode)
+    }
+
+    @Test func tabEntersAskAIFromAnEmptyField() throws {
+        let overlay = KeyboardOverlay(settings: settings())
+        let viewModel = overlay.viewModel
+        viewModel.input = ""
+
+        #expect(viewModel.handleTab())
+
+        #expect(viewModel.inputMode == .askAI)
+        #expect(viewModel.input.isEmpty)
+        #expect(viewModel.topLayer == .inputMode)
+    }
+
+    // MARK: - 5. The Tab hint
+
+    @Test func theTabHintFollowsTheSettingAndTabStillEntersAskAIWhenHidden() throws {
+        let overlay = KeyboardOverlay(settings: settings { $0.tabShortcutHintVisible = true })
+        let viewModel = overlay.viewModel
+
+        #expect(viewModel.showsTabShortcutHint)
+        #expect(viewModel.askAIItem(query: "").detail.contains("⇥"))
+        let withHint = try renderRoot(viewModel)
+
+        viewModel.updateSettings { $0.tabShortcutHintVisible = false }
+
+        #expect(!viewModel.showsTabShortcutHint)
+        #expect(!viewModel.askAIItem(query: "").detail.contains("⇥"))
+        #expect(!viewModel.askAIItem(query: "").detail.contains("switches to AI"))
+        let withoutHint = try renderRoot(viewModel)
+        #expect(withHint != withoutHint, "the search row draws differently with the hint off")
+
+        // The hint is a hint: Tab opens Quick AI either way.
+        #expect(viewModel.handleTab())
+        #expect(viewModel.inputMode == .askAI)
+        #expect(viewModel.topLayer == .inputMode)
+    }
+
+    /// The root search surface as it is actually drawn, so "which control is
+    /// drawn" is checked on pixels rather than on a flag.
+    private func renderRoot(_ viewModel: QuickViewModel) throws -> Data {
+        let width = viewModel.currentPanelWidth
+        let host = NSHostingView(rootView: OverlayView(viewModel: viewModel).frame(width: width))
+        host.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: width, height: max(host.fittingSize.height, 200))
+        )
+        host.layoutSubtreeIfNeeded()
+        let representation = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: representation)
+        return try #require(representation.representation(using: .png, properties: [:]))
+    }
+
+    // MARK: - 6. Return runs the configured primary action
+
+    @Test func returnCopiesWhenCopyIsThePrimaryAction() async throws {
+        let (overlay, _) = try await answered { $0.quickAIPrimaryAction = .copyToClipboard }
+        let viewModel = overlay.viewModel
+        let answer = viewModel.output
+
+        await overlay.submitLikeReturn()
+
+        #expect(overlay.pasteboard.string == answer)
+        #expect(overlay.selection.pastedText == nil, "copy never pastes")
+        #expect(viewModel.output == answer, "the answer stays on screen")
+        #expect(viewModel.topLayer == .answer)
+    }
+
+    @Test func returnPastesWhenPasteIsThePrimaryAction() async throws {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "An answer.", finishReason: "stop")])
+        let overlay = KeyboardOverlay(
+            settings: settings { $0.quickAIPrimaryAction = .pasteToActiveApp },
+            service: service
+        )
+        let viewModel = overlay.viewModel
+        viewModel.rememberSelectionTarget(target)
+        viewModel.input = "what happened"
+        await viewModel.submit()
+        let answer = viewModel.output
+
+        await overlay.submitLikeReturn()
+
+        #expect(overlay.selection.pastedText == answer)
+        #expect(overlay.selection.pastedTarget == target)
+        #expect(overlay.presenter.dismissCount == 1, "a successful paste closes the overlay")
+        #expect(overlay.pasteboard.string == nil, "a successful paste does not also copy")
+    }
+
+    @Test func returnWithTypedTextSubmitsAFollowUpInstead() async throws {
+        let (overlay, service) = try await answered()
+        let viewModel = overlay.viewModel
+        await service.setResponses([StreamDelta(text: "Follow-up.", finishReason: "stop")])
+        viewModel.input = "and then?"
+
+        await overlay.submitLikeReturn()
+
+        #expect(await waitFor { viewModel.output == "Follow-up." })
+        #expect(await service.sendCallCount == 2)
+        #expect(await service.lastPrompt == "and then?")
+        #expect(overlay.pasteboard.string == nil, "the primary action never ran")
+        #expect(overlay.selection.pastedText == nil)
+        #expect(viewModel.input.isEmpty, "the composer is spent by the submit")
+    }
+
+    /// The panel's own route to that same entry point: ⇧↩ with no translation
+    /// direction installed falls through `translateHandler` to `returnHandler`
+    /// (AppDelegate.swift:67-77). This is a real key event through the real
+    /// panel, so the wiring above `submitResolvingFuzzyAlias` is proven here.
+    @Test func shiftReturnFallsThroughToTheSameSubmitEntryPoint() async throws {
+        let (overlay, _) = try await answered { $0.quickAIPrimaryAction = .copyToClipboard }
+        let viewModel = overlay.viewModel
+        let answer = viewModel.output
+        #expect(viewModel.translationDirection == nil, "nothing to translate on an empty composer")
+
+        try await overlay.pressShiftReturn()
+        #expect(await waitFor { overlay.pasteboard.string == answer })
+
+        #expect(overlay.pasteboard.string == answer)
+    }
+
+    // MARK: - 7. Show more and Collapse
+
+    private func longAnswer(lines: Int) -> String {
+        (1...lines).map { "line \($0) and a little more text to be sure" }.joined(separator: "\n")
+    }
+
+    @Test func showMoreAndCollapseSwapAndTheShortcutFlipsThem() async throws {
+        let text = longAnswer(lines: 14)
+        let (overlay, _) = try await answered(reply: text)
+        let viewModel = overlay.viewModel
+        // ⌘J opens the conversation view, where every message is addressable.
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        let message = try #require(
+            viewModel.conversationMessages.last { MessageCollapsePolicy.shouldCollapse($0.content) }
+        )
+
+        #expect(viewModel.collapseState(for: message).isCollapsed)
+        #expect(viewModel.collapseState(for: message).controlTitle == "Show more")
+        #expect(viewModel.collapseState(for: message).displayedText.hasPrefix(text.prefix(40)))
+        #expect(viewModel.collapseState(for: message).displayedText.count < text.count)
+
+        #expect(try overlay.press("m", keyCode: 46, [.command, .shift]))
+        #expect(viewModel.collapseState(for: message).controlTitle == "Collapse")
+        #expect(!viewModel.collapseState(for: message).isCollapsed)
+        #expect(viewModel.collapseState(for: message).displayedText == text)
+
+        #expect(try overlay.press("m", keyCode: 46, [.command, .shift]))
+        #expect(viewModel.collapseState(for: message).controlTitle == "Show more")
+        #expect(viewModel.collapseState(for: message).isCollapsed)
+    }
+
+    @Test func aShortAnswerDrawsNeitherControlAndTheShortcutDoesNothing() async throws {
+        let (overlay, _) = try await answered(reply: "Short.")
+        let viewModel = overlay.viewModel
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        let message = try #require(viewModel.conversationMessages.last)
+
+        #expect(!MessageCollapsePolicy.shouldCollapse(message.content))
+        #expect(viewModel.collapseState(for: message).controlTitle == nil, "no control at all")
+        #expect(!viewModel.collapseState(for: message).isCollapsible)
+        #expect(viewModel.keyboardToggleMessageID == nil)
+
+        #expect(try overlay.press("m", keyCode: 46, [.command, .shift]) == false,
+                "an unconsumed key still reaches the field editor")
+        #expect(viewModel.collapseState(for: message).controlTitle == nil)
+        #expect(viewModel.collapseState(for: message).displayedText == "Short.")
+    }
+}
+
+// MARK: - Harness
+
+/// The overlay's real panel, wired with the same closures `AppDelegate.makePanel`
+/// installs, so a real `NSEvent` travels the same path the running overlay uses.
+@MainActor
+private final class KeyboardOverlay {
+    let viewModel: QuickViewModel
+    let panel: KeyablePanel
+    let presenter: KeyboardOverlayPresenter
+    let pasteboard: FakePasteboard
+    let selection: KeyboardSelectedTextService
+
+    private var pendingReturn: Task<Void, Never>?
+
+    init(
+        settings: QuickSettings = QuickSettings(),
+        service: (any QuickService)? = nil,
+        applicationCatalog: (any ApplicationCatalogServicing)? = nil,
+        launcherCatalog: (any LauncherCatalogServicing)? = nil,
+        selectionText: String? = nil
+    ) {
+        _ = NSApplication.shared
+        let presenter = KeyboardOverlayPresenter()
+        let pasteboard = FakePasteboard()
+        let selection = KeyboardSelectedTextService(text: selectionText)
+        let viewModel = QuickViewModel(
+            settings: settings,
+            service: service,
+            selectedTextService: selection,
+            applicationCatalog: applicationCatalog,
+            launcherCatalog: launcherCatalog,
+            pasteboard: pasteboard
+        )
+        viewModel.overlayPresenter = presenter
+        // Deliberately no content view controller: the assertions read the view
+        // model, and `super.performKeyEquivalent` must not need a live window.
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 120),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        self.presenter = presenter
+        self.pasteboard = pasteboard
+        self.selection = selection
+        self.viewModel = viewModel
+        self.panel = panel
+
+        // Mirrors Sources/App/AppDelegate.swift:514-544.
+        panel.commandKHandler = { [weak viewModel] in
+            viewModel?.handleCommandK()
+        }
+        panel.commandCHandler = { [weak viewModel] in
+            guard let viewModel, viewModel.catalogScope != nil else { return false }
+            viewModel.copySelectedLauncherItem()
+            return true
+        }
+        panel.screenshotHandler = { _ in }
+        panel.shortcutHandler = { [weak viewModel] characters, keyCode, modifiers in
+            viewModel?.performShortcut(
+                characters: characters,
+                keyCode: keyCode,
+                modifiers: modifiers
+            ) ?? false
+        }
+        panel.translateHandler = { [weak viewModel] in
+            guard let viewModel, viewModel.translationDirection != nil else { return false }
+            Task { @MainActor in await viewModel.translateInput() }
+            return true
+        }
+        panel.backspaceHandler = { [weak viewModel] in
+            viewModel?.popLayerForEmptyBackspace() ?? false
+        }
+        panel.escapeHandler = { [weak viewModel] in
+            viewModel?.handleEscapeKey() ?? false
+        }
+        panel.returnHandler = { [weak self] in
+            // AppDelegate spawns the same Task; holding it lets the test await
+            // the outcome instead of guessing a scheduling order.
+            guard let viewModel = self?.viewModel else { return }
+            self?.pendingReturn = Task { @MainActor in await viewModel.submitResolvingFuzzyAlias() }
+        }
+    }
+
+    /// Push a real key event through the panel's own routing. Returns whether
+    /// routing consumed the key (`performKeyEquivalent`'s answer).
+    @discardableResult
+    func press(
+        _ characters: String,
+        keyCode: UInt16,
+        _ modifiers: NSEvent.ModifierFlags = []
+    ) throws -> Bool {
+        panel.performKeyEquivalent(with: try keyEvent(characters, keyCode, modifiers))
+    }
+
+    /// Escape is caught in `sendEvent`, before the SwiftUI field editor can
+    /// swallow it, so the event goes in that way.
+    func pressEscape() throws {
+        panel.sendEvent(try keyEvent("\u{1b}", VirtualKey.escape.rawValue, []))
+    }
+
+    /// Return is async in the running app; await the handler's own task.
+    func pressShiftReturn() async throws {
+        _ = try press("\r", keyCode: VirtualKey.return.rawValue, [.shift])
+        let task = pendingReturn
+        pendingReturn = nil
+        await task?.value
+    }
+
+    /// Plain Return never reaches the panel at all: the composer's TextField
+    /// delivers it through `.onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }`
+    /// (OverlayView.swift:52). A SwiftUI submit cannot be driven from a
+    /// synthetic event in-process, so this calls that same entry point with the
+    /// same Task the view spawns.
+    func submitLikeReturn() async {
+        let task = Task { @MainActor in await viewModel.submitResolvingFuzzyAlias() }
+        await task.value
+    }
+
+    private func keyEvent(
+        _ characters: String,
+        _ keyCode: UInt16,
+        _ modifiers: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters.lowercased(),
+            isARepeat: false,
+            keyCode: keyCode
+        ))
+    }
+}
+
+/// Counts overlay show/hide instead of posting system notifications.
+@MainActor
+private final class KeyboardOverlayPresenter: OverlayPresenting {
+    private(set) var presentCount = 0
+    private(set) var dismissCount = 0
+
+    func presentOverlay() { presentCount += 1 }
+    func dismissOverlay() { dismissCount += 1 }
+    func openSettings() {}
+    func openTranslator() {}
+    func openTypeToClick() {}
+}
+
+/// Records what a keyboard-driven action copied, pasted, or replaced.
+private final class KeyboardSelectedTextService: SelectedTextServicing {
+    var isAccessibilityTrusted: Bool { true }
+    var selectedText: String?
+    private(set) var replacedText: String?
+    private(set) var pastedText: String?
+    private(set) var pastedTarget: SelectionTarget?
+
+    init(text: String?) {
+        selectedText = text
+    }
+
+    func currentExternalTarget() -> SelectionTarget? { nil }
+
+    func capture(
+        from target: SelectionTarget,
+        promptForPermission: Bool
+    ) -> SelectedTextContext? {
+        guard let selectedText else { return nil }
+        return SelectedTextContext(target: target, text: selectedText)
+    }
+
+    func replace(_ text: String, in context: SelectedTextContext) async -> Bool {
+        replacedText = text
+        return true
+    }
+
+    func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+        pastedText = text
+        pastedTarget = target
+        return true
+    }
+
+    func openAccessibilitySettings() {}
+}
+
+/// One application, so ⌘K and ⌘⇧A have a real focused row to act on.
+private final class KeyboardApplicationCatalog: ApplicationCatalogServicing {
+    let applications = [
+        LaunchableApplication(
+            name: "Safari",
+            bundleIdentifier: "com.apple.Safari",
+            url: URL(fileURLWithPath: "/Applications/Safari.app")
+        ),
+    ]
+
+    func launch(_ application: LaunchableApplication) -> Bool { true }
+}

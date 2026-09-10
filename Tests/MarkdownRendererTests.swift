@@ -141,6 +141,37 @@ struct MarkdownRendererTests {
         #expect(font!.isFixedPitch)
     }
 
+    /// The answer body splits at the fences instead of rendering one string:
+    /// prose, code, prose, and the fence markers stay out of the prose.
+    @Test func testSegmentsSplitAtFencedCodeBlocks() {
+        let input = "Before\n\n```swift\nlet x = 42\n```\n\nAfter"
+        let segments = MarkdownRenderer.segments(input)
+        #expect(segments.count == 3)
+        guard case .prose(let before) = segments[0].content,
+              case .code(let block) = segments[1].content,
+              case .prose(let after) = segments[2].content
+        else {
+            Issue.record("expected prose, code, prose, got \(segments.map(\.content))")
+            return
+        }
+        #expect(before.contains("Before"))
+        #expect(!before.contains("```"))
+        #expect(block.language == "swift")
+        #expect(block.copyPayload == "let x = 42")
+        #expect(after.contains("After"))
+        #expect(!after.contains("```"))
+    }
+
+    @Test func testSegmentsLeaveACodeFreeAnswerWhole() {
+        let segments = MarkdownRenderer.segments("Just prose with `inline code`.")
+        #expect(segments.count == 1)
+        guard case .prose(let source) = segments.first?.content else {
+            Issue.record("a code-free answer is one prose segment")
+            return
+        }
+        #expect(source == "Just prose with `inline code`.")
+    }
+
     // MARK: - Headings
 
     @Test func testHeadingRendered() {
