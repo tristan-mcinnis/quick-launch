@@ -63,6 +63,12 @@ struct QuickSettings: Codable, Sendable {
     var launcherItemConfigurations: [LauncherItemConfiguration] = Self.defaultWindowConfigurations + Self.defaultFolderConfigurations
     /// Rank launcher results by what was chosen before (local only).
     var launcherLearningEnabled: Bool = true
+    // Interaction journal: a local-only, bounded review log of launcher and
+    // AI *outcomes* (choices, abandoned searches, retries, failures). It stores
+    // no content, never leaves this Mac, and never feeds ranking.
+    var interactionJournalEnabled: Bool = true
+    var interactionJournalRetentionDays: Int = 30
+    var interactionJournalEventCap: Int = 2000
     /// Bundle identifier of the browser that opens Quick Links; nil = system default.
     var quickLinkBrowserBundleID: String?
     /// Folders added in Settings › Items beside the built-in user folders.
@@ -153,6 +159,18 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .launcherLearningEnabled
         ) ?? true
+        interactionJournalEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .interactionJournalEnabled
+        ) ?? true
+        interactionJournalRetentionDays = InteractionJournalStore.clampRetention(
+            try c.decodeIfPresent(Int.self, forKey: .interactionJournalRetentionDays)
+                ?? InteractionJournalStore.defaultRetentionDays
+        )
+        interactionJournalEventCap = InteractionJournalStore.clampEventCap(
+            try c.decodeIfPresent(Int.self, forKey: .interactionJournalEventCap)
+                ?? InteractionJournalStore.defaultEventCap
+        )
         quickLinkBrowserBundleID = try c.decodeIfPresent(String.self, forKey: .quickLinkBrowserBundleID)
         customFolders = try c.decodeIfPresent([FolderLocation].self, forKey: .customFolders) ?? []
         customApplicationPaths = try c.decodeIfPresent([String].self, forKey: .customApplicationPaths) ?? []

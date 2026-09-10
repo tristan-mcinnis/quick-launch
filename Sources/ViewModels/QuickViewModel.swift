@@ -154,6 +154,9 @@ import Observation
     /// Learned ranking. Defaults to an in-memory store; the app injects a
     /// persistent one.
     @ObservationIgnored var launcherUsage: LauncherUsageStore
+    /// Local, bounded review log of launcher and AI *outcomes*. Read-only
+    /// evidence for the user: it never feeds `launcherUsage` or ranking.
+    @ObservationIgnored var interactionJournal: InteractionJournalStore
     /// Shows/hides the panel. AppDelegate installs the real one; the default
     /// posts the legacy notifications so tests and previews keep working.
     @ObservationIgnored var overlayPresenter: any OverlayPresenting = NotificationOverlayPresenter()
@@ -173,6 +176,21 @@ import Observation
     // MARK: - Private
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
+    /// True once `cancel()` stopped the model request on screen. The stream
+    /// task can end without a `CancellationError` (a service that finishes its
+    /// continuation instead of throwing), so the outcome record is suppressed
+    /// explicitly rather than inferred. Never persisted.
+    @ObservationIgnored private var streamWasCancelled = false
+    /// The folded query the user actually submitted or acted on in this overlay
+    /// session, set where the submission happens — not inferred from whatever
+    /// `input` happens to hold when the outcome is recorded. That is what stops
+    /// a failed or cancelled request from also being logged as an abandoned
+    /// search, since those paths restore the typed text into `input`.
+    /// In memory only.
+    @ObservationIgnored private var journalActedQuery: String?
+    /// The command-action process for the request on screen, so Escape can
+    /// really terminate it instead of only hiding its output.
+    @ObservationIgnored private var commandTask: Task<String, Error>?
     /// Tokens arrive faster than the overlay can re-render a long answer, so
     /// deltas collect here and `output` is published at most every 33 ms.
     @ObservationIgnored private var streamBuffer = ""
@@ -226,6 +244,7 @@ import Observation
         caffeinateManager: (any CaffeinateManaging)? = nil,
         localSpeechService: (any LocalSpeechServicing)? = nil,
         launcherUsage: LauncherUsageStore? = nil,
+        interactionJournal: InteractionJournalStore? = nil,
         screenshotService: (any ScreenshotCapturing)? = nil,
         screenAwareness: (any ScreenAwarenessReading)? = nil,
         screenshotTextIndex: ScreenshotTextIndex? = nil,
@@ -260,6 +279,10 @@ import Observation
         self.caffeinateManager = caffeinateManager
         self.localSpeechService = localSpeechService
         self.launcherUsage = launcherUsage ?? LauncherUsageStore(fileURL: nil)
+        self.interactionJournal = interactionJournal ?? InteractionJournalStore(fileURL: nil)
+        self.interactionJournal.retentionDays = settings.interactionJournalRetentionDays
+        self.interactionJournal.eventCap = settings.interactionJournalEventCap
+        self.interactionJournal.prune()
         self.screenshotService = screenshotService
         self.screenAwareness = screenAwareness
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
@@ -1341,11 +1364,14 @@ import Observation
             ) else { continue }
             scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item)))
         }
-        // A web address typed in full opens in the Quick Link browser.
+        // A web address typed in full opens in the Quick Link browser. The
+        // item id carries a stable content digest, not the address itself, so
+        // nothing that records identifiers — learned ranking, the interaction
+        // journal — ever sees what was typed.
         if let url = TypedURLDetector.url(from: query) {
             let item = LauncherCatalogItem(
                 kind: .quickLink,
-                itemID: "typed:" + url.absoluteString,
+                itemID: "typed:" + StableIdentifier.make(url.absoluteString),
                 title: "Open " + (url.host ?? url.absoluteString),
                 detail: url.absoluteString,
                 value: url.absoluteString
@@ -1630,6 +1656,13 @@ import Observation
 
     /// Remember that the user chose `result` for the current input.
     func learn(_ result: LauncherSearchResult) {
+        noteActedQuery(input)
+        recordJournal(
+            kind: .selectionAccepted,
+            scope: learningScope,
+            itemID: result.id,
+            query: input
+        )
         guard settings.launcherLearningEnabled else { return }
         launcherUsage.recordSelection(query: input, scope: learningScope, itemID: result.id)
         launcherRankingVersion += 1
@@ -1637,15 +1670,32 @@ import Observation
 
     /// Remember a use that skipped the launcher, such as a global hotkey.
     func learnDirectUse(of item: LauncherCatalogItem) {
-        guard settings.launcherLearningEnabled else { return }
-        launcherUsage.recordUse(itemID: item.id)
-        launcherRankingVersion += 1
+        learnDirectUse(itemID: item.id, scope: LauncherUsageStore.rootScope)
     }
 
     func learnDirectUse(of application: LaunchableApplication) {
+        learnDirectUse(
+            itemID: LauncherSearchResult.application(application).id,
+            scope: LauncherUsageStore.rootScope
+        )
+    }
+
+    /// One hotkey run of an item that never passed through the launcher.
+    /// Journals the review row and, when ranking learning is on, the use count.
+    func learnDirectUse(itemID: String, scope: String) {
+        noteDirectHotkeyUse(itemID: itemID, scope: scope)
         guard settings.launcherLearningEnabled else { return }
-        launcherUsage.recordUse(itemID: LauncherSearchResult.application(application).id)
+        launcherUsage.recordUse(itemID: itemID, scope: scope)
         launcherRankingVersion += 1
+    }
+
+    /// Journal row for a hotkey run with no launcher item to learn against,
+    /// such as a saved AI action. Ranking is left untouched.
+    func noteDirectHotkeyUse(
+        itemID: String,
+        scope: String = LauncherUsageStore.rootScope
+    ) {
+        recordJournal(kind: .directHotkeyUse, scope: scope, itemID: itemID)
     }
 
     func forgetLearnedRanking() {
@@ -1657,6 +1707,151 @@ import Observation
     /// Call after an alias or hotkey edit so cached rankings pick it up.
     func invalidateLauncherRanking() {
         launcherRankingVersion += 1
+    }
+
+    // MARK: - Interaction journal
+
+    /// Bumped whenever the journal changes, so the Settings review list can
+    /// re-render; the store itself is `@ObservationIgnored`.
+    var interactionJournalRevision: Int = 0
+
+    /// The one place the journal is written to. Gates on the setting and keeps
+    /// the store's bounds in step with the settings.
+    ///
+    /// The stored `query` digest is opt-in: only `learn` and
+    /// `endInteractionSession` pass it. Note what that means — `learn` fires for
+    /// every accepted row, *including the Ask AI row*, whose typed text is the
+    /// question that goes to the model. So a typed question can reach the digest
+    /// path; what never happens is the *text* reaching it. The digest is
+    /// HMAC-SHA256 under this install's `interaction-journal-key` and is stored
+    /// with only a coarse size band, so a question contributes 12 hex characters
+    /// that cannot be recomputed without that file and nothing else. Model
+    /// request outcomes (`aiFailed`, `aiSucceeded`, `aiCancelled`) pass no query
+    /// at all.
+    ///
+    /// Session correlation is tracked separately, by `journalActedQuery`.
+    private func recordJournal(
+        kind: InteractionJournalEventKind,
+        scope: String = LauncherUsageStore.rootScope,
+        itemID: String? = nil,
+        query: String? = nil,
+        detail: String? = nil
+    ) {
+        guard settings.interactionJournalEnabled else { return }
+        interactionJournal.retentionDays = settings.interactionJournalRetentionDays
+        interactionJournal.eventCap = settings.interactionJournalEventCap
+        interactionJournal.record(
+            kind: kind,
+            scope: scope,
+            itemID: itemID,
+            query: query,
+            detail: detail
+        )
+        interactionJournalRevision += 1
+    }
+
+    /// Remembers the folded query the user submitted or acted on, so dismissing
+    /// the overlay afterwards is not mistaken for an abandoned search. Called
+    /// at every entry point that turns typed text into a request or a choice,
+    /// whatever happens next.
+    private func noteActedQuery(_ query: String) {
+        journalActedQuery = LauncherUsageStore.normalizedQuery(query)
+    }
+
+    /// Records an action failure from `errorMessage`, which is the single
+    /// user-visible failure channel. Only the *category* is journalled — the
+    /// message itself is compared and discarded, never stored.
+    private func noteActionFailure(itemID: String, scope: String, priorError: String?) {
+        guard let message = errorMessage, message != priorError else {
+            return
+        }
+        recordJournal(kind: .actionFailed, scope: scope, itemID: itemID, detail: "action")
+    }
+
+    /// The overlay was dismissed. When the user typed a query and nothing came
+    /// of it — no choice, no answer, no submission — that is an abandoned
+    /// search; the store turns an immediate repeat of the same query into a
+    /// retry.
+    ///
+    /// Must be called before the dismissal resets the input. A session whose
+    /// query was submitted (and then failed or was cancelled) is not abandoned:
+    /// `journalActedQuery` matches the restored text.
+    func endInteractionSession() {
+        defer { journalActedQuery = nil }
+        // Retention is a data-lifecycle rule, not recording: it applies whether
+        // or not the journal is on, so an old log does not sit on disk forever
+        // after the toggle is turned off. Pruning writes only when something
+        // actually expired.
+        interactionJournal.prune()
+        guard settings.interactionJournalEnabled else { return }
+        guard !isStreaming, output.isEmpty else { return }
+        let folded = LauncherUsageStore.normalizedQuery(input)
+        guard !folded.isEmpty, folded != journalActedQuery else { return }
+        recordJournal(kind: .searchAbandoned, scope: learningScope, query: input)
+    }
+
+    /// Applies the journal's retention and cap from settings and trims what is
+    /// already stored. Called at launch and whenever the settings change.
+    func applyInteractionJournalSettings() {
+        interactionJournal.retentionDays = settings.interactionJournalRetentionDays
+        interactionJournal.eventCap = settings.interactionJournalEventCap
+        interactionJournal.prune()
+        interactionJournalRevision += 1
+    }
+
+    /// Journal rows, newest first, for the Settings review list and export.
+    var interactionJournalEvents: [InteractionJournalEvent] {
+        interactionJournal.recentEvents()
+    }
+
+    /// Bytes the journal occupies on disk.
+    var interactionJournalByteSize: Int { interactionJournal.byteSize }
+
+    /// Age of the newest journal row, or `nil` when the journal is empty.
+    var interactionJournalLastEventDate: Date? { interactionJournal.lastEventDate }
+
+    /// Explicit, reversible marker: "this recorded choice was the wrong one".
+    /// Review metadata only — it is never fed into ranking.
+    func setInteractionMarkedAccidental(id: UUID, accidental: Bool) {
+        interactionJournal.setMarkedAccidental(accidental, id: id)
+        journalActedQuery = nil
+        interactionJournalRevision += 1
+    }
+
+    func clearInteractionJournal() {
+        interactionJournal.clear()
+        interactionJournalRevision += 1
+    }
+
+    /// Renders the journal for review. Pure: no UI, no disk.
+    func renderInteractionJournal(as format: InteractionJournalExportFormat) -> String {
+        InteractionJournalExporter.render(interactionJournal.recentEvents(), as: format)
+    }
+
+    /// Writes an export the user picked a location for. Owner-only `0600`.
+    @discardableResult
+    func writeInteractionJournal(
+        as format: InteractionJournalExportFormat,
+        to url: URL
+    ) -> Bool {
+        do {
+            try InteractionJournalExporter.write(renderInteractionJournal(as: format), to: url)
+            return true
+        } catch {
+            errorMessage = "Could not export the interaction journal: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Shows the journal file in Finder, or its folder when nothing is stored
+    /// yet. Local data only; nothing is uploaded.
+    func revealInteractionJournal() {
+        let file = InteractionJournalStore.defaultFileURL()
+        if FileManager.default.fileExists(atPath: file.path) {
+            workspace.revealInFileViewer([file])
+        } else {
+            workspace.revealInFileViewer([AppPaths.applicationSupportDirectory])
+        }
     }
 
     var contextualCatalogItem: LauncherCatalogItem? {
@@ -1883,7 +2078,9 @@ import Observation
         learn(result)
         switch result {
         case .application(let application):
+            let priorError = errorMessage
             _ = launch(application: application)
+            noteActionFailure(itemID: result.id, scope: learningScope, priorError: priorError)
         case .catalog(let scope, _):
             enterCatalog(scope)
         case .item(let item):
@@ -2019,6 +2216,8 @@ import Observation
     private func submitVaultSearch(mode: VaultSearchMode, followUp: Bool) async {
         let question = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
+        // A submitted Vault Search is an act, not an abandoned search.
+        noteActedQuery(question)
         guard let vaultSearchService else {
             errorMessage = "Vault Search is unavailable. Check the VPS connection and try again."
             requestInputFocus()
@@ -2234,6 +2433,12 @@ import Observation
     }
 
     func performLauncherItem(_ item: LauncherCatalogItem) async {
+        // Every branch returns through here, so one deferred check covers
+        // every item action that fails without instrumenting each branch.
+        let priorError = errorMessage
+        defer {
+            noteActionFailure(itemID: item.id, scope: learningScope, priorError: priorError)
+        }
         switch item.kind {
         case .quickLink:
             if item.requiresInput {
@@ -4736,6 +4941,9 @@ import Observation
     /// and streams the answer into `output`.
     func stream(_ request: PreparedRequest) async {
         let submittedInput = request.submittedInput
+        // The user submitted this text, whatever happens next: a failure or a
+        // cancellation must not later read as an abandoned search.
+        noteActedQuery(submittedInput)
         let submittedImages = request.submittedImages
         let submittedImage = request.submittedImage
         let action = request.action
@@ -4758,6 +4966,11 @@ import Observation
             errorMessage = submittedImage != nil
                 ? "Choose a vision model in Settings › Models."
                 : "Choose a provider and model in Settings."
+            recordJournal(
+                kind: .aiFailed,
+                scope: learningScope,
+                detail: submittedImage != nil ? "missing-vision-model" : "missing-model"
+            )
             requestInputFocus()
             return
         }
@@ -4769,6 +4982,7 @@ import Observation
            provider.location == .cloud,
            (apiKeyProvider(provider.id) ?? "").isEmpty {
             errorMessage = "\(provider.name) needs an API key. Add it under Settings › Models."
+            recordJournal(kind: .aiFailed, scope: learningScope, detail: "missing-api-key")
             requestInputFocus()
             return
         }
@@ -4810,11 +5024,13 @@ import Observation
             rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
             pendingImages = submittedImages
             errorMessage = "\(provider.name) is not available. Check its model, endpoint, or installed command."
+            recordJournal(kind: .aiFailed, scope: learningScope, detail: "service-unavailable")
             requestInputFocus()
             return
         }
 
         let stream = service.send(messages: requestMessages, images: submittedImages)
+        streamWasCancelled = false
 
         streamTask = Task {
             do {
@@ -4839,6 +5055,14 @@ import Observation
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
                 }
+                if !streamWasCancelled {
+                    recordJournal(
+                        kind: output.isEmpty ? .aiFailed : .aiSucceeded,
+                        scope: learningScope,
+                        detail: output.isEmpty ? "empty-answer" : (action == nil ? "prompt" : "action")
+                    )
+                }
+                streamWasCancelled = false
                 var didAutoWrite = false
                 if action?.outputBehavior == .replaceSelection, !output.isEmpty {
                     didAutoWrite = true
@@ -4874,6 +5098,10 @@ import Observation
                 streamingStatus = nil
                 isStreaming = false
                 output = ""
+                if !streamWasCancelled {
+                    recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
+                }
+                streamWasCancelled = false
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             } catch {
@@ -4881,6 +5109,10 @@ import Observation
                 streamingStatus = nil
                 errorMessage = error.localizedDescription
                 isStreaming = false
+                if !streamWasCancelled {
+                    recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
+                }
+                streamWasCancelled = false
                 rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
                 requestInputFocus()
             }
@@ -4913,14 +5145,26 @@ import Observation
         output = ""
         input = ""
         isStreaming = true
-        do {
-            let result = try await CommandActionRunner.run(
+        // The user submitted this alias, whatever the command does next: a
+        // failure or a cancellation must not read as an abandoned search.
+        noteActedQuery(submittedInput)
+        // Retained so Escape can terminate the process instead of only hiding
+        // its output; `ProcessRunner` terminates the child when its task is
+        // cancelled and rethrows `CancellationError`.
+        let task = Task {
+            try await CommandActionRunner.run(
                 executable: executable,
                 arguments: definition.commandArguments ?? [],
                 input: context
             )
+        }
+        commandTask = task
+        defer { if commandTask == task { commandTask = nil } }
+        do {
+            let result = try await task.value
             isStreaming = false
             output = result
+            recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
             var didAutoWrite = false
             if definition.outputBehavior == .replaceSelection,
                !output.isEmpty {
@@ -4944,11 +5188,20 @@ import Observation
             if !didAutoWrite, let selectionContext = selectedTextContext {
                 replaceableSelectionContext = selectionContext
             }
+        } catch is CancellationError {
+            // The process was actually terminated: `ProcessRunner` rethrows
+            // `CancellationError` only after its cancellation handler ran. No
+            // late output can reappear, because the result is never assigned.
+            isStreaming = false
+            output = ""
+            input = submittedInput
+            recordJournal(kind: .actionCancelled, scope: learningScope, detail: "command")
         } catch {
             isStreaming = false
             output = ""
             input = submittedInput
             errorMessage = error.localizedDescription
+            recordJournal(kind: .actionFailed, scope: learningScope, detail: "command-error")
         }
         requestInputFocus()
     }
@@ -5222,12 +5475,24 @@ import Observation
     // MARK: - Cancel
 
     func cancel() {
+        // A running command action has no `streamTask`; a model request does.
+        // Only claim a cancellation that really happened: the model lane
+        // records through its stream, and the command lane records from
+        // `runCommandAction` once `ProcessRunner` confirms the child was
+        // terminated.
+        let wasStreaming = isStreaming
+        let cancelledModelRequest = wasStreaming && streamTask != nil
+        if cancelledModelRequest { streamWasCancelled = true }
         streamTask?.cancel()
         streamTask = nil
+        commandTask?.cancel()
+        commandTask = nil
         discardStreamBuffer()
         isStreaming = false
         streamingStatus = nil
         output = ""
+        guard wasStreaming, cancelledModelRequest else { return }
+        recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
     }
 
     // MARK: - Stream buffering

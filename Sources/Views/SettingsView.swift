@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Measures the Settings shell and its panes share.
 ///
@@ -392,6 +393,7 @@ private struct GeneralTab: View {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 hotkeysCard
                 behaviourCard
+                learningAndReviewCard
                 historyCard
                 appearanceCard
             }
@@ -519,22 +521,6 @@ private struct GeneralTab: View {
                 }
             }
 
-            SettingsRow(
-                title: "Learn from my choices",
-                detail: "Items you pick for a search rise to the top next time. Stored only on this Mac."
-            ) {
-                Toggle(
-                    "Learn from my choices",
-                    isOn: viewModel.settingsBinding(\.launcherLearningEnabled)
-                )
-                .toggleStyle(InkToggleStyle())
-            }
-            CardNote {
-                Button("Forget learned ranking", role: .destructive) {
-                    viewModel.forgetLearnedRanking()
-                }
-            }
-
             SettingsRow(title: "Double-tap right \u{2318} sends the focused window to AI") {
                 Toggle(
                     "Double-tap right \u{2318} sends the focused window to AI",
@@ -563,6 +549,243 @@ private struct GeneralTab: View {
                 )
                 .toggleStyle(InkToggleStyle())
             }
+        }
+    }
+
+    /// Ranking learning and the interaction journal sit together: they are the
+    /// two halves of "how does Quick Launch learn from me, and what can I see
+    /// and undo".
+    private var learningAndReviewCard: some View {
+        SettingsCard("Learning & Review") {
+            SettingsRow(
+                title: "Learn from my choices",
+                detail: "Items you pick for a search rise to the top next time. Stored only on this Mac.",
+                isFirst: true
+            ) {
+                Toggle(
+                    "Learn from my choices",
+                    isOn: viewModel.settingsBinding(\.launcherLearningEnabled)
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            CardNote {
+                Button("Forget learned ranking", role: .destructive) {
+                    viewModel.forgetLearnedRanking()
+                }
+            }
+
+            SettingsRow(
+                title: "Keep a local interaction journal",
+                detail: "Records outcomes only — choices, abandoned searches, retries, and failures. No text, no content, no network. Turning it off stops new recording; events already kept stay on this Mac and keep ageing out until you clear them."
+            ) {
+                Toggle(
+                    "Keep a local interaction journal",
+                    isOn: viewModel.settingsBinding(\.interactionJournalEnabled) { _ in
+                        viewModel.applyInteractionJournalSettings()
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            if !viewModel.settings.interactionJournalEnabled {
+                CardNote {
+                    CardText(
+                        viewModel.interactionJournalEvents.isEmpty
+                            ? "Recording is off. Nothing new is written."
+                            : "Recording is off. The "
+                                + "\(viewModel.interactionJournalEvents.count) saved event"
+                                + "\(viewModel.interactionJournalEvents.count == 1 ? "" : "s") "
+                                + "stay on this Mac and remain exportable and clearable, and "
+                                + "still age out on the retention below."
+                    )
+                }
+            }
+
+            SettingsRow(title: "Keep journal events for") {
+                Picker(
+                    "Keep journal events for",
+                    selection: viewModel.settingsBinding(\.interactionJournalRetentionDays) { _ in
+                        viewModel.applyInteractionJournalSettings()
+                    }
+                ) {
+                    ForEach(retentionChoices, id: \.self) { days in
+                        Text(Self.retentionTitle(days)).tag(days)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 140)
+            }
+
+            SettingsRow(title: "Maximum journal events") {
+                Picker(
+                    "Maximum journal events",
+                    selection: viewModel.settingsBinding(\.interactionJournalEventCap) { _ in
+                        viewModel.applyInteractionJournalSettings()
+                    }
+                ) {
+                    ForEach(eventCapChoices, id: \.self) { cap in
+                        Text(cap.formatted()).tag(cap)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 140)
+            }
+
+            CardNote { CardText(journalStatusText) }
+
+            journalReview
+
+            CardNote {
+                HStack(spacing: House.Spacing.sm) {
+                    Menu("Export…") {
+                        ForEach(InteractionJournalExportFormat.allCases) { format in
+                            Button(format.title) { exportJournal(as: format) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .disabled(viewModel.interactionJournalEvents.isEmpty)
+                    Button("Reveal in Finder") { viewModel.revealInteractionJournal() }
+                    Button("Clear journal", role: .destructive) {
+                        viewModel.clearInteractionJournal()
+                    }
+                    .disabled(viewModel.interactionJournalEvents.isEmpty)
+                }
+            }
+
+            CardNote {
+                CardText(
+                    "Local only: the journal lives at "
+                        + "~/Library/Application Support/Quick Launch/interaction-journal.json "
+                        + "with owner-only permissions, and nothing is ever sent anywhere. "
+                        + "Its query digest is keyed with a random key this Mac generated "
+                        + "(interaction-journal-key, also owner-only and re-checked on "
+                        + "every launch), so repeats correlate here and the digest cannot "
+                        + "be recomputed without that file. "
+                        + "It never stores clipboard, snippet, chat, selection, file, query, "
+                        + "or AI answer text. Typed text is written only as that keyed "
+                        + "digest plus a coarse size band — including a question you "
+                        + "submit through the Ask AI row. That digest is one-way, not a "
+                        + "secret store: a short query is still guessable by brute force "
+                        + "if someone has the key file, so avoid typing secrets here. "
+                        + "An identifier that could carry content, such as a typed web "
+                        + "address or a window title, is replaced by a keyed digest too; "
+                        + "for a typed web address the launcher's own row identity is a "
+                        + "keyless content hash, which is stable but not cryptographic, "
+                        + "so this journal re-keys it. "
+                        + "Marked rows are review notes and never change ranking."
+                )
+            }
+        }
+    }
+
+    /// Every clamped setting value must render and select. The documented range
+    /// is far wider than the presets, so the current value is added when it is
+    /// not already offered.
+    private var retentionChoices: [Int] {
+        InteractionJournalStore.retentionChoices(
+            including: viewModel.settings.interactionJournalRetentionDays
+        )
+    }
+
+    private var eventCapChoices: [Int] {
+        InteractionJournalStore.eventCapChoices(
+            including: viewModel.settings.interactionJournalEventCap
+        )
+    }
+
+    private static func retentionTitle(_ days: Int) -> String {
+        switch days {
+        case 7, 30, 90: "\(days) days"
+        case 365: "1 year"
+        case 1: "1 day"
+        default: "\(days) days"
+        }
+    }
+
+    private var journalStatusText: String {
+        let events = viewModel.interactionJournalEvents
+        guard let first = events.first else { return "No events recorded yet." }
+        var text = "\(events.count) event\(events.count == 1 ? "" : "s") · "
+        text += ByteCountFormatter.string(
+            fromByteCount: Int64(viewModel.interactionJournalByteSize),
+            countStyle: .file
+        )
+        text += " · last \(first.date.formatted(date: .abbreviated, time: .shortened))"
+        let accidents = events.count { $0.markedAccidental }
+        if accidents > 0 { text += " · \(accidents) marked accidental" }
+        return text
+    }
+
+    /// The last few outcomes, each with the explicit, reversible "wrong choice"
+    /// marker. Nothing here is inferred and nothing feeds ranking.
+    private var journalReview: some View {
+        let events = Array(viewModel.interactionJournalEvents.prefix(6))
+        let revision = viewModel.interactionJournalRevision
+        return Group {
+            if !events.isEmpty {
+                VStack(spacing: 0) {
+                    HouseDivider()
+                    ForEach(events) { event in
+                        journalRow(event)
+                    }
+                }
+                .id(revision)
+            }
+        }
+    }
+
+    private func journalRow(_ event: InteractionJournalEvent) -> some View {
+        HStack(spacing: House.Spacing.sm) {
+            Text(event.date.formatted(date: .omitted, time: .shortened))
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(width: 58, alignment: .leading)
+            Text(event.kind.shortTitle)
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .frame(width: 84, alignment: .leading)
+            Text(journalDetail(event))
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: House.Spacing.sm)
+            Button(event.markedAccidental ? "Unmark" : "Mark wrong") {
+                viewModel.setInteractionMarkedAccidental(
+                    id: event.id,
+                    accidental: !event.markedAccidental
+                )
+            }
+            .font(AQDesign.TypeToken.caption)
+        }
+        .frame(minHeight: 26)
+    }
+
+    private func journalDetail(_ event: InteractionJournalEvent) -> String {
+        var parts: [String] = []
+        if let itemID = event.itemID { parts.append(itemID) }
+        if event.scope != LauncherUsageStore.rootScope { parts.append(event.scope) }
+        if let detail = event.detail { parts.append(detail) }
+        if let bucket = event.queryLengthBucket { parts.append("\(bucket) chars") }
+        if event.markedAccidental { parts.append("marked accidental") }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+
+    private func exportJournal(as format: InteractionJournalExportFormat) {
+        let panel = NSSavePanel()
+        panel.title = "Export Interaction Journal"
+        panel.nameFieldStringValue = InteractionJournalExporter.suggestedFileName(for: format)
+        switch format {
+        case .markdown:
+            panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        case .jsonLines:
+            panel.allowedContentTypes = [UTType(filenameExtension: "jsonl") ?? .json]
+        }
+        panel.canCreateDirectories = true
+        let viewModel = viewModel
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            viewModel.writeInteractionJournal(as: format, to: url)
         }
     }
 

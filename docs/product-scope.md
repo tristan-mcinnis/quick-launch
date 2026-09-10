@@ -46,6 +46,7 @@ The app stays running as a small menu-bar process.
 - The main global hotkey opens one search field.
 - Typing filters items across the enabled catalogs in one ranked list.
 - The launcher learns: the text typed when an item is chosen ranks that item first for the same text next time, per catalog, with a 14-day decay. Learning is local, bounded, optional, and can be forgotten.
+- The launcher keeps a local interaction journal: a bounded review log of outcomes — choices, searches typed and dropped, retries of the same query, action and AI failures or cancellations, successful and stopped command actions, and hotkey runs. It stores item identifiers, category codes, and a keyed HMAC-SHA256 digest of the folded query under a random 32-byte key generated on first use and kept owner-only beside the journal; repeats correlate on this Mac and the digest cannot be recomputed without that file. It never stores the query text, an exact query length (only a coarse band), or any clipboard, snippet, chat, selection, file, or AI answer content, and an identifier that could carry content is digested too. The digest is one-way, not a secret store: a short query stays guessable by brute force from the digest plus the key. Settings › General › Learning & Review shows its status, lets the user mark a recorded choice as the wrong one (explicit, reversible, never fed into ranking), export it as JSON Lines or Markdown, reveal the file, or clear it. On by default: 30 days, 2 000 events, `0600`, no network. Turning it off stops new recording and keeps what is already there until it is cleared or ages out.
 - Escape closes the panel from anywhere. Backspace on an empty field returns to the root. Reopening starts at the root.
 - A footer shows the keys that work now; rows show their global hotkey.
 - `Command+Shift+V` opens Clipboard History directly.
@@ -98,6 +99,7 @@ Remove a Tuna command only after its alias, hotkey, result, and previous-app beh
 ## Privacy
 
 - Selected-text access uses macOS Accessibility. It does not record the screen.
+- The interaction journal is optional and local: outcome rows only, bounded by retention and a hard event cap, written owner-only to `~/Library/Application Support/Quick Launch/interaction-journal.json`. The input field — which also carries AI prompts, and whose Ask AI row is digested like any other accepted row — is reduced to an HMAC-SHA256 digest (12 hex characters, `v2:`-prefixed) under a random per-install key kept owner-only in `interaction-journal-key`, before it is written, so no typed text reaches the file; only a coarse size band records how long it was. An identifier that could carry content is digested the same way, including the typed-URL row, whose launcher identity is a stable keyless FNV-1a hash that this journal re-keys under its own HMAC key. The digest is one-way, not a secret store. The journal is review evidence and never a ranking input.
 - Clipboard history is optional, local, bounded, and easy to clear.
 - Snippet and clipboard values never appear in diagnostics.
 - API actions send only the text used by that action to the chosen provider.

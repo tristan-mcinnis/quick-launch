@@ -176,6 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private let localSpeechService = LocalSpeechService()
     private let launcherUsage = LauncherUsageStore(fileURL: LauncherUsageStore.defaultFileURL())
+    private let interactionJournal = InteractionJournalStore(
+        fileURL: InteractionJournalStore.defaultFileURL()
+    )
     private let screenshotService = ScreenshotCaptureService()
     private let screenAwareness = ScreenAwarenessService()
     private let screenshotTextIndex = ScreenshotTextIndex(storeURL: ScreenshotTextIndex.defaultStoreURL())
@@ -210,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             caffeinateManager: caffeinateManager,
             localSpeechService: localSpeechService,
             launcherUsage: launcherUsage,
+            interactionJournal: interactionJournal,
             screenshotService: screenshotService,
             screenAwareness: screenAwareness,
             screenshotTextIndex: screenshotTextIndex,
@@ -645,6 +649,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func hideOverlay() {
         guard let panel else { return }
         panel.orderOut(nil)
+        // Read the session's outcome while its state is still intact: the
+        // resets below clear the query and the answer.
+        viewModel?.endInteractionSession()
         viewModel?.reset(.layers)
         viewModel?.rememberSelectionTarget(nil)
         // Dismissal drops the launch-scoped selection so a non-capture reopen
@@ -1006,6 +1013,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture before activation so the action runs on the user's actual
         // selection, not re-read after the overlay stole focus.
         vm.captureLaunchSelection()
+        // A hotkey run is a direct use; the journal keeps its own row and
+        // ranking is left alone because a saved action is not a launcher item.
+        vm.noteDirectHotkeyUse(itemID: "action:\(action.alias)")
         showOverlay(captureSelectionTarget: false)
         Task { await vm.perform(action: action) }
     }

@@ -17,6 +17,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Global, configurable hotkey and small floating panel
 - Fuzzy application launcher with live rows, aliases, optional per-app hotkeys, arrow navigation, and Return to open
 - Learns from your choices: the text you typed when you picked an item ranks that item first next time (`cla` → Claude), with a 14-day decay so old favourites fade; most-used items show on an empty search; local only, one toggle and a Forget button
+- Local interaction journal: a bounded review log of launcher and AI *outcomes* — choices, searches you typed and dropped, retries of the same query, action and AI failures or cancellations, successful command actions, and hotkey runs. It stores item identifiers, category codes, and a *keyed* one-way digest of a typed query, never the query text and never any clipboard, snippet, chat, selection, file, or answer content. The digest is HMAC-SHA256 under a random 32-byte key this Mac generates on first use (`interaction-journal-key`, owner-only), so repeats still correlate locally and the digest means nothing without that file; an identifier that could carry content (a typed URL, a window title) is digested instead. A query's exact length is never stored — only a coarse band. Note what that digest does and does not protect: the typed text is one-way, but a *short* query can still be guessed by brute force if someone has the key file, and no search field is a password box. Settings › General › Learning & Review shows the event count, size, and last event, lets you mark a recorded choice as the wrong one (reversible, never fed into ranking), export JSON Lines or Markdown through the normal save panel, reveal the file, or clear it. On by default, 30 days and 2 000 events, `0600`, nothing sent anywhere; turning it off stops new recording and keeps what is already there until you clear it
 - One ranked root search across apps, folders, commands, snippets, quick links, catalog roots, and the Ask AI row
 - Return runs the highlighted row. Ask AI is a row: one word keeps the launcher first (`weather` opens Weather), two or more words or a question put Ask AI first, and an exact name, prefix, alias, or learned abbreviation still wins. `Tab` sends whatever you typed to the AI from any search. Ask AI learns from use and takes a pin, alias, or hotkey like any row
 - Answers as you type: math, unit conversions (`12 km in miles`, `72f to c`), dates (`3 days from now`, `days until 2026-12-25`), and city times (`time in tokyo`) are the top row; Return copies, `⌘↩` pastes. A typed address (`apple.com`) gets an Open row
@@ -68,7 +69,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Adjustable 10-second quick-reopen window for the last result or draft
 - API keys stored in the macOS Keychain and not synced through iCloud
 - Deterministic local math shortcut and optional automatic clipboard copy
-- No telemetry
+- Local only: no analytics and no telemetry. The one log the app keeps about your use is the local interaction journal described above, which is bounded, content-free, owner-only, and never leaves this Mac
 
 ## Requirements
 
@@ -306,7 +307,30 @@ OpenAI-compatible providers do not have a tool-calling loop.
   copied into Quick Launch settings.
 - Selected-text actions use macOS Accessibility only to read or replace the
   current selection. They do not record the screen.
-- The app has no telemetry.
+- The interaction journal is local and bounded: outcome rows only (identifiers,
+  category codes, a coarse query-size band, and a keyed digest of the folded
+  query), kept in `~/Library/Application Support/Quick Launch/interaction-journal.json`
+  with `0600` permissions. The digest is HMAC-SHA256 under a random 32-byte key
+  generated on first use and stored owner-only beside it
+  (`interaction-journal-key`, re-checked to `0600` on every load); repeats
+  correlate on this Mac and the digest cannot be recomputed without that file.
+  It never stores clipboard, snippet, chat, selection, file, query, or AI answer
+  text: the input field — which also carries AI prompts, and whose Ask AI row is
+  digested like any other accepted row — is reduced to that digest before it is
+  written, with only a coarse size band for its length. An identifier that could
+  carry content is digested the same way. That includes the typed-URL row: the
+  launcher identifies it by a stable FNV-1a content hash, which is irreversible
+  in practice but is *not* cryptographic (it has no key, and ranking cannot use
+  one), so the journal re-keys that row id under its own HMAC key before writing
+  it. This is not a secret store: a short query remains guessable by brute force
+  from the digest plus the key file, so nothing that must stay secret belongs in
+  the search field. The "wrong choice" marker is set only by an explicit,
+  reversible action, and nothing in the journal feeds ranking.
+- Turning the journal off stops new recording. Events already kept stay on this
+  Mac, remain exportable and clearable, and still age out on the same retention.
+- The app has no analytics and sends nothing about your use anywhere. It keeps
+  one bounded local review log, the interaction journal above; exports happen
+  only to a location you pick in a save panel.
 
 ## Architecture
 

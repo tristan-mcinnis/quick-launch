@@ -32,7 +32,7 @@ final class LauncherUsageStore {
     static let maxMnemonics = 300
     static let maxItemsPerMnemonic = 6
     static let maxItems = 400
-    static let rootScope = "root"
+    nonisolated static let rootScope = "root"
 
     /// `"<scope>\u{1F}<query>"` → item id → record.
     private(set) var mnemonics: [String: [String: Record]] = [:]

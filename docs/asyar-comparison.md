@@ -8,7 +8,7 @@ A full cross-platform Raycast competitor (macOS, Windows, Linux) built on Tauri 
 
 ## What Quick Launch is
 
-A single-user, native Swift, macOS-only AI action overlay. ~33.6k lines across ~110 source files. Deliberately scope-fenced by the golden goal: instant prompt-to-result, not a launcher platform. No extensions, no telemetry, Keychain secrets, direct process execution with no shell interpolation, protocol-backed services with tests.
+A single-user, native Swift, macOS-only AI action overlay. ~33.6k lines across ~110 source files. Deliberately scope-fenced by the golden goal: instant prompt-to-result, not a launcher platform. No extensions, no analytics, no outbound telemetry (one bounded, content-free local interaction journal stays on this Mac), Keychain secrets, direct process execution with no shell interpolation, protocol-backed services with tests.
 
 ## Feature overlap (independently converged)
 
