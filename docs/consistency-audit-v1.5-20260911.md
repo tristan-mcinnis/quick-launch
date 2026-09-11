@@ -38,6 +38,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - The setting is on by default ("Copy result to clipboard automatically", `Sources/Views/SettingsView.swift:500-506`).
 - Why it matters: in a chat, every follow-up and every AI Chat turn replaces the user's clipboard.
 - Fix: skip auto-copy in AI Chat and on follow-ups, or mark the write as transient. Rewrite the row text.
+- Fixed in v1.5.0 (group G2): auto-copy takes only a Quick AI chat's first answer (never a follow-up, never AI Chat), every AI-answer copy is transient via `writeTransientString`, and the row reads "Copy the first answer of each chat automatically".
 
 **6. Settings does not show the chat defaults. (M)**
 - Memory, Vault and Skills are on by default in code (`QuickViewModel+ChatTools.swift:21-25`). Only web search has a switch, under Models › Web search (`Sources/Views/ProviderSettingsView.swift:199-209`). Its note mentions only `search_web`.
@@ -67,6 +68,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 **10. The Ask AI row can say the wrong thing for math. (S)**
 - The row is always listed (`QuickViewModel.swift:1633-1640`). Its detail says "“2+2” to DeepSeek… ⇥ opens Quick AI" (`:1138-1146`), but Tab and Return answer inline.
 - Fix: when `localAnswer(for:)` matches, change the detail.
+- Fixed in v1.5.0 (group G2): with a local answer the row reads "Answered here, not sent to <model>" and draws no ⇥ hint (`typedTextHasLocalAnswer`, the same rule as Tab).
 
 **11. The Welcome text is stale. (S)**
 - Evidence: `Sources/Views/WelcomeOverlayView.swift:28-37`; `slate-welcome-dark.png`.
@@ -76,6 +78,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - "Open Quick Launch" shows ⌃Space. The default is ⌥Space and it can be changed (`Sources/App/AppDelegate.swift:1236-1242`; `QuickSettings.swift:126-127`).
 - "AI Chat" sits between Settings and Caffeinate.
 - Fix: read the hotkey from settings, and reorder the menu.
+- Fixed in v1.5.0 (group G2): `StatusMenu` builds the menu from settings on every right-click, so "Open Quick Launch" shows the configured hotkey, and AI Chat follows it before Settings and Caffeinate.
 
 **13. ⌘P means two things. (S)**
 - In Translator, ⌘P is Target language (`translator-dark.png`; `README.md:33`). In Quick AI and AI Chat, ⌘P opens the chat list.
@@ -89,6 +92,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 **15. Keep on Top uses the pin glyph. (S)**
 - Evidence: `Sources/Models/QuickAISurfaceAction.swift:54`.
 - Pinned chats use the same glyph, so the pin in the AI Chat header is ambiguous.
+- Fixed in v1.5.0 (group G2): Keep on Top uses `square.3.layers.3d.top.filled` (Stop is `square.3.layers.3d.slash`) in `⌘K` and the AI Chat header; the pin is only for pinned chats.
 
 **16. Translator still uses the old look. (M, low priority)**
 - Uppercase labels (SOURCE, CHINESE (SIMPLIFIED)), a footer well with a status dot, and its own `FooterHintView` (`Sources/Views/TranslatorView.swift:82,129,262`).

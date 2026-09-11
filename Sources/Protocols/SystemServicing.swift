@@ -10,8 +10,15 @@ import Foundation
 protocol PasteboardWriting: AnyObject {
     /// The current string item, if any.
     func readString() -> String?
-    /// Replaces every item on the pasteboard with `text`.
+    /// Replaces every item on the pasteboard with `text`: a copy the user
+    /// keeps (a snippet, a cleaned link, text from the screen), so the
+    /// Clipboard History and other clipboard managers record it.
     func writeString(_ text: String)
+    /// Replaces every item on the pasteboard with `text`, marked transient and
+    /// auto-generated (nspasteboard.org): an AI answer the app wrote, which
+    /// the Clipboard History and other clipboard managers skip. The text is
+    /// still one Command-V away.
+    func writeTransientString(_ text: String)
 }
 
 /// Opens URLs, reveals files, and finds applications.

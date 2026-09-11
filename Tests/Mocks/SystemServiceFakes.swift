@@ -5,7 +5,12 @@ import Foundation
 @MainActor
 final class FakePasteboard: PasteboardWriting {
     var string: String?
+    /// Every write, kept or transient.
     private(set) var writeCount = 0
+    /// Writes marked transient: AI answers the Clipboard History skips.
+    private(set) var transientWriteCount = 0
+    /// Whether the string on the pasteboard now came from a transient write.
+    private(set) var isTransient = false
 
     init(string: String? = nil) {
         self.string = string
@@ -16,6 +21,14 @@ final class FakePasteboard: PasteboardWriting {
     func writeString(_ text: String) {
         string = text
         writeCount += 1
+        isTransient = false
+    }
+
+    func writeTransientString(_ text: String) {
+        string = text
+        writeCount += 1
+        transientWriteCount += 1
+        isTransient = true
     }
 }
 

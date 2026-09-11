@@ -46,13 +46,19 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Keep on Top's glyph, in the palette and in the AI Chat header while
+    /// the window is kept on top.
+    static let keepOnTopSymbol = "square.3.layers.3d.top.filled"
+
     var systemImage: String {
         switch self {
         case .resetSize: "arrow.down.right.and.arrow.up.left"
         case .showChatList, .hideChatList: "sidebar.left"
         case .findInChat: "magnifyingglass"
-        case .keepOnTop: "pin"
-        case .stopKeepingOnTop: "pin.slash"
+        // Layers with the top one filled: "in front". Not the pin, which
+        // marks a pinned chat.
+        case .keepOnTop: Self.keepOnTopSymbol
+        case .stopKeepingOnTop: "square.3.layers.3d.slash"
         }
     }
 

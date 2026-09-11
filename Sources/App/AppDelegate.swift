@@ -1225,101 +1225,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Built on every right-click, so it shows the current hotkey and
+    /// Caffeinate state (`StatusMenu`).
     private func buildContextMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        let show = NSMenuItem(
-            title: "Open Quick Launch",
-            action: #selector(showOverlayFromMenu),
-            keyEquivalent: " "
+        StatusMenu.make(
+            StatusMenu.State(
+                settings: viewModel?.settings ?? QuickSettings(),
+                isCaffeinating: viewModel?.isCaffeinating == true,
+                screenHistory: ScreenHistoryStatusPresentation.make(
+                    status: viewModel?.screenHistory.captureStatus
+                ),
+                version: Bundle.main.shortVersion
+            ),
+            target: self,
+            action: #selector(performStatusMenuCommand(_:))
         )
-        show.keyEquivalentModifierMask = .control
-        show.target = self
-        menu.addItem(show)
+    }
 
-        let settings = NSMenuItem(
-            title: "Settings…",
-            action: #selector(openSettingsFromMenu),
-            keyEquivalent: ","
-        )
-        settings.target = self
-        menu.addItem(settings)
-
-        let aiChat = NSMenuItem(
-            title: "AI Chat",
-            action: #selector(showAIChatFromMenu),
-            keyEquivalent: ""
-        )
-        aiChat.target = self
-        menu.addItem(aiChat)
-
-        let caffeinate = NSMenuItem(
-            title: viewModel?.isCaffeinating == true ? "Turn Caffeinate Off" : "Turn Caffeinate On",
-            action: #selector(toggleCaffeinateFromMenu),
-            keyEquivalent: ""
-        )
-        caffeinate.state = viewModel?.isCaffeinating == true ? .on : .off
-        caffeinate.target = self
-        menu.addItem(caffeinate)
-
-        menu.addItem(.separator())
-
-        let screenHistory = ScreenHistoryStatusPresentation.make(
-            status: viewModel?.screenHistory.captureStatus
-        )
-        let screenHistoryStatus = NSMenuItem(
-            title: screenHistory.statusTitle,
-            action: nil,
-            keyEquivalent: ""
-        )
-        screenHistoryStatus.isEnabled = false
-        menu.addItem(screenHistoryStatus)
-
-        let screenHistoryControl = NSMenuItem(
-            title: screenHistory.controlTitle,
-            action: #selector(stopScreenHistoryFromMenu),
-            keyEquivalent: ""
-        )
-        screenHistoryControl.isEnabled = screenHistory.controlIsEnabled
-        screenHistoryControl.target = self
-        menu.addItem(screenHistoryControl)
-
-        let welcome = NSMenuItem(
-            title: "Show Welcome Again",
-            action: #selector(showWelcomeFromMenu),
-            keyEquivalent: ""
-        )
-        welcome.target = self
-        menu.addItem(welcome)
-
-        menu.addItem(.separator())
-
-        let version = NSMenuItem(
-            title: "Quick Launch v\(Bundle.main.shortVersion)",
-            action: nil,
-            keyEquivalent: ""
-        )
-        version.isEnabled = false
-        menu.addItem(version)
-
-        let website = NSMenuItem(
-            title: "View Quick Launch on GitHub",
-            action: #selector(openWebsite),
-            keyEquivalent: ""
-        )
-        website.target = self
-        menu.addItem(website)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(
-            title: "Quit Quick Launch",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        menu.addItem(quit)
-
-        return menu
+    @objc private func performStatusMenuCommand(_ sender: NSMenuItem) {
+        switch StatusMenu.Command(rawValue: sender.tag) {
+        case .openQuickLaunch: showOverlayFromMenu()
+        case .openAIChat: showAIChatFromMenu()
+        case .openSettings: openSettingsFromMenu()
+        case .toggleCaffeinate: toggleCaffeinateFromMenu()
+        case .stopScreenHistory: stopScreenHistoryFromMenu()
+        case .showWelcome: showWelcomeFromMenu()
+        case .openWebsite: openWebsite()
+        case .quit: NSApp.terminate(nil)
+        case nil: break
+        }
     }
 
     // MARK: - Panel auto-resize observer
