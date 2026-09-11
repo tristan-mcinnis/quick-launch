@@ -72,7 +72,8 @@ The same key means the same thing on every layer.
 | `⌃X` | Delete (press twice) |
 | `⌘⇧P` | Pin to the top of its catalog, or unpin (snippets, quick links, clipboard, screenshots, chats) |
 | `⌘⇧N` / `⌘⇧L` | Save as snippet / save as quick link |
-| `⌘⇧C` | Copy path (apps) or copy answer |
+| `⌘⇧C` | Copy path (apps) or copy answer (Quick AI stays open) |
+| `⌥⌘C` | Copy the whole Quick AI chat, labelled "You:" and the model |
 | `↑ ↓` | Move the highlight; `⌘1…9` is deliberately unused |
 
 Reopening the overlay always starts at the root. Opening Settings hides the

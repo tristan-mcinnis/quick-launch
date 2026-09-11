@@ -1,6 +1,14 @@
 import Foundation
 
 enum WebSearchIntentDetector {
+    /// Leading words that ask for a web search outright, longest first so
+    /// "search web for" is matched before "search web". A chat title drops
+    /// them (`QuickConversation.cleanTitle`).
+    static let commandPrefixes = [
+        "search the web for", "search the web", "search web for", "search web",
+        "look up", "find online",
+    ]
+
     static func shouldSearch(_ input: String) -> Bool {
         let query = input
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -8,8 +16,7 @@ enum WebSearchIntentDetector {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return false }
 
-        let directPrefixes = [
-            "search the web", "search web", "look up", "find online",
+        let directPrefixes = commandPrefixes + [
             "latest ", "latest news", "news about",
             "when is the next", "when are the next", "who is the current",
         ]

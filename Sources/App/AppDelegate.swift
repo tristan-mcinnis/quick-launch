@@ -217,6 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             screenshotService: screenshotService,
             screenAwareness: screenAwareness,
             screenshotTextIndex: screenshotTextIndex,
+            pasteboard: SystemPasteboard(),
+            historyFileURL: QuickHistoryStore.defaultFileURL(),
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm

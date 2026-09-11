@@ -66,7 +66,8 @@ struct OverlayParityTests {
 
         #expect(!MessageCollapsePolicy.shouldCollapse(short))
         #expect(MessageCollapsePolicy.shouldCollapse(long))
-        #expect(MessageCollapsePolicy.shouldCollapse(String(repeating: "word ", count: 200)))
+        let words = MessageCollapsePolicy.collapsedCharacterCount / "word ".count + 1
+        #expect(MessageCollapsePolicy.shouldCollapse(String(repeating: "word ", count: words)))
     }
 
     @Test func theCollapsedPreviewKeepsTheFirstPartAndNeverCutsAWord() {

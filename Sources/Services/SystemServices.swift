@@ -2,7 +2,9 @@ import AppKit
 import Foundation
 
 // AppKit implementations of the seams in `Sources/Protocols/SystemServicing.swift`.
-// `QuickViewModel.init` installs these by default; tests inject fakes.
+// `QuickViewModel.init` installs these by default, except the pasteboard (the
+// app injects `SystemPasteboard`; the default is `InMemoryPasteboard`); tests
+// inject fakes.
 
 @MainActor
 final class SystemPasteboard: PasteboardWriting {
@@ -20,6 +22,20 @@ final class SystemPasteboard: PasteboardWriting {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
+}
+
+/// A pasteboard that only remembers its last string: `QuickViewModel`'s
+/// default when none is injected, so a view model built without one (a
+/// test) never clears or replaces the system clipboard.
+@MainActor
+final class InMemoryPasteboard: PasteboardWriting {
+    private var string: String?
+
+    init() {}
+
+    func readString() -> String? { string }
+
+    func writeString(_ text: String) { string = text }
 }
 
 @MainActor

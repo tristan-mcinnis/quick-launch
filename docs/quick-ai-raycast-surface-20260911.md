@@ -99,6 +99,13 @@ surface is fixed and never measures its content. A catalog with a detail pane
 - Ask User Question card, when the model genuinely asks, sits in the thread at
   the assistant position and keeps its current look.
 - Long messages keep the Show more / Collapse control.
+
+  > Changed in v1.5.0: only user turns collapse; answers always draw in
+  > full, as Raycast does. The threshold is measured at the pill's width
+  > (about 105 characters a line, not 60), and Show more and Collapse scroll
+  > the message's first line to the top of the thread. Only the newest
+  > collapsible turn, the one `⇧⌘M` acts on, shows the key caps, in both
+  > Show more and Collapse.
 - Vertical rhythm: `Spacing.md` (16) between turns, `Spacing.xl` (24) above the
   first turn.
 - The thread auto-scrolls to the newest turn while streaming.
@@ -116,12 +123,17 @@ surface is fixed and never measures its content. A catalog with a detail pane
   `TypeToken.bodySmall` (13) text, the same size as Raycast's action label
   (Raycast's field is 13, not 16), placeholder "Ask anything, @ tools, or /
   for commands…" in `textTertiary`, drawn as an overlay on the field's text
-  origin since a styled prompt takes the field's ink on macOS. Left text inset
+  origin since a styled prompt takes the field's ink on macOS (v1.5.0: "Ask a
+  follow-up…" once a thread exists, "Search chats…" in Recent Chats, "Waiting
+  for the answer… esc stops" while streaming, the web-search phase included,
+  since the question leaves the field for its pill when the search starts,
+  "Pick an option above… esc stops" while the question card waits). Left text inset
   `Spacing.md` (16). On the right, inside the field: the primary action label in
   `TypeToken.label` `textPrimary` ("Paste Response" or "Copy Response" per the
   Primary Action setting; "Ask" before an answer exists; "Stop" while streaming;
-  "Open" in Recent Chats) followed by its key cap (`↩`, or `esc` while
-  streaming).
+  "Open" in Recent Chats; v1.5.0: the open chooser's own action, "Use Model",
+  "Regenerate", "Add", or "Run", while one floats above the composer) followed
+  by its key cap (`↩`, or `esc` while streaming).
 - Right: a `command` glyph in a `Control.pill` (36) circle, the twin of the
   plus circle across the field (Raycast's ⌘ is a circle, not a rounded
   square: its fill has the chord profile of the plus button), `stroke`
@@ -152,6 +164,10 @@ surface is fixed and never measures its content. A catalog with a detail pane
   "Open ↩"), `esc` returns to the thread. One column. The split view is
   deleted. `⌘J` enters through the same path as Tab, so a catalog, an input
   mode, or a Quick Link input steps aside and the composer's Return asks.
+
+  > Changed in v1.5.0: the composer searches the list (title and message
+  > text) and opens empty; Return opens the highlighted match and clears the
+  > text; `esc` clears a search before it returns to the thread.
 - While an answer streams, Return still picks in the model chooser, Add
   Context, and the Transform chooser; only the ask itself waits for the
   stream to end.
@@ -250,7 +266,7 @@ written, this is what was built instead.
   rule (typed text pops before anything behind it) is kept, so with a
   half-typed follow-up it is Escape, Escape to root search.
 - **Return in Recent Chats always opens the highlighted chat**, typed text or
-  not; the list has no search.
+  not; the list has no search. (Superseded in v1.5.0: the composer searches the list, and Return opens the highlighted match.)
 - **The finished-search line is per answer.** "Search web: …" is kept on the
   view model for the answer it belongs to and cleared by the next question; it
   is not written into chat history, so a reloaded chat shows no tool line.

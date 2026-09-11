@@ -447,7 +447,7 @@ struct OverlayView: View {
             if !viewModel.history.isEmpty {
                 Divider()
                 ForEach(viewModel.history.prefix(10)) { conversation in
-                    Button(conversation.title) {
+                    Button(viewModel.title(of: conversation)) {
                         viewModel.loadConversation(id: conversation.id)
                     }
                 }
@@ -1427,7 +1427,7 @@ struct TransformChooserPane: View {
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 Spacer()
                 KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: "Run", keys: ["↩"])
+                KeyHint(label: QuickViewModel.transformChooserConfirmTitle, keys: ["↩"])
                 KeyHint(label: "Close", keys: ["esc"])
             }
             .padding(.horizontal, AQDesign.Space.panel)
@@ -1540,7 +1540,7 @@ struct AddContextPane: View {
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 Spacer()
                 KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: "Add", keys: ["↩"])
+                KeyHint(label: QuickViewModel.addContextConfirmTitle, keys: ["↩"])
                 KeyHint(label: "Close", keys: ["esc"])
             }
             .padding(.horizontal, AQDesign.Space.panel)

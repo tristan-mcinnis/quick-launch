@@ -592,14 +592,22 @@ struct QuickAIKeyboardTests {
         (1...lines).map { "line \($0) and a little more text to be sure" }.joined(separator: "\n")
     }
 
-    @Test func showMoreAndCollapseSwapAndTheShortcutFlipsThem() async throws {
+    /// A panel sitting on the answer to `question`.
+    private func asked(_ question: String, reply: String) async -> KeyboardOverlay {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: reply, finishReason: "stop")])
+        let overlay = KeyboardOverlay(settings: settings(), service: service)
+        overlay.viewModel.input = question
+        await overlay.viewModel.submit()
+        return overlay
+    }
+
+    @Test func showMoreAndCollapseSwapOnALongQuestionAndTheShortcutFlipsThem() async throws {
         let text = longAnswer(lines: 14)
-        let (overlay, _) = try await answered(reply: text)
+        let overlay = await asked(text, reply: "Short.")
         let viewModel = overlay.viewModel
-        // The thread shows every message, so the newest long one is addressable.
-        let message = try #require(
-            viewModel.conversationMessages.last { MessageCollapsePolicy.shouldCollapse($0.content) }
-        )
+        let message = try #require(viewModel.conversationMessages.first { $0.role == .user })
+        #expect(viewModel.keyboardToggleMessageID == message.id, "the long question is the target")
 
         #expect(viewModel.collapseState(for: message).isCollapsed)
         #expect(viewModel.collapseState(for: message).controlTitle == "Show more")
@@ -610,10 +618,32 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.collapseState(for: message).controlTitle == "Collapse")
         #expect(!viewModel.collapseState(for: message).isCollapsed)
         #expect(viewModel.collapseState(for: message).displayedText == text)
+        #expect(viewModel.threadScrollRequest?.messageID == message.id, "Show more brings the head to the top")
+        let expandRevision = try #require(viewModel.threadScrollRequest?.revision)
 
         #expect(try overlay.press("m", keyCode: 46, [.command, .shift]))
         #expect(viewModel.collapseState(for: message).controlTitle == "Show more")
         #expect(viewModel.collapseState(for: message).isCollapsed)
+        #expect(viewModel.threadScrollRequest?.messageID == message.id, "Collapse uses the same anchor")
+        #expect(viewModel.threadScrollRequest?.revision == expandRevision + 1, "a second request scrolls again")
+    }
+
+    @Test func aLongAnswerNeverCollapsesAndTheShortcutLeavesItAlone() async throws {
+        let text = longAnswer(lines: 14)
+        let (overlay, _) = try await answered(reply: text)
+        let viewModel = overlay.viewModel
+        let answer = try #require(viewModel.conversationMessages.last)
+        #expect(answer.role == .assistant)
+        #expect(MessageCollapsePolicy.shouldCollapse(answer.content), "long enough to fold if the user had sent it")
+
+        #expect(!viewModel.collapseState(for: answer).isCollapsible)
+        #expect(viewModel.collapseState(for: answer).controlTitle == nil)
+        #expect(viewModel.collapseState(for: answer).displayedText == text)
+        #expect(viewModel.keyboardToggleMessageID == nil)
+        #expect(try overlay.press("m", keyCode: 46, [.command, .shift]) == false,
+                "nothing to fold, so the key reaches the field editor")
+        #expect(!viewModel.toggleTranscriptMessage(answer.id), "a click cannot fold an answer either")
+        #expect(viewModel.threadScrollRequest == nil)
     }
 
     @Test func aShortAnswerDrawsNeitherControlAndTheShortcutDoesNothing() async throws {
@@ -630,6 +660,46 @@ struct QuickAIKeyboardTests {
                 "an unconsumed key still reaches the field editor")
         #expect(viewModel.collapseState(for: message).controlTitle == nil)
         #expect(viewModel.collapseState(for: message).displayedText == "Short.")
+    }
+
+    // MARK: - 8. Copy Chat and Change Model keys
+
+    @Test func optionCommandCCopiesTheLabelledChatAndKeepsTheSurface() async throws {
+        let (overlay, _) = try await answered(reply: "Everything went to plan.")
+        let viewModel = overlay.viewModel
+        let model = try #require(viewModel.currentConversation?.model)
+
+        #expect(try overlay.press("c", keyCode: 8, [.command, .option]))
+        #expect(await waitFor { overlay.pasteboard.string != nil })
+        #expect(overlay.pasteboard.string == """
+        You: what happened
+
+        \(ModelProfile.displayName(forModelID: model)): Everything went to plan.
+        """)
+        #expect(overlay.presenter.dismissCount == 0, "the surface stays open")
+        #expect(viewModel.isQuickAIPresented)
+        #expect(viewModel.composerConfirmation == "Chat copied")
+    }
+
+    @Test func shiftCommandCCopiesTheAnswerAndKeepsTheSurface() async throws {
+        let (overlay, _) = try await answered(reply: "Just the answer.")
+        #expect(try overlay.press("c", keyCode: 8, [.command, .shift]))
+        #expect(await waitFor { overlay.pasteboard.string == "Just the answer." })
+        #expect(overlay.presenter.dismissCount == 0, "Copy Answer no longer closes the window")
+        #expect(overlay.viewModel.composerConfirmation == "Copied")
+    }
+
+    @Test func shiftCommandOChangesTheModelOnTheEmptySurface() throws {
+        let overlay = KeyboardOverlay(settings: settings(), service: MockQuickService())
+        let viewModel = overlay.viewModel
+        viewModel.input = ""
+        #expect(viewModel.handleTab())
+        #expect(viewModel.isQuickAIPresented)
+        #expect(viewModel.output.isEmpty, "no answer yet")
+
+        #expect(try overlay.press("o", keyCode: 31, [.command, .shift]))
+        #expect(viewModel.isModelChooserPresented, "the key the empty surface names works before the first answer")
+        #expect(viewModel.modelChooserPurpose == .change)
     }
 }
 

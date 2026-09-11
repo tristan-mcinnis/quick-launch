@@ -378,6 +378,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case replaceSelection
     case pasteBack
     case copy
+    /// `⌥⌘C`: the whole chat as a labelled transcript ("You:" and the model).
+    case copyChat
     case readAloud
     case saveSnippet
     case searchWeb
@@ -401,6 +403,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .replaceSelection: "Replace Selection"
         case .pasteBack: "Paste into Previous App"
         case .copy: "Copy Answer"
+        case .copyChat: "Copy Chat"
         case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
@@ -422,6 +425,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .replaceSelection: "text.cursor"
         case .pasteBack: "arrow.turn.down.right"
         case .copy: "doc.on.doc"
+        case .copyChat: "text.bubble"
         case .readAloud: "speaker.wave.2"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
@@ -445,6 +449,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .replaceSelection: .commandShift("v")
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
+        case .copyChat: .commandOption("c")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")

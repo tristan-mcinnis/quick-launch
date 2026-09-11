@@ -6,10 +6,19 @@ import Testing
 @Suite("Answer state", .serialized)
 @MainActor
 struct AnswerStateTests {
-    private func answered(_ question: String, reply: String = "Argentina.") async -> (QuickViewModel, MockQuickService) {
+    /// A fake pasteboard, and chat history off unless a test needs it.
+    /// History never has a file here (no `historyFileURL`), so even with it
+    /// on a run never writes the user's clipboard or chat file.
+    private func answered(
+        _ question: String,
+        reply: String = "Argentina.",
+        keepsHistory: Bool = false
+    ) async -> (QuickViewModel, MockQuickService) {
         let mock = MockQuickService()
         await mock.setResponses([StreamDelta(text: reply, finishReason: "stop")])
-        let vm = QuickViewModel(service: mock)
+        var settings = QuickSettings()
+        settings.historyEnabled = keepsHistory
+        let vm = QuickViewModel(settings: settings, service: mock, pasteboard: FakePasteboard())
         vm.settings.autoCopy = false
         vm.input = question
         await vm.submit()
@@ -30,7 +39,7 @@ struct AnswerStateTests {
         vm.input = ""
         #expect(vm.resultActions.contains(.pasteBack) && vm.resultActions.contains(.renameChat))
         #expect(!vm.resultActions.contains(.previousChat), "one chat: nothing to browse")
-        #expect(vm.quickAITitle == "who won the world cup")
+        #expect(vm.quickAITitle == "Who won the world cup", "the question, cleaned up into a title")
     }
 
     @Test func backspaceOnEmptyPopsToTheRootAndKeepsTheThread() async {
@@ -54,17 +63,17 @@ struct AnswerStateTests {
         #expect(vm.launcherMatches.isEmpty)
     }
 
-    @Test func copyShortcutCopiesTheAnswerAndCloses() async {
+    @Test func copyShortcutCopiesTheAnswerAndStaysOpen() async {
         let (vm, _) = await answered("hello", reply: "Bonjour")
-        var dismissed = 0
-        let token = NotificationCenter.default.addObserver(forName: .dismissOverlay, object: nil, queue: nil) { _ in dismissed += 1 }
-        defer { NotificationCenter.default.removeObserver(token) }
+        let presenter = RecordingPresenter()
+        vm.overlayPresenter = presenter
         #expect(vm.performShortcut(characters: "c", keyCode: 8, modifiers: [.command, .shift]))
         try? await Task.sleep(for: .milliseconds(30))
-        // Other suites share the pasteboard and the notification center, so
-        // assert on this view model's own state.
+        #expect((vm.pasteboard as? FakePasteboard)?.string == "Bonjour")
         #expect(vm.justCopied)
-        #expect(dismissed >= 1)
+        #expect(presenter.dismissals == 0, "Copy Answer keeps the Quick AI surface open")
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.composerConfirmation == "Copied", "the composer shows the checkmark")
     }
 
     @Test func followUpKeepsTheThreadAndUpdatesTheQuestion() async {
@@ -104,7 +113,7 @@ struct AnswerStateTests {
     }
 
     @Test func chatHistoryActionOpensTheChatsCatalog() async {
-        let (vm, _) = await answered("hello")
+        let (vm, _) = await answered("hello", keepsHistory: true)
         #expect(vm.resultActions.contains(.chatHistory), "a saved chat means history is browsable")
         vm.openChatHistory()
         #expect(vm.catalogScope == .chats)

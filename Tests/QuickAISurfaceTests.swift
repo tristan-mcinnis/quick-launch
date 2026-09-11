@@ -65,7 +65,7 @@ struct QuickAISurfaceTests {
         #expect(await mock.sendCallCount == 1, "nothing is staged for editing")
         #expect(vm.lastQuestion == "raycast founder")
         #expect(vm.output == "Thomas Paul Mann and Petr Nikolaev.")
-        #expect(vm.quickAITitle == "raycast founder", "the title is the first user message")
+        #expect(vm.quickAITitle == "Raycast founder", "the title is the first user message, capitalised")
         #expect(vm.input.isEmpty)
     }
 
@@ -416,7 +416,7 @@ struct QuickAISurfaceTests {
         #expect(!vm.isRecentChatsPresented, "Return opens the chat in the thread")
         #expect(vm.currentConversation?.id == older.id)
         #expect(vm.output == "Older answer.")
-        #expect(vm.quickAITitle == "older")
+        #expect(vm.quickAITitle == "Older")
         #expect(vm.activeModelDisplay == "older-model", "the header names the model that answers next")
         #expect(vm.webSearchNote == nil, "the tool line belongs to the answer it was made for")
         #expect(vm.quickAIComposerAction.label == "Paste Response")

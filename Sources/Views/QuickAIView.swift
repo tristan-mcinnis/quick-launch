@@ -16,6 +16,7 @@ import SwiftUI
 struct QuickAIView: View {
     @Bindable var viewModel: QuickViewModel
     @FocusState private var composerFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The composer row from the panel's bottom edge: the pill-high row plus
     /// its inset above and below. The floating `⌘K` pane and the choosers
@@ -86,12 +87,23 @@ struct QuickAIView: View {
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(viewModel.activeModelDisplay)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
+                // The model line is a button: it opens the model chooser
+                // to change the model for the next message.
+                Button {
+                    viewModel.toggleModelChooserFromHeader()
+                } label: {
+                    Text(viewModel.activeModelDisplay)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
+                .accessibilityHint("Change the model")
+                .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
+                .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
             }
             Spacer(minLength: House.Spacing.sm)
             // Raycast's expand glyph is a boxed up-right arrow; this is the
@@ -158,6 +170,22 @@ struct QuickAIView: View {
         return nil
     }
 
+    /// The empty surface: three quiet lines naming the ways in, centred in
+    /// the space the thread will take.
+    private func emptyStateHints(_ hints: [String]) -> some View {
+        VStack(spacing: House.Spacing.xs) {
+            ForEach(hints, id: \.self) { hint in
+                Text(hint)
+                    .font(AQDesign.TypeToken.body)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
     private var thread: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
@@ -181,7 +209,7 @@ struct QuickAIView: View {
                     // with no chat behind it) still reads as a turn: an
                     // answer never draws without its question.
                     if let question = pendingQuestion {
-                        userPill(MessageCollapseState(text: question, isExpanded: true), toggle: nil)
+                        userPill(MessageCollapseState(text: question, collapses: false), toggle: nil)
                             .id(Self.detachedQuestionID)
                         if let note = viewModel.webSearchNote {
                             toolLine(note, symbol: "globe")
@@ -231,12 +259,27 @@ struct QuickAIView: View {
                 .padding(.horizontal, House.Spacing.lg)
                 .padding(.bottom, House.Spacing.md)
             }
+            .overlay {
+                let hints = viewModel.quickAIEmptyStateHints
+                if !hints.isEmpty { emptyStateHints(hints) }
+            }
             .onAppear { scrollToEnd(proxy) }
             .onChange(of: viewModel.conversationMessages.count) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.output) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.isStreaming) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.streamingStatus) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in scrollToEnd(proxy) }
+            // Show more and Collapse bring the message's head to the top.
+            .onChange(of: viewModel.threadScrollRequest) { _, request in
+                guard let request else { return }
+                if reduceMotion {
+                    proxy.scrollTo(request.messageID, anchor: .top)
+                } else {
+                    withAnimation(.easeOut(duration: AQDesign.Motion.select)) {
+                        proxy.scrollTo(request.messageID, anchor: .top)
+                    }
+                }
+            }
         }
         .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
     }
@@ -245,7 +288,10 @@ struct QuickAIView: View {
     private func turn(_ message: QuickMessage) -> some View {
         switch message.role {
         case .user:
-            userPill(viewModel.collapseState(for: message)) {
+            userPill(
+                viewModel.collapseState(for: message),
+                showsShortcut: viewModel.showsCollapseShortcut(for: message)
+            ) {
                 viewModel.toggleTranscriptMessage(message.id)
             }
         case .assistant:
@@ -254,25 +300,28 @@ struct QuickAIView: View {
                 // the user picked.
                 AskUserQuestionCard(question: question, isInteractive: false)
             } else {
-                CollapsibleMessageText(
-                    state: viewModel.collapseState(for: message),
-                    rendersMarkdown: true,
+                // Answers never collapse: Raycast folds only what you send.
+                answerProse(
+                    message.content,
+                    isStreaming: false,
                     instanceID: "message-\(message.id.uuidString)"
-                ) {
-                    viewModel.toggleTranscriptMessage(message.id)
-                }
-                .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+                )
             }
         }
     }
 
     /// A user turn: a pill on the right in secondary ink one step below
     /// the answer prose, wrapping left-aligned inside it. No "You" label.
-    private func userPill(_ state: MessageCollapseState, toggle: (() -> Void)?) -> some View {
+    private func userPill(
+        _ state: MessageCollapseState,
+        showsShortcut: Bool = false,
+        toggle: (() -> Void)?
+    ) -> some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             CollapsibleMessageText(
                 state: state,
+                showsShortcut: showsShortcut,
                 plainTextFont: AQDesign.TypeToken.body,
                 fillsWidth: false
             ) {
@@ -394,7 +443,7 @@ struct QuickAIView: View {
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .leading) {
                     if viewModel.input.isEmpty {
-                        Text(QuickViewModel.quickAIPlaceholder)
+                        Text(viewModel.quickAIComposerPlaceholder)
                             .font(AQDesign.TypeToken.body)
                             .foregroundStyle(AQDesign.ColorToken.textTertiary)
                             .lineLimit(1)
@@ -411,17 +460,29 @@ struct QuickAIView: View {
                 // stays in the field instead of walking focus away.
                 .onKeyPress(.tab) { .handled }
                 .onChange(of: viewModel.input) { _, newValue in
-                    viewModel.noteInteraction()
-                    // Typing `@` opens the same Add Context menu the circle
-                    // left of the field does.
-                    viewModel.addContextTriggerDidChange(newValue)
+                    // Recent Chats filters on it; elsewhere a typed `@`
+                    // opens the same Add Context menu the circle does.
+                    viewModel.quickAIComposerDidChange(newValue)
                 }
-                .accessibilityLabel("Ask Quick AI")
-                Text(action.label)
-                    .font(AQDesign.TypeToken.label)
-                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    .lineLimit(1)
-                KeyCapGroup(keys: action.keys)
+                .accessibilityLabel(viewModel.isRecentChatsPresented ? "Search chats" : "Ask Quick AI")
+                if let confirmation = viewModel.composerConfirmation {
+                    // A copy just landed: a checkmark in place of the action
+                    // for a moment, then the action comes back.
+                    Image(systemName: "checkmark")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .accessibilityHidden(true)
+                    Text(confirmation)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                } else {
+                    Text(action.label)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    KeyCapGroup(keys: action.keys)
+                }
             }
             .padding(.leading, House.Spacing.md)
             .padding(.trailing, House.Spacing.sm)
@@ -435,7 +496,21 @@ struct QuickAIView: View {
                 Self.fieldShape.strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
             )
             .accessibilityElement(children: .contain)
-            .accessibilityValue("\(action.label), \(action.keys.joined(separator: " "))")
+            .accessibilityValue(
+                viewModel.composerConfirmation
+                    ?? "\(action.label), \(action.keys.joined(separator: " "))"
+            )
+            .onChange(of: viewModel.composerConfirmation) { _, confirmation in
+                guard let confirmation else { return }
+                NSAccessibility.post(
+                    element: NSApplication.shared,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: confirmation,
+                        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                    ]
+                )
+            }
 
             Button {
                 viewModel.handleCommandK()
@@ -504,8 +579,9 @@ struct QuickAIView: View {
 
 /// `⌘J`: the recent chat list in place of the thread. One column of the
 /// launcher's own chat rows (the Chats catalog rows: icon tile, title,
-/// question count and time), pinned first; `↑↓` move, `↩` opens the chat
-/// in the thread, `esc` returns to the thread.
+/// question count and time), pinned first, narrowed by what the composer
+/// holds; `↑↓` move, `↩` opens the chat in the thread, `esc` clears the
+/// search and then returns to the thread.
 private struct RecentChatsList: View {
     @Bindable var viewModel: QuickViewModel
 
@@ -517,7 +593,8 @@ private struct RecentChatsList: View {
                 Spacer()
                 KeyHint(label: "Move", keys: ["↑", "↓"])
                 KeyHint(label: "Open", keys: ["↩"])
-                KeyHint(label: "Back", keys: ["esc"])
+                // Escape clears a search before it leaves the list.
+                KeyHint(label: viewModel.input.isEmpty ? "Back" : "Clear", keys: ["esc"])
             }
             .padding(.horizontal, House.Spacing.lg)
             .padding(.vertical, House.Spacing.xs)
@@ -533,7 +610,7 @@ private struct RecentChatsList: View {
                     bottom: House.Spacing.xs,
                     trailing: House.Spacing.sm
                 ),
-                emptyText: "No chats yet",
+                emptyText: viewModel.input.isEmpty ? "No chats yet" : "No chats match",
                 scrollsToSelection: true,
                 onActivate: open
             ) { index, item, isSelected in

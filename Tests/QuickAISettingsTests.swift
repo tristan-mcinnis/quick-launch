@@ -137,7 +137,7 @@ struct QuickAISettingsTests {
 
         #expect(vm.currentConversation?.messages.count == 2, "the second question starts a new chat")
         #expect(vm.history.count == 2)
-        #expect(vm.currentConversation?.title == "second question")
+        #expect(vm.currentConversation?.title == "Second question")
     }
 
     @Test func neverKeepsOneThreadUntilTheUserStartsANewOne() async {

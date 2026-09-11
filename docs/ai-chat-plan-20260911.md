@@ -25,6 +25,7 @@ design. The window section below is the corrected one.
 |---|---|
 | v1.4.0 | Quick AI is the Raycast surface; Tab sends; ⌘J Recent Chats; clarifying questions off by default |
 | v1.4.1 | DeepSeek on `deepseek-flash`, the only flash id the DeepSeek API lists. It is DeepSeek V4.1 Flash, it reads images (tested), and it is the id pi uses. `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` were aliases of it; settings migrated (configuration version 24). |
+| v1.5.0 | Phase A1 (items 1, 2, 6, 7, 8, 9, 10, 12, 15): answers never collapse; Show more and Collapse scroll the head to the top; the threshold is measured at the thread's width; Recent Chats search; cleaned-up titles; state-aware placeholder; Copy Answer stays open, Copy Chat (`⌥⌘C`); empty-state hints; the model line opens the chooser |
 
 ## 2. Did v1.4.0 take liberties?
 

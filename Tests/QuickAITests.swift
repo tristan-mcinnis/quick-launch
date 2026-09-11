@@ -72,20 +72,20 @@ struct QuickAITests {
         vm.input = "chats"
         #expect(vm.launcherMatches.contains(.catalog(.chats, count: 2)))
         vm.enterCatalog(.chats)
-        #expect(vm.catalogItems.map(\.title) == ["second question", "first question"])
+        #expect(vm.catalogItems.map(\.title) == ["Second question", "First question"])
         #expect(vm.catalogItems.first?.value == "Second answer")
         let first = vm.catalogItems[1]
         #expect(ItemActionCatalog.actions(for: .item(first), pasteTarget: nil).map(\.title)
             == ["Continue Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Delete Chat"])
 
         await vm.perform(ItemActionCatalog.actions(for: .item(first), pasteTarget: nil)[3], on: .item(first))
-        #expect(vm.catalogItems.first?.title == "first question")
+        #expect(vm.catalogItems.first?.title == "First question")
         #expect(vm.catalogItems.first?.isPinned == true)
 
         let pinned = vm.catalogItems[0]
         await vm.perform(ItemActionCatalog.actions(for: .item(pinned), pasteTarget: nil)[2], on: .item(pinned))
         #expect(vm.inputMode == .renameChat(UUID(uuidString: pinned.itemID)!))
-        #expect(vm.input == "first question")
+        #expect(vm.input == "First question", "Rename starts from the title")
         vm.input = "Budget thread"
         await vm.submitResolvingFuzzyAlias()
         #expect(vm.catalogScope == .chats)
@@ -123,7 +123,7 @@ struct QuickAITests {
         await ask(vm, mock, "older question", reply: "Older answer")
         vm.startNewConversation()
         await ask(vm, mock, "newer question", reply: "Newer answer")
-        #expect(vm.currentConversation?.title == "newer question")
+        #expect(vm.currentConversation?.title == "Newer question")
 
         // Previous Chat (⌘[) goes back in time from the newest chat...
         await vm.performResultAction(.previousChat)
@@ -143,7 +143,7 @@ struct QuickAITests {
             conversations.append(conversation)
         }
         let bounded = QuickHistoryStore.bounded(conversations, limit: 2)
-        #expect(bounded.map(\.title) == ["Keep", "q4", "q3"])
+        #expect(bounded.map(\.title) == ["Keep", "Q4", "Q3"])
         let data = try JSONEncoder().encode(bounded)
         let back = try JSONDecoder().decode([QuickConversation].self, from: data)
         #expect(back.first?.isPinned == true && back.first?.title == "Keep")

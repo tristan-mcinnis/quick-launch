@@ -463,11 +463,16 @@ struct OverlayRenderProofTests {
             #expect(streaming.pendingQuestion == "search web raycast founder")
             #expect(streaming.webSearchNote?.hasPrefix("Search web: ") == true)
             #expect(streaming.quickAIComposerAction.label == "Stop")
+            // The question left the composer for its pill, so the field
+            // reads the streaming placeholder.
+            #expect(streaming.input.isEmpty)
+            #expect(streaming.quickAIComposerPlaceholder == QuickViewModel.streamingPlaceholder)
             try Self.save(
                 try Self.renderQuickAI(streaming, appearance: appearance),
                 name: "quick-ai-streaming-\(suffix).png"
             )
             streaming.cancel()
+            #expect(streaming.input == "search web raycast founder", "stopping gives the question back")
             await search.release()
             await searchSubmit?.value
             #expect(streaming.output.isEmpty, "the stopped ask never reached the model")
@@ -486,7 +491,7 @@ struct OverlayRenderProofTests {
             await answered.tabSubmitTask?.value
             answered.webSearchNote = "Search web: Raycast founder and 2 more terms"
             #expect(answered.isQuickAIPresented)
-            #expect(answered.quickAITitle == "raycast founder")
+            #expect(answered.quickAITitle == "Raycast founder")
             #expect(answered.quickAIComposerAction.label == "Paste Response")
             let answeredImage = try Self.renderQuickAI(answered, appearance: appearance)
             try Self.save(answeredImage, name: "quick-ai-answered-\(suffix).png")
@@ -555,6 +560,174 @@ struct OverlayRenderProofTests {
             try Self.save(
                 try Self.renderQuickAI(recent, appearance: appearance),
                 name: "quick-ai-recent-chats-\(suffix).png"
+            )
+        }
+    }
+
+    /// The v1.5.0 Quick AI fixes, in both appearances: a long finished
+    /// answer drawn in full (no Show more), a long question folded to its
+    /// pill with Show more, the empty surface's three hints, Recent Chats
+    /// narrowed by the composer, the model chooser opened from the header's
+    /// model line, and the composer's checkmark after Copy Answer.
+    /// Output: quick-ai-{state}-{dark,light}.png.
+    @Test func rendersQuickAIPolishSet() async throws {
+        let longAnswer = (1...18).map { index in
+            "\(index). Step \(index) of the release plan: check the build, run the tests, and write the note for the changelog before moving on."
+        }.joined(separator: "\n")
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
+
+            // A long answer, finished: every line drawn, no Show more.
+            let long = Self.makeViewModel(appearance: preference)
+            long.input = ""
+            let longMock = MockQuickService()
+            await longMock.setResponses([StreamDelta(text: longAnswer, finishReason: "stop")])
+            long.service = longMock
+            long.settings.autoCopy = false
+            long.input = "walk me through the release plan"
+            #expect(long.handleTab())
+            await long.tabSubmitTask?.value
+            let answer = try #require(long.conversationMessages.last)
+            #expect(answer.role == .assistant)
+            #expect(MessageCollapsePolicy.shouldCollapse(answer.content), "long enough that v1.4 folded it")
+            #expect(long.collapseState(for: answer).controlTitle == nil, "an answer never folds")
+            #expect(long.quickAIComposerPlaceholder == "Ask a follow-up…")
+            try Self.save(
+                try Self.renderQuickAI(long, appearance: appearance),
+                name: "quick-ai-long-answer-\(suffix).png"
+            )
+
+            // A long question: its pill folds to the preview with Show more.
+            let question = Self.makeViewModel(appearance: preference)
+            question.input = ""
+            let questionMock = MockQuickService()
+            await questionMock.setResponses([StreamDelta(text: "Here is the short version: ship on Friday.", finishReason: "stop")])
+            question.service = questionMock
+            question.settings.autoCopy = false
+            question.openQuickAI()
+            question.input = (1...14).map { "Line \($0) of the notes I pasted in, with the context for the question." }
+                .joined(separator: "\n")
+            await question.submit()
+            let pill = try #require(question.conversationMessages.first)
+            #expect(question.collapseState(for: pill).controlTitle == "Show more")
+            try Self.save(
+                try Self.renderQuickAI(question, appearance: appearance),
+                name: "quick-ai-long-question-collapsed-\(suffix).png"
+            )
+
+            // Two long questions: both fold, but only the newest names
+            // ⇧⌘M, the one the key acts on.
+            let two = Self.makeViewModel(appearance: preference)
+            two.input = ""
+            two.openQuickAI()
+            let notes = { (label: String) in
+                (1...12).map { "\(label) line \($0): the context I pasted in for this question." }
+                    .joined(separator: "\n")
+            }
+            two.currentConversation = QuickConversation(
+                providerID: InferenceProvider.deepSeekID,
+                model: InferenceProvider.deepSeekDefaultModel,
+                messages: [
+                    QuickMessage(role: .user, content: notes("Older")),
+                    QuickMessage(role: .assistant, content: "Ship on Friday."),
+                    QuickMessage(role: .user, content: notes("Newer")),
+                    QuickMessage(role: .assistant, content: "Then Monday."),
+                ]
+            )
+            two.output = "Then Monday."
+            let olderPill = two.conversationMessages[0]
+            let newerPill = two.conversationMessages[2]
+            #expect(two.collapseState(for: olderPill).controlTitle == "Show more")
+            #expect(two.collapseState(for: newerPill).controlTitle == "Show more")
+            #expect(!two.showsCollapseShortcut(for: olderPill))
+            #expect(two.showsCollapseShortcut(for: newerPill))
+            try Self.save(
+                try Self.renderQuickAI(two, appearance: appearance),
+                name: "quick-ai-two-long-questions-\(suffix).png"
+            )
+
+            // The empty surface: three quiet hints with their real keys.
+            let empty = Self.makeViewModel(appearance: preference)
+            empty.input = ""
+            #expect(empty.handleTab())
+            #expect(empty.quickAIEmptyStateHints.count == 3)
+            try Self.save(
+                try Self.renderQuickAI(empty, appearance: appearance),
+                name: "quick-ai-empty-hints-\(suffix).png"
+            )
+
+            // Recent Chats narrowed by the composer.
+            // The chat a web search started: its title drops "search web".
+            let recent = Self.makeViewModel(appearance: preference)
+            recent.input = ""
+            recent.settings.autoCopy = false
+            recent.currentConversation = QuickConversation(
+                providerID: InferenceProvider.deepSeekID,
+                model: InferenceProvider.deepSeekDefaultModel,
+                messages: [
+                    QuickMessage(role: .user, content: "search web raycast founder"),
+                    QuickMessage(role: .assistant, content: "Raycast was co-founded by **Thomas Paul Mann** and **Petr Nikolaev** in 2020."),
+                ]
+            )
+            recent.output = recent.currentConversation!.lastAnswer!
+            #expect(recent.isQuickAIPresented)
+            recent.history = [
+                recent.currentConversation!,
+                QuickConversation(
+                    providerID: InferenceProvider.deepSeekID,
+                    model: "deepseek-v4-pro",
+                    messages: [
+                        QuickMessage(role: .user, content: "summarise the Q3 plan"),
+                        QuickMessage(role: .assistant, content: "Three priorities: hiring, pricing, launch."),
+                    ]
+                ),
+                QuickConversation(
+                    providerID: InferenceProvider.deepSeekID,
+                    model: InferenceProvider.deepSeekDefaultModel,
+                    messages: [
+                        QuickMessage(role: .user, content: "what is the capital of Peru?"),
+                        QuickMessage(role: .assistant, content: "Lima."),
+                    ]
+                ),
+                QuickConversation(
+                    providerID: InferenceProvider.deepSeekID,
+                    model: InferenceProvider.deepSeekDefaultModel,
+                    messages: [
+                        QuickMessage(role: .user, content: "flights to Peru in March"),
+                        QuickMessage(role: .assistant, content: "Lima from Shanghai, one stop."),
+                    ]
+                ),
+            ]
+            recent.openRecentChats()
+            recent.input = "peru"
+            recent.quickAIComposerDidChange(recent.input)
+            #expect(Set(recent.recentChatItems.map(\.title)) == ["Flights to Peru in March", "What is the capital of Peru"])
+            #expect(recent.quickAITitle == "Raycast founder", "the header title is cleaned up too")
+            try Self.save(
+                try Self.renderQuickAI(recent, appearance: appearance),
+                name: "quick-ai-recent-chats-filtered-\(suffix).png"
+            )
+            recent.closeRecentChats()
+
+            // The model line is a button: it opens the chooser to change
+            // the model.
+            recent.toggleModelChooserFromHeader()
+            #expect(recent.isModelChooserPresented)
+            #expect(recent.modelChooserPurpose == .change)
+            #expect(recent.quickAIComposerAction.label == "Use Model", "the composer agrees with the chooser")
+            try Self.save(
+                try Self.renderQuickAI(recent, appearance: appearance),
+                name: "quick-ai-model-line-chooser-\(suffix).png"
+            )
+            recent.closeModelChooser()
+
+            // Copy Answer: the surface stays, the composer shows the check.
+            recent.copyAnswerOnSurface()
+            #expect(recent.composerConfirmation == "Copied")
+            #expect((recent.pasteboard as? FakePasteboard)?.string == recent.output, "the fake got it, not the Mac")
+            try Self.save(
+                try Self.renderQuickAI(recent, appearance: appearance),
+                name: "quick-ai-copied-\(suffix).png"
             )
         }
     }
@@ -646,9 +819,12 @@ struct OverlayRenderProofTests {
 
     // MARK: - Helpers
 
+    /// A proof view model: a fake pasteboard and no chat history, so a
+    /// render run never writes the user's clipboard or chat file.
     private static func makeViewModel(appearance: AppearancePreference) -> QuickViewModel {
         var settings = QuickSettings()
         settings.appearance = appearance
+        settings.historyEnabled = false
         settings.launcherItemConfigurations.append(LauncherItemConfiguration(
             kind: .application,
             itemID: "com.apple.Safari",
@@ -658,7 +834,8 @@ struct OverlayRenderProofTests {
         let vm = QuickViewModel(
             settings: settings,
             applicationCatalog: ProofApplicationCatalog(),
-            launcherCatalog: ProofLauncherCatalog()
+            launcherCatalog: ProofLauncherCatalog(),
+            pasteboard: FakePasteboard()
         )
         vm.input = "s"
         vm.applicationSelectionIndex = 0

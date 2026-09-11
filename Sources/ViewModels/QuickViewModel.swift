@@ -37,6 +37,11 @@ import Observation
     var settings: QuickSettings
     var updateState: UpdateState = .idle
     var history: [QuickConversation] = []
+    /// Where chat history is kept on disk. The app passes the real
+    /// `chat-history.json`; nil (the default, and every test) keeps history
+    /// in memory only, so a test run never reads, replaces, or deletes the
+    /// user's chats.
+    let historyFileURL: URL?
     var currentConversation: QuickConversation?
     var modelRefreshMessage: String?
     var hotkeyRegistrationError: String?
@@ -78,6 +83,18 @@ import Observation
     var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
+    /// What the Quick AI composer confirms for a moment after Copy Answer
+    /// or Copy Chat ("Copied"), drawn with a checkmark in place of the
+    /// primary action. Nil the rest of the time.
+    var composerConfirmation: String?
+    /// Which thread message to bring to the top of the view, and a revision
+    /// so asking twice for the same message scrolls twice. Set by Show more
+    /// and Collapse; the thread observes it.
+    struct ThreadScrollRequest: Equatable, Sendable {
+        let messageID: UUID
+        let revision: Int
+    }
+    var threadScrollRequest: ThreadScrollRequest?
     /// Screenshots waiting to travel with the next question, oldest first.
     var pendingImages: [QuickImageAttachment] = []
     /// The newest attachment. Setting appends; setting nil clears all.
@@ -176,7 +193,10 @@ import Observation
     var screenshotService: (any ScreenshotCapturing)?
     var screenAwareness: (any ScreenAwarenessReading)?
     /// AppKit seams (pasteboard, Finder/URL opening, running apps, displays).
-    /// The app keeps the system defaults; tests inject fakes.
+    /// The app keeps the system defaults; tests inject fakes. The pasteboard
+    /// is the exception: with none injected it is in memory
+    /// (`InMemoryPasteboard`), and the app passes `SystemPasteboard`, so a
+    /// test that copies never replaces the user's clipboard.
     @ObservationIgnored var pasteboard: any PasteboardWriting
     @ObservationIgnored var workspace: any WorkspaceOpening
     @ObservationIgnored var runningApplications: any RunningApplicationsQuerying
@@ -201,6 +221,9 @@ import Observation
 
     // How long the "just copied" flag stays true after auto-copy.
     @ObservationIgnored var justCopiedTimeout: Duration = .seconds(2)
+    /// How long the composer's checkmark stays after a copy on Quick AI.
+    @ObservationIgnored var composerConfirmationDuration: Duration = .milliseconds(1500)
+    @ObservationIgnored private var composerConfirmationTask: Task<Void, Never>?
     @ObservationIgnored var webAnswerTimeout: Duration = .seconds(15)
     @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
@@ -282,6 +305,7 @@ import Observation
         screenAwareness: (any ScreenAwarenessReading)? = nil,
         screenshotTextIndex: ScreenshotTextIndex? = nil,
         pasteboard: (any PasteboardWriting)? = nil,
+        historyFileURL: URL? = nil,
         workspace: (any WorkspaceOpening)? = nil,
         runningApplications: (any RunningApplicationsQuerying)? = nil,
         screenGeometry: (any ScreenGeometryProviding)? = nil,
@@ -319,7 +343,8 @@ import Observation
         self.screenshotService = screenshotService
         self.screenAwareness = screenAwareness
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
-        self.pasteboard = pasteboard ?? SystemPasteboard()
+        self.pasteboard = pasteboard ?? InMemoryPasteboard()
+        self.historyFileURL = historyFileURL
         self.workspace = workspace ?? SystemWorkspace()
         self.runningApplications = runningApplications ?? SystemRunningApplications()
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
@@ -1010,20 +1035,23 @@ import Observation
 
     /// Recent Quick AI chats, pinned first, as launcher items.
     var conversationItems: [LauncherCatalogItem] {
-        QuickHistoryStore.ordered(history).map { conversation in
-            let turns = conversation.messages.filter { $0.role == .user }.count
-            let stamp = conversation.updatedAt.formatted(date: .abbreviated, time: .shortened)
-            let count = turns == 1 ? "1 question" : "\(turns) questions"
-            return LauncherCatalogItem(
-                kind: .conversation,
-                itemID: conversation.id.uuidString,
-                title: conversation.title,
-                detail: (conversation.isPinned ? "Pinned · " : "") + "\(count) · \(stamp)",
-                value: conversation.lastAnswer ?? "",
-                keywords: conversation.isPinned ? "pinned" : "",
-                isPinned: conversation.isPinned
-            )
-        }
+        QuickHistoryStore.ordered(history).map(conversationItem)
+    }
+
+    /// One chat as a launcher row: its title, question count, and time.
+    private func conversationItem(_ conversation: QuickConversation) -> LauncherCatalogItem {
+        let turns = conversation.messages.filter { $0.role == .user }.count
+        let stamp = conversation.updatedAt.formatted(date: .abbreviated, time: .shortened)
+        let count = turns == 1 ? "1 question" : "\(turns) questions"
+        return LauncherCatalogItem(
+            kind: .conversation,
+            itemID: conversation.id.uuidString,
+            title: title(of: conversation),
+            detail: (conversation.isPinned ? "Pinned · " : "") + "\(count) · \(stamp)",
+            value: conversation.lastAnswer ?? "",
+            keywords: conversation.isPinned ? "pinned" : "",
+            isPinned: conversation.isPinned
+        )
     }
 
     /// The saved files, newest first, pins floated. The capture and AI
@@ -1938,8 +1966,44 @@ import Observation
         return "Search for apps and commands…"
     }
 
-    /// The Quick AI composer's placeholder, Raycast's own words.
+    /// The Quick AI composer's placeholder on an empty surface, Raycast's
+    /// own words.
     static let quickAIPlaceholder = "Ask anything, @ tools, or / for commands…"
+    /// Once a thread exists and the next question joins it.
+    static let quickAIFollowUpPlaceholder = "Ask a follow-up…"
+    /// While Recent Chats is up the composer filters the list.
+    static let recentChatsPlaceholder = "Search chats…"
+    /// While an answer streams Return waits and Escape stops it.
+    static let streamingPlaceholder = "Waiting for the answer… esc stops"
+    /// While the model waits on its question card, the wait is the user's.
+    static let askQuestionPlaceholder = "Pick an option above… esc stops"
+
+    /// What the empty Quick AI composer says right now: what typing will do.
+    var quickAIComposerPlaceholder: String {
+        if isRecentChatsPresented { return Self.recentChatsPlaceholder }
+        if isAskQuestionActive { return Self.askQuestionPlaceholder }
+        if isStreaming { return Self.streamingPlaceholder }
+        if isFollowUp, !shouldStartNewConversation { return Self.quickAIFollowUpPlaceholder }
+        return Self.quickAIPlaceholder
+    }
+
+    /// The three quiet lines an empty Quick AI surface shows, each naming a
+    /// way in with its real key: Add Context, Recent Chats, Change Model.
+    /// Empty once the surface has anything to draw.
+    var quickAIEmptyStateHints: [String] {
+        guard conversationMessages.isEmpty,
+              !isStreaming,
+              output.isEmpty,
+              pendingQuestion == nil,
+              lastQuestion == nil,
+              pendingAskQuestion == nil
+        else { return [] }
+        return [
+            "\(Self.addContextTrigger) adds a window, a selection, or a screen",
+            "\(Self.recentChatsShortcut.keyCaps.joined()) opens recent chats",
+            "\(ResultAction.changeModel.shortcut.keyCaps.joined()) changes the model",
+        ]
+    }
 
     /// What Return does from the Quick AI composer right now, drawn inside
     /// the field as a label and its key cap. The surface has no footer; this
@@ -1949,8 +2013,26 @@ import Observation
         let keys: [String]
     }
 
+    /// What Return does in the Transform chooser, in its header and in the
+    /// composer.
+    static let transformChooserConfirmTitle = "Run"
+    /// What Return does in Add Context, in its header and in the composer.
+    static let addContextConfirmTitle = "Add"
+
     var quickAIComposerAction: ComposerAction {
         if isAskQuestionActive { return ComposerAction(label: "Pick", keys: ["↩"]) }
+        // A chooser above the composer takes Return (the order of
+        // `topLayer`), so the field names the chooser's own action: two ↩
+        // hints on one screen never disagree.
+        if isTransformChooserPresented {
+            return ComposerAction(label: Self.transformChooserConfirmTitle, keys: ["↩"])
+        }
+        if isModelChooserPresented {
+            return ComposerAction(label: modelChooserPurpose.confirmTitle, keys: ["↩"])
+        }
+        if isAddContextMenuPresented {
+            return ComposerAction(label: Self.addContextConfirmTitle, keys: ["↩"])
+        }
         // In Recent Chats, Return opens the highlighted chat; ↩ means one
         // thing on the screen.
         if isRecentChatsPresented { return ComposerAction(label: "Open", keys: ["↩"]) }
@@ -1970,7 +2052,17 @@ import Observation
         guard let conversation = currentConversation,
               conversation.messages.contains(where: { $0.role == .assistant })
         else { return "Quick AI" }
-        return conversation.title
+        return title(of: conversation)
+    }
+
+    /// A chat's title with this Mac's saved-prompt prefix and aliases, so
+    /// only a real alias is dropped from the question. The header, Recent
+    /// Chats, the Chats catalog, and the menu all name a chat through here.
+    func title(of conversation: QuickConversation) -> String {
+        conversation.title(
+            aliasPrefix: settings.savedPromptPrefix,
+            aliases: Set(settings.savedPrompts.map(\.alias))
+        )
     }
 
     var activeProvider: InferenceProvider? { settings.quickAIProvider }
@@ -2007,9 +2099,6 @@ import Observation
         guard !isStreaming, !output.isEmpty else { return nil }
         let lastAssistant = conversationMessages.last { $0.role == .assistant }?.content
         return lastAssistant == output ? nil : output
-    }
-    var conversationTranscriptText: String {
-        conversationMessages.map(\.content).joined(separator: "\n")
     }
     var pasteTargetName: String? { selectionTarget?.applicationName }
     var applications: [LaunchableApplication] { applicationCatalog?.applications ?? [] }
@@ -2124,9 +2213,11 @@ import Observation
             answerAskQuestion(index: askQuestionSelectionIndex)
             return
         }
-        if isRecentChatsPresented {
-            // Return in Recent Chats opens the highlighted chat in the thread.
-            openSelectedRecentChat()
+        // A chooser floats above Recent Chats (`topLayer`), so it takes
+        // Return first, in the same order Escape closes them.
+        if isTransformChooserPresented {
+            // Return runs the focused transform in the keyboard-first chooser.
+            await runTransformChooserSelection()
             return
         }
         if isModelChooserPresented {
@@ -2139,9 +2230,9 @@ import Observation
             await runAddContextSelection()
             return
         }
-        if isTransformChooserPresented {
-            // Return runs the focused transform in the keyboard-first chooser.
-            await runTransformChooserSelection()
+        if isRecentChatsPresented {
+            // Return in Recent Chats opens the highlighted chat in the thread.
+            openSelectedRecentChat()
             return
         }
         // The composer keeps focus while an answer streams; Return waits for
@@ -2312,6 +2403,8 @@ import Observation
     func closeQuickAI() {
         guard isQuickAIPresented else { return }
         if isStreaming { cancel() }
+        // Recent Chats' search text belongs to the list, not to root search.
+        if isRecentChatsPresented { input = "" }
         isRecentChatsPresented = false
         isModelChooserPresented = false
         isAddContextMenuPresented = false
@@ -2986,8 +3079,10 @@ import Observation
         // fail safe to Copy with a truthful error when the target is gone.
         var actions: [ResultAction] = []
         if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
+        actions.append(contentsOf: [.pasteBack, .copy])
+        if !conversationMessages.isEmpty { actions.append(.copyChat) }
         actions.append(contentsOf: [
-            .pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb,
+            .readAloud, .saveSnippet, .searchWeb,
             .regenerate, .regenerateWithModel, .changeModel, .newChat,
         ])
         if !history.isEmpty { actions.append(.chatHistory) }
@@ -3022,9 +3117,12 @@ import Observation
         case .pasteBack:
             _ = await pasteOutputToPreviousApp()
         case .copy:
-            copyOutputAndMark()
+            // The surface stays open; the composer shows the checkmark.
             isActionPalettePresented = false
-            overlayPresenter.dismissOverlay()
+            copyAnswerOnSurface()
+        case .copyChat:
+            isActionPalettePresented = false
+            copyChatTranscript()
         case .readAloud:
             isActionPalettePresented = false
             await performReadAloud(text: output)
@@ -3082,6 +3180,10 @@ import Observation
     /// Opens the chooser for the last answer. Every provider's visible models
     /// are offered, and the row for the model already in use starts selected.
     func openModelChooser(_ purpose: ModelChooserPurpose) {
+        // The model's question card owns ↑↓ and Return while it waits; a
+        // chooser on top of it would draw one thing and let the keys do
+        // another.
+        guard !isAskQuestionActive else { return }
         let options = modelChooserEntries()
         guard !options.isEmpty else {
             errorMessage = "No model is available. Add a provider in Settings › Models."
@@ -3235,6 +3337,9 @@ import Observation
         requestInputFocus()
     }
 
+    /// The character that opens Add Context from the composer.
+    static let addContextTrigger: Character = "@"
+
     /// Typing `@` opens the same menu the control does. The `@` is a trigger,
     /// not content, so it is dropped; a `@` inside a word (an address) never
     /// opens the menu. Returns whether it opened.
@@ -3243,12 +3348,14 @@ import Observation
         guard !isAddContextMenuPresented,
               !isStreaming,
               !isItemActionPanePresented,
+              // In Recent Chats the composer is a search field.
+              !isRecentChatsPresented,
               // Only the root and answer composers: inside a catalog search or
               // a typed command an `@` is part of what is being typed.
               catalogScope == nil,
               inputMode == nil,
               pendingQuickLinkID == nil,
-              newValue.hasSuffix("@")
+              newValue.last == Self.addContextTrigger
         else { return false }
         let head = newValue.dropLast()
         guard head.isEmpty || head.last?.isWhitespace == true else { return false }
@@ -4550,7 +4657,7 @@ import Observation
         case .addContextMenu:
             closeAddContextMenu()
         case .recentChats:
-            closeRecentChats()
+            popRecentChatsLayer()
         case .streaming:
             cancel()
         case .typedText:
@@ -4654,6 +4761,18 @@ import Observation
             modifiers: modifiers
         ), let id = keyboardToggleMessageID {
             toggleTranscriptMessage(id)
+            return true
+        }
+        // Change Model works on the Quick AI surface before the first answer
+        // too: the empty surface names this key, and so does the header's
+        // model line.
+        if isQuickAIPresented, !isItemActionPanePresented,
+           ResultAction.changeModel.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            openModelChooser(.change)
             return true
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
@@ -4939,9 +5058,8 @@ import Observation
     }
 
     private func saveHistory() {
-        if settings.historyEnabled {
-            QuickHistoryStore.save(history, limit: settings.historyLimit)
-        }
+        guard settings.historyEnabled, let historyFileURL else { return }
+        QuickHistoryStore.save(history, limit: settings.historyLimit, to: historyFileURL)
     }
 
     /// ⌘[ / ⌘] or ↑↓ on an answer: move through recent chats, pinned first.
@@ -5514,11 +5632,32 @@ import Observation
     }
 
     /// Marks the ask in flight: the typed question is on screen as its own
-    /// pill from the first moment of a search or page read.
+    /// pill from the first moment of a search or page read, and it leaves
+    /// the composer, which now reads the streaming placeholder. The text is
+    /// kept until the model call makes it a turn, so a failed or stopped
+    /// ask can put it back (`restoreEnrichmentInput`).
     private func beginPendingQuestion(_ submittedInput: String) {
         let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
         lastQuestion = question
         pendingQuestion = question
+        if enrichmentSubmittedInput == nil {
+            enrichmentSubmittedInput = submittedInput
+            input = ""
+        }
+    }
+
+    /// The question a web search or page read took out of the composer, held
+    /// until the model call makes it a turn.
+    private var enrichmentSubmittedInput: String?
+
+    /// A search or page read that ends without reaching the model (failed,
+    /// stopped, or no model to call) gives the composer its question back,
+    /// as `rollbackSubmission` does for a failed stream. Text typed since
+    /// the search started is kept.
+    private func restoreEnrichmentInput() {
+        guard let text = enrichmentSubmittedInput else { return }
+        enrichmentSubmittedInput = nil
+        if input.isEmpty { input = text }
     }
 
     /// Whether the ask that started an enrichment is still wanted after one
@@ -5554,7 +5693,10 @@ import Observation
             isStreaming = true
             do {
                 let searchBundle = try await webSearchService.search(query)
-                guard enrichmentContinues else { return false }
+                guard enrichmentContinues else {
+                    restoreEnrichmentInput()
+                    return false
+                }
                 request.effectivePrompt = Self.webAnswerPrompt(
                     question: query,
                     searchBundle: searchBundle
@@ -5564,10 +5706,14 @@ import Observation
                 output = ""
                 isStreaming = false
             } catch {
-                guard enrichmentContinues else { return false }
+                guard enrichmentContinues else {
+                    restoreEnrichmentInput()
+                    return false
+                }
                 output = ""
                 isStreaming = false
                 errorMessage = error.localizedDescription
+                restoreEnrichmentInput()
                 requestInputFocus()
                 return false
             }
@@ -5590,10 +5736,16 @@ import Observation
             for url in promptPageURLs {
                 do {
                     let content = try await pageReader.read(url)
-                    guard enrichmentContinues else { return false }
+                    guard enrichmentContinues else {
+                        restoreEnrichmentInput()
+                        return false
+                    }
                     sections.append("### \(url.absoluteString)\n\(content)")
                 } catch {
-                    guard enrichmentContinues else { return false }
+                    guard enrichmentContinues else {
+                        restoreEnrichmentInput()
+                        return false
+                    }
                     sections.append(
                         "### \(url.absoluteString)\n(Could not read this page: \(error.localizedDescription))"
                     )
@@ -5634,6 +5786,7 @@ import Observation
                     : (action?.model ?? settings.quickAIModelOverride(for: provider.id))
               )
         else {
+            restoreEnrichmentInput()
             errorMessage = submittedImage != nil
                 ? "Choose a vision model in Settings › Models."
                 : "Choose a provider and model in Settings."
@@ -5652,6 +5805,7 @@ import Observation
            provider.kind == .openAICompatible,
            provider.location == .cloud,
            (apiKeyProvider(provider.id) ?? "").isEmpty {
+            restoreEnrichmentInput()
             errorMessage = "\(provider.name) needs an API key. Add it under Settings › Models."
             recordJournal(kind: .aiFailed, scope: learningScope, detail: "missing-api-key")
             requestInputFocus()
@@ -5673,6 +5827,13 @@ import Observation
             role: .user,
             content: usedWebSearch || usedPageRead ? submittedInput : effectivePrompt
         )
+        // The title comes from what the user typed, not from the expanded
+        // saved prompt or the Add Context preamble the model receives. Set
+        // on the first question; a first question that rolled back leaves
+        // no user turn, so the next one replaces it.
+        if currentConversation?.messages.contains(where: { $0.role == .user }) == false {
+            currentConversation?.titleSource = submittedInput
+        }
         currentConversation?.messages.append(submittedMessage)
         currentConversation?.updatedAt = Date()
         var requestMessages = currentConversation?.messages ?? [
@@ -5682,6 +5843,8 @@ import Observation
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
         input = ""
+        // The question is a turn now; a stream failure rolls it back itself.
+        enrichmentSubmittedInput = nil
         pendingImages.removeAll()
         pendingContext = nil
         lastQuestion = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6239,6 +6402,10 @@ import Observation
             pendingQuestion = nil
             // The search line was made for an answer that will not come.
             webSearchNote = nil
+            // The question goes back in the composer now, before whatever
+            // the caller does next (Recent Chats or root search may clear
+            // it), not when the cancelled search returns later.
+            restoreEnrichmentInput()
         }
         guard wasStreaming, cancelledModelRequest else { return }
         recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
@@ -6287,6 +6454,37 @@ import Observation
         guard !output.isEmpty else { return }
         copyOutput()
         markJustCopied()
+    }
+
+    /// Copy Answer on the Quick AI surface: copy, keep the surface open, and
+    /// confirm in the composer.
+    func copyAnswerOnSurface() {
+        guard !output.isEmpty else { return }
+        copyOutputAndMark()
+        confirmInComposer("Copied")
+        requestInputFocus()
+    }
+
+    /// Copy Chat (`⌥⌘C`): the whole thread as a labelled transcript, "You:"
+    /// for each question and the model's display name for each answer.
+    func copyChatTranscript() {
+        guard let conversation = currentConversation, !conversation.messages.isEmpty else { return }
+        pasteboard.writeString(conversation.labelledTranscript)
+        markJustCopied()
+        confirmInComposer("Chat copied")
+        requestInputFocus()
+    }
+
+    /// Shows `message` with a checkmark in the composer for
+    /// `composerConfirmationDuration`. A second copy restarts the clock.
+    func confirmInComposer(_ message: String) {
+        composerConfirmationTask?.cancel()
+        composerConfirmation = message
+        composerConfirmationTask = Task { @MainActor [weak self, duration = composerConfirmationDuration] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else { return }
+            self?.composerConfirmation = nil
+        }
     }
 
     /// Replace the originally captured selection with the current output.
@@ -6387,7 +6585,7 @@ import Observation
             // Fails safe: it copies and explains when there is no target.
             _ = await pasteOutputToPreviousApp()
         case .copyToClipboard:
-            copyOutputAndMark()
+            copyAnswerOnSurface()
         }
     }
 
@@ -6451,6 +6649,10 @@ import Observation
         askQuestionSelectionIndex = 0
         pendingAskQuestion = question
         streamingStatus = nil
+        // The card takes ↑↓ and Return, so no chooser stays open over it.
+        isModelChooserPresented = false
+        isAddContextMenuPresented = false
+        isTransformChooserPresented = false
         // The composer was disabled while the model worked, so its focus
         // needs reclaiming for the Return fallback path.
         requestInputFocus()
@@ -6557,6 +6759,7 @@ import Observation
             errorMessage = nil
             lastQuestion = nil
             pendingQuestion = nil
+            enrichmentSubmittedInput = nil
             webSearchNote = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
@@ -6629,6 +6832,9 @@ import Observation
         isConversationHistoryPresented = false
         isModelChooserPresented = false
         isAddContextMenuPresented = false
+        // The composer is the list's search field now; a half-typed
+        // follow-up would filter the list, so the list opens on all chats.
+        input = ""
         recentChatsIndex = currentConversation
             .flatMap { conversation in
                 recentChatItems.firstIndex { $0.itemID == conversation.id.uuidString }
@@ -6636,10 +6842,25 @@ import Observation
         requestInputFocus()
     }
 
+    /// Back to the thread. The search text belonged to the list, so it goes
+    /// with it rather than becoming a follow-up.
     func closeRecentChats() {
         guard isRecentChatsPresented else { return }
         isRecentChatsPresented = false
+        input = ""
         requestInputFocus()
+    }
+
+    /// Escape in Recent Chats: typed search text clears first, as in every
+    /// catalog, then the list closes.
+    private func popRecentChatsLayer() {
+        if input.isEmpty {
+            closeRecentChats()
+        } else {
+            input = ""
+            recentChatsIndex = 0
+            requestInputFocus()
+        }
     }
 
     func toggleRecentChats() {
@@ -6651,9 +6872,39 @@ import Observation
     }
 
     /// The rows of Recent Chats: the launcher's own chat rows (the Chats
-    /// catalog), pinned first, newest next. `recentChatsIndex` indexes
-    /// this list, so the keys and the drawn rows agree.
-    var recentChatItems: [LauncherCatalogItem] { conversationItems }
+    /// catalog), pinned first, newest next, narrowed by the composer text
+    /// while the list is up. `recentChatsIndex` indexes this list, so the
+    /// keys and the drawn rows agree.
+    var recentChatItems: [LauncherCatalogItem] {
+        let terms = FuzzyMatcher.fold(input)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        let ordered = QuickHistoryStore.ordered(history)
+        guard isRecentChatsPresented, !terms.isEmpty else { return ordered.map(conversationItem) }
+        return ordered
+            .filter { conversation in
+                let haystack = FuzzyMatcher.fold(
+                    ([title(of: conversation)]
+                        + conversation.messages.map(\.content))
+                        .joined(separator: "\n")
+                )
+                return terms.allSatisfy { haystack.contains($0) }
+            }
+            .map(conversationItem)
+    }
+
+    /// The composer's text changed on the Quick AI surface. In Recent Chats
+    /// it is the search, so typing moves the highlight to the first match
+    /// (a search cleared by opening or Escape keeps the highlight it set);
+    /// elsewhere a typed `@` opens Add Context.
+    func quickAIComposerDidChange(_ newValue: String) {
+        noteInteraction()
+        if isRecentChatsPresented {
+            if !newValue.isEmpty { recentChatsIndex = 0 }
+        } else {
+            addContextTriggerDidChange(newValue)
+        }
+    }
 
     func moveRecentChatsSelection(_ delta: Int) {
         let count = recentChatItems.count
@@ -6665,17 +6916,19 @@ import Observation
         )
     }
 
-    /// Return in Recent Chats: open the highlighted chat in the thread.
+    /// Return in Recent Chats: open the highlighted chat in the thread and
+    /// clear the search text. A search with no match keeps the list up.
     func openSelectedRecentChat() {
         let items = recentChatItems
         guard items.indices.contains(recentChatsIndex) else {
-            closeRecentChats()
+            if input.isEmpty { closeRecentChats() }
             return
         }
         // A stream still running belongs to the chat being left.
         if isStreaming { cancel() }
         continueConversation(itemID: items[recentChatsIndex].itemID)
         isRecentChatsPresented = false
+        input = ""
         requestInputFocus()
     }
 
@@ -6690,32 +6943,60 @@ import Observation
     /// is collapsed when it is long enough and its id is not in here.
     var expandedTranscriptMessageIDs: Set<UUID> = []
 
-    /// What the transcript draws for one message.
+    /// What the thread draws for one message. Only a user turn collapses;
+    /// an answer always shows in full, as in Raycast.
     func collapseState(for message: QuickMessage) -> MessageCollapseState {
         MessageCollapseState(
             text: message.content,
-            isExpanded: expandedTranscriptMessageIDs.contains(message.id)
+            isExpanded: expandedTranscriptMessageIDs.contains(message.id),
+            collapses: message.role == .user
         )
     }
 
-    /// The newest message that has a Show more control, the one the
-    /// keyboard shortcut acts on. The thread shows every message.
+    /// The newest turn that has a Show more control, the one the keyboard
+    /// shortcut acts on. The thread shows every message.
     var keyboardToggleMessageID: UUID? {
-        conversationMessages.last { MessageCollapsePolicy.shouldCollapse($0.content) }?.id
+        conversationMessages.last { collapseState(for: $0).isCollapsible }?.id
     }
 
-    /// Toggles one message between collapsed and expanded. Returns `false`
-    /// when the id is not part of the open conversation.
+    /// Whether this turn's Show more or Collapse control shows the `⇧⌘M`
+    /// key caps: only the turn the key acts on does, so an older pill never
+    /// names a key that would fold a different message.
+    func showsCollapseShortcut(for message: QuickMessage) -> Bool {
+        message.id == keyboardToggleMessageID
+    }
+
+    /// Toggles one collapsible turn between collapsed and expanded and asks
+    /// the thread to bring its head to the top of the view, so the reader
+    /// lands on the start of what opened or next to Show more after it
+    /// folds. Returns `false` when the id is not a collapsible turn of the
+    /// open conversation.
     @discardableResult
     func toggleTranscriptMessage(_ id: UUID) -> Bool {
-        guard conversationMessages.contains(where: { $0.id == id }) else { return false }
+        guard let message = conversationMessages.first(where: { $0.id == id }),
+              collapseState(for: message).isCollapsible
+        else { return false }
         if expandedTranscriptMessageIDs.contains(id) {
             expandedTranscriptMessageIDs.remove(id)
         } else {
             expandedTranscriptMessageIDs.insert(id)
         }
+        threadScrollRequest = ThreadScrollRequest(
+            messageID: id,
+            revision: (threadScrollRequest?.revision ?? 0) + 1
+        )
         noteInteraction()
         return true
+    }
+
+    /// The header's model line: opens the model chooser to change the model
+    /// for the next message, or closes it when it is already open.
+    func toggleModelChooserFromHeader() {
+        if isModelChooserPresented {
+            closeModelChooser()
+        } else {
+            openModelChooser(.change)
+        }
     }
 
     // MARK: - Lightweight follow-up history
@@ -6737,7 +7018,11 @@ import Observation
     }
 
     func loadHistory() {
-        history = settings.historyEnabled ? QuickHistoryStore.load() : []
+        guard settings.historyEnabled, let historyFileURL else {
+            history = []
+            return
+        }
+        history = QuickHistoryStore.load(from: historyFileURL)
     }
 
     func startNewConversation() {
@@ -6749,7 +7034,7 @@ import Observation
         history = []
         currentConversation = nil
         isConversationHistoryPresented = false
-        QuickHistoryStore.clear()
+        if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
         output = ""
         errorMessage = nil
         activeVaultSearchMode = nil
@@ -6809,7 +7094,7 @@ import Observation
             into: history,
             limit: settings.historyLimit
         )
-        QuickHistoryStore.save(history, limit: settings.historyLimit)
+        saveHistory()
     }
 
     private func rollbackSubmission(

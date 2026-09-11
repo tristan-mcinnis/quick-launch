@@ -1,30 +1,27 @@
 import AppKit
 import SwiftUI
 
-/// One transcript message body, with the Show more / Collapse control from
+/// One user turn's text, with the Show more / Collapse control from
 /// `MessageCollapseState`. A short message renders whole and grows no
 /// control; a long one starts collapsed at the first part of the text.
+/// Answers never collapse, so they draw as prose and never come here.
 ///
 /// The control is a real button, so it is keyboard focusable, reachable by
-/// VoiceOver, and announces the state it moved to. `⌘⇧M` toggles the newest
+/// VoiceOver, and announces the state it moved to. `⇧⌘M` toggles the newest
 /// collapsible message from anywhere in the overlay, for a reader who never
-/// leaves the composer.
+/// leaves the composer; only that message's control shows the key.
 struct CollapsibleMessageText: View {
     let state: MessageCollapseState
-    /// How the surface draws the message body. The overlay's transcript block
-    /// draws it as plain text; the `⌘J` thread draws the answer stack, which
-    /// is what gives a message its code blocks. The collapse rule, the
-    /// control, and its announcement are shared either way.
-    var rendersMarkdown = false
-    /// The font of a plain-text body. A user pill in the thread reads at
-    /// `prose`; the default is the transcript's `detail`.
+    /// Whether `⇧⌘M` acts on this message (the newest collapsible turn).
+    /// Only then does the control draw the key caps, in both Show more
+    /// and Collapse.
+    var showsShortcut = false
+    /// The font of the body. A user pill in the thread reads at `body`; the
+    /// default is the transcript's `detail`.
     var plainTextFont: Font = AQDesign.TypeToken.detail
-    /// Whether a plain-text body takes the full width (the transcript) or
-    /// hugs its text (a pill in the thread).
+    /// Whether the body takes the full width or hugs its text (a pill in
+    /// the thread).
     var fillsWidth = true
-    /// Scopes the answer stack's controls, so the thread's Copy button and
-    /// the overlay's are not the same accessibility element.
-    var instanceID = "transcript"
     var onToggle: () -> Void
 
     var body: some View {
@@ -38,7 +35,7 @@ struct CollapsibleMessageText: View {
                             .font(AQDesign.TypeToken.footnote.weight(.semibold))
                         Text(title)
                             .font(AQDesign.TypeToken.metadata)
-                        if !state.isExpanded {
+                        if showsShortcut {
                             KeyCapGroup(keys: QuickViewModel.transcriptCollapseShortcut.keyCaps)
                         }
                     }
@@ -55,30 +52,23 @@ struct CollapsibleMessageText: View {
                 .focusable()
                 .accessibilityLabel(title)
                 .accessibilityValue(state.accessibilityState)
-                .help(state.isExpanded
-                    ? "Collapse this message"
-                    : "Show the rest of this message (⌘⇧M)")
+                .help(helpText)
             }
         }
     }
 
-    @ViewBuilder
+    private var helpText: String {
+        let help = state.isExpanded ? "Collapse this message" : "Show the rest of this message"
+        guard showsShortcut else { return help }
+        return "\(help) (\(QuickViewModel.transcriptCollapseShortcut.keyCaps.joined()))"
+    }
+
     private var messageBody: some View {
-        if rendersMarkdown {
-            MarkdownTextView(
-                markdown: state.displayedText,
-                isStreaming: false,
-                scrolls: false,
-                instanceID: instanceID
-            )
+        Text(state.displayedText)
+            .font(plainTextFont)
+            .textSelection(.enabled)
+            .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
             .accessibilityLabel(state.text)
-        } else {
-            Text(state.displayedText)
-                .font(plainTextFont)
-                .textSelection(.enabled)
-                .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
-                .accessibilityLabel(state.text)
-        }
     }
 
     private func toggle() {
