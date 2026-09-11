@@ -995,6 +995,10 @@ private struct QuickActionPalette: View {
         case surface(QuickAISurfaceAction)
         case command(LauncherCatalogItem)
         case prompt(SavedPrompt)
+        /// `⌘K` › Tools: one of the chat's tools, toggled by Return.
+        case tool(ChatToolKind)
+        /// `⌘K` › Open Source: one of the answer's sources.
+        case source(ChatSource)
 
         var id: String {
             switch self {
@@ -1002,21 +1006,38 @@ private struct QuickActionPalette: View {
             case .surface(let action): "surface:" + action.id
             case .command(let item): "command:" + item.itemID
             case .prompt(let prompt): "prompt:" + prompt.id.uuidString
+            case .tool(let kind): "tool:" + kind.rawValue
+            case .source(let source): "source:" + source.id
             }
         }
     }
 
     private var entries: [Entry] {
-        viewModel.paletteResultActions.map(Entry.result)
-            + viewModel.paletteSurfaceActions.map(Entry.surface)
-            + viewModel.paletteCommandMatches.map(Entry.command)
-            + viewModel.actionMatches.map(Entry.prompt)
+        switch viewModel.actionPaletteSubmenu {
+        case .tools:
+            return viewModel.paletteToolRows.map(Entry.tool)
+        case .sources:
+            return viewModel.paletteSourceRows.map(Entry.source)
+        case nil:
+            return viewModel.paletteResultActions.map(Entry.result)
+                + viewModel.paletteSurfaceActions.map(Entry.surface)
+                + viewModel.paletteCommandMatches.map(Entry.command)
+                + viewModel.actionMatches.map(Entry.prompt)
+        }
+    }
+
+    private var searchPrompt: String {
+        switch viewModel.actionPaletteSubmenu {
+        case .tools: "Search tools"
+        case .sources: "Search sources"
+        case nil: "Search actions"
+        }
     }
 
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                TextField("Search actions", text: $viewModel.actionQuery)
+                TextField(searchPrompt, text: $viewModel.actionQuery)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                     .onSubmit { runSelected() }
@@ -1050,10 +1071,18 @@ private struct QuickActionPalette: View {
 
             HStack(spacing: AQDesign.Space.row) {
                 Text("↑↓ Navigate")
-                Text("↩ Run")
-                Text("Tab completes aliases")
+                switch viewModel.actionPaletteSubmenu {
+                case .tools:
+                    Text("↩ Turn on or off")
+                    Text("For this chat")
+                case .sources:
+                    Text("↩ Open")
+                case nil:
+                    Text("↩ Run")
+                    Text("Tab completes aliases")
+                }
                 Spacer()
-                Text("Esc Close")
+                Text(viewModel.actionPaletteSubmenu == nil ? "Esc Close" : "Esc Back")
             }
             .font(AQDesign.TypeToken.metadata)
             .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -1065,6 +1094,10 @@ private struct QuickActionPalette: View {
             announceSelected()
         }
         .onChange(of: viewModel.actionQuery) { _, _ in
+            selectedIndex = 0
+            announceSelected()
+        }
+        .onChange(of: viewModel.actionPaletteSubmenu) { _, _ in
             selectedIndex = 0
             announceSelected()
         }
@@ -1086,14 +1119,49 @@ private struct QuickActionPalette: View {
                 EmptyView()
             }
         case .prompt(let action):
+            // An assistant row picks the assistant for the chat; every other
+            // row runs its prompt on the text.
             paletteRow(
-                symbol: action.outputBehavior == .replaceSelection ? "text.cursor" : "sparkles",
+                symbol: action.isAssistant
+                    ? ResultAction.changeAssistant.systemImage
+                    : (action.outputBehavior == .replaceSelection ? "text.cursor" : "sparkles"),
                 title: action.name,
-                detail: "\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)"
+                detail: "\(viewModel.settings.savedPromptPrefix)\(action.alias) · "
+                    + (action.isAssistant ? "Assistant" : action.outputBehavior.displayName)
             ) {
                 if let hotkey = action.hotkey {
                     KeyCapGroup(keys: hotkey.keyCaps)
                 }
+            }
+        case .tool(let kind):
+            let isAvailable = viewModel.isChatToolAvailable(kind)
+            // A tool this Mac cannot run is never offered, whatever the chat
+            // chose, so its row says so instead of "On".
+            let isOn = isAvailable && viewModel.chatTools.contains(kind)
+            paletteRow(
+                symbol: kind.systemImage,
+                title: kind.displayName,
+                detail: isAvailable ? kind.detail : "Not available on this Mac"
+            ) {
+                HStack(spacing: AQDesign.Space.compact) {
+                    if isOn {
+                        Image(systemName: "checkmark")
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(isAvailable ? (isOn ? "On" : "Off") : "Unavailable")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(isOn ? AQDesign.ColorToken.textPrimary : AQDesign.ColorToken.textTertiary)
+                }
+            }
+        case .source(let source):
+            paletteRow(
+                symbol: "doc.text",
+                title: source.title,
+                detail: source.day ?? "Source"
+            ) {
+                EmptyView()
             }
         }
     }
@@ -1147,6 +1215,9 @@ private struct QuickActionPalette: View {
         case .surface(let action): title = action.title
         case .command(let item): title = item.title
         case .prompt(let prompt): title = prompt.name
+        case .tool(let kind):
+            title = "\(kind.displayName), \(viewModel.chatTools.contains(kind) ? "on" : "off")"
+        case .source(let source): title = "Source \(source.title)"
         }
         NSAccessibility.post(
             element: NSApplication.shared,
@@ -1174,6 +1245,12 @@ private struct QuickActionPalette: View {
             Task { await viewModel.runPaletteCommand(item) }
         case .prompt(let action):
             Task { await viewModel.perform(action: action) }
+        case .tool(let kind):
+            // The palette stays open so several tools can change at once.
+            viewModel.toggleChatTool(kind)
+            announceSelected()
+        case .source(let source):
+            viewModel.requestOpenSource(source)
         }
     }
 }
@@ -1334,6 +1411,10 @@ struct ComposerKeyRouting: ViewModifier {
         }
         if viewModel.isModelChooserPresented {
             viewModel.moveModelChooserSelection(delta)
+            return .handled
+        }
+        if viewModel.isAssistantChooserPresented {
+            viewModel.moveAssistantChooserSelection(delta)
             return .handled
         }
         if viewModel.isAddContextMenuPresented {

@@ -72,6 +72,12 @@ surface is fixed and never measures its content. A catalog with a detail pane
   model button). Title falls back to the first user
   message, truncated middle, one line. Before the first answer the title is
   "Quick AI".
+- In an assistant chat (v1.5.0, plan Phase D) the model line starts with the
+  assistant's name in `TypeToken.metadata` `textPrimary`, a `textTertiary`
+  middle dot, then the model: "Vault researcher · DeepSeek V4.1 Flash". The
+  name is its own button for Change Assistant (`⌥⌘A`); the model stays the
+  Change Model button. Chosen over a chip before the title: a 28 pt chip does
+  not fit the 13 pt title line, and the prefix keeps the header two lines.
 - Right: an `arrow.up.right.square` (expand) glyph button, same size, inset
   `Spacing.lg`. Raycast draws a boxed up-right arrow; this is the nearest SF
   Symbol, at `TypeToken.glyphMedium` (16 semibold) in `textPrimary`. The back
@@ -222,6 +228,12 @@ surface is fixed and never measures its content. A catalog with a detail pane
   search closes the window as today.
 - `⌘R`, `⇧⌘R`, `⌘N`, `⌘[`, `⌘]`, `⌘K`, `⌘L`, `⇧⌘M`, `⇧⌘V` keep their v1.3.0
   meanings.
+
+  > Added in v1.5.0: `⌥⌘P` (and `⌘K` › Continue in pi) hands the thread to
+  > a new pi session in tmux and opens Ghostty on it. The thread then ends
+  > with one tool line in the same style as the search line, a `terminal`
+  > glyph and "Opened in pi · tmux session ql-…", until the next question
+  > or another chat.
 - `⌘J` opens Recent Chats: the same window, the thread replaced by the
   launcher's own chat rows (the Chats catalog rows: 26 px icon tile, `label`
   title, `meta` question count and time, 40 high), pinned first, then newest
@@ -364,6 +376,10 @@ written, this is what was built instead.
 - **The finished-search line is per answer.** "Search web: …" is kept on the
   view model for the answer it belongs to and cleared by the next question; it
   is not written into chat history, so a reloaded chat shows no tool line.
+  (Changed in v1.5.0: every tool line, this one included, is saved on its
+  answer as `QuickMessage.toolRecords`, so a reloaded chat shows the lines and
+  the answer's source list. Consecutive tool lines sit `Spacing.xs` apart, each
+  glyph in a fixed `Control.keyCap` column.)
 - **Recent Chats keeps the header** (title over model, chevron, expand glyph)
   and puts a "Recent Chats" section label with its key hints (`↑↓`, `↩`,
   `esc`) above the rows. The rows are the launcher's `LauncherResultRow`

@@ -1,14 +1,36 @@
 import SwiftUI
 
 /// Settings pane for managing saved prompts (aliases) and the command prefix.
-/// The list and the editor for the selected command are two cards.
+/// The list, the editor for the selected command, and its assistant fields
+/// are three cards. Instructions make a command an assistant; its tools and
+/// context skills apply to the chat it opens.
 struct SavedPromptsEditor: View {
     @Bindable var viewModel: QuickViewModel
     @State private var selection: SavedPrompt.ID?
+    /// The folders `~/.claude/skills` lists, for the Add Skill menu and to
+    /// mark a context skill that is gone. Nil until loaded.
+    @State private var skillNames: [String]?
 
     /// The shared model profiles. A parameter would be better, but this pane
     /// is built by `SettingsView`, which owns the pane list.
     private var preferences: ModelPreferenceStore { .shared }
+
+    /// The Instructions editor: taller than the prompt field, since
+    /// instructions run to several lines.
+    private static let instructionsMinHeight = House.Spacing.xxxl * 2
+    private static let instructionsMaxHeight = House.Spacing.xxxxl * 2
+
+    /// `initialSelection` and `knownSkills` let a render proof open the
+    /// pane on one command with its skill list already read.
+    init(
+        viewModel: QuickViewModel,
+        initialSelection: SavedPrompt.ID? = nil,
+        knownSkills: [String]? = nil
+    ) {
+        self.viewModel = viewModel
+        _selection = State(initialValue: initialSelection)
+        _skillNames = State(initialValue: knownSkills)
+    }
 
     var body: some View {
         ScrollView {
@@ -17,11 +39,21 @@ struct SavedPromptsEditor: View {
                 if let selection,
                    let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
                     detailCard(prompt)
+                    assistantCard(prompt)
                 }
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task {
+            guard skillNames == nil else { return }
+            // No skill library (a test, a proof): no skills to offer.
+            guard let library = viewModel.skillLibrary else {
+                skillNames = []
+                return
+            }
+            skillNames = await AssistantContext.availableSkills(library: library)
         }
     }
 
@@ -218,6 +250,117 @@ struct SavedPromptsEditor: View {
         }
     }
 
+    /// Instructions, Tools, and Context skills. Instructions make the
+    /// command an assistant; the other two apply to the chat it opens, so
+    /// they show only once it is one. A command action cannot be one, so its
+    /// Instructions field is off.
+    @ViewBuilder
+    private func assistantCard(_ prompt: SavedPrompt) -> some View {
+        let isCommand = prompt.commandExecutable?.isEmpty == false
+        SettingsCard("Assistant") {
+            CardNote(isFirst: true) {
+                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                    Text("Instructions")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(isCommand ? AQDesign.ColorToken.textSecondary : AQDesign.ColorToken.textPrimary)
+                    TextEditor(text: bindingForInstructions(prompt.id))
+                        .font(AQDesign.TypeToken.detail)
+                        .scrollContentBackground(.hidden)
+                        .padding(AQDesign.Space.standard)
+                        .frame(minHeight: Self.instructionsMinHeight, maxHeight: Self.instructionsMaxHeight)
+                        .background(fieldBackground)
+                        .disabled(isCommand)
+                        .accessibilityLabel("Instructions")
+                    CardText(instructionsNote(prompt))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if prompt.isAssistant {
+                assistantChatRows(prompt)
+            }
+        }
+    }
+
+    /// Tools and Context skills: what an assistant's chat may use and reads.
+    @ViewBuilder
+    private func assistantChatRows(_ prompt: SavedPrompt) -> some View {
+        SettingsRow(
+            title: "Tools",
+            detail: "What the model may use in this assistant's chats."
+        ) {
+            InkSegmentedControl(
+                selection: bindingForToolsUseDefaults(prompt.id),
+                options: [
+                    InkSegment(value: true, title: "Chat defaults"),
+                    InkSegment(value: false, title: "Choose"),
+                ]
+            )
+            .fixedSize()
+            .accessibilityLabel("Tools")
+        }
+        if prompt.enabledTools != nil {
+            ForEach(ChatToolKind.allCases) { tool in
+                SettingsRow(title: tool.displayName) {
+                    Toggle(tool.displayName, isOn: bindingForTool(tool, prompt.id))
+                        .toggleStyle(InkToggleStyle())
+                }
+            }
+        }
+
+        SettingsRow(
+            title: "Context skills",
+            detail: "Read once from ~/.claude/skills into each chat, after the instructions."
+        ) {
+            addSkillMenu(prompt)
+        }
+        ForEach(prompt.contextRefs, id: \.self) { name in
+            SettingsRow(title: name, detail: skillNames.map { $0.contains(name) } == false
+                ? "Not in ~/.claude/skills. It is skipped." : nil) {
+                Button {
+                    removeContextRef(name, from: prompt.id)
+                } label: {
+                    Image(systemName: "minus.circle")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .frame(width: House.Control.compact, height: House.Control.compact)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(name)")
+                .help("Remove \(name)")
+            }
+        }
+    }
+
+    private func instructionsNote(_ prompt: SavedPrompt) -> String {
+        let alias = viewModel.settings.savedPromptPrefix + prompt.alias
+        if prompt.commandExecutable?.isEmpty == false {
+            return "A command runs its executable, so it cannot be an assistant. Clear the command to use instructions."
+        }
+        return "With instructions, \(alias) alone opens a Quick AI chat with this assistant. With text after it, or text selected, it runs the prompt above."
+    }
+
+    /// Lists the skills not yet chosen. Empty or unread, it says so.
+    private func addSkillMenu(_ prompt: SavedPrompt) -> some View {
+        let available = (skillNames ?? []).filter { !prompt.contextRefs.contains($0) }
+        return Menu {
+            if available.isEmpty {
+                Text(skillNames == nil ? "Reading skills…" : "No more skills in ~/.claude/skills")
+            } else {
+                ForEach(available, id: \.self) { name in
+                    Button(name) { addContextRef(name, to: prompt.id) }
+                }
+            }
+        } label: {
+            Text("Add Skill")
+                .font(AQDesign.TypeToken.metadata)
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .accessibilityLabel("Add context skill")
+    }
+
     /// The house field ground: quiet fill plus a hairline, at `Radius.sm`.
     private var fieldBackground: some View {
         RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
@@ -306,6 +449,41 @@ struct SavedPromptsEditor: View {
                 }
             }
         )
+    }
+
+    // MARK: - Assistant bindings (internal for the editor round-trip test)
+
+    func bindingForInstructions(_ id: SavedPrompt.ID) -> Binding<String> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.systemPrompt ?? "" },
+            set: { newValue in update(id) { $0.setInstructions(newValue) } }
+        )
+    }
+
+    /// True while the assistant uses the chat's default tools (`nil`).
+    func bindingForToolsUseDefaults(_ id: SavedPrompt.ID) -> Binding<Bool> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.enabledTools == nil },
+            set: { newValue in update(id) { $0.setToolsUseDefaults(newValue) } }
+        )
+    }
+
+    func bindingForTool(_ tool: ChatToolKind, _ id: SavedPrompt.ID) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.settings.savedPrompts.first(where: { $0.id == id })?
+                    .enabledTools?.contains(tool) ?? false
+            },
+            set: { newValue in update(id) { $0.setTool(tool, enabled: newValue) } }
+        )
+    }
+
+    func addContextRef(_ name: String, to id: SavedPrompt.ID) {
+        update(id) { $0.addContextRef(name) }
+    }
+
+    func removeContextRef(_ name: String, from id: SavedPrompt.ID) {
+        update(id) { $0.removeContextRef(name) }
     }
 
     private func update(_ id: SavedPrompt.ID, mutation: (inout SavedPrompt) -> Void) {

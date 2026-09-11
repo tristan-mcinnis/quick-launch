@@ -42,6 +42,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - One Vision model setting decides where screenshots go; DeepSeek `deepseek-flash` by default, the same model that answers text (the retired `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` aliases migrate to it), local MLX when chosen; follow-ups keep the screenshot in memory for the thread
 - `⌘K` on any row opens a Raycast-style action list with the shortcut beside each action: Return is the primary action, `⌘↩` the secondary (copy, show in Finder, copy link), `⌘⇧↩` copy and paste, `⌘E` edit, `⌘⇧A` alias, `⌘⇧H` hotkey, `⌃X` delete (press twice); the same keys work straight from the list
 - Quick AI, Raycast's surface: a 750 × 475 panel replaces the launcher (drag its edges to make it larger; it keeps that size across opens and relaunches, the thread stays one readable centred column, and `⌘K` › Reset Quick AI Size goes back to 750 × 475), with a header (back chevron, the chat title over the model that will answer next), the thread (your turns as pills on the right, answers as prose on the left, a web-search or thinking status line), and a bottom composer whose right edge names what Return does and whose placeholder says what typing will do ("Ask a follow-up…" once a thread exists). An empty surface shows three quiet hints: `@` for context, `⌘J` for recent chats, `⇧⌘O` for the model. Chat titles are the first question as you typed it, tidied up: no saved-prompt `/alias` or "search web" prefix, a capital first letter, cut at a word under 60 characters. Return on an answer pastes it into the previous app (or copies, per Settings › General › Quick AI), typing asks a follow-up, and Return while an answer streams queues that follow-up ("Queued ↩") to send when the answer ends; Escape stops a stream and keeps what arrived as the answer (a queued follow-up stays in the composer, unsent), otherwise returns to root search with the thread kept, and a second Escape closes the window; a provider error stays under its question with Retry; `⌘N` new chat, `⌘R` asks the last question again (after an answer, a stop, or an error), `⇧⌘R` regenerate on another model, Change Model (`⌘⇧O`, or click the model name under the title) switches model mid-thread, Copy Answer (`⇧⌘C`) and Copy Chat (`⌥⌘C`, the whole thread labelled "You:" and the model) copy without closing the window, `⌘J` opens Recent Chats in the same window (one column, `↑↓`, Return opens, Escape back, `⌘K` and the row keys act on the highlighted chat, a pin glyph marks pinned chats), `⌘[`/`⌘]` flip between recent chats. `↑` on an empty composer puts the last question back to edit; PageUp/PageDown and `⌥↑`/`⌥↓` scroll the thread by a page and `⌘↑`/`⌘↓` jump to its ends; the thread follows new text only while you are at the bottom, and a "Latest" chip (or `⌘↓`) takes you back. A command action's output and a Vault Search use the same surface with the command or "Vault Search · mode" named where the model would be, and never join a chat; so does math asked in a chat ("Local answer"), while math in root search answers inline there. The Quick AI Chats catalog lists chats with continue, copy last answer, rename, pin, delete. **Let the model ask clarifying questions** (Settings › General › Quick AI, off by default) decides whether the model may pause with a multiple-choice card
+- Tools inside the chat: the model can search your memory (`recall_memory`, `recall_today` through the `recall` CLI), your vault (`search_vault`, the Vault Search SSH lane), and your skills (`read_skill`, a `SKILL.md` from `~/.claude/skills`), beside web search. Each call leaves a line in the thread ("Searched memory: 4 hits", "Searched vault · current: 6 results", "Read skill: costing") that is saved with the answer, and memory and vault hits list their sources under the answer; Open Source (`⌘O`) opens one. `⌘K` › Tools (`⌥⌘K`) turns each tool on or off for the chat, and Capture to Memory (`⌥⌘M`) sends the answer to `recall remember`. See "Tools inside the chat" below
 - Code blocks in an answer carry a header strip: the detected language, Copy, and a line-wrap toggle. Long lines scroll sideways by default and wrap only when you turn wrapping on, so pasted output keeps its shape
 - Long questions collapse: over ten lines (measured at the thread's width), a question you sent shows its opening lines with **Show more**, and **Collapse** folds it back; both scroll the message's first line to the top. Answers and shorter messages always show in full, and `⇧⌘M` toggles the newest long question (only its control shows the key)
 - Add Context: a control left of the composer, or typing `@`, offers Focused Window, Selected Text, Selected Area, and Entire Screen, reusing the Screen Awareness captures. What you attach rides with that message only
@@ -70,6 +71,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Command-K keyboard action picker with Paste, Copy, Copy & Paste, Edit, and guarded Delete for snippets, plus fuzzy slash aliases such as `/eml`
 - Empty Backspace leaves a nested catalogue, and inactive catalogue views return to the launcher root after 15 seconds
 - Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
+- Assistants: a saved AI command with Instructions is an assistant. Its alias alone (`/vault`, then Return), `⌘K` › Change Assistant (`⌥⌘A`), or its hotkey, with nothing selected, starts or switches the Quick AI chat to it: the header reads "Vault researcher · model", its instructions and context skills (read once from `~/.claude/skills`) lead the system message, its tools become the chat's tool set, and its pinned provider and model apply. The alias with text after it (`/vault pricing`), or the alias or hotkey with text selected, still runs its prompt as a one-shot command, in a plain chat of its own. When the new-chat interval starts a fresh chat, the assistant goes along. Two ship by default: Vault researcher (vault and memory tools, cites sources) and STE editor (no tools, ASD-STE100 rules)
 - Short follow-up threads and a local, bounded recent-history menu
 - On-demand conversation transcript plus Copy Result and Paste Back actions
 - Adjustable 10-second quick-reopen window for the last result or draft
@@ -258,6 +260,15 @@ prompt, output behavior, optional global hotkey, and optional provider and
 model. An unpinned action uses the overlay's current model. Use `{selection}`
 inside the prompt to control where selected or typed text is inserted.
 
+The **Assistant** card under it turns the action into an assistant. Fill in
+**Instructions** (an action with a command cannot be one, so the field is off).
+Once it is an assistant, choose **Tools** (Chat defaults, or pick Memory,
+Vault, Skills, and Web search one by one), and add **Context skills** from the
+folders in `~/.claude/skills`. A skill that is
+no longer there is marked and skipped. The skills are read once per chat and
+go into the system message after the instructions, ahead of the app's own
+instruction.
+
 `Command+,`, the menu-bar Settings item, and the overlay Settings action all
 open the same settings interface. The main launcher shortcut is editable in
 **Settings → General**. A shortcut
@@ -283,8 +294,50 @@ The Pi provider still runs a fresh one-shot `pi` process for prompts that need
 Pi extensions, skills, prompt templates, or custom tools. It disables Pi's
 built-in raw file tools for the quick overlay.
 
-Pi can use the tools and skills in its own configuration. General
-OpenAI-compatible providers do not have a tool-calling loop.
+Pi can use the tools and skills in its own configuration. OpenAI-compatible
+providers get Quick Launch's own tool loop, below.
+
+## Tools inside the chat
+
+An OpenAI-compatible model can call read-only tools that Quick Launch runs
+itself, each through a CLI with an argv array (no shell) and a timeout:
+
+| Tool | Runs | Limit |
+|---|---|---|
+| `recall_memory(query)` | `recall search <query> --json` over `~/memory` | 5 s |
+| `recall_today()` | `recall today --json` | 5 s |
+| `search_vault(query, mode)` | the Vault Search SSH lane; `mode` is current, reconcile, history, or portfolio | one try, 8 s |
+| `read_skill(name)` | `~/.claude/skills/<name>/SKILL.md`, `name` checked against the folder listing | 12,000 characters |
+| `search_web(query)` | SearXNG, as before | 8 s |
+
+The descriptions tell the model to use memory and the vault only when you ask
+about your own notes, projects, clients, decisions, or files, and a skill when
+you name one or ask how you do something. An answer may use six tool rounds and
+30 seconds of tool time; after that the model is asked to answer with what it
+has. Every call leaves a line in the thread, saved with the answer. Memory and
+vault hits list their sources under the answer (`~/memory` files as they are;
+vault paths mapped from `/home/ubuntu/vault-private/` to `~/vault/`), and Open
+Source (`⌘O`) opens one with `/usr/bin/open` when it is a document (text,
+Markdown, PDF, image, Office, or email) inside `~/memory` or `~/vault`. `⌘K` ›
+Tools (`⌥⌘K`) sets the chat's tools; a chat you start with `⌘N` has memory,
+vault, and skills on, and web search as set in Settings › Models, and a chat the
+next question starts on its own keeps the open chat's choice. Long chats are
+held to a budget from the model's context window: older tool results go first,
+then old turns, and the results the model just fetched last, never the first or
+the current question. Capture to Memory (`⌥⌘M`) is the one write, and only you
+can run it: it sends the answer on screen to `recall remember`. No tool runs a
+skill, sends mail, or changes a file.
+
+Continue in pi (`⌥⌘P`, or `⌘K` › Continue in pi on a Quick AI thread) moves a
+chat into a full pi session instead: the thread is written as Markdown to
+`~/Library/Application Support/Quick Launch/pi-handoff/`, a detached tmux
+session `ql-<id>` starts in your home folder running `pi @<file>` with a short
+instruction, and a new Ghostty window attaches to it (`open -n -b
+com.mitchellh.ghostty --args -e tmux attach-session -t ql-<id>`, the way
+Ghostty's own help names for macOS). Needs `tmux` and `pi` in `~/.local/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`, or `PATH`. If Ghostty does not open, the
+session still runs and `tmux attach -t ql-<id>` is copied. Quick Launch does
+not stop the session; close it in tmux as usual.
 
 ## Privacy boundary
 
@@ -293,7 +346,15 @@ OpenAI-compatible providers do not have a tool-calling loop.
   at the local-models daemon (`127.0.0.1:8078`) and are not persisted by Quick Launch.
 - There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers can send prompts to their configured service.
+- The memory and skill tools read local files only. The vault tool sends its
+  query over SSH to vault-vps, as Vault Search does. What a tool returns goes to
+  the chat's model as part of the question, so a cloud model sees the lines it
+  found; turn a tool off for a chat in `⌘K` › Tools.
 - Recent history is local, optional, and limited to 20 threads by default.
+- Continue in pi writes the thread's text (never its screenshots) to
+  `~/Library/Application Support/Quick Launch/pi-handoff/`, owner-only (folder
+  `0700`, files `0600`), keeping the 20 newest files. pi then sends it to pi's
+  configured model, like any pi session.
 - The clipboard history is local, optional, deduplicated, and bounded. It keeps
   the full copy (text, an image, rich text, or a file URL) so a later paste
   restores the original representation. It honours concealed/transient
@@ -380,8 +441,10 @@ interpolated into a shell command.
 - App discovery and 100 fuzzy filters each have a 250 ms regression gate.
 - Quick web search uses snippets rather than full-page extraction and has an
   eight-second retrieval ceiling.
-- A silent web-answer model is stopped after 15 seconds. Linked results appear
-  instead of an endless spinner.
+- A silent web-answer model (no text and no tool line yet) is stopped after 15
+  seconds. Linked results appear instead of an endless spinner.
+- An answer's tool loop has six rounds and 30 seconds of tool time; a stuck
+  tool is cut at the budget and the model answers with what it has.
 
 ## Deliberately not in the core build
 

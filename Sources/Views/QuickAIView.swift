@@ -52,6 +52,7 @@ struct QuickAIView: View {
     private static let liveQuestionID = "quick-ai-live-question"
     private static let statusLineID = "quick-ai-status"
     private static let webSearchNoteID = "quick-ai-web-search"
+    private static let threadNoticeID = "quick-ai-thread-notice"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -127,6 +128,16 @@ struct QuickAIView: View {
                         .truncationMode(.middle)
                         .accessibilityLabel("Source: \(source)")
                 } else {
+                HStack(spacing: House.Spacing.xxs) {
+                    // An assistant chat names its assistant ahead of the
+                    // model, in full ink: the name opens Change Assistant.
+                    if let assistant = viewModel.activeAssistant {
+                        assistantName(assistant.name)
+                        Text("·")
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                            .accessibilityHidden(true)
+                    }
                     // The model line is a button: it opens the model chooser
                     // to change the model for the next message.
                     Button {
@@ -144,6 +155,7 @@ struct QuickAIView: View {
                     .accessibilityHint("Change the model")
                     .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
                     .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
+                    }
                 }
             }
             Spacer(minLength: House.Spacing.sm)
@@ -165,6 +177,26 @@ struct QuickAIView: View {
         .padding(.leading, House.Spacing.sm)
         .padding(.trailing, House.Spacing.lg)
         .frame(height: Self.headerHeight)
+    }
+
+    /// The assistant's name on the model line: a button for Change
+    /// Assistant, never truncated ahead of the model.
+    private func assistantName(_ name: String) -> some View {
+        Button {
+            viewModel.toggleAssistantChooser()
+        } label: {
+            Text(name)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .lineLimit(1)
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Assistant: \(name)")
+        .accessibilityHint("Change the assistant")
+        .accessibilityValue(viewModel.isAssistantChooserPresented ? "Open" : "Closed")
+        .help("Change assistant (\(ResultAction.changeAssistant.shortcut.keyCaps.joined()))")
     }
 
     private func glyphButton(
@@ -237,11 +269,12 @@ struct QuickAIView: View {
                     // The search line belongs to the newest question;
                     // while that question is still pending it hangs
                     // under the pending pill instead.
-                    if pendingQuestion == nil,
-                       message.id == lastUserMessageID,
-                       let note = viewModel.webSearchNote {
-                        toolLine(note, symbol: "globe")
-                            .id(Self.webSearchNoteID)
+                    // The search line and the lines of the calls still
+                    // streaming belong to the newest question; while that
+                    // question is pending they hang under its pill instead.
+                    // A finished answer draws its own lines.
+                    if pendingQuestion == nil, message.id == lastUserMessageID {
+                        liveToolLines
                     }
                     // A provider error stays with the question it failed,
                     // in the tool line's place, with Retry.
@@ -257,10 +290,7 @@ struct QuickAIView: View {
                 if let question = pendingQuestion {
                     userPill(MessageCollapseState(text: question, collapses: false), toggle: nil)
                         .id(Self.detachedQuestionID)
-                    if let note = viewModel.webSearchNote {
-                        toolLine(note, symbol: "globe")
-                            .id(Self.webSearchNoteID)
-                    }
+                    liveToolLines
                 }
                 // The model paused to ask. The live card sits where the
                 // answer will; once picked it joins the thread as the
@@ -296,6 +326,11 @@ struct QuickAIView: View {
                 if let answer = viewModel.quickAIDetachedAnswer {
                     answerProse(answer, isStreaming: false, instanceID: "answer")
                         .id(Self.detachedAnswerID)
+                }
+                // Where the thread went after Continue in pi.
+                if let notice = viewModel.threadNotice {
+                    toolLine(notice, symbol: "terminal")
+                        .id(Self.threadNoticeID)
                 }
             }
             .frame(maxWidth: Self.threadColumnWidth)
@@ -345,6 +380,19 @@ struct QuickAIView: View {
         .onChange(of: viewModel.streamingStatus) { _, _ in followBottom() }
         .onChange(of: viewModel.threadError) { _, _ in followBottom() }
         .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in followBottom() }
+        .onChange(of: viewModel.liveToolRecords.count) { _, _ in followBottom() }
+        .onChange(of: viewModel.threadNotice) { _, notice in
+            followBottom()
+            guard let notice else { return }
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: notice,
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ]
+            )
+        }
         // A new question (or another chat) follows the bottom again.
         .onChange(of: viewModel.isThreadFollowingBottom) { _, follows in
             if follows { scrollToEnd() }
@@ -401,19 +449,131 @@ struct QuickAIView: View {
             ) {
                 viewModel.toggleTranscriptMessage(message.id)
             }
+        case .system:
+            // Never a saved turn; nothing to draw if one ever arrives.
+            EmptyView()
         case .assistant:
             if let question = message.askUserQuestion {
                 // The record of a question the model asked and the option
                 // the user picked.
                 AskUserQuestionCard(question: question, isInteractive: false)
             } else {
-                // Answers never collapse: Raycast folds only what you send.
-                answerProse(
-                    message.content,
-                    isStreaming: false,
-                    instanceID: "message-\(message.id.uuidString)"
-                )
+                answerTurn(message)
             }
+        }
+    }
+
+    /// An answer with what its tools left: the tool lines above the prose,
+    /// the sources under it, and a Capture to Memory checkmark last. Saved
+    /// with the chat, so a reopened chat draws the same lines.
+    private func answerTurn(_ message: QuickMessage) -> some View {
+        let records = message.tools
+        let sources = message.sources
+        let above = records.filter(\.drawsAboveAnswer)
+        return VStack(alignment: .leading, spacing: House.Spacing.md) {
+            if !above.isEmpty {
+                toolLineGroup(above.map { ($0.summary, $0.systemImage) })
+            }
+            // Answers never collapse: Raycast folds only what you send.
+            answerProse(
+                message.content,
+                isStreaming: false,
+                instanceID: "message-\(message.id.uuidString)"
+            )
+            if !sources.isEmpty {
+                sourceList(sources)
+            }
+            ForEach(Array(records.filter { !$0.drawsAboveAnswer }.enumerated()), id: \.offset) { _, record in
+                toolLine(record.summary, symbol: record.systemImage)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The lines of the ask in flight: an explicit web search, then each
+    /// tool call as it finishes. Grouped as a finished answer groups them,
+    /// so nothing moves when the answer lands.
+    @ViewBuilder
+    private var liveToolLines: some View {
+        let lines = (viewModel.webSearchNote.map { [($0, "globe")] } ?? [])
+            + viewModel.liveToolRecords.map { ($0.summary, $0.systemImage) }
+        if !lines.isEmpty {
+            toolLineGroup(lines)
+                .id(Self.webSearchNoteID)
+        }
+    }
+
+    /// Consecutive tool lines, closer together than the turns around them.
+    private func toolLineGroup(_ lines: [(text: String, symbol: String)]) -> some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xs) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                toolLine(line.text, symbol: line.symbol)
+            }
+        }
+    }
+
+    /// Sources listed under an answer before the rest are left to `⌘K` ›
+    /// Open Source.
+    static let listedSourceLimit = 5
+
+    /// The answer's sources: a quiet list under the prose, one row each
+    /// (the title or file, then its day). A row with a local file opens it
+    /// on click, as `⌘K` › Open Source (`⌘O`) does.
+    private func sourceList(_ sources: [ChatSource]) -> some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+            ForEach(sources.prefix(Self.listedSourceLimit)) { source in
+                sourceRow(source)
+            }
+            if sources.count > Self.listedSourceLimit {
+                Text("\(sources.count - Self.listedSourceLimit) more in ⌘K › Open Source")
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .padding(.leading, House.Control.keyCap + House.Spacing.xs)
+            }
+        }
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sources")
+    }
+
+    @ViewBuilder
+    private func sourceRow(_ source: ChatSource) -> some View {
+        let label = HStack(spacing: House.Spacing.xs) {
+            // The tool lines' glyph column, so every line's text starts at
+            // one edge.
+            Image(systemName: "doc.text")
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(width: House.Control.keyCap)
+            Text(source.title)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let day = source.day {
+                Text(day)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .frame(minHeight: House.Control.keyCap)
+        .contentShape(Rectangle())
+        if let path = source.path, viewModel.fileOpener != nil {
+            Button {
+                viewModel.requestOpenSource(source)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .help("Open \(path)")
+            .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+            .accessibilityHint("Opens the file")
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
         }
     }
 
@@ -461,18 +621,24 @@ struct QuickAIView: View {
 
     /// The model is working and nothing has landed yet: the breathing dots,
     /// or the globe when the status is a web search, and the status text.
+    /// A memory, vault, or skill call keeps the dots while it runs; its
+    /// line, with its own glyph, lands when it finishes.
     private var statusLine: some View {
         let status = viewModel.streamingStatus ?? "Thinking…"
-        return toolLine(status, symbol: status.hasPrefix("Search") ? "globe" : nil)
+        let isWebSearch = status.hasPrefix("Search web") || status.hasPrefix("Searching the web")
+        return toolLine(status, symbol: isWebSearch ? "globe" : nil)
     }
 
     /// One quiet line: a glyph (or the thinking dots) and tertiary text.
+    /// The glyph sits in a fixed column, so the text of consecutive lines
+    /// starts at one edge whatever the symbol's width.
     private func toolLine(_ text: String, symbol: String?) -> some View {
         HStack(spacing: House.Spacing.xs) {
             if let symbol {
                 Image(systemName: symbol)
                     .font(AQDesign.TypeToken.body)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .frame(width: House.Control.keyCap)
             } else {
                 ThinkingIndicator()
             }
@@ -725,12 +891,15 @@ struct QuickAIView: View {
     private var floatingChooser: some View {
         if viewModel.isTransformChooserPresented
             || viewModel.isModelChooserPresented
+            || viewModel.isAssistantChooserPresented
             || viewModel.isAddContextMenuPresented {
             Group {
                 if viewModel.isTransformChooserPresented {
                     TransformChooserPane(viewModel: viewModel)
                 } else if viewModel.isModelChooserPresented {
                     ModelChooserPane(viewModel: viewModel)
+                } else if viewModel.isAssistantChooserPresented {
+                    AssistantChooserPane(viewModel: viewModel)
                 } else {
                     AddContextPane(viewModel: viewModel)
                 }
@@ -800,5 +969,71 @@ private struct RecentChatsList: View {
     private func open(_ item: LauncherCatalogItem) {
         viewModel.recentChatsIndex = viewModel.recentChatItems.firstIndex { $0.id == item.id } ?? 0
         viewModel.openSelectedRecentChat()
+    }
+}
+
+// MARK: - Change Assistant
+
+/// ⌘K › Change Assistant (`⌥⌘A`): No Assistant, then every assistant, with
+/// its alias and tools. ↑↓ move, Return picks, Esc closes. Floats above the
+/// composer, like the model chooser.
+private struct AssistantChooserPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        let options = viewModel.assistantChooserOptions
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text(ResultAction.changeAssistant.title)
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: QuickViewModel.assistantChooserConfirmTitle, keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: options,
+                selectedIndex: $viewModel.assistantChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { option in
+                    // A click picks the row it lands on, not the keyed one.
+                    if let index = options.firstIndex(of: option) {
+                        viewModel.assistantChooserIndex = index
+                    }
+                    viewModel.runAssistantChooserSelection()
+                }
+            ) { _, option, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: option.assistantID == nil
+                              ? "bubble.left"
+                              : ResultAction.changeAssistant.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(option.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(height: PanelSizing.actionListHeight(rows: options.count, padded: false))
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(ResultAction.changeAssistant.title)
     }
 }

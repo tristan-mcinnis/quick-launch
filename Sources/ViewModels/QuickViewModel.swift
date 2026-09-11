@@ -71,9 +71,27 @@ import Observation
     }
     /// Highlighted row of the Recent Chats list.
     var recentChatsIndex = 0
-    /// "Search web: …" for the current answer, drawn as the tool line above
-    /// it while the search runs and after it finishes.
+    /// "Search web: …" for the ask in flight, drawn as the tool line above
+    /// its answer while the search runs and the answer streams. When the
+    /// answer lands the line moves onto it (`QuickMessage.toolRecords`), so
+    /// a reopened chat still shows it.
     var webSearchNote: String?
+    /// The tool lines of the answer streaming now, in the order the calls
+    /// finished. They join the answer's message when it lands.
+    var liveToolRecords: [ChatToolRecord] = []
+    /// The tools chosen on the empty surface, before a chat exists. The chat
+    /// the next question starts takes them; nil means the defaults.
+    var pendingChatTools: Set<ChatToolKind>?
+    /// A second list inside the `⌘K` palette: the chat's tools, or the
+    /// answer's sources. Escape returns to the full list.
+    var actionPaletteSubmenu: ActionPaletteSubmenu?
+    /// The thread's closing line after Continue in pi ("Opened in pi ·
+    /// tmux session ql-3fa9c1"). Like the search line it belongs to the
+    /// chat on screen: the next question, another chat, and a new chat
+    /// clear it, and it is never written to history.
+    var threadNotice: String?
+    /// True while Continue in pi runs, so a second press waits for it.
+    private(set) var isHandingOffToPi = false
     /// Short progress note from the service while streaming ("Searching
     /// the web…"); shown in place of "Thinking…" until answer text lands.
     var streamingStatus: String?
@@ -239,6 +257,9 @@ import Observation
     /// Test seam. When set, every provider resolves to this service.
     /// Production leaves it nil and builds a client per provider.
     var service: (any QuickService)?
+    /// The context skills the open assistant chat has loaded, so each chat
+    /// reads its skill files once (`assistantSystemMessage(for:)`).
+    @ObservationIgnored var assistantSkillCache: AssistantSkillCache?
     var selectedTextService: (any SelectedTextServicing)?
     var applicationCatalog: (any ApplicationCatalogServicing)?
     var launcherCatalog: (any LauncherCatalogServicing)?
@@ -249,6 +270,21 @@ import Observation
     var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
+    /// `recall_memory` and `recall_today`. Nil in tests that do not fake it.
+    var memoryService: (any MemoryRecalling)?
+    /// Capture to Memory (`recall remember`), a user action only.
+    var memoryCapture: (any MemoryCapturing)?
+    /// `read_skill`, over the canonical skills folder.
+    var skillLibrary: SkillLibrary?
+    /// Open Source: `/usr/bin/open` on a source's local path.
+    var fileOpener: (any LocalFileOpening)?
+    /// The folders Open Source may open from (the memory store and the
+    /// vault clone); tests point it at a temporary folder.
+    @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots
+    /// Continue in pi. The app sets `PiHandoffService`; nil (every test
+    /// that does not set one) leaves the action out of `⌘K`, so no test
+    /// can start tmux or open Ghostty.
+    @ObservationIgnored var piHandoff: (any PiHandoffServicing)?
     /// Screen History lives behind this one hook; the core only knows the
     /// catalog scope, the ⌘K form, and the pause/resume command.
     let screenHistory: ScreenHistoryController
@@ -296,6 +332,9 @@ import Observation
     @ObservationIgnored var webAnswerTimeout: Duration = .seconds(15)
     @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
+    /// A source being opened from the thread or the palette; a second click
+    /// replaces it.
+    @ObservationIgnored var sourceOpenTask: Task<Void, Never>?
     @ObservationIgnored private var catalogIdleResetTask: Task<Void, Never>?
 
     // MARK: - Private
@@ -2183,6 +2222,9 @@ import Observation
         if isModelChooserPresented {
             return ComposerAction(label: modelChooserPurpose.confirmTitle, keys: ["↩"])
         }
+        if isAssistantChooserPresented {
+            return ComposerAction(label: Self.assistantChooserConfirmTitle, keys: ["↩"])
+        }
         if isAddContextMenuPresented {
             return ComposerAction(label: Self.addContextConfirmTitle, keys: ["↩"])
         }
@@ -2408,6 +2450,11 @@ import Observation
             await runModelChooserSelection()
             return
         }
+        if isAssistantChooserPresented {
+            // Return in Change Assistant picks the assistant the keys are on.
+            runAssistantChooserSelection()
+            return
+        }
         if isAddContextMenuPresented {
             // Return in Add Context attaches the highlighted entry.
             await runAddContextSelection()
@@ -2614,6 +2661,7 @@ import Observation
         if isRecentChatsPresented { input = "" }
         isRecentChatsPresented = false
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         isActionPalettePresented = false
@@ -3335,9 +3383,20 @@ import Observation
             if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
             actions.append(contentsOf: [.pasteBack, .copy])
         }
-        if !conversationMessages.isEmpty { actions.append(.copyChat) }
-        if hasAnswer { actions.append(contentsOf: [.readAloud, .saveSnippet, .searchWeb]) }
-        actions.append(contentsOf: [.regenerate, .regenerateWithModel, .changeModel, .newChat])
+        if !conversationMessages.isEmpty {
+            actions.append(.copyChat)
+            if piHandoff != nil { actions.append(.continueInPi) }
+        }
+        if fileOpener != nil, !answerSources.isEmpty { actions.append(.openSource) }
+        if hasAnswer {
+            actions.append(contentsOf: [.readAloud, .saveSnippet])
+            if memoryCapture != nil { actions.append(.captureToMemory) }
+            actions.append(.searchWeb)
+        }
+        actions.append(contentsOf: [.regenerate, .regenerateWithModel, .changeModel])
+        if !assistants.isEmpty { actions.append(.changeAssistant) }
+        if isQuickAIPresented { actions.append(.tools) }
+        actions.append(.newChat)
         if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
@@ -3356,8 +3415,20 @@ import Observation
             selectionTarget.map { "Paste into \($0.applicationName)" }
         case .changeModel:
             "Using \(activeModelDisplay)"
+        case .changeAssistant:
+            activeAssistant.map { "Using \($0.name)" } ?? "No assistant"
         case .regenerateWithModel:
             "Run this question again on another model"
+        case .openSource:
+            answerSources.count == 1
+                ? answerSources[0].title
+                : "\(answerSources.count) sources"
+        case .captureToMemory:
+            "Send this answer to recall"
+        case .tools:
+            chatToolsSummary
+        case .continueInPi:
+            "New tmux session in Ghostty"
         default:
             nil
         }
@@ -3376,6 +3447,8 @@ import Observation
         case .copyChat:
             isActionPalettePresented = false
             copyChatTranscript()
+        case .continueInPi:
+            await continueInPi()
         case .readAloud:
             isActionPalettePresented = false
             await performReadAloud(text: output)
@@ -3393,6 +3466,10 @@ import Observation
             // Switching model mid-conversation sends nothing: the next
             // question simply goes to the new model.
             openModelChooser(.change)
+        case .changeAssistant:
+            // Nothing is sent either: the next question goes to the chat
+            // as the picked assistant.
+            openAssistantChooser()
         case .newChat:
             isActionPalettePresented = false
             startNewConversation()
@@ -3418,6 +3495,18 @@ import Observation
             guard let id = currentConversation?.id else { return }
             isActionPalettePresented = false
             deleteConversation(id: id)
+        case .openSource:
+            let sources = answerSources
+            if sources.count == 1 {
+                await openSource(sources[0])
+            } else {
+                openActionPaletteSubmenu(.sources)
+            }
+        case .captureToMemory:
+            isActionPalettePresented = false
+            await captureAnswerToMemory()
+        case .tools:
+            openActionPaletteSubmenu(.tools)
         }
     }
 
@@ -3428,6 +3517,12 @@ import Observation
     var isModelChooserPresented = false {
         didSet { if !isModelChooserPresented { resumeQueuedFollowUp() } }
     }
+    /// ⌘K › Change Assistant (`⌥⌘A`): the keyboard list of assistants over
+    /// the Quick AI composer. ↑↓ move, Return picks, Escape closes.
+    var isAssistantChooserPresented = false {
+        didSet { if !isAssistantChooserPresented { resumeQueuedFollowUp() } }
+    }
+    var assistantChooserIndex = 0
     var modelChooserPurpose: ModelChooserPurpose = .change
     var modelChooserIndex = 0
     var modelChooserOptions: [ModelChooserOption] = []
@@ -3449,6 +3544,7 @@ import Observation
         modelChooserPurpose = purpose
         modelChooserIndex = options.firstIndex { $0.model == activeModelID } ?? 0
         isModelChooserPresented = true
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         isApplicationActionPanePresented = false
@@ -3535,6 +3631,7 @@ import Observation
         isAddContextMenuPresented = true
         addContextIndex = 0
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         errorMessage = nil
@@ -4635,6 +4732,7 @@ import Observation
         guard !isStreaming, !chipTransformOptions.isEmpty else { return }
         isTransformChooserPresented = true
         transformChooserIndex = 0
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         isApplicationActionPanePresented = false
         isCatalogActionPanePresented = false
@@ -4684,6 +4782,7 @@ import Observation
         isCatalogActionPanePresented = false
         contextualCatalogItemID = nil
         isActionPalettePresented.toggle()
+        actionPaletteSubmenu = nil
         actionQuery = ""
         if !isActionPalettePresented { requestInputFocus() }
     }
@@ -4776,9 +4875,18 @@ import Observation
     }
 
     /// Result actions after the palette's search filter, best match first.
+    /// On the Quick AI surface Tools is offered before the first answer too,
+    /// so a chat's tools can be chosen before it starts.
     var paletteResultActions: [ResultAction] {
-        guard !actionQuery.isEmpty else { return resultActions }
-        return Self.rankByQuery(resultActions, query: actionQuery, title: \.title)
+        var actions = resultActions
+        if isQuickAIPresented, !actions.contains(.tools) { actions.append(.tools) }
+        // Change Assistant is on the Quick AI surface before the first
+        // answer too: picking one is how an assistant chat starts.
+        if isQuickAIPresented, !assistants.isEmpty, !actions.contains(.changeAssistant) {
+            actions.append(.changeAssistant)
+        }
+        guard !actionQuery.isEmpty else { return actions }
+        return Self.rankByQuery(actions, query: actionQuery, title: \.title)
     }
 
     /// Actions on the Quick AI window itself, while the surface is up:
@@ -4837,7 +4945,7 @@ import Observation
     }
 
     /// Fuzzy-filters and orders by match score; ties keep the list order.
-    private static func rankByQuery<T>(
+    static func rankByQuery<T>(
         _ items: [T],
         query: String,
         title: KeyPath<T, String>
@@ -4857,8 +4965,13 @@ import Observation
 
     /// Row count the prompt palette will render, for window sizing.
     var actionPaletteEntryCount: Int {
-        paletteResultActions.count + paletteSurfaceActions.count
-            + paletteCommandMatches.count + actionMatches.count
+        switch actionPaletteSubmenu {
+        case .tools: paletteToolRows.count
+        case .sources: paletteSourceRows.count
+        case nil:
+            paletteResultActions.count + paletteSurfaceActions.count
+                + paletteCommandMatches.count + actionMatches.count
+        }
     }
 
     func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
@@ -4908,6 +5021,7 @@ import Observation
         case actionPalette
         case transformChooser
         case modelChooser
+        case assistantChooser
         case addContextMenu
         case recentChats
         case streaming
@@ -4929,6 +5043,7 @@ import Observation
         if isActionPalettePresented { return .actionPalette }
         if isTransformChooserPresented { return .transformChooser }
         if isModelChooserPresented { return .modelChooser }
+        if isAssistantChooserPresented { return .assistantChooser }
         if isAddContextMenuPresented { return .addContextMenu }
         if isRecentChatsPresented { return .recentChats }
         if isStreaming { return .streaming }
@@ -4950,11 +5065,19 @@ import Observation
         case .itemActionForm, .itemActionPane:
             dismissItemActionLayer()
         case .actionPalette:
-            closeActionPalette()
+            if actionPaletteSubmenu != nil {
+                // A second list goes back to the full one first.
+                actionPaletteSubmenu = nil
+                actionQuery = ""
+            } else {
+                closeActionPalette()
+            }
         case .transformChooser:
             closeTransformChooser()
         case .modelChooser:
             closeModelChooser()
+        case .assistantChooser:
+            closeAssistantChooser()
         case .addContextMenu:
             closeAddContextMenu()
         case .recentChats:
@@ -4991,6 +5114,10 @@ import Observation
         guard input.isEmpty, !isItemActionPanePresented, !isActionPalettePresented else { return false }
         if isModelChooserPresented {
             closeModelChooser()
+            return true
+        }
+        if isAssistantChooserPresented {
+            closeAssistantChooser()
             return true
         }
         if isAddContextMenuPresented {
@@ -5109,6 +5236,26 @@ import Observation
                modifiers: modifiers
            ) {
             openModelChooser(.change)
+            return true
+        }
+        // Tools opens on the surface before the first answer too.
+        if isQuickAIPresented, !isItemActionPanePresented, activeItemActionForm == nil,
+           ResultAction.tools.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            openActionPaletteSubmenu(.tools)
+            return true
+        }
+        // Change Assistant, too: picking one is how an assistant chat starts.
+        if isQuickAIPresented, !isItemActionPanePresented,
+           ResultAction.changeAssistant.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            toggleAssistantChooser()
             return true
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
@@ -5746,11 +5893,22 @@ import Observation
 
     func closeActionPalette() {
         isActionPalettePresented = false
+        actionPaletteSubmenu = nil
         actionQuery = ""
         requestInputFocus()
     }
 
     func perform(action: SavedPrompt) async {
+        // With nothing selected, an assistant is picked, not run: the
+        // palette row and its hotkey start or switch the Quick AI chat to
+        // it, and nothing is sent. With a selection it runs its prompt on
+        // the selection, as any saved prompt does.
+        if action.isAssistant, !hasSelectedActionSource {
+            isActionPalettePresented = false
+            actionQuery = ""
+            selectAssistant(action)
+            return
+        }
         let source: String
         // Explicit Screen Awareness selection, then text typed into the
         // launcher, then the launch-scoped background selection, then a fresh
@@ -5787,6 +5945,17 @@ import Observation
 
     func requestInputFocus() {
         inputFocusRequest &+= 1
+    }
+
+    /// Whether a saved action has selected text to work on: a source a
+    /// picker or hotkey stashed, an attached Screen Awareness selection, or
+    /// the launch selection chip. An assistant's alias alone, its palette
+    /// row, or its hotkey runs its prompt on that text instead of picking
+    /// the assistant.
+    var hasSelectedActionSource: Bool {
+        [pendingActionSource, pendingContext?.selectedText, launchSelection?.text].contains { text in
+            text.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+        }
     }
 
     func openAccessibilitySettings() {
@@ -5892,6 +6061,8 @@ import Observation
         // A turn asked again stays in its chat, so it keeps the chat's
         // images even past the Start New Chat interval.
         let keepsThread = reasksTurn || !shouldStartNewConversation
+        liveToolRecords = []
+        threadNotice = nil
         let submittedImages = !pendingImages.isEmpty
             ? pendingImages
             : ((isFollowUp && keepsThread) ? conversationImages : [])
@@ -5905,6 +6076,21 @@ import Observation
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
+
+        // An assistant's alias alone, with nothing selected, picks the
+        // assistant for the chat and sends nothing. With text after it, or
+        // with selected text, the alias is a transform like any other saved
+        // prompt, below.
+        if !hasSelectedActionSource, let assistant = SavedPromptResolver.assistant(
+            input: submittedInput,
+            prefix: settings.savedPromptPrefix,
+            savedPrompts: settings.savedPrompts
+        ) {
+            noteActedQuery(submittedInput)
+            input = ""
+            selectAssistant(assistant)
+            return nil
+        }
 
         // The launch-scoped selection is a single-use snapshot captured before
         // the overlay took focus. Read it once so every branch below uses the
@@ -6262,6 +6448,30 @@ import Observation
         let effectivePrompt = request.effectivePrompt
         let usedWebSearch = request.usedWebSearch
         let usedPageRead = request.usedPageRead
+        // A saved-prompt transform (`/alias text`) runs in a plain chat of
+        // its own: after an answer, and in an assistant chat, it starts one.
+        // ⌘R asks a turn of this chat again: it stays in this chat whatever
+        // the Start New Chat interval says, and the composer keeps its text.
+        let startsNewChat = !request.reasksTurn && (shouldStartNewConversation
+            || (action != nil && (isFollowUp || currentConversation?.assistantID != nil)))
+        // A question runs as the open chat's assistant, the one the header
+        // names. When the new-chat interval moves it to a fresh chat, the
+        // assistant goes along. A transform never runs as an assistant.
+        let requestAssistant = action == nil ? activeAssistant : nil
+        let newChatID = UUID()
+        // The assistant's instructions and context skills, the skill files
+        // read once per chat.
+        var assistantSystem: String?
+        if let requestAssistant {
+            assistantSystem = await assistantSystemMessage(
+                requestAssistant,
+                conversationID: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID)
+            )
+        }
+        guard !Task.isCancelled else {
+            restoreEnrichmentInput()
+            return
+        }
 
         guard let provider = provider(
             for: usedWebSearch ? nil : action?.providerID,
@@ -6300,16 +6510,25 @@ import Observation
             return
         }
 
-        // ⌘R asks a turn of this chat again: it stays in this chat whatever
-        // the Start New Chat interval says, and the composer keeps its text.
-        if !request.reasksTurn, shouldStartNewConversation || (action != nil && isFollowUp) {
+        // The tools chosen for the open chat carry into a chat this question
+        // starts on its own (the new-chat interval, a saved-prompt follow-up).
+        // An assistant's tools stay with the assistant: a transform that
+        // leaves an assistant chat starts from the defaults.
+        let carriedTools = requestAssistant == nil && activeAssistant != nil
+            ? pendingChatTools
+            : currentConversation?.enabledTools ?? pendingChatTools
+        if startsNewChat {
             startNewConversation()
         }
         if currentConversation == nil {
             currentConversation = QuickConversation(
+                id: newChatID,
                 providerID: provider.id,
-                model: model
+                model: model,
+                enabledTools: carriedTools ?? requestAssistant?.enabledTools,
+                assistantID: requestAssistant?.id
             )
+            pendingChatTools = nil
         }
         currentConversation?.providerID = provider.id
         currentConversation?.model = model
@@ -6334,6 +6553,11 @@ import Observation
         ])
         if (usedWebSearch || usedPageRead), !requestMessages.isEmpty {
             requestMessages[requestMessages.count - 1].content = effectivePrompt
+        }
+        // The system message rides this request only; the saved chat keeps
+        // the turns, and the assistant is looked up again next time.
+        if let assistantSystem {
+            requestMessages.insert(QuickMessage(role: .system, content: assistantSystem), at: 0)
         }
         if request.takesComposerText { input = "" }
         // The question is a turn now; a stream failure keeps it there.
@@ -6391,6 +6615,12 @@ import Observation
                     if let status = delta.status {
                         streamingStatus = status
                     }
+                    if let record = delta.toolRecord {
+                        noteLiveToolRecord(record)
+                        // The call is done and its line is drawn; the dots
+                        // cover the wait for the next round.
+                        streamingStatus = nil
+                    }
                     if let text = delta.text {
                         if !text.isEmpty { streamingStatus = nil }
                         appendStreamText(text)
@@ -6404,11 +6634,19 @@ import Observation
                 isStreaming = false
                 inFlightTurn = nil
                 if !output.isEmpty {
+                    let records = answerToolRecords(usedWebSearch: usedWebSearch)
                     currentConversation?.messages.append(
-                        QuickMessage(role: .assistant, content: output)
+                        QuickMessage(
+                            role: .assistant,
+                            content: output,
+                            toolRecords: records.isEmpty ? nil : records
+                        )
                     )
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
+                    // The lines live on the answer now.
+                    liveToolRecords = []
+                    if usedWebSearch { webSearchNote = nil }
                 }
                 recordJournal(
                     kind: output.isEmpty ? .aiFailed : .aiSucceeded,
@@ -6451,6 +6689,7 @@ import Observation
                 // stays with the text that arrived, as Stop leaves it, and
                 // `waitForWebAnswer` shows the search results if none did.
                 keepStoppedAnswer()
+                liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
                 isFollowUpQueued = false
@@ -6462,6 +6701,7 @@ import Observation
                 // error under it; ⌘R asks it again. Text that arrived before
                 // the error stays on screen, not as a turn.
                 flushStreamBuffer()
+                liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
                 inFlightTurn = nil
@@ -6517,9 +6757,13 @@ import Observation
               currentConversation?.messages.contains(where: { $0.id == turn.messageID }) == true,
               !output.isEmpty
         else { return }
-        currentConversation?.messages.append(QuickMessage(role: .assistant, content: output))
+        let records = answerToolRecords(usedWebSearch: webSearchNote != nil)
+        currentConversation?.messages.append(
+            QuickMessage(role: .assistant, content: output, toolRecords: records.isEmpty ? nil : records)
+        )
         currentConversation?.updatedAt = Date()
         persistCurrentConversation()
+        liveToolRecords = []
     }
 
     /// Return while an answer streams: queue what is typed. It stays in the
@@ -6764,10 +7008,16 @@ import Observation
         submittedMessageID: UUID,
         generation: Int
     ) async {
-        let timeoutTask = Task { @MainActor [timeout = webAnswerTimeout] in
+        let timeoutTask = Task { @MainActor [weak self, timeout = webAnswerTimeout] in
             do {
                 try await Task.sleep(for: timeout)
             } catch {
+                return false
+            }
+            // Only a silent model is stopped. One that is writing, or is
+            // still running its tools (each line is progress, and the tool
+            // loop has its own clock), keeps going.
+            guard let self, output.isEmpty, streamBuffer.isEmpty, liveToolRecords.isEmpty else {
                 return false
             }
             task.cancel()
@@ -6947,23 +7197,30 @@ import Observation
            (apiKeyProvider(provider.id) ?? "").isEmpty {
             return nil
         }
-        return makeService(provider: provider, model: model)
+        return makeService(provider: provider, model: model, chatTools: false)
     }
 
+    /// `chatTools` offers the chat's memory, vault, and skill tools and lets
+    /// the chat's toggle decide web search. The Translator passes false: it
+    /// gets web search per the setting and nothing else.
     func makeService(
         provider: InferenceProvider,
-        model: String
+        model: String,
+        chatTools: Bool = true
     ) -> (any QuickService)? {
         if let service { return service }
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
+            let tools = self.chatTools
             // The model gets a search_web tool so it can look things up
             // mid-answer; SearXNG stays the single search backend.
             var webSearch: (@Sendable (String) async throws -> String)?
-            if settings.modelWebSearchEnabled, let webSearchService {
+            let webEnabled = chatTools ? tools.contains(.web) : settings.modelWebSearchEnabled
+            if webEnabled, let webSearchService {
                 webSearch = { query in try await webSearchService.search(query) }
             }
+            let profile = modelPreferences.profile(providerID: provider.id, model: model)
             // The question card is behind the Quick AI setting "Let the model
             // ask clarifying questions"; off, the tool is not offered at all.
             var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
@@ -6980,9 +7237,16 @@ import Observation
                 systemPrompt: settings.systemPrompt,
                 webSearch: webSearch,
                 askUserQuestion: askUserQuestion,
-                reasoningEffort: modelPreferences
-                    .profile(providerID: provider.id, model: model)
-                    .reasoningEffort
+                tools: chatTools
+                    ? ChatToolbox(
+                        enabled: tools,
+                        memory: memoryService,
+                        vault: vaultSearchService,
+                        skills: skillLibrary
+                    )
+                    : ChatToolbox(),
+                contextBudget: ContextBudget(contextWindow: profile.contextWindow),
+                reasoningEffort: profile.reasoningEffort
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
@@ -7037,6 +7301,7 @@ import Observation
         streamingStatus = nil
         // A queued follow-up stays in the composer, unsent.
         isFollowUpQueued = false
+        liveToolRecords = []
         if cancelledEnrichment {
             pendingQuestion = nil
             // The search line was made for an answer that will not come.
@@ -7113,6 +7378,66 @@ import Observation
         markJustCopied()
         confirmInComposer("Chat copied")
         requestInputFocus()
+    }
+
+    // MARK: - Continue in pi
+
+    /// Continue in pi (`⌥⌘P`): the thread goes to a new pi session in its
+    /// own tmux session, and Ghostty opens on it (`PiHandoffService`). The
+    /// surface stays open and the thread ends with a line naming the
+    /// session. When Ghostty does not open, the session still runs and the
+    /// attach command is copied instead.
+    func continueInPi() async {
+        isActionPalettePresented = false
+        guard let piHandoff,
+              let conversation = currentConversation,
+              !conversation.messages.isEmpty,
+              !isStreaming,
+              !isHandingOffToPi
+        else { return }
+        isHandingOffToPi = true
+        defer { isHandingOffToPi = false }
+        errorMessage = nil
+        let request = PiHandoffRequest(
+            title: title(of: conversation),
+            markdown: piHandoffMarkdown(for: conversation),
+            workingDirectory: nil
+        )
+        do {
+            let result = try await piHandoff.handOff(request)
+            // The line belongs to the chat that was handed off.
+            if currentConversation?.id == conversation.id {
+                if result.openedGhostty {
+                    threadNotice = "Opened in pi · tmux session \(result.sessionName)"
+                } else {
+                    pasteboard.writeString(result.attachCommand)
+                    threadNotice = "Started pi in tmux session \(result.sessionName) · "
+                        + "Ghostty did not open, attach command copied"
+                }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        requestInputFocus()
+    }
+
+    /// The thread as pi gets it: every answer with its saved tool lines and
+    /// sources. A search line still on screen and not yet saved opens the
+    /// answer it was made for: the first answer after the newest question.
+    func piHandoffMarkdown(for conversation: QuickConversation, date: Date = Date()) -> String {
+        var toolLines: [UUID: [String]] = [:]
+        if let note = webSearchNote,
+           let lastQuestion = conversation.messages.lastIndex(where: { $0.role == .user }),
+           let answer = conversation.messages[lastQuestion...].first(where: { $0.role == .assistant }) {
+            toolLines[answer.id] = [note]
+        }
+        return PiHandoffDocument.markdown(
+            title: title(of: conversation),
+            modelName: ModelProfile.displayName(forModelID: conversation.model),
+            messages: conversation.messages,
+            toolLines: toolLines,
+            date: date
+        )
     }
 
     /// Shows `message` with a checkmark in the composer for
@@ -7291,6 +7616,7 @@ import Observation
         streamingStatus = nil
         // The card takes ↑↓ and Return, so no chooser stays open over it.
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         // The composer was disabled while the model worked, so its focus
@@ -7369,6 +7695,7 @@ import Observation
         if !scope.isDisjoint(with: [.mode, .input]) { isFollowUpQueued = false }
         if scope.contains(.layers) {
             presentedLayer = nil
+            actionPaletteSubmenu = nil
             contextualApplicationID = nil
             contextualCatalogItemID = nil
             activeItemActionForm = nil
@@ -7411,6 +7738,9 @@ import Observation
             pendingQuestion = nil
             enrichmentSubmittedInput = nil
             webSearchNote = nil
+            liveToolRecords = []
+            pendingChatTools = nil
+            threadNotice = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
@@ -7769,8 +8099,12 @@ import Observation
     /// Whether the next question starts a fresh chat. "Always" and "Never"
     /// are not windows: one starts a new chat every time, the other keeps the
     /// thread until the user starts a new chat by hand.
-    private var shouldStartNewConversation: Bool {
-        guard let updatedAt = currentConversation?.updatedAt else { return false }
+    var shouldStartNewConversation: Bool {
+        guard let conversation = currentConversation else { return false }
+        // A picked assistant with nothing asked yet is the chat the next
+        // question starts, however long ago it was picked.
+        if conversation.messages.isEmpty, conversation.assistantID != nil { return false }
+        let updatedAt = conversation.updatedAt
         switch settings.newChatInterval {
         case .always:
             return true
@@ -7825,8 +8159,11 @@ import Observation
         threadError = nil
         answerSource = .model
         // The finished-search line belongs to the answer it was made for,
-        // as does a question that never became a turn.
+        // as does a question that never became a turn, and the hand-off
+        // line to the chat it was for.
         webSearchNote = nil
+        liveToolRecords = []
+        threadNotice = nil
         pendingQuestion = nil
         input = ""
         // Another chat opens on its newest turn.
@@ -7856,7 +8193,7 @@ import Observation
         enterCatalog(.chats)
     }
 
-    private func persistCurrentConversation() {
+    func persistCurrentConversation() {
         guard settings.historyEnabled, let conversation = currentConversation else { return }
         history = QuickHistoryStore.upserting(
             conversation,

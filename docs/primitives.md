@@ -76,6 +76,7 @@ The same key means the same thing on every layer.
 | `⌘⇧N` / `⌘⇧L` | Save as snippet / save as quick link |
 | `⌘⇧C` | Copy path (apps) or copy answer (Quick AI stays open) |
 | `⌥⌘C` | Copy the whole Quick AI chat, labelled "You:" and the model |
+| `⌥⌘P` | Continue the Quick AI chat in pi: a new tmux session, opened in Ghostty |
 | `↑ ↓` | Move the highlight; `⌘1…9` is deliberately unused |
 
 Reopening the overlay always starts at the root. Opening Settings hides the

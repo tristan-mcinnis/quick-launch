@@ -120,7 +120,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 24
+    var configurationVersion: Int = 25
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -274,7 +274,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 24
+        configurationVersion = 25
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -624,6 +624,16 @@ struct QuickSettings: Codable, Sendable {
                 if let seed = SavedPrompt.defaults.first(where: { $0.alias == alias }) {
                     savedPrompts.append(seed)
                 }
+            }
+        }
+        if decodedConfigurationVersion < 25 {
+            // 2026-09-11: the two default assistants join an existing
+            // install once. An alias already in use (the user's own `/vault`)
+            // keeps its action, and a deleted assistant stays deleted after
+            // this version.
+            for seed in SavedPrompt.assistantDefaults
+            where !savedPrompts.contains(where: { $0.alias == seed.alias }) {
+                savedPrompts.append(seed)
             }
         }
     }

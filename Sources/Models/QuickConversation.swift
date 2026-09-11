@@ -19,6 +19,10 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
     /// The tools this chat lets the model call. Nil uses the defaults; an
     /// assistant writes its own set here.
     var enabledTools: Set<ChatToolKind>?
+    /// The assistant (a `SavedPrompt` with instructions) this chat runs as.
+    /// Its instructions and context skills are the chat's system message;
+    /// nil is a plain chat. A deleted assistant leaves a plain chat.
+    var assistantID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -30,7 +34,8 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         customTitle: String? = nil,
         titleSource: String? = nil,
         isPinned: Bool = false,
-        enabledTools: Set<ChatToolKind>? = nil
+        enabledTools: Set<ChatToolKind>? = nil,
+        assistantID: UUID? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -42,10 +47,11 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         self.titleSource = titleSource
         self.isPinned = isPinned
         self.enabledTools = enabledTools
+        self.assistantID = assistantID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned, enabledTools
+        case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned, enabledTools, assistantID
     }
 
     init(from decoder: Decoder) throws {
@@ -60,6 +66,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         titleSource = try c.decodeIfPresent(String.self, forKey: .titleSource)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        assistantID = try c.decodeIfPresent(UUID.self, forKey: .assistantID)
     }
 
     /// The chat's name without the saved-prompt list, so no leading

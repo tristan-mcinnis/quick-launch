@@ -380,6 +380,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case copy
     /// `⌥⌘C`: the whole chat as a labelled transcript ("You:" and the model).
     case copyChat
+    /// `⌥⌘P`: the thread to a new pi session in tmux, opened in Ghostty.
+    case continueInPi
     case readAloud
     case saveSnippet
     case searchWeb
@@ -388,6 +390,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case regenerateWithModel
     /// `⌘⇧O`: make the picked model the active one, without answering again.
     case changeModel
+    /// `⌥⌘A`: start or switch the chat to an assistant, or back to a plain chat.
+    case changeAssistant
     case newChat
     case chatHistory
     case previousChat
@@ -395,6 +399,12 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case renameChat
     case pinChat
     case deleteChat
+    /// `⌘O`: open the answer's source, or pick one when there are several.
+    case openSource
+    /// `⌥⌘M`: send the answer to `recall remember`. User-triggered only.
+    case captureToMemory
+    /// `⌥⌘K`: the chat's tools, toggled in the palette.
+    case tools
 
     var id: String { rawValue }
 
@@ -404,12 +414,14 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .pasteBack: "Paste into Previous App"
         case .copy: "Copy Answer"
         case .copyChat: "Copy Chat"
+        case .continueInPi: "Continue in pi"
         case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
         case .regenerateWithModel: "Regenerate with Model…"
         case .changeModel: "Change Model"
+        case .changeAssistant: "Change Assistant"
         case .newChat: "New Chat"
         case .chatHistory: "Browse Chat History"
         case .previousChat: "Previous Chat"
@@ -417,6 +429,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: "Rename Chat"
         case .pinChat: "Pin Chat"
         case .deleteChat: "Delete Chat"
+        case .openSource: "Open Source"
+        case .captureToMemory: "Capture to Memory"
+        case .tools: "Tools"
         }
     }
 
@@ -426,12 +441,14 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .pasteBack: "arrow.turn.down.right"
         case .copy: "doc.on.doc"
         case .copyChat: "text.bubble"
+        case .continueInPi: "terminal"
         case .readAloud: "speaker.wave.2"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
         case .regenerate: "arrow.clockwise"
         case .regenerateWithModel: "arrow.clockwise.circle"
         case .changeModel: "cpu"
+        case .changeAssistant: "person.crop.circle"
         case .newChat: "plus.bubble"
         case .chatHistory: "clock.arrow.circlepath"
         case .previousChat: "chevron.left"
@@ -439,6 +456,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: "pencil"
         case .pinChat: "pin"
         case .deleteChat: "trash"
+        case .openSource: "doc.text"
+        case .captureToMemory: "brain.head.profile"
+        case .tools: "wrench.and.screwdriver"
         }
     }
 
@@ -450,12 +470,16 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
         case .copyChat: .commandOption("c")
+        // P for pi. Checked free against every key table (see
+        // PiHandoffTests); `⇧⌘P` is Pin.
+        case .continueInPi: .commandOption("p")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")
         case .regenerateWithModel: .commandShift("r")
         case .changeModel: .commandShift("o")
+        case .changeAssistant: .commandOption("a")
         case .newChat: .command("n")
         case .chatHistory: .command("h")
         case .previousChat: .command("[")
@@ -463,6 +487,11 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: .command("e")
         case .pinChat: .commandShift("p")
         case .deleteChat: .control("x")
+        case .openSource: .command("o")
+        // `⇧⌘M` folds a long question, so memory takes the Option layer.
+        case .captureToMemory: .commandOption("m")
+        // `⌘K` opens the palette; `⌥⌘K` opens it on Tools.
+        case .tools: .commandOption("k")
         }
     }
 

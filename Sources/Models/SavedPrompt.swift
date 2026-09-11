@@ -35,6 +35,13 @@ struct ActionHotkey: Codable, Sendable, Equatable, Hashable {
 
 /// A saved prompt users can invoke with `<prefix><alias>`, e.g. `/translate`.
 /// The `prompt` field is the full expansion sent to the selected provider.
+///
+/// A saved prompt with `systemPrompt` set and no command is an **assistant**
+/// (`isAssistant`): `<prefix><alias>` alone, ⌘K › Change Assistant, or its
+/// hotkey starts or switches the Quick AI chat to it. Its instructions and
+/// its `contextRefs` skills become the chat's system message, its tools the
+/// chat's tool set, and its provider and model the chat's. With text after
+/// the alias it still runs `prompt` as a one-shot transform.
 struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
     let id: UUID
     var name: String
@@ -51,6 +58,17 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
     /// Argv for `commandExecutable`. `{input}` is replaced within each
     /// element, so user text stays a single argument.
     var commandArguments: [String]?
+    /// The instructions an assistant's chat starts with. Set, with no
+    /// command, this saved prompt is an assistant.
+    var systemPrompt: String?
+    /// The tools an assistant's chat lets the model call, written to the
+    /// chat's `QuickConversation.enabledTools`. Nil uses the chat defaults;
+    /// an empty set offers no tools.
+    var enabledTools: Set<ChatToolKind>?
+    /// Skill names (folders of `~/.claude/skills`) an assistant's chat loads
+    /// once, through `SkillLibrary`, into its system message. A name the
+    /// library does not list is skipped.
+    var contextRefs: [String]
 
     init(
         id: UUID = UUID(),
@@ -62,7 +80,10 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         outputBehavior: ActionOutputBehavior = .showInOverlay,
         hotkey: ActionHotkey? = nil,
         commandExecutable: String? = nil,
-        commandArguments: [String]? = nil
+        commandArguments: [String]? = nil,
+        systemPrompt: String? = nil,
+        enabledTools: Set<ChatToolKind>? = nil,
+        contextRefs: [String] = []
     ) {
         self.id = id
         self.name = name ?? alias.replacingOccurrences(of: "-", with: " ").capitalized
@@ -74,6 +95,9 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.hotkey = hotkey
         self.commandExecutable = commandExecutable
         self.commandArguments = commandArguments
+        self.systemPrompt = systemPrompt
+        self.enabledTools = enabledTools
+        self.contextRefs = contextRefs
     }
 
     init(from decoder: Decoder) throws {
@@ -92,6 +116,55 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         hotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .hotkey)
         commandExecutable = try c.decodeIfPresent(String.self, forKey: .commandExecutable)
         commandArguments = try c.decodeIfPresent([String].self, forKey: .commandArguments)
+        systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+        enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        contextRefs = try c.decodeIfPresent([String].self, forKey: .contextRefs) ?? []
+    }
+
+    /// True for an assistant: instructions set, and no command to run.
+    var isAssistant: Bool {
+        guard let systemPrompt,
+              !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        return commandExecutable?.isEmpty ?? true
+    }
+}
+
+// MARK: - Assistant edits (the Settings editor's fields)
+
+extension SavedPrompt {
+    /// The Instructions field. Blank text clears it, and with it the
+    /// assistant: the saved prompt is a plain transform again.
+    mutating func setInstructions(_ text: String) {
+        systemPrompt = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    /// Tools › Chat defaults (`nil`) or Choose, which starts from every tool
+    /// on so a choice only ever takes tools away.
+    mutating func setToolsUseDefaults(_ useDefaults: Bool) {
+        if useDefaults {
+            enabledTools = nil
+        } else if enabledTools == nil {
+            enabledTools = Set(ChatToolKind.allCases)
+        }
+    }
+
+    /// One tool toggle. Turning one on or off leaves Chat defaults.
+    mutating func setTool(_ tool: ChatToolKind, enabled: Bool) {
+        var tools = enabledTools ?? Set(ChatToolKind.allCases)
+        if enabled { tools.insert(tool) } else { tools.remove(tool) }
+        enabledTools = tools
+    }
+
+    /// Adds a context skill once, at the end; a blank name is ignored.
+    mutating func addContextRef(_ name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !contextRefs.contains(name) else { return }
+        contextRefs.append(name)
+    }
+
+    mutating func removeContextRef(_ name: String) {
+        contextRefs.removeAll { $0 == name }
     }
 }
 
@@ -158,6 +231,40 @@ extension SavedPrompt {
             alias: "search",
             prompt: "Search for current, reliable information about the following. Give a concise answer and include source links.\n\n{selection}",
             providerID: InferenceProvider.piID
+        ),
+    ] + assistantDefaults
+
+    /// The assistants a fresh install has, and the ones configuration
+    /// version 25 adds to an existing install when their alias is free.
+    static let assistantDefaults: [SavedPrompt] = [
+        SavedPrompt(
+            name: "Vault researcher",
+            alias: "vault",
+            prompt: "Find what my vault and memory say about the following. Cite the source of every fact.\n\n{selection}",
+            systemPrompt: """
+            You research the user's own notes. Before you answer, search the vault and memory for what they say about the question. \
+            Cite the source of every fact you use: the note path or the memory entry it came from. \
+            If the vault and memory have nothing on it, say so. Do not fill the gap with a guess.
+            """,
+            enabledTools: [.vault, .memory]
+        ),
+        SavedPrompt(
+            name: "STE editor",
+            alias: "ste",
+            prompt: "Rewrite the following text in ASD-STE100 Simplified Technical English. Return only the rewritten text.\n\n{selection}",
+            systemPrompt: """
+            You edit text into ASD-STE100 Simplified Technical English. Rewrite the text you get so it obeys these rules:
+            - Use approved words with their approved meaning only: one word, one meaning. Keep technical names and technical verbs.
+            - Keep sentences short: 20 words or fewer in procedures, 25 or fewer in descriptions.
+            - Write one instruction or one idea in each sentence.
+            - Use the active voice. Write instructions in the imperative.
+            - Use only the present, the simple past, and the simple future tense.
+            - Do not use the -ing form of a verb as a verb or an adjective.
+            - Use articles (the, a) and demonstratives (this, these) where you can.
+            - Keep every fact, number, and name. Do not add content.
+            Return only the rewritten text, unless the user asks a question about STE.
+            """,
+            enabledTools: []
         ),
     ]
 }

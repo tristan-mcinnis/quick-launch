@@ -27,6 +27,8 @@ design. The window section below is the corrected one.
 | v1.4.1 | DeepSeek on `deepseek-flash`, the only flash id the DeepSeek API lists. It is DeepSeek V4.1 Flash, it reads images (tested), and it is the id pi uses. `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` were aliases of it; settings migrated (configuration version 24). |
 | v1.5.0 | Phase A1 (items 1, 2, 6, 7, 8, 9, 10, 12, 15): answers never collapse; Show more and Collapse scroll the head to the top; the threshold is measured at the thread's width; Recent Chats search; cleaned-up titles; state-aware placeholder; Copy Answer stays open, Copy Chat (`⌥⌘C`); empty-state hints; the model line opens the chooser |
 | v1.5.0 | Phase A2 (items 16, 5, 3, 4, 11, 13, 14): local answers inline in root search, command and Vault Search output name their source; `↑` recalls the last question, PageUp/PageDown, `⌥↑↓`, `⌘↑↓` scroll the thread; Stop keeps the partial answer and `⌘R` asks that turn again; the thread follows only a reader at the bottom, "↓ Latest" otherwise; a provider error stays under its question with Retry; Return while streaming queues one follow-up; `⌘K` and the row keys in Recent Chats act on the highlighted chat, pin glyph on pinned rows |
+| v1.5.0 | Phase E: Continue in pi (`⌥⌘P`, and `⌘K`): the thread as Markdown in `pi-handoff/`, a detached tmux session `ql-<id>` running `pi @<file>`, and a Ghostty window attached to it |
+| v1.5.0 | Phase D: assistants. A saved prompt with instructions and no command is an assistant; `/alias` alone, `⌘K` › Change Assistant (`⌥⌘A`), or its hotkey picks it for the chat; instructions and context skills lead the system message; its tools are written to the chat's `enabledTools` (the tools themselves are Phase C); Vault researcher and STE editor seeded |
 
 ## 2. Did v1.4.0 take liberties?
 
@@ -114,6 +116,18 @@ automations, no file changes; those belong to pi."
 
 ## 5. Phase C: tools inside the chat
 
+> Shipped in v1.5.0. What landed differs from the plan below in three places.
+> Citations needed no remote change: `vault-search.py` already returns
+> `source_path` (vault-relative, or under `/home/ubuntu/vault-private/`), a
+> title, and dates on each `evidence` or `results` row, so the app reads them
+> from the JSON it already gets and maps them onto `~/vault/`. The context
+> budget cuts rather than summarises: the results of the answer's older tool
+> rounds, then oldest turns, then the newest round's results, never the first
+> or the current question, with a line saying what was left
+> out. Capture to Memory is on the answer on screen (the thread has no
+> message selection), `⌥⌘M`. Tools per chat live in `⌘K` › Tools (`⌥⌘K`);
+> the wall-clock budget is 30 seconds, not counting time on a question card.
+
 The app declares two tools today (`search_web`, `ask_user_question`) in
 `OpenAICompatibleService` and runs them itself, three rounds at most. New
 tools follow the same pattern: a CLI called with an argv array, no shell, a
@@ -181,6 +195,31 @@ window. Size L, and it needs a tool-approval UI.
 
 PI-Desktop is not a lane: no deep link, no socket, manual import only, not
 installed, and you said no fork.
+
+> Shipped in v1.5.0 (`PiHandoffService`, `PiHandoffDocument`). What differs
+> from the sketch above:
+>
+> - **Key `⌥⌘P`**, checked free against every key table (P for pi; `⇧⌘P` is
+>   Pin). The action shows in `⌘K` on any Quick AI thread.
+> - **Home folder.** A Quick AI chat has no working folder, so pi starts in
+>   `~`; the request carries a folder for when one exists.
+> - **The instruction** is "Continue this conversation from Quick Launch. The
+>   thread is attached."
+> - **`PATH`.** pi is a Node script; tmux runs the command directly (several
+>   arguments, no `sh -c`) in the session's environment, and a tmux server
+>   the app starts inherits launchd's `PATH`, which has no `node`. The session
+>   gets `-e PATH=…`: the server's own `PATH` (`show-environment -g PATH`),
+>   or the app's with no server, plus the folders of pi, node, tmux, and the
+>   usual CLI folders.
+> - **Ghostty.** Its help says a macOS terminal cannot be started from its
+>   CLI (`+new-window` is GTK only) and names `open -na Ghostty.app --args`.
+>   The app runs `open -n -b com.mitchellh.ghostty --args -e <tmux>
+>   attach-session -t ql-<id>`: a new Ghostty instance per hand-off that
+>   quits when its window closes. If `open` fails, `tmux attach -t ql-<id>`
+>   is copied and the thread says so.
+> - **The round trip passed** on 2026-09-11 with the tmux step run for real:
+>   pi 0.85.1 showed the attached file and answered from it. The Ghostty step
+>   was not run (no GUI during the build); its argv is unit-tested.
 
 ## 8. What stays out
 
