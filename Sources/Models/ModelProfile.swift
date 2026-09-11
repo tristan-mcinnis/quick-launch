@@ -12,6 +12,9 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
     /// Whether the model pickers may offer this model. Off means hidden
     /// everywhere, not deleted.
     var enabled: Bool
+    /// The vendor's name for the model, as the header and the chat rows
+    /// show it ("DeepSeek V4 Flash"). `nil` means the id is the name.
+    var displayName: String?
     /// Curated 1 to 5 rating, 5 fastest. `nil` means not known.
     var speed: ModelRating?
     /// Curated 1 to 5 rating, 5 strongest. `nil` means not known.
@@ -25,6 +28,7 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
 
     init(
         enabled: Bool = true,
+        displayName: String? = nil,
         speed: ModelRating? = nil,
         intelligence: ModelRating? = nil,
         contextWindow: Int? = nil,
@@ -32,6 +36,7 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
         reasoningEffort: ReasoningEffort = .modelDefault
     ) {
         self.enabled = enabled
+        self.displayName = displayName
         self.speed = speed
         self.intelligence = intelligence
         self.contextWindow = contextWindow
@@ -47,6 +52,13 @@ extension ModelProfile {
     /// as `1M`, `256K`, or `131.1K`.
     var contextWindowLabel: String {
         Self.contextWindowLabel(contextWindow)
+    }
+
+    /// The name to show for a model id: the curated display name when the
+    /// app ships one, otherwise the id itself.
+    static func displayName(forModelID modelID: String) -> String {
+        guard !modelID.isEmpty else { return modelID }
+        return curated(forModelID: modelID).displayName ?? modelID
     }
 
     static func contextWindowLabel(_ tokens: Int?) -> String {
@@ -85,19 +97,25 @@ extension ModelProfile {
         // every V4 id takes a reasoning effort, and all three serve a
         // 1M-token context.
         "deepseek-v4-flash": ModelProfile(
+            displayName: "DeepSeek V4 Flash",
             speed: .five,
             intelligence: .four,
             contextWindow: 1_000_000,
             supportsReasoningEffort: true
         ),
         "deepseek-v4-pro": ModelProfile(
+            displayName: "DeepSeek V4 Pro",
             speed: .three,
             intelligence: .five,
             contextWindow: 1_000_000,
             supportsReasoningEffort: true
         ),
-        // The image-capable V4 id.
+        // The image-capable V4 id. Sunset for text (2026-09-11): it ships
+        // turned off so it leaves every text picker, and stays the vision
+        // route. Manage Models can switch it back on.
         "deepseek-v4-flash-vision-exp": ModelProfile(
+            enabled: false,
+            displayName: "DeepSeek V4 Flash Vision",
             speed: .four,
             intelligence: .four,
             contextWindow: 1_000_000,
@@ -108,17 +126,20 @@ extension ModelProfile {
         // thinking with their own `thinking` object instead, so they get no
         // reasoning-effort control.
         "kimi-k3": ModelProfile(
+            displayName: "Kimi K3",
             speed: .three,
             intelligence: .five,
             contextWindow: 1_000_000,
             supportsReasoningEffort: true
         ),
         "kimi-k2.6": ModelProfile(
+            displayName: "Kimi K2.6",
             speed: .four,
             intelligence: .four,
             contextWindow: 256_000
         ),
         "kimi-k2.7-code-highspeed": ModelProfile(
+            displayName: "Kimi K2.7 Code Highspeed",
             speed: .five,
             intelligence: .four,
             contextWindow: 256_000
@@ -127,9 +148,9 @@ extension ModelProfile {
         // vendor's published figure for the open-weight family; no reasoning
         // effort is offered, because the daemon documents no such parameter.
         // `s1-mini` is left unknown: the name covers more than one family.
-        "qwen3-vl": ModelProfile(speed: .four, intelligence: .three, contextWindow: 256_000),
-        "qwen3.5": ModelProfile(speed: .four, intelligence: .three, contextWindow: 256_000),
-        "gemma-it": ModelProfile(speed: .five, intelligence: .two, contextWindow: 128_000),
+        "qwen3-vl": ModelProfile(displayName: "Qwen3 VL", speed: .four, intelligence: .three, contextWindow: 256_000),
+        "qwen3.5": ModelProfile(displayName: "Qwen3.5", speed: .four, intelligence: .three, contextWindow: 256_000),
+        "gemma-it": ModelProfile(displayName: "Gemma IT", speed: .five, intelligence: .two, contextWindow: 128_000),
         "s1-mini": ModelProfile(),
     ]
 

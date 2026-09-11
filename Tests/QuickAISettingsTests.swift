@@ -55,7 +55,7 @@ struct QuickAISettingsTests {
                 #"{"configurationVersion":21,"newConversationAfterMinutes":\#(stored)}"#
             )
             #expect(settings.newChatInterval == option, "\(stored) minutes")
-            #expect(settings.configurationVersion == 22)
+            #expect(settings.configurationVersion == 23)
         }
     }
 
@@ -72,7 +72,7 @@ struct QuickAISettingsTests {
     /// A blob with no version and no keys at all, the oldest shape there is.
     @Test func aVersionlessBlobStillDecodes() throws {
         let settings = try decode(#"{"autoCopy":false}"#)
-        #expect(settings.configurationVersion == 22)
+        #expect(settings.configurationVersion == 23)
         #expect(settings.autoCopy == false)
         #expect(settings.newChatInterval == .fiveMinutes)
         #expect(settings.quickAIPrimaryAction == .pasteToActiveApp)
@@ -317,8 +317,9 @@ struct QuickAISettingsTests {
             let vm = make(settings: settings, service: MockQuickService())
             vm.input = "hello there"
             #expect(vm.handleTab())
-            #expect(vm.inputMode == .askAI, "\(list)")
+            #expect(vm.isQuickAIPresented, "\(list)")
             #expect(vm.launcherMatches.isEmpty)
+            await vm.tabSubmitTask?.value
         }
     }
 
@@ -414,6 +415,46 @@ struct QuickAISettingsTests {
     }
 
     // MARK: - Default model
+
+    @Test func reloadingAChatOnATurnedOffModelKeepsTheProviderSelection() {
+        var settings = QuickSettings()
+        settings.historyEnabled = false
+        let vm = make(settings: settings, service: MockQuickService())
+        vm.modelPreferences = ModelPreferenceStore(fileURL: nil)
+        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekDefaultModel)
+
+        // A chat written by v1.3.0, when the vision id was the default.
+        let sunset = QuickConversation(
+            providerID: InferenceProvider.deepSeekID,
+            model: InferenceProvider.deepSeekVisionModel,
+            messages: [
+                QuickMessage(role: .user, content: "older"),
+                QuickMessage(role: .assistant, content: "Older answer."),
+            ]
+        )
+        let kept = QuickConversation(
+            providerID: InferenceProvider.deepSeekID,
+            model: "deepseek-v4-pro",
+            messages: [
+                QuickMessage(role: .user, content: "pro"),
+                QuickMessage(role: .assistant, content: "Pro answer."),
+            ]
+        )
+        vm.history = [sunset, kept]
+
+        vm.loadConversation(id: sunset.id)
+        #expect(vm.currentConversation?.id == sunset.id)
+        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekDefaultModel, "the sunset id is not re-selected")
+        #expect(vm.activeModelID == InferenceProvider.deepSeekDefaultModel, "the header names the model that answers next")
+
+        vm.loadConversation(id: kept.id)
+        #expect(vm.settings.selectedModel == "deepseek-v4-pro", "a chat on a model still offered carries it over")
+
+        // Switched back on in Manage Models, the id carries over again.
+        vm.modelPreferences.setEnabled(true, providerID: InferenceProvider.deepSeekID, model: InferenceProvider.deepSeekVisionModel)
+        vm.loadConversation(id: sunset.id)
+        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekVisionModel)
+    }
 
     @Test func theQuickAIModelAnswersAndTheSelectionIsTheFallback() async {
         var settings = QuickSettings()

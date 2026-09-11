@@ -133,3 +133,40 @@ actor FakeLocalSpeechService: LocalSpeechServicing {
         stopCount += 1
     }
 }
+
+/// A web search that does not answer until the test lets it: holds every
+/// `search` on a continuation so a test can look at, or stop, the ask
+/// while its search phase is still running.
+actor GatedWebSearchService: WebSearchServicing {
+    let result: String
+    private(set) var searchCount = 0
+    private(set) var lastQuery: String?
+    private var pending: [CheckedContinuation<String, any Error>] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(result: String) {
+        self.result = result
+    }
+
+    func search(_ query: String) async throws -> String {
+        searchCount += 1
+        lastQuery = query
+        for waiter in waiters { waiter.resume() }
+        waiters.removeAll()
+        return try await withCheckedThrowingContinuation { pending.append($0) }
+    }
+
+    /// Returns once a search is being held; after a `release()` it waits
+    /// for the next one.
+    func waitUntilSearching() async {
+        guard pending.isEmpty else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// Lets every held search return its result.
+    func release() {
+        let held = pending
+        pending.removeAll()
+        for continuation in held { continuation.resume(returning: result) }
+    }
+}

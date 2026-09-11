@@ -10,86 +10,31 @@ struct PanelSizingTests {
     // MARK: - Idle (collapsed)
 
     @Test func testIdleHeightIsInputOnly() {
-        let h = PanelSizing.panelHeight(output: "", isStreaming: false, errorMessage: nil)
+        let h = PanelSizing.panelHeight(errorMessage: nil)
         #expect(h == PanelSizing.inputHeight)
     }
 
-    // MARK: - Streaming with no output yet
+    // MARK: - Quick AI is one fixed window
 
-    @Test func testStreamingEmptyOutputAddsBody() {
-        let h = PanelSizing.panelHeight(output: "", isStreaming: true, errorMessage: nil)
-        // approxLines = max(1, 0/60 + 1) = 1
-        // body = min(640, 22 + 40) = 62
-        #expect(h == PanelSizing.inputHeight + 62)
-    }
-
-    // MARK: - Output present, not streaming
-
-    @Test func testShortOutputUsesOneLine() {
-        let h = PanelSizing.panelHeight(output: "hello", isStreaming: false, errorMessage: nil)
-        #expect(h == PanelSizing.inputHeight + 62)
-    }
-
-    @Test func testLongOutputCapsAtMaxBodyHeight() {
-        // 10 000 chars -> approxLines ~ 167 -> far past the cap, so capped
-        let long = String(repeating: "x", count: 10_000)
-        let h = PanelSizing.panelHeight(output: long, isStreaming: false, errorMessage: nil)
-        #expect(h == PanelSizing.inputHeight + PanelSizing.maxBodyHeight)
-    }
-
-    @Test func testMeasuredBodyHeightOverridesTheCharacterGuess() {
-        let measured = PanelSizing.panelHeight(
-            output: "short", isStreaming: false, errorMessage: nil,
-            measuredBodyHeight: 300
-        )
-        #expect(measured == PanelSizing.inputHeight + 300 + 40)
-        // Still capped, and still floored for the thinking row.
-        let tall = PanelSizing.panelHeight(
-            output: "short", isStreaming: false, errorMessage: nil,
-            measuredBodyHeight: 5_000
-        )
-        #expect(tall == PanelSizing.inputHeight + PanelSizing.maxBodyHeight)
-        let thinking = PanelSizing.panelHeight(
-            output: "", isStreaming: true, errorMessage: nil,
-            measuredBodyHeight: 0
-        )
-        #expect(thinking == PanelSizing.inputHeight + 68)
-    }
-
-    @Test func testTranscriptBlockAppearsAfterTwoMessages() {
-        #expect(PanelSizing.transcriptBlockHeight(messageCount: 2) == 0)
-        #expect(
-            PanelSizing.transcriptBlockHeight(messageCount: 4)
-                == PanelSizing.transcriptHeight + 17
-        )
-        let withTranscript = PanelSizing.panelHeight(
-            output: "answer", isStreaming: false, errorMessage: nil,
-            measuredBodyHeight: 100,
-            transcriptHeight: PanelSizing.transcriptBlockHeight(messageCount: 4)
-        )
-        #expect(
-            withTranscript
-                == PanelSizing.inputHeight + PanelSizing.transcriptHeight + 17 + 140
-        )
+    @Test func testQuickAISurfaceIsTheLauncherWidthAndAFixedHeight() {
+        #expect(PanelSizing.panelWidth == House.Layout.panelWidth)
+        #expect(PanelSizing.panelWidth == 750)
+        #expect(PanelSizing.quickAIHeight == House.Layout.quickAIHeight)
+        #expect(PanelSizing.quickAIHeight == 475)
     }
 
     // MARK: - Error banner adds 40
 
     @Test func testErrorBannerAddsFourtyOnTopOfIdle() {
-        let h = PanelSizing.panelHeight(output: "", isStreaming: false, errorMessage: "boom")
+        let h = PanelSizing.panelHeight(errorMessage: "boom")
         #expect(h == PanelSizing.inputHeight + PanelSizing.errorBannerHeight)
-    }
-
-    @Test func testErrorBannerStacksWithOutput() {
-        let h = PanelSizing.panelHeight(output: "hi", isStreaming: false, errorMessage: "boom")
-        #expect(h == PanelSizing.inputHeight + 62 + PanelSizing.errorBannerHeight)
     }
 
     // MARK: - Idempotence: same inputs -> same output
 
     @Test func testPureFunctionIsIdempotent() {
-        let a = PanelSizing.panelHeight(output: "abc", isStreaming: true, errorMessage: nil)
-        let b = PanelSizing.panelHeight(output: "abc", isStreaming: true, errorMessage: nil)
+        let a = PanelSizing.panelHeight(errorMessage: nil, suggestionCount: 3)
+        let b = PanelSizing.panelHeight(errorMessage: nil, suggestionCount: 3)
         #expect(a == b)
     }
 
@@ -127,10 +72,10 @@ struct PanelSizingTests {
 
     @Test func testLauncherSuggestionsAddBoundedHeight() {
         let three = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 3
+            errorMessage: nil, suggestionCount: 3
         )
         let many = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 20
+            errorMessage: nil, suggestionCount: 20
         )
         #expect(three == PanelSizing.inputHeight + 3 * PanelSizing.launcherRowHeight)
         let expectedMany = PanelSizing.inputHeight + 12 * PanelSizing.launcherRowHeight
@@ -139,18 +84,14 @@ struct PanelSizingTests {
 
     @Test func testCompletedResultActionsAddCompactFooter() {
         let height = PanelSizing.panelHeight(
-            output: "Answer",
-            isStreaming: false,
             errorMessage: nil,
             showsResultActions: true
         )
-        #expect(height == PanelSizing.inputHeight + 62 + AQDesign.controlHeight + 1)
+        #expect(height == PanelSizing.inputHeight + AQDesign.controlHeight + 1)
     }
 
     @Test func testScreenshotAttachmentAddsCompactPreviewRow() {
         let height = PanelSizing.panelHeight(
-            output: "",
-            isStreaming: false,
             errorMessage: nil,
             hasAttachment: true
         )
@@ -161,7 +102,7 @@ struct PanelSizingTests {
 
     @Test func testFooterAddsItsRowAndDivider() {
         let h = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, showsFooter: true
+            errorMessage: nil, showsFooter: true
         )
         let expected = PanelSizing.inputHeight + AQDesign.footerHeight + 1
         #expect(h == expected)
@@ -169,10 +110,10 @@ struct PanelSizingTests {
 
     @Test func testLauncherRowsIncludeHeaderChrome() {
         let plain = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil, suggestionCount: 3
+            errorMessage: nil, suggestionCount: 3
         )
         let launcher = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil,
+            errorMessage: nil,
             suggestionCount: 3, launcherRowCount: 3
         )
         let expectedPlain = PanelSizing.inputHeight + 3 * PanelSizing.launcherRowHeight
@@ -181,7 +122,7 @@ struct PanelSizingTests {
         #expect(launcher == expectedLauncher)
         // A full list caps exactly where the rendered view caps.
         let full = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil,
+            errorMessage: nil,
             suggestionCount: 20, launcherRowCount: 20
         )
         let expectedFull = PanelSizing.inputHeight + PanelSizing.launcherListMaximumHeight
@@ -201,7 +142,7 @@ struct PanelSizingTests {
         host.appearance = NSAppearance(named: .darkAqua)
         let fitting = host.fittingSize.height
         let estimate = PanelSizing.panelHeight(
-            output: "", isStreaming: false, errorMessage: nil,
+            errorMessage: nil,
             suggestionCount: max(vm.launcherMatches.count, vm.savedPromptMatches.count),
             showsFooter: vm.showsLauncherFooter,
             launcherRowCount: vm.launcherMatches.count

@@ -37,13 +37,19 @@ struct OverlayLayerTests {
         #expect(presenter.dismissals == 1)
     }
 
-    @Test("Escape on a finished answer hides the overlay and keeps the thread")
-    func escapeOnAnswerDismisses() {
+    @Test("Escape on a finished answer returns to root search and keeps the thread")
+    func escapeOnAnswerReturnsToRoot() {
         let (vm, presenter) = makeModel()
         vm.output = "42"
+        #expect(vm.isQuickAIPresented, "an answer presents the Quick AI surface")
+        #expect(vm.topLayer == .answer)
+        vm.handleEscapeKey()
+        #expect(presenter.dismissals == 0)
+        #expect(!vm.isQuickAIPresented)
+        #expect(vm.output == "42", "the thread is kept behind root search")
+        #expect(vm.topLayer == .root)
         vm.handleEscapeKey()
         #expect(presenter.dismissals == 1)
-        #expect(vm.output == "42")
     }
 
     @Test("Empty Backspace and Escape pop the same stack in the same order")

@@ -6,6 +6,42 @@ struct OverlayView: View {
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        Group {
+            if viewModel.isQuickAIPresented {
+                // Quick AI replaces the launcher in place: its own header,
+                // thread, and bottom composer, and no footer well.
+                QuickAIView(viewModel: viewModel)
+            } else {
+                rootSurface
+            }
+        }
+        .frame(width: viewModel.currentPanelWidth)
+        .panelGlass()
+        .overlay(alignment: viewModel.isQuickAIPresented ? .bottomTrailing : .topTrailing) {
+            actionPopover
+        }
+        .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
+        .onAppear { focusInput() }
+        .onChange(of: viewModel.inputFocusRequest) { _, _ in focusInput() }
+        .onChange(of: viewModel.launcherMatches.map(\.id)) { _, matches in
+            if !matches.isEmpty { viewModel.announceCurrentLauncherSelection() }
+        }
+        .onChange(of: viewModel.launcherSelectionAnnouncementRevision) { _, _ in
+            announceLauncherSelection(viewModel.launcherSelectionAnnouncement)
+        }
+        .onChange(of: viewModel.screenHistory.announcementRevision) { _, _ in
+            announceScreenHistoryResult(viewModel.screenHistory.resultAnnouncement)
+        }
+        .onChange(of: viewModel.errorMessage) { _, error in
+            guard let error, !error.isEmpty else { return }
+            postAccessibilityAnnouncement("Error. \(error)", priority: .high)
+        }
+    }
+
+    /// Root search: the input row, the launcher list, the catalogs, and the
+    /// footer well. Answers never draw here; they live on the Quick AI
+    /// surface, and a thread kept behind root search stays out of sight.
+    private var rootSurface: some View {
         VStack(spacing: 0) {
             // Input row: the Add Context control, a leading glyph, the field,
             // and one square menu button. No send circle and no accent
@@ -29,13 +65,9 @@ struct OverlayView: View {
                 .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
                 .help("Add context: a window, a selection, an area, or a screen (or type @)")
 
-                Image(systemName: viewModel.isAnswerActive ? "sparkles" : "magnifyingglass")
+                Image(systemName: "magnifyingglass")
                     .font(AQDesign.TypeToken.glyph)
-                    .foregroundStyle(
-                        viewModel.isAnswerActive
-                            ? AQDesign.ColorToken.textSecondary
-                            : AQDesign.ColorToken.textTertiary
-                    )
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .accessibilityHidden(true)
 
                 // Single line, scrolling horizontally like Raycast. A
@@ -50,77 +82,7 @@ struct OverlayView: View {
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit { Task { await viewModel.submitResolvingFuzzyAlias() } }
-                    .onKeyPress(.tab) {
-                        viewModel.handleTab() ? .handled : .ignored
-                    }
-                    .onKeyPress(.downArrow) {
-                        if viewModel.isAskQuestionActive {
-                            viewModel.moveAskQuestionSelection(1)
-                            return .handled
-                        }
-                        if viewModel.isTransformChooserPresented {
-                            viewModel.moveTransformChooserSelection(1)
-                            return .handled
-                        }
-                        if viewModel.isModelChooserPresented {
-                            viewModel.moveModelChooserSelection(1)
-                            return .handled
-                        }
-                        if viewModel.isAddContextMenuPresented {
-                            viewModel.moveAddContextSelection(1)
-                            return .handled
-                        }
-                        if viewModel.isConversationViewPresented, viewModel.input.isEmpty {
-                            viewModel.moveConversationViewSelection(1)
-                            return .handled
-                        }
-                        if viewModel.isAnswerActive, viewModel.input.isEmpty {
-                            viewModel.browseConversations(1)
-                            return .handled
-                        }
-                        guard !viewModel.launcherMatches.isEmpty else { return .ignored }
-                        viewModel.moveSelectionVertically(1)
-                        return .handled
-                    }
-                    .onKeyPress(.upArrow) {
-                        if viewModel.isAskQuestionActive {
-                            viewModel.moveAskQuestionSelection(-1)
-                            return .handled
-                        }
-                        if viewModel.isTransformChooserPresented {
-                            viewModel.moveTransformChooserSelection(-1)
-                            return .handled
-                        }
-                        if viewModel.isModelChooserPresented {
-                            viewModel.moveModelChooserSelection(-1)
-                            return .handled
-                        }
-                        if viewModel.isAddContextMenuPresented {
-                            viewModel.moveAddContextSelection(-1)
-                            return .handled
-                        }
-                        if viewModel.isConversationViewPresented, viewModel.input.isEmpty {
-                            viewModel.moveConversationViewSelection(-1)
-                            return .handled
-                        }
-                        if viewModel.isAnswerActive, viewModel.input.isEmpty {
-                            viewModel.browseConversations(-1)
-                            return .handled
-                        }
-                        guard !viewModel.launcherMatches.isEmpty else { return .ignored }
-                        viewModel.moveSelectionVertically(-1)
-                        return .handled
-                    }
-                    .onKeyPress(.rightArrow) {
-                        guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
-                        viewModel.moveApplicationSelection(1)
-                        return .handled
-                    }
-                    .onKeyPress(.leftArrow) {
-                        guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
-                        viewModel.moveApplicationSelection(-1)
-                        return .handled
-                    }
+                    .modifier(ComposerKeyRouting(viewModel: viewModel))
                     .onChange(of: viewModel.input) { _, newValue in
                         viewModel.resetApplicationSelection()
                         viewModel.noteInteraction()
@@ -155,124 +117,31 @@ struct OverlayView: View {
 
             if viewModel.launchSelection != nil {
                 HouseDivider()
-                HStack(spacing: AQDesign.Space.standard) {
-                    Image(systemName: "text.cursor")
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                    VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
-                        Text(viewModel.launchSelectionTitle)
-                            .font(AQDesign.TypeToken.label)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text(viewModel.launchSelectionPreview)
-                            .font(AQDesign.TypeToken.metadata)
-                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer(minLength: AQDesign.Space.standard)
-                    if !viewModel.chipTransformOptions.isEmpty {
-                        Button {
-                            viewModel.toggleTransformChooser()
-                        } label: {
-                            Label("Transform", systemImage: "wand.and.stars")
-                                .font(AQDesign.TypeToken.metadata)
-                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                                .padding(.horizontal, AQDesign.Space.standard)
-                                .frame(height: AQDesign.controlHeight)
-                                .background(
-                                    RoundedRectangle(
-                                        cornerRadius: AQDesign.fieldCornerRadius,
-                                        style: .continuous
-                                    )
-                                    .fill(AQDesign.ColorToken.chipFill)
-                                )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Transform selected text")
-                        .help("Transform the selected text (⌘⌥T)")
-                    }
-                    Button {
-                        viewModel.clearLaunchSelection()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove selected text")
-                    .help("Remove the selected text from the next request")
-                }
-                .padding(.horizontal, AQDesign.Space.panel)
-                .padding(.vertical, AQDesign.Space.standard)
+                LaunchSelectionStrip(viewModel: viewModel)
 
                 if viewModel.isTransformChooserPresented {
-                    transformChooser
+                    TransformChooserPane(viewModel: viewModel)
                 }
             }
 
             if viewModel.isModelChooserPresented {
                 HouseDivider()
-                modelChooser
+                ModelChooserPane(viewModel: viewModel)
             }
 
             if viewModel.isAddContextMenuPresented {
                 HouseDivider()
-                addContextMenu
+                AddContextPane(viewModel: viewModel)
             }
 
             if viewModel.hasPendingAttachment {
                 HouseDivider()
-                HStack(spacing: AQDesign.Space.standard) {
-                    HStack(spacing: 4) {
-                        ForEach(Array(viewModel.pendingImages.suffix(4).enumerated()), id: \.offset) { _, image in
-                            if let preview = NSImage(data: image.data) {
-                                Image(nsImage: preview)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous))
-                                    .accessibilityLabel(
-                                        "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
-                                    )
-                            }
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(viewModel.attachmentTitle)
-                            .font(AQDesign.TypeToken.label)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text(viewModel.attachmentSubtitle)
-                            .font(AQDesign.TypeToken.metadata)
-                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer()
-                    Button {
-                        viewModel.clearAttachments()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove attachments")
-                    .help("Remove all attachments (⌫ removes the newest)")
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-            }
-
-            if viewModel.isConversationViewPresented {
-                HouseDivider()
-                ConversationView(viewModel: viewModel)
+                AttachmentStrip(viewModel: viewModel)
             }
 
             if !viewModel.isTransformChooserPresented,
                !viewModel.isModelChooserPresented,
                !viewModel.isAddContextMenuPresented,
-               !viewModel.isConversationViewPresented,
                !viewModel.launcherMatches.isEmpty {
                 HouseDivider()
                 if viewModel.isGridCatalog {
@@ -321,65 +190,6 @@ struct OverlayView: View {
                 }
             }
 
-            if !viewModel.isConversationViewPresented,
-               (!viewModel.output.isEmpty || viewModel.isStreaming) {
-                HouseDivider()
-                VStack(alignment: .leading, spacing: 8) {
-                    if viewModel.conversationMessages.count > 2 {
-                        // Earlier turns, compact; the latest answer follows in full.
-                        ConversationTranscript(
-                            messages: Array(viewModel.conversationMessages.dropLast(2)),
-                            viewModel: viewModel
-                        )
-                            .frame(maxHeight: PanelSizing.transcriptHeight)
-                        HouseDivider()
-                    }
-                    if let question = viewModel.lastQuestion, !question.isEmpty {
-                        HouseChip(text: question)
-                            .accessibilityLabel("Question: \(question)")
-                    }
-                    // The model paused to ask. The card is live until an
-                    // option is picked, then stays in the thread as the record.
-                    if let ask = viewModel.pendingAskQuestion {
-                        AskUserQuestionCard(
-                            question: ask,
-                            selectedIndex: viewModel.askQuestionSelectionIndex,
-                            isInteractive: !ask.isAnswered,
-                            onMove: { viewModel.moveAskQuestionSelection($0) },
-                            onPick: { viewModel.answerAskQuestion(index: $0) }
-                        )
-                    }
-                    if viewModel.isStreaming,
-                       viewModel.output.isEmpty,
-                       viewModel.pendingAskQuestion == nil {
-                        HStack(spacing: 8) {
-                            ThinkingIndicator()
-                                .frame(width: 18, height: 18)
-                            Text(viewModel.streamingStatus ?? "Thinking…")
-                                .font(AQDesign.TypeToken.label)
-                                .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                        }
-                        .frame(height: 28)
-                    } else if viewModel.pendingAskQuestion != nil, viewModel.output.isEmpty {
-                        // The card is the only thing to show; an empty answer
-                        // body would draw a bare streaming caret under it.
-                        EmptyView()
-                    } else {
-                        MarkdownTextView(
-                            markdown: viewModel.output,
-                            isStreaming: viewModel.isStreaming
-                        )
-                        .frame(maxWidth: House.Layout.answerMaxWidth, alignment: .leading)
-                        .frame(maxHeight: PanelSizing.maxBodyHeight)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, AQDesign.Space.panel)
-                .padding(.top, 18)
-                .padding(.bottom, AQDesign.Space.panel)
-                .transition(.opacity)
-            }
-
             // Error message
             if let error = viewModel.errorMessage {
                 HouseDivider()
@@ -392,8 +202,7 @@ struct OverlayView: View {
                         Button("Open System Settings") {
                             viewModel.openAccessibilitySettings()
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(InkButtonStyle())
                     }
                 }
                 .padding(.horizontal, 20)
@@ -404,30 +213,12 @@ struct OverlayView: View {
                 FooterWell { LauncherFooter(viewModel: viewModel) }
             }
         }
-        .frame(width: viewModel.currentPanelWidth)
-        .panelGlass()
-        .overlay(alignment: .topTrailing) {
-            actionPopover
-        }
-        .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
-        .onAppear { focusInput() }
-        .onChange(of: viewModel.inputFocusRequest) { _, _ in focusInput() }
-        .onChange(of: viewModel.launcherMatches.map(\.id)) { _, matches in
-            if !matches.isEmpty { viewModel.announceCurrentLauncherSelection() }
-        }
-        .onChange(of: viewModel.launcherSelectionAnnouncementRevision) { _, _ in
-            announceLauncherSelection(viewModel.launcherSelectionAnnouncement)
-        }
-        .onChange(of: viewModel.screenHistory.announcementRevision) { _, _ in
-            announceScreenHistoryResult(viewModel.screenHistory.resultAnnouncement)
-        }
-        .onChange(of: viewModel.errorMessage) { _, error in
-            guard let error, !error.isEmpty else { return }
-            postAccessibilityAnnouncement("Error. \(error)", priority: .high)
-        }
     }
 
     private func focusInput() {
+        // The Quick AI composer owns focus while the surface is up; asking
+        // the hidden root field would move nothing.
+        guard !viewModel.isQuickAIPresented else { return }
         FocusRequest.apply($inputFocused)
     }
 
@@ -447,20 +238,28 @@ struct OverlayView: View {
         // dark sheet whenever the window was tall.
         .panelGlass(radius: AQDesign.cardCornerRadius)
         .panelShadows()
+        // At root the pane hangs from the input row; on the Quick AI
+        // surface it hugs the composer, so the flexible frame fills the
+        // surface's proposal and the palette sits at its bottom edge, not
+        // over the header.
         .frame(
             maxHeight: viewModel.activeItemActionForm?.minimumWindowHeight
                 .map { $0 - PanelSizing.inputHeight - PanelSizing.paneBottomMargin }
                 ?? 460,
-            alignment: .top
+            alignment: viewModel.isQuickAIPresented ? .bottom : .top
         )
         // Below the input row and, when present, the attachment strip:
-        // without the offset the pane covered the attachment preview.
+        // without the offset the pane covered the attachment preview. On the
+        // Quick AI surface the pane floats above the bottom composer instead.
         .padding(
             .top,
-            PanelSizing.inputHeight
-                + (viewModel.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
+            viewModel.isQuickAIPresented
+                ? 0
+                : PanelSizing.inputHeight
+                    + (viewModel.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
         )
-        .padding(.trailing, 12)
+        .padding(.bottom, viewModel.isQuickAIPresented ? QuickAIView.composerRowHeight : 0)
+        .padding(.trailing, House.Spacing.sm)
     }
 
     @ViewBuilder
@@ -534,164 +333,6 @@ struct OverlayView: View {
         .padding(.top, AQDesign.Space.standard)
         .padding(.bottom, AQDesign.Space.standard)
         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
-    }
-
-    /// Keyboard-first Transform chooser: ↑↓ move, Return runs, Esc closes.
-    /// Opened by the Transform chip or ⌘⇧D. Every row is a saved rewrite action
-    /// (or the Translator) acting on the captured selection snapshot.
-    private var transformChooser: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: AQDesign.Space.row) {
-                Text("Transform selected text")
-                    .font(AQDesign.TypeToken.section)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                Spacer()
-                KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: "Run", keys: ["↩"])
-                KeyHint(label: "Close", keys: ["esc"])
-            }
-            .padding(.horizontal, AQDesign.Space.panel)
-            .padding(.top, AQDesign.Space.standard)
-
-            SelectableListPane(
-                items: viewModel.chipTransformOptions,
-                selectedIndex: $viewModel.transformChooserIndex,
-                rowHeight: AQDesign.rowHeight,
-                onActivate: { _ in
-                    Task { await viewModel.runTransformChooserSelection() }
-                }
-            ) { _, option, isSelected in
-                HStack(spacing: AQDesign.Space.row) {
-                    IconTile {
-                        Image(systemName: option.systemImage)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    }
-                    Text(option.title)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    Spacer()
-                }
-                .padding(.horizontal, AQDesign.Space.row)
-                .contentShape(Rectangle())
-            }
-            .frame(
-                height: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
-            )
-            .padding(.horizontal, AQDesign.Space.standard)
-            .padding(.bottom, AQDesign.Space.standard)
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private var modelChooser: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: AQDesign.Space.row) {
-                Text(viewModel.modelChooserPurpose.title)
-                    .font(AQDesign.TypeToken.section)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                Spacer()
-                KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: viewModel.modelChooserPurpose.confirmTitle, keys: ["↩"])
-                KeyHint(label: "Close", keys: ["esc"])
-            }
-            .padding(.horizontal, AQDesign.Space.panel)
-            .padding(.top, AQDesign.Space.standard)
-
-            SelectableListPane(
-                items: viewModel.modelChooserOptions,
-                selectedIndex: $viewModel.modelChooserIndex,
-                rowHeight: AQDesign.rowHeight,
-                scrollsToSelection: true,
-                onActivate: { _ in
-                    Task { await viewModel.runModelChooserSelection() }
-                }
-            ) { _, option, _ in
-                HStack(spacing: AQDesign.Space.row) {
-                    IconTile {
-                        Image(systemName: "cpu")
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    }
-                    Text(option.title)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .lineLimit(1)
-                    Text(option.detail)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, AQDesign.Space.row)
-                .contentShape(Rectangle())
-            }
-            .frame(
-                height: PanelSizing.actionListHeight(
-                    rows: viewModel.modelChooserOptions.count,
-                    padded: false
-                )
-            )
-            .padding(.horizontal, AQDesign.Space.standard)
-            .padding(.bottom, AQDesign.Space.standard)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(viewModel.modelChooserPurpose.title)
-    }
-
-    private var addContextMenu: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: AQDesign.Space.row) {
-                Text("Add Context")
-                    .font(AQDesign.TypeToken.section)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                Spacer()
-                KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: "Add", keys: ["↩"])
-                KeyHint(label: "Close", keys: ["esc"])
-            }
-            .padding(.horizontal, AQDesign.Space.panel)
-            .padding(.top, AQDesign.Space.standard)
-
-            SelectableListPane(
-                items: viewModel.addContextOptions,
-                selectedIndex: $viewModel.addContextIndex,
-                rowHeight: AQDesign.rowHeight,
-                scrollsToSelection: true,
-                onActivate: { entry in
-                    Task { await viewModel.addContext(entry) }
-                }
-            ) { _, entry, _ in
-                HStack(spacing: AQDesign.Space.row) {
-                    IconTile {
-                        Image(systemName: entry.systemImage)
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    }
-                    Text(entry.title)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .lineLimit(1)
-                    Text(entry.detail)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, AQDesign.Space.row)
-                .contentShape(Rectangle())
-            }
-            .frame(
-                height: PanelSizing.actionListHeight(
-                    rows: viewModel.addContextOptions.count,
-                    padded: false
-                )
-            )
-            .padding(.horizontal, AQDesign.Space.standard)
-            .padding(.bottom, AQDesign.Space.standard)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Add Context")
     }
 
     private var launcherSectionTitle: String {
@@ -817,57 +458,10 @@ struct OverlayView: View {
     }
 }
 
-private struct ConversationTranscript: View {
-    let messages: [QuickMessage]
-    @Bindable var viewModel: QuickViewModel
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(messages) { message in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text((message.role == .user ? "You" : "Answer").uppercased())
-                                .font(AQDesign.TypeToken.section)
-                                .tracking(AQDesign.TypeToken.sectionTracking)
-                                .foregroundStyle(
-                                    message.role == .user
-                                        ? AQDesign.ColorToken.textPrimary
-                                        : AQDesign.ColorToken.textTertiary
-                                )
-                            if let question = message.askUserQuestion {
-                                // The record of a question the model asked and
-                                // the option the user picked.
-                                AskUserQuestionCard(question: question, isInteractive: false)
-                            } else {
-                                CollapsibleMessageText(
-                                    state: viewModel.collapseState(for: message)
-                                ) {
-                                    viewModel.toggleTranscriptMessage(message.id)
-                                }
-                            }
-                        }
-                        .id(message.id)
-                    }
-                }
-                // No horizontal inset: earlier turns line up with the
-                // question row and the answer below them.
-                .padding(.vertical, 8)
-            }
-            .onAppear {
-                guard let lastID = messages.last?.id else { return }
-                proxy.scrollTo(lastID, anchor: .bottom)
-            }
-            .onChange(of: messages.count) { _, _ in
-                guard let lastID = messages.last?.id else { return }
-                proxy.scrollTo(lastID, anchor: .bottom)
-            }
-        }
-        .accessibilityLabel("Current quick action conversation")
-    }
-}
-
-private struct LauncherResultRow: View {
+/// One launcher row: the 26 pt icon tile, `label` title, `meta` detail,
+/// and the trailing hotkey, status light, or type. The Quick AI surface
+/// draws Recent Chats with the same row.
+struct LauncherResultRow: View {
     let result: LauncherSearchResult
     let isSelected: Bool
     var hotkey: ActionHotkey? = nil
@@ -1648,3 +1242,349 @@ struct ThinkingIndicator: View {
         .accessibilityLabel("Working")
     }
 }
+
+// MARK: - Shared composer pieces
+//
+// The root input row and the Quick AI composer are two fields with one
+// keyboard contract; the strips and choosers under them are the same views
+// on both surfaces (inline at root, floating over the Quick AI thread).
+
+/// The arrow keys and Tab, routed in one fixed precedence: a live question,
+/// the Transform chooser, the model chooser, Add Context, Recent Chats, the
+/// answer's chat browsing, then the launcher list.
+struct ComposerKeyRouting: ViewModifier {
+    @Bindable var viewModel: QuickViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onKeyPress(.tab) {
+                viewModel.handleTab() ? .handled : .ignored
+            }
+            .onKeyPress(.downArrow) { move(1) }
+            .onKeyPress(.upArrow) { move(-1) }
+            .onKeyPress(.rightArrow) {
+                guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
+                viewModel.moveApplicationSelection(1)
+                return .handled
+            }
+            .onKeyPress(.leftArrow) {
+                guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
+                viewModel.moveApplicationSelection(-1)
+                return .handled
+            }
+    }
+
+    private func move(_ delta: Int) -> KeyPress.Result {
+        if viewModel.isAskQuestionActive {
+            viewModel.moveAskQuestionSelection(delta)
+            return .handled
+        }
+        if viewModel.isTransformChooserPresented {
+            viewModel.moveTransformChooserSelection(delta)
+            return .handled
+        }
+        if viewModel.isModelChooserPresented {
+            viewModel.moveModelChooserSelection(delta)
+            return .handled
+        }
+        if viewModel.isAddContextMenuPresented {
+            viewModel.moveAddContextSelection(delta)
+            return .handled
+        }
+        if viewModel.isRecentChatsPresented {
+            viewModel.moveRecentChatsSelection(delta)
+            return .handled
+        }
+        if viewModel.isAnswerActive, viewModel.input.isEmpty {
+            viewModel.browseConversations(delta)
+            return .handled
+        }
+        guard !viewModel.launcherMatches.isEmpty else { return .ignored }
+        viewModel.moveSelectionVertically(delta)
+        return .handled
+    }
+}
+
+/// The selected text captured at launch: its title, a preview, the Transform
+/// control, and a remove button.
+struct LaunchSelectionStrip: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        HStack(spacing: AQDesign.Space.standard) {
+            Image(systemName: "text.cursor")
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
+                Text(viewModel.launchSelectionTitle)
+                    .font(AQDesign.TypeToken.label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(viewModel.launchSelectionPreview)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: AQDesign.Space.standard)
+            if !viewModel.chipTransformOptions.isEmpty {
+                Button {
+                    viewModel.toggleTransformChooser()
+                } label: {
+                    Label("Transform", systemImage: "wand.and.stars")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .padding(.horizontal, AQDesign.Space.standard)
+                        .frame(height: AQDesign.controlHeight)
+                        .background(
+                            RoundedRectangle(
+                                cornerRadius: AQDesign.fieldCornerRadius,
+                                style: .continuous
+                            )
+                            .fill(AQDesign.ColorToken.chipFill)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Transform selected text")
+                .help("Transform the selected text (⌘⌥T)")
+            }
+            Button {
+                viewModel.clearLaunchSelection()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove selected text")
+            .help("Remove the selected text from the next request")
+        }
+        .padding(.horizontal, AQDesign.Space.panel)
+        .padding(.vertical, AQDesign.Space.standard)
+    }
+}
+
+/// The attachments riding on the next question: up to four thumbnails, the
+/// attachment title and detail, and a clear button.
+struct AttachmentStrip: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        HStack(spacing: AQDesign.Space.standard) {
+            HStack(spacing: AQDesign.Space.compact) {
+                ForEach(Array(viewModel.pendingImages.suffix(4).enumerated()), id: \.offset) { _, image in
+                    if let preview = NSImage(data: image.data) {
+                        Image(nsImage: preview)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous))
+                            .accessibilityLabel(
+                                "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
+                            )
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
+                Text(viewModel.attachmentTitle)
+                    .font(AQDesign.TypeToken.label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(viewModel.attachmentSubtitle)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button {
+                viewModel.clearAttachments()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove attachments")
+            .help("Remove all attachments (⌫ removes the newest)")
+        }
+        .padding(.horizontal, AQDesign.Space.panel)
+        .padding(.vertical, AQDesign.Space.standard)
+    }
+}
+
+/// Keyboard-first Transform chooser: ↑↓ move, Return runs, Esc closes.
+/// Opened by the Transform chip or ⌘⌥T. Every row is a saved rewrite action
+/// (or the Translator) acting on the captured selection snapshot. Inline
+/// under the root input row; floating above the Quick AI composer.
+struct TransformChooserPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Transform selected text")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Run", keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.chipTransformOptions,
+                selectedIndex: $viewModel.transformChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                onActivate: { _ in
+                    Task { await viewModel.runTransformChooserSelection() }
+                }
+            ) { _, option, isSelected in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: option.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The keyboard model chooser (`⇧⌘R`, Change Model): ↑↓ move, Return picks,
+/// Esc closes. Inline under the root input row; floating above the Quick AI
+/// composer.
+struct ModelChooserPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text(viewModel.modelChooserPurpose.title)
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: viewModel.modelChooserPurpose.confirmTitle, keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.modelChooserOptions,
+                selectedIndex: $viewModel.modelChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { _ in
+                    Task { await viewModel.runModelChooserSelection() }
+                }
+            ) { _, option, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: "cpu")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(option.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(
+                    rows: viewModel.modelChooserOptions.count,
+                    padded: false
+                )
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(viewModel.modelChooserPurpose.title)
+    }
+}
+
+/// Add Context: Focused Window, Selected Text, Selected Area, Entire Screen.
+/// Opened by the control left of the composer or by typing `@`.
+struct AddContextPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Add Context")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Add", keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: viewModel.addContextOptions,
+                selectedIndex: $viewModel.addContextIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { entry in
+                    Task { await viewModel.addContext(entry) }
+                }
+            ) { _, entry, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: entry.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(entry.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(entry.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(
+                height: PanelSizing.actionListHeight(
+                    rows: viewModel.addContextOptions.count,
+                    padded: false
+                )
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Add Context")
+    }
+}
+

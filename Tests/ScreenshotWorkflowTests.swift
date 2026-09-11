@@ -132,7 +132,7 @@ struct ScreenshotWorkflowTests {
         #expect(vm.visionModelName == InferenceProvider.deepSeekVisionModel)
         #expect(vm.visionRoutingNote == "Sent to DeepSeek API")
         vm.pendingImage = Self.sampleAttachment
-        #expect(vm.activeModelDisplay.contains(InferenceProvider.deepSeekVisionModel))
+        #expect(vm.activeModelDisplay.contains(ModelProfile.displayName(forModelID: InferenceProvider.deepSeekVisionModel)))
 
         let fresh = QuickViewModel()
         #expect(fresh.visionProvider?.id == InferenceProvider.deepSeekID)
@@ -166,7 +166,10 @@ struct ScreenshotWorkflowTests {
         let migrated = try JSONDecoder().decode(QuickSettings.self, from: legacyData)
         #expect(migrated.providers[index].models.contains(InferenceProvider.deepSeekVisionModel))
         #expect(migrated.visionProviderID == InferenceProvider.deepSeekID)
-        #expect(migrated.providers[index].selectedModel == InferenceProvider.deepSeekVisionModel)
+        // Version 13 moved text onto the vision id; version 23 sunset it for
+        // text again, so an old blob lands on the flash text model.
+        #expect(migrated.providers[index].selectedModel == InferenceProvider.deepSeekDefaultModel)
+        #expect(migrated.visionModel == InferenceProvider.deepSeekVisionModel)
     }
 
     // MARK: - Result actions

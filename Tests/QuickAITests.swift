@@ -66,6 +66,8 @@ struct QuickAITests {
         await ask(vm, mock, "second question", reply: "Second answer")
         vm.startNewConversation()
         #expect(vm.history.count == 2)
+        // Back to root search: the catalogs live there, not on the surface.
+        vm.closeQuickAI()
 
         vm.input = "chats"
         #expect(vm.launcherMatches.contains(.catalog(.chats, count: 2)))
@@ -108,7 +110,9 @@ struct QuickAITests {
 
         await vm.performResultAction(.deleteChat)
         #expect(vm.history.count == 1)
-        #expect(!vm.isAnswerActive)
+        #expect(vm.output.isEmpty, "the deleted chat leaves the surface empty")
+        #expect(vm.currentConversation == nil)
+        #expect(vm.isQuickAIPresented, "deleting a chat does not leave Quick AI")
     }
 
     @Test func chatArrowsStepBackwardsThroughRecency() async {

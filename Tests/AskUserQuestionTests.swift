@@ -199,18 +199,16 @@ struct AskUserQuestionTests {
         #expect(decoded.askUserQuestion == nil)
     }
 
-    // MARK: - Footer hint
+    // MARK: - Composer hint
 
-    @Test func footerHintNamesThePrimaryActionReturnWillRun() async {
+    @Test func theComposerNamesThePrimaryActionReturnWillRun() async {
         let pasting = await Self.answeredViewModel(primary: .pasteToActiveApp)
-        #expect(pasting.footerHints.first?.label == "Paste back")
-        #expect(pasting.footerHints.contains { $0.label == "Copy" && $0.keys == ["⇧", "⌘", "C"] })
+        #expect(pasting.quickAIComposerAction == .init(label: "Paste Response", keys: ["↩"]))
 
         let copying = await Self.answeredViewModel(primary: .copyToClipboard)
-        #expect(copying.footerHints.first?.label == "Copy answer")
-        #expect(copying.footerHints.first?.keys == ["↩"])
-        #expect(!copying.footerHints.map(\.label).contains("Paste back"))
-        // ⌘⇧C stays the Copy hint in both settings.
-        #expect(copying.footerHints.contains { $0.label == "Copy" && $0.keys == ["⇧", "⌘", "C"] })
+        #expect(copying.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
+        // ⌘⇧C stays the explicit copy in both settings.
+        #expect(copying.resultActions.contains(.copy))
+        #expect(ResultAction.copy.shortcut.keyCaps == ["⇧", "⌘", "C"])
     }
 }

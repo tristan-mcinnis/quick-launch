@@ -103,17 +103,16 @@ struct AskAITests {
         #expect(ids.contains("catalog:snippets"))
     }
 
-    @Test func tabSwitchesTheTypedTextToTheAI() async {
+    @Test func tabHandsTheTypedTextToQuickAIAndSendsIt() async {
         let (vm, catalog, ai) = make()
         vm.input = "hi"
         #expect(vm.handleTab())
-        #expect(vm.inputMode == .askAI)
-        #expect(vm.input == "hi")
+        #expect(vm.isQuickAIPresented)
         #expect(vm.launcherMatches.isEmpty)
-        #expect(vm.footerContext.hasPrefix("Ask AI"))
-        await vm.submitResolvingFuzzyAlias()
+        await vm.tabSubmitTask?.value
         #expect(catalog.launched == nil)
-        #expect(await ai.sendCallCount == 1)
+        #expect(await ai.sendCallCount == 1, "Tab submits in the same gesture")
+        #expect(vm.lastQuestion == "hi")
         #expect(vm.inputMode == nil)
     }
 
@@ -125,12 +124,12 @@ struct AskAITests {
         #expect(vm.input.hasPrefix("/grammar"))
     }
 
-    @Test func backspaceOnEmptyLeavesTheMode() {
+    @Test func backspaceOnEmptyLeavesTheSurface() {
         let (vm, _, _) = make()
         vm.input = ""
-        vm.enterAskAIMode()
+        vm.openQuickAI()
         #expect(vm.popLayerForEmptyBackspace())
-        #expect(vm.inputMode == nil)
+        #expect(!vm.isQuickAIPresented)
     }
 
     @Test func hotkeyPathOpensTheModeWithNothingTyped() async {
@@ -138,7 +137,9 @@ struct AskAITests {
         let item = vm.catalogItem(kind: .askAI, itemID: QuickViewModel.askAIItemID)
         #expect(item != nil)
         await vm.performLauncherItem(item!)
-        #expect(vm.inputMode == .askAI)
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.input.isEmpty)
+        #expect(vm.quickAITitle == "Quick AI")
     }
 
     @Test func askAIHasPinAliasAndHotkeyActions() {

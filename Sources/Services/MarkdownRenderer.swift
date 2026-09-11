@@ -176,9 +176,11 @@ enum MarkdownRenderer {
     /// The house answer line height (1.55) as leading, added in one pass at
     /// the end so list hanging indents and paragraph spacing survive.
     /// `measuredHeight` reads the same string, so the window cannot drift.
+    /// The leading is the target minus SF's own line height
+    /// (`AQDesign.TypeToken.proseLineSpacing`), about 5 pt for 14 pt text.
     private static func applyProseLineHeight(_ text: NSAttributedString) -> NSAttributedString {
         guard text.length > 0 else { return text }
-        let leading = House.TypeToken.Size.body * (House.TypeToken.LineHeight.body - 1)
+        let leading = AQDesign.TypeToken.proseLineSpacing
         let output = NSMutableAttributedString(attributedString: text)
         let whole = NSRange(location: 0, length: output.length)
         output.enumerateAttribute(.paragraphStyle, in: whole) { value, range, _ in

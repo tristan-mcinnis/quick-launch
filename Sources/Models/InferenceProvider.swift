@@ -73,7 +73,11 @@ struct InferenceProvider: Codable, Sendable, Equatable, Identifiable, Hashable {
 extension InferenceProvider {
     static let lmStudioID = UUID(uuidString: "EB79F178-A20A-4BB2-B0CE-C751E6480E0D")!
     static let deepSeekID = UUID(uuidString: "D49908A5-649F-462B-A569-F75495568A82")!
+    /// DeepSeek's text model, the default Quick AI answers with.
+    static let deepSeekDefaultModel = "deepseek-v4-flash"
     /// DeepSeek's image-capable model (api-docs.deepseek.com/guides/vision).
+    /// Sunset for text on 2026-09-11: it ships turned off in Manage Models
+    /// and stays the image route until DeepSeek ships vision on the flash id.
     static let deepSeekVisionModel = "deepseek-v4-flash-vision-exp"
     static let moonshotID = UUID(uuidString: "9001D74E-B44B-46F7-B8BF-803E743A64C1")!
     static let openAIID = UUID(uuidString: "343A1F1C-C113-493F-92B8-F93D0636603F")!
@@ -117,8 +121,8 @@ extension InferenceProvider {
                 kind: .openAICompatible,
                 location: .cloud,
                 baseURL: "https://api.deepseek.com",
-                models: ["deepseek-v4-flash", "deepseek-v4-pro", deepSeekVisionModel],
-                selectedModel: deepSeekVisionModel,
+                models: [deepSeekDefaultModel, "deepseek-v4-pro", deepSeekVisionModel],
+                selectedModel: deepSeekDefaultModel,
                 discovery: .openAI,
                 isBuiltIn: true
             ),

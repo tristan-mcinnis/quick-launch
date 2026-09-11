@@ -146,7 +146,7 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.activeModelDisplay == model, "⌘R stays on the model in use")
     }
 
-    @Test func commandNStartsANewChat() async throws {
+    @Test func commandNStartsANewChatOnTheSurface() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
 
@@ -154,7 +154,9 @@ struct QuickAIKeyboardTests {
 
         #expect(await waitFor { viewModel.currentConversation == nil })
         #expect(viewModel.output.isEmpty)
-        #expect(viewModel.topLayer == .root)
+        #expect(viewModel.isQuickAIPresented, "a new chat starts in Quick AI, not in root search")
+        #expect(viewModel.topLayer == .answer)
+        #expect(viewModel.quickAITitle == "Quick AI")
     }
 
     @Test func commandBracketsStepThroughChats() async throws {
@@ -184,18 +186,21 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.output == "An answer.")
     }
 
-    @Test func commandJOpensAndClosesTheConversationView() async throws {
+    @Test func commandJOpensAndClosesRecentChats() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
 
         #expect(try overlay.press("j", keyCode: 38, [.command]))
-        #expect(viewModel.isConversationViewPresented)
-        #expect(viewModel.topLayer == .conversationView)
+        #expect(viewModel.isRecentChatsPresented)
+        #expect(viewModel.isQuickAIPresented, "Recent Chats lives inside the Quick AI window")
+        #expect(viewModel.topLayer == .recentChats)
         #expect(!viewModel.conversationMessages.isEmpty)
+        #expect(viewModel.currentPanelWidth == PanelSizing.panelWidth, "one column, no split view")
 
         #expect(try overlay.press("j", keyCode: 38, [.command]))
-        #expect(!viewModel.isConversationViewPresented)
-        #expect(viewModel.output == "An answer.", "leaving the view keeps the thread")
+        #expect(!viewModel.isRecentChatsPresented)
+        #expect(viewModel.isQuickAIPresented, "back to the thread")
+        #expect(viewModel.output == "An answer.", "leaving the list keeps the thread")
         #expect(viewModel.currentConversation != nil)
     }
 
@@ -280,15 +285,16 @@ struct QuickAIKeyboardTests {
         #expect(overlay.presenter.dismissCount == 0)
     }
 
-    @Test func escapeClosesTheConversationViewAndKeepsTheThread() async throws {
+    @Test func escapeClosesRecentChatsAndKeepsTheThread() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
         #expect(try overlay.press("j", keyCode: 38, [.command]))
-        #expect(viewModel.topLayer == .conversationView)
+        #expect(viewModel.topLayer == .recentChats)
 
         try overlay.pressEscape()
 
-        #expect(!viewModel.isConversationViewPresented)
+        #expect(!viewModel.isRecentChatsPresented)
+        #expect(viewModel.isQuickAIPresented)
         #expect(viewModel.output == "An answer.")
         #expect(viewModel.currentConversation != nil)
         #expect(overlay.presenter.dismissCount == 0)
@@ -304,30 +310,57 @@ struct QuickAIKeyboardTests {
         #expect(await waitFor { viewModel.topLayer == .modelChooser })
 
         try overlay.pressEscape()
-        #expect(viewModel.topLayer == .conversationView, "the chooser goes, the view stays")
+        #expect(viewModel.topLayer == .recentChats, "the chooser goes, the list stays")
 
         try overlay.pressEscape()
-        #expect(!viewModel.isConversationViewPresented)
-        #expect(viewModel.topLayer == .answer)
+        #expect(!viewModel.isRecentChatsPresented)
+        #expect(viewModel.topLayer == .answer, "the list goes, the thread stays")
+        #expect(viewModel.currentConversation?.id == conversation.id)
+
+        try overlay.pressEscape()
+        #expect(!viewModel.isQuickAIPresented, "the surface goes, root search is back")
+        #expect(viewModel.topLayer == .root)
+        #expect(overlay.presenter.dismissCount == 0)
+        #expect(viewModel.output == "An answer.", "Escape never discards the thread")
         #expect(viewModel.currentConversation?.id == conversation.id)
 
         try overlay.pressEscape()
         #expect(overlay.presenter.dismissCount == 1, "only the last Escape hides the overlay")
-        #expect(viewModel.output == "An answer.", "Escape never discards the thread")
         #expect(viewModel.currentConversation?.id == conversation.id)
     }
 
-    @Test func escapeOnAnAnswerHidesTheOverlayInsteadOfDiscardingIt() async throws {
+    @Test func escapeOnAnAnswerReturnsToRootSearchAndKeepsTheThread() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
         #expect(viewModel.topLayer == .answer)
 
         try overlay.pressEscape()
 
-        #expect(overlay.presenter.dismissCount == 1)
+        #expect(overlay.presenter.dismissCount == 0, "the first Escape leaves the surface, not the window")
+        #expect(!viewModel.isQuickAIPresented)
+        #expect(viewModel.topLayer == .root)
+        #expect(viewModel.output == "An answer.", "the thread is kept")
+        #expect(!viewModel.launcherMatches.isEmpty, "root search shows its rows again")
+
+        try overlay.pressEscape()
+        #expect(overlay.presenter.dismissCount == 1, "the second Escape hides the overlay")
         #expect(overlay.presenter.presentCount == 0)
-        #expect(viewModel.topLayer == .answer, "the overlay hides; the answer layer stays")
-        #expect(viewModel.output == "An answer.")
+    }
+
+    @Test func escapeWhileStreamingStopsAndStaysOnTheSurface() async throws {
+        let service = MockQuickService()
+        let overlay = KeyboardOverlay(settings: settings(), service: service)
+        let viewModel = overlay.viewModel
+        viewModel.isStreaming = true
+        viewModel.streamingStatus = "Thinking…"
+        #expect(viewModel.isQuickAIPresented, "streaming presents the surface")
+        #expect(viewModel.quickAIComposerAction == .init(label: "Stop", keys: ["esc"]))
+
+        try overlay.pressEscape()
+
+        #expect(!viewModel.isStreaming)
+        #expect(viewModel.isQuickAIPresented, "stopping keeps the surface open")
+        #expect(overlay.presenter.dismissCount == 0)
     }
 
     @Test func escapeAtAnEmptyRootHidesTheOverlay() throws {
@@ -406,32 +439,43 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.topLayer != .inputMode)
     }
 
-    @Test func tabEntersAskAIWithTheTypedText() throws {
-        let overlay = KeyboardOverlay(settings: settings())
+    @Test func tabOpensQuickAIAndSubmitsTheTypedText() async throws {
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "Hello.", finishReason: "stop")])
+        let overlay = KeyboardOverlay(settings: settings(), service: service)
         let viewModel = overlay.viewModel
         viewModel.input = "hi"
 
         #expect(viewModel.handleTab())
 
-        #expect(viewModel.inputMode == .askAI)
-        #expect(viewModel.input == "hi", "the typed text comes along")
+        #expect(viewModel.isQuickAIPresented, "the surface opens in the same gesture")
         #expect(viewModel.launcherMatches.isEmpty, "the launcher rows step aside")
-        // The layer is still the typed-text one because the text survived; the
-        // mode is what tells Return to send it to the model.
-        #expect(viewModel.topLayer == .typedText)
-        #expect(viewModel.classifySubmit() == .inputMode)
+        #expect(viewModel.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(viewModel.estimatedWindowHeight == PanelSizing.quickAIHeight)
+        await viewModel.tabSubmitTask?.value
+        #expect(await service.sendCallCount == 1, "Tab submits; nothing is staged for editing")
+        #expect(await service.lastPrompt == "hi")
+        #expect(viewModel.output == "Hello.")
+        #expect(viewModel.input.isEmpty, "the composer is spent by the submit")
+        #expect(viewModel.topLayer == .answer)
     }
 
-    @Test func tabEntersAskAIFromAnEmptyField() throws {
+    @Test func tabOpensQuickAIEmptyFromAnEmptyField() throws {
         let overlay = KeyboardOverlay(settings: settings())
         let viewModel = overlay.viewModel
         viewModel.input = ""
 
         #expect(viewModel.handleTab())
 
-        #expect(viewModel.inputMode == .askAI)
+        #expect(viewModel.isQuickAIPresented)
         #expect(viewModel.input.isEmpty)
-        #expect(viewModel.topLayer == .inputMode)
+        #expect(viewModel.tabSubmitTask == nil, "nothing to send")
+        #expect(viewModel.output.isEmpty)
+        #expect(viewModel.quickAITitle == "Quick AI")
+        #expect(viewModel.topLayer == .answer)
+        #expect(viewModel.quickAIComposerAction == .init(label: "Ask", keys: ["↩"]))
+        #expect(viewModel.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(viewModel.estimatedWindowHeight == PanelSizing.quickAIHeight)
     }
 
     // MARK: - 5. The Tab hint
@@ -453,9 +497,10 @@ struct QuickAIKeyboardTests {
         #expect(withHint != withoutHint, "the search row draws differently with the hint off")
 
         // The hint is a hint: Tab opens Quick AI either way.
+        viewModel.input = ""
         #expect(viewModel.handleTab())
-        #expect(viewModel.inputMode == .askAI)
-        #expect(viewModel.topLayer == .inputMode)
+        #expect(viewModel.isQuickAIPresented)
+        #expect(viewModel.topLayer == .answer)
     }
 
     /// The root search surface as it is actually drawn, so "which control is
@@ -551,8 +596,7 @@ struct QuickAIKeyboardTests {
         let text = longAnswer(lines: 14)
         let (overlay, _) = try await answered(reply: text)
         let viewModel = overlay.viewModel
-        // ⌘J opens the conversation view, where every message is addressable.
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        // The thread shows every message, so the newest long one is addressable.
         let message = try #require(
             viewModel.conversationMessages.last { MessageCollapsePolicy.shouldCollapse($0.content) }
         )
@@ -575,7 +619,6 @@ struct QuickAIKeyboardTests {
     @Test func aShortAnswerDrawsNeitherControlAndTheShortcutDoesNothing() async throws {
         let (overlay, _) = try await answered(reply: "Short.")
         let viewModel = overlay.viewModel
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
         let message = try #require(viewModel.conversationMessages.last)
 
         #expect(!MessageCollapsePolicy.shouldCollapse(message.content))

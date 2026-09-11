@@ -1,0 +1,557 @@
+import AppKit
+import SwiftUI
+
+/// Quick AI, after Raycast's: one fixed `panelWidth` × `quickAIHeight`
+/// surface that replaces the launcher in place. A header (back chevron,
+/// conversation title over the model, expand glyph), the scrolling thread
+/// (user turns as pills on the right, answers as prose on the left, one
+/// tool or status line, the question card when the model asks), and the
+/// composer row along the bottom edge: the Add Context circle, the pill
+/// field with the primary action inside it, and the `⌘K` circle. There is
+/// no footer well; the composer row is the footer.
+///
+/// Every chooser that floats over the launcher floats here too, anchored
+/// above the composer. The field keeps focus the whole time the surface is
+/// open, streaming included.
+struct QuickAIView: View {
+    @Bindable var viewModel: QuickViewModel
+    @FocusState private var composerFocused: Bool
+
+    /// The composer row from the panel's bottom edge: the pill-high row plus
+    /// its inset above and below. The floating `⌘K` pane and the choosers
+    /// sit on top of it.
+    static let composerRowHeight = House.Control.pill + House.Spacing.xs * 2
+
+    /// The header row. Raycast's is 60 tall; the nearest house control
+    /// height is the input row.
+    static let headerHeight = House.Control.input
+
+    private static let bottomID = "quick-ai-thread-end"
+    private static let liveAnswerID = "quick-ai-live-answer"
+    private static let detachedQuestionID = "quick-ai-detached-question"
+    private static let detachedAnswerID = "quick-ai-detached-answer"
+    private static let liveQuestionID = "quick-ai-live-question"
+    private static let statusLineID = "quick-ai-status"
+    private static let webSearchNoteID = "quick-ai-web-search"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Group {
+                if viewModel.isRecentChatsPresented {
+                    RecentChatsList(viewModel: viewModel)
+                } else {
+                    thread
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let error = viewModel.errorMessage {
+                errorLine(error)
+            }
+            // The strips read as rows; the surface has no hairlines.
+            if viewModel.launchSelection != nil {
+                LaunchSelectionStrip(viewModel: viewModel)
+            }
+            if viewModel.hasPendingAttachment {
+                AttachmentStrip(viewModel: viewModel)
+            }
+            composer
+        }
+        .frame(width: PanelSizing.panelWidth, height: PanelSizing.quickAIHeight)
+        .overlay(alignment: .bottom) { floatingChooser }
+        .onAppear { focusComposer() }
+        .onChange(of: viewModel.inputFocusRequest) { _, _ in focusComposer() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Quick AI")
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: House.Spacing.sm) {
+            // The chevron is the quiet one: secondary ink, a step smaller
+            // than the expand glyph, as in Raycast.
+            glyphButton(
+                "chevron.left",
+                font: AQDesign.TypeToken.glyphSmall,
+                color: AQDesign.ColorToken.textSecondary,
+                label: "Back to search",
+                help: "Back to search, keeping this chat (esc)"
+            ) {
+                viewModel.closeQuickAI()
+            }
+            VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                Text(viewModel.quickAITitle)
+                    .font(AQDesign.TypeToken.subheading)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(viewModel.activeModelDisplay)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
+            }
+            Spacer(minLength: House.Spacing.sm)
+            // Raycast's expand glyph is a boxed up-right arrow; this is the
+            // nearest SF Symbol.
+            glyphButton(
+                "arrow.up.right.square",
+                font: AQDesign.TypeToken.glyphMedium,
+                color: AQDesign.ColorToken.textPrimary,
+                label: "Recent Chats",
+                help: "Recent Chats (⌘J)"
+            ) {
+                viewModel.toggleRecentChats()
+            }
+            .accessibilityValue(viewModel.isRecentChatsPresented ? "Open" : "Closed")
+        }
+        // A tighter left inset than right: with the compact button and the
+        // row gap, the title starts where Raycast's does.
+        .padding(.leading, House.Spacing.sm)
+        .padding(.trailing, House.Spacing.lg)
+        .frame(height: Self.headerHeight)
+    }
+
+    private func glyphButton(
+        _ symbol: String,
+        font: Font,
+        color: Color,
+        label: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(font)
+                .foregroundStyle(color)
+                .frame(width: House.Control.compact, height: House.Control.compact)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(help)
+    }
+
+    // MARK: - Thread
+
+    private var lastUserMessageID: UUID? {
+        viewModel.conversationMessages.last { $0.role == .user }?.id
+    }
+
+    /// The question that is not yet a turn of the thread, drawn as its own
+    /// pill: the one being asked while the web search runs (the user
+    /// message joins the thread only when the model is called), the one a
+    /// detached answer (a local answer, a Vault Search) belongs to, and any
+    /// question with no chat behind it.
+    private var pendingQuestion: String? {
+        if let question = viewModel.pendingQuestion, !question.isEmpty,
+           viewModel.isStreaming || viewModel.quickAIDetachedAnswer != nil {
+            return question
+        }
+        // An answer with no chat behind it (a Vault Search, for one).
+        if viewModel.currentConversation == nil,
+           let question = viewModel.lastQuestion, !question.isEmpty {
+            return question
+        }
+        return nil
+    }
+
+    private var thread: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: House.Spacing.md) {
+                    let pendingQuestion = pendingQuestion
+                    ForEach(viewModel.conversationMessages) { message in
+                        turn(message)
+                            .id(message.id)
+                        // The search line belongs to the newest question;
+                        // while that question is still pending it hangs
+                        // under the pending pill instead.
+                        if pendingQuestion == nil,
+                           message.id == lastUserMessageID,
+                           let note = viewModel.webSearchNote {
+                            toolLine(note, symbol: "globe")
+                                .id(Self.webSearchNoteID)
+                        }
+                    }
+                    // A question that is not a thread turn (the one being
+                    // searched for, the one a local answer belongs to, one
+                    // with no chat behind it) still reads as a turn: an
+                    // answer never draws without its question.
+                    if let question = pendingQuestion {
+                        userPill(MessageCollapseState(text: question, isExpanded: true), toggle: nil)
+                            .id(Self.detachedQuestionID)
+                        if let note = viewModel.webSearchNote {
+                            toolLine(note, symbol: "globe")
+                                .id(Self.webSearchNoteID)
+                        }
+                    }
+                    // The model paused to ask. The live card sits where the
+                    // answer will; once picked it joins the thread as the
+                    // record and the answer continues under it.
+                    if let ask = viewModel.pendingAskQuestion, !ask.isAnswered {
+                        AskUserQuestionCard(
+                            question: ask,
+                            selectedIndex: viewModel.askQuestionSelectionIndex,
+                            isInteractive: true,
+                            onMove: { viewModel.moveAskQuestionSelection($0) },
+                            onPick: { viewModel.answerAskQuestion(index: $0) }
+                        )
+                        .id(Self.liveQuestionID)
+                    }
+                    // While the search itself runs its note is the status,
+                    // already drawn above; the dots take over once the
+                    // model is thinking.
+                    if viewModel.isStreaming,
+                       viewModel.output.isEmpty,
+                       !viewModel.isAskQuestionActive,
+                       viewModel.streamingStatus == nil || viewModel.streamingStatus != viewModel.webSearchNote {
+                        statusLine
+                            .id(Self.statusLineID)
+                    }
+                    if viewModel.isStreaming, !viewModel.output.isEmpty {
+                        answerProse(viewModel.output, isStreaming: true, instanceID: "live-answer")
+                            .id(Self.liveAnswerID)
+                    }
+                    // A finished answer that is not the thread's last turn
+                    // (a local answer, a command result, a Vault Search, a
+                    // failed stream's partial text) draws after the thread,
+                    // whether or not a chat is kept.
+                    if let answer = viewModel.quickAIDetachedAnswer {
+                        answerProse(answer, isStreaming: false, instanceID: "answer")
+                            .id(Self.detachedAnswerID)
+                    }
+                    Color.clear
+                        .frame(height: House.hairline)
+                        .id(Self.bottomID)
+                }
+                .padding(.top, House.Spacing.xl)
+                .padding(.horizontal, House.Spacing.lg)
+                .padding(.bottom, House.Spacing.md)
+            }
+            .onAppear { scrollToEnd(proxy) }
+            .onChange(of: viewModel.conversationMessages.count) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.output) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.isStreaming) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.streamingStatus) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in scrollToEnd(proxy) }
+        }
+        .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
+    }
+
+    @ViewBuilder
+    private func turn(_ message: QuickMessage) -> some View {
+        switch message.role {
+        case .user:
+            userPill(viewModel.collapseState(for: message)) {
+                viewModel.toggleTranscriptMessage(message.id)
+            }
+        case .assistant:
+            if let question = message.askUserQuestion {
+                // The record of a question the model asked and the option
+                // the user picked.
+                AskUserQuestionCard(question: question, isInteractive: false)
+            } else {
+                CollapsibleMessageText(
+                    state: viewModel.collapseState(for: message),
+                    rendersMarkdown: true,
+                    instanceID: "message-\(message.id.uuidString)"
+                ) {
+                    viewModel.toggleTranscriptMessage(message.id)
+                }
+                .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+            }
+        }
+    }
+
+    /// A user turn: a pill on the right in secondary ink one step below
+    /// the answer prose, wrapping left-aligned inside it. No "You" label.
+    private func userPill(_ state: MessageCollapseState, toggle: (() -> Void)?) -> some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            CollapsibleMessageText(
+                state: state,
+                plainTextFont: AQDesign.TypeToken.body,
+                fillsWidth: false
+            ) {
+                toggle?()
+            }
+            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, House.Spacing.sm)
+            .padding(.vertical, House.Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: House.Radius.pill, style: .circular)
+                    .fill(AQDesign.ColorToken.chipFill)
+            )
+            .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .trailing)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You: \(state.text)")
+    }
+
+    private func answerProse(_ markdown: String, isStreaming: Bool, instanceID: String) -> some View {
+        MarkdownTextView(
+            markdown: markdown,
+            isStreaming: isStreaming,
+            scrolls: false,
+            instanceID: instanceID
+        )
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+    }
+
+    /// The model is working and nothing has landed yet: the breathing dots,
+    /// or the globe when the status is a web search, and the status text.
+    private var statusLine: some View {
+        let status = viewModel.streamingStatus ?? "Thinking…"
+        return toolLine(status, symbol: status.hasPrefix("Search") ? "globe" : nil)
+    }
+
+    /// One quiet line: a glyph (or the thinking dots) and tertiary text.
+    private func toolLine(_ text: String, symbol: String?) -> some View {
+        HStack(spacing: House.Spacing.xs) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(AQDesign.TypeToken.body)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            } else {
+                ThinkingIndicator()
+            }
+            Text(text)
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(minHeight: House.Control.keyCap)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo(Self.bottomID, anchor: .bottom)
+    }
+
+    // MARK: - Error
+
+    private func errorLine(_ error: String) -> some View {
+        HStack(spacing: AQDesign.Space.standard) {
+            Text(error)
+                .font(AQDesign.TypeToken.detail)
+                .foregroundStyle(AQDesign.ColorToken.danger)
+                .lineLimit(2)
+            Spacer()
+            if viewModel.needsAccessibilityPermission {
+                Button("Open System Settings") {
+                    viewModel.openAccessibilitySettings()
+                }
+                .buttonStyle(InkButtonStyle())
+            }
+        }
+        .padding(.horizontal, House.Spacing.lg)
+        .padding(.vertical, House.Spacing.xs)
+    }
+
+    // MARK: - Composer
+
+    private var composer: some View {
+        let action = viewModel.quickAIComposerAction
+        return HStack(spacing: House.Spacing.xs) {
+            Button {
+                viewModel.toggleAddContextMenu()
+            } label: {
+                Image(systemName: "plus")
+                    .font(AQDesign.TypeToken.glyphMedium)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .frame(width: House.Control.pill, height: House.Control.pill)
+                    .background(Circle().fill(AQDesign.ColorToken.surfaceFill))
+                    .overlay(
+                        Circle().strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add Context")
+            .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
+            .help("Add context: a window, a selection, an area, or a screen (or type @)")
+
+            HStack(spacing: House.Spacing.xs) {
+                // The placeholder is drawn as an overlay, not as the field's
+                // prompt: a styled prompt takes the field's ink on macOS and
+                // read as typed text. The empty prompt keeps the field from
+                // drawing its label as a placeholder under the overlay.
+                TextField(text: $viewModel.input, prompt: Text("")) {
+                    Text("Ask Quick AI")
+                }
+                .textFieldStyle(.plain)
+                .labelsHidden()
+                // Raycast's field runs at the small reading size, the same
+                // as its action label, not the launcher's 16.
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) {
+                    if viewModel.input.isEmpty {
+                        Text(QuickViewModel.quickAIPlaceholder)
+                            .font(AQDesign.TypeToken.body)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                            .lineLimit(1)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .focused($composerFocused)
+                .submitLabel(.send)
+                .onSubmit { viewModel.submitFromComposer() }
+                .modifier(ComposerKeyRouting(viewModel: viewModel))
+                // Tab has nothing to move to on this surface: an alias
+                // completes through the routing above, and otherwise the key
+                // stays in the field instead of walking focus away.
+                .onKeyPress(.tab) { .handled }
+                .onChange(of: viewModel.input) { _, newValue in
+                    viewModel.noteInteraction()
+                    // Typing `@` opens the same Add Context menu the circle
+                    // left of the field does.
+                    viewModel.addContextTriggerDidChange(newValue)
+                }
+                .accessibilityLabel("Ask Quick AI")
+                Text(action.label)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                KeyCapGroup(keys: action.keys)
+            }
+            .padding(.leading, House.Spacing.md)
+            .padding(.trailing, House.Spacing.sm)
+            .frame(height: House.Control.pill)
+            // `Radius.pill` is half the row height, so this is a capsule,
+            // drawn as a circular rounded rectangle: `Capsule`'s stroke
+            // leaves a stray hairline outside its left cap on macOS 26.
+            // Outline only, as Raycast draws it: the hairline on the glass,
+            // no fill.
+            .overlay(
+                Self.fieldShape.strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityValue("\(action.label), \(action.keys.joined(separator: " "))")
+
+            Button {
+                viewModel.handleCommandK()
+            } label: {
+                // A circle, the twin of the plus circle across the field,
+                // full ink in both states as Raycast draws it. Closed it is
+                // outline only; the open state shows on the circle's fill.
+                Image(systemName: "command")
+                    .font(AQDesign.TypeToken.glyphMedium)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .frame(width: House.Control.pill, height: House.Control.pill)
+                    .background {
+                        if viewModel.isActionPalettePresented {
+                            Circle().fill(AQDesign.ColorToken.interactiveFill)
+                        }
+                    }
+                    .overlay(
+                        Circle().strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Actions")
+            .accessibilityValue(viewModel.isActionPalettePresented ? "Open" : "Closed")
+            .help("Actions (⌘K)")
+        }
+        .padding(House.Spacing.xs)
+    }
+
+    /// The composer field's capsule.
+    private static var fieldShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: House.Radius.pill, style: .circular)
+    }
+
+    private func focusComposer() {
+        FocusRequest.apply($composerFocused)
+    }
+
+    // MARK: - Floating choosers
+
+    /// The Transform chooser, the model chooser, and Add Context float above
+    /// the composer here, where at root they sit inline under the input row.
+    @ViewBuilder
+    private var floatingChooser: some View {
+        if viewModel.isTransformChooserPresented
+            || viewModel.isModelChooserPresented
+            || viewModel.isAddContextMenuPresented {
+            Group {
+                if viewModel.isTransformChooserPresented {
+                    TransformChooserPane(viewModel: viewModel)
+                } else if viewModel.isModelChooserPresented {
+                    ModelChooserPane(viewModel: viewModel)
+                } else {
+                    AddContextPane(viewModel: viewModel)
+                }
+            }
+            .frame(width: PanelSizing.panelWidth - House.Spacing.xs * 2)
+            .panelGlass(radius: AQDesign.cardCornerRadius)
+            .panelShadows()
+            .padding(.bottom, Self.composerRowHeight)
+        }
+    }
+}
+
+// MARK: - Recent Chats
+
+/// `⌘J`: the recent chat list in place of the thread. One column of the
+/// launcher's own chat rows (the Chats catalog rows: icon tile, title,
+/// question count and time), pinned first; `↑↓` move, `↩` opens the chat
+/// in the thread, `esc` returns to the thread.
+private struct RecentChatsList: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        let items = viewModel.recentChatItems
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                SectionLabel(text: "Recent Chats")
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Open", keys: ["↩"])
+                KeyHint(label: "Back", keys: ["esc"])
+            }
+            .padding(.horizontal, House.Spacing.lg)
+            .padding(.vertical, House.Spacing.xs)
+
+            SelectableListPane(
+                items: items,
+                selectedIndex: $viewModel.recentChatsIndex,
+                rowSpacing: PanelSizing.actionRowSpacing,
+                rowHeight: House.Control.row,
+                listInsets: EdgeInsets(
+                    top: House.Spacing.xs,
+                    leading: House.Spacing.sm,
+                    bottom: House.Spacing.xs,
+                    trailing: House.Spacing.sm
+                ),
+                emptyText: "No chats yet",
+                scrollsToSelection: true,
+                onActivate: open
+            ) { index, item, isSelected in
+                LauncherResultRow(
+                    result: .item(item),
+                    isSelected: isSelected,
+                    position: index + 1,
+                    total: items.count
+                )
+                .padding(.horizontal, House.Spacing.xs)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recent Chats")
+    }
+
+    private func open(_ item: LauncherCatalogItem) {
+        viewModel.recentChatsIndex = viewModel.recentChatItems.firstIndex { $0.id == item.id } ?? 0
+        viewModel.openSelectedRecentChat()
+    }
+}

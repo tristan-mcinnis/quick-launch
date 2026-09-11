@@ -57,7 +57,7 @@ final class ModelPreferenceStore {
     func profile(providerID: UUID, model: String) -> ModelProfile {
         var profile = ModelProfile.curated(forModelID: model)
         let stored = profiles[ModelKey.make(providerID: providerID, model: model)]
-        profile.enabled = stored?.enabled ?? true
+        profile.enabled = stored?.enabled ?? profile.enabled
         if profile.supportsReasoningEffort {
             profile.reasoningEffort = stored?.reasoningEffort ?? carriedReasoningEffort
         } else {
@@ -68,9 +68,11 @@ final class ModelPreferenceStore {
         return profile
     }
 
-    /// Whether model pickers may offer this model. The default is on.
+    /// Whether model pickers may offer this model. The default is on, unless
+    /// the curated catalogue ships the model turned off (a sunset id).
     func isEnabled(providerID: UUID, model: String) -> Bool {
-        profiles[ModelKey.make(providerID: providerID, model: model)]?.enabled ?? true
+        profiles[ModelKey.make(providerID: providerID, model: model)]?.enabled
+            ?? ModelProfile.curated(forModelID: model).enabled
     }
 
     /// Every model the given providers report, resolved, as rows for the

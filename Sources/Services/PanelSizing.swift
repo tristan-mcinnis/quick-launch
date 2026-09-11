@@ -8,23 +8,16 @@ enum PanelSizing {
 
     // MARK: - Widths
 
-    /// The house launcher width.
+    /// The house launcher width. The Quick AI surface is the same width.
     static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
     static let panelWidthWithDetail: CGFloat = 960
-    /// A Quick AI thread gets a little more room so answers read like a
-    /// document rather than a strip.
-    static let panelWidthForAnswer = House.Layout.answerPanelWidth
 
     // MARK: - Heights
 
     static let inputHeight = House.Control.input
-    static let maxBodyHeight: CGFloat = 640
-    /// Horizontal padding around the answer body (20pt each side); the
-    /// measured markdown width is the panel width minus this.
-    static let answerHorizontalPadding = House.Spacing.lg * 2
-    /// Compact earlier-turns transcript shown above the latest answer.
-    static let transcriptHeight: CGFloat = 240
+    /// The Quick AI surface: one fixed height, the thread scrolls inside it.
+    static let quickAIHeight = House.Layout.quickAIHeight
     static let errorBannerHeight = House.Control.footer
     static let attachmentHeight = House.Control.input
     /// One row in the launcher list.
@@ -45,8 +38,6 @@ enum PanelSizing {
     static let footerHeight = AQDesign.footerHeight + House.hairline
     /// Vertical inset around the launcher rows.
     static let launcherListInset = House.Spacing.sm
-    /// The question chip above an answer, plus the gap under it.
-    static let questionChipBlock = House.Control.chip - 6 + House.Spacing.sm
     /// The launcher list's chrome above and below the rows: the section
     /// header ("Results") plus the bottom inset, as measured from the
     /// rendered view. Counting only the rows left the last one clipped.
@@ -121,28 +112,18 @@ enum PanelSizing {
         return max(base, paneTop + paneHeight + paneBottomMargin)
     }
 
-    /// The earlier-turns block above the latest answer: capped transcript
-    /// plus its divider and the surrounding stack spacing. Zero until a
-    /// conversation has more than one exchange on screen.
-    static func transcriptBlockHeight(messageCount: Int) -> CGFloat {
-        messageCount > 2 ? transcriptHeight + 17 : 0
-    }
-
+    /// The root launcher window. Answers never add to it: they live on the
+    /// fixed Quick AI surface (`quickAIHeight`).
     static func panelHeight(
-        output: String,
-        isStreaming: Bool,
         errorMessage: String?,
         suggestionCount: Int = 0,
         showsResultActions: Bool = false,
         hasAttachment: Bool = false,
         showsFooter: Bool = false,
         launcherRowCount: Int = 0,
-        showsQuestion: Bool = false,
         gridRows: Int = 0,
         gridSections: Int = 0,
-        showsDetailPane: Bool = false,
-        measuredBodyHeight: CGFloat? = nil,
-        transcriptHeight: CGFloat = 0
+        showsDetailPane: Bool = false
     ) -> CGFloat {
         var total = inputHeight
         if hasAttachment { total += attachmentHeight }
@@ -158,20 +139,6 @@ enum PanelSizing {
             }
             if showsDetailPane { block = max(block, detailPaneMinimumHeight) }
             total += block
-        }
-        if !output.isEmpty || isStreaming {
-            total += transcriptHeight
-            let bodyHeight: CGFloat
-            if let measuredBodyHeight {
-                // Measured text plus the 20pt vertical padding around the
-                // answer stack; the floor keeps room for the thinking row.
-                bodyHeight = min(maxBodyHeight, max(68, measuredBodyHeight + 40))
-            } else {
-                let approxLines = max(1, output.count / 60 + 1)
-                bodyHeight = min(maxBodyHeight, CGFloat(approxLines) * 22 + 40)
-            }
-            total += bodyHeight
-            if showsQuestion { total += questionChipBlock }
         }
         if errorMessage != nil {
             total += errorBannerHeight

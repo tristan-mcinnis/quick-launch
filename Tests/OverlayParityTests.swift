@@ -146,9 +146,9 @@ struct OverlayParityTests {
         #expect(vm.isModelChooserPresented)
         #expect(vm.modelChooserPurpose == .regenerate)
         // The row for the model in use starts selected.
-        #expect(vm.modelChooserOptions[vm.modelChooserIndex].model == vm.activeModelDisplay)
+        #expect(vm.modelChooserOptions[vm.modelChooserIndex].model == vm.activeModelID)
 
-        let other = try! #require(vm.modelChooserOptions.first { $0.model != vm.activeModelDisplay })
+        let other = try! #require(vm.modelChooserOptions.first { $0.model != vm.activeModelID })
         vm.modelChooserIndex = vm.modelChooserOptions.firstIndex(of: other)!
         await service.setResponses([StreamDelta(text: "Second answer", finishReason: "stop")])
         await vm.runModelChooserSelection()
@@ -172,16 +172,16 @@ struct OverlayParityTests {
         let callsBefore = await service.sendCallCount
 
         let other = try! #require(
-            vm.modelChooserEntries().first { $0.model != vm.activeModelDisplay }
+            vm.modelChooserEntries().first { $0.model != vm.activeModelID }
         )
         vm.openModelChooser(.change)
         vm.modelChooserIndex = vm.modelChooserOptions.firstIndex(of: other)!
         await vm.runModelChooserSelection()
 
         #expect(await service.sendCallCount == callsBefore, "Change Model sends nothing")
-        #expect(vm.activeModelDisplay == other.model)
+        #expect(vm.activeModelID == other.model)
         #expect(vm.currentConversation?.model == other.model)
-        #expect(vm.resultActionDetail(.changeModel) == "Using \(other.model)")
+        #expect(vm.resultActionDetail(.changeModel) == "Using \(ModelProfile.displayName(forModelID: other.model))")
     }
 
     @Test func theChooserAnswersTheLastQuestionAndNeverAPreviousOne() async {
@@ -374,7 +374,7 @@ struct OverlayParityTests {
         #expect(vm.askAIItem(query: "").title == "Ask AI")
     }
 
-    // MARK: - 5. ⌘J conversation view
+    // MARK: - 5. ⌘J Recent Chats
 
     @Test func commandJCarriesTheThreadAndTheModelOver() async {
         let service = MockQuickService()
@@ -391,31 +391,34 @@ struct OverlayParityTests {
             modifiers: [.command]
         ))
 
-        #expect(vm.isConversationViewPresented)
-        #expect(vm.topLayer == .conversationView)
+        #expect(vm.isRecentChatsPresented)
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.topLayer == .recentChats)
         #expect(vm.conversationMessages == messages)
         #expect(vm.activeModelDisplay == model)
-        #expect(vm.currentPanelWidth == ConversationViewLayout.panelWidth)
-        #expect(vm.estimatedWindowHeight == ConversationViewLayout.panelHeight)
+        // One column, inside the same fixed Quick AI window: no split view.
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(vm.estimatedWindowHeight == PanelSizing.quickAIHeight)
     }
 
-    @Test func escapeReturnsFromTheConversationViewToTheOverlay() async {
+    @Test func escapeReturnsFromRecentChatsToTheThread() async {
         let service = MockQuickService()
         var settings = QuickSettings()
         settings.historyEnabled = false
         let vm = make(settings: settings, service: service)
         await ask(vm, service, "a question", reply: "An answer.")
 
-        vm.openConversationView()
-        #expect(vm.isConversationViewPresented)
+        vm.openRecentChats()
+        #expect(vm.isRecentChatsPresented)
 
         #expect(vm.handleEscapeKey())
-        #expect(!vm.isConversationViewPresented)
-        #expect(!vm.output.isEmpty, "the thread is untouched by leaving the view")
+        #expect(!vm.isRecentChatsPresented)
+        #expect(vm.isQuickAIPresented, "back to the thread, not to root search")
+        #expect(!vm.output.isEmpty, "the thread is untouched by leaving the list")
         #expect(vm.currentConversation != nil)
     }
 
-    @Test func theConversationViewWalksTheHistoryAndContinuesAThread() async {
+    @Test func recentChatsWalksTheHistoryAndOpensAChatInTheThread() async {
         let service = MockQuickService()
         var settings = QuickSettings()
         settings.historyEnabled = false
@@ -433,20 +436,19 @@ struct OverlayParityTests {
         vm.history = [newer, older]
         vm.currentConversation = newer
 
-        vm.openConversationView()
-        #expect(vm.conversationViewHistoryIndex == 0)
+        vm.openRecentChats()
+        #expect(vm.recentChatsIndex == 0)
 
-        vm.moveConversationViewSelection(1)
-        #expect(vm.conversationViewHistoryIndex == 1)
-        vm.openSelectedConversationFromView()
-        #expect(vm.currentConversation?.id == older.id)
-        #expect(vm.activeModelDisplay == "older-model")
-        #expect(vm.isConversationViewPresented, "the view stays open on the new thread")
-
-        // An empty composer continues the highlighted chat; typed text asks.
+        vm.moveRecentChatsSelection(1)
+        #expect(vm.recentChatsIndex == 1)
+        // Return opens the highlighted chat in the thread.
         vm.input = ""
         await vm.submitResolvingFuzzyAlias()
         #expect(vm.currentConversation?.id == older.id)
+        #expect(vm.activeModelDisplay == "older-model")
+        #expect(!vm.isRecentChatsPresented, "the list gives way to the thread")
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.quickAITitle == "Quick AI", "no answer yet in that chat")
     }
 
     // MARK: - 6. Model visibility

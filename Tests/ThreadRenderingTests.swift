@@ -1,6 +1,6 @@
-// ThreadRenderingTests — the `⌘J` conversation view draws messages through
-// the same answer stack as the overlay: prose runs, code blocks with their
-// chrome, and no second scroll view nested in the thread's own.
+// ThreadRenderingTests — the Quick AI thread draws messages through the one
+// answer stack: prose runs, code blocks with their chrome, and no second
+// scroll view nested in the thread's own.
 //
 // The scroll-view counts here are the executable form of "nesting does not
 // double-scroll": SwiftUI backs a `ScrollView` with an `NSScrollView`, so the
@@ -110,8 +110,8 @@ struct ThreadRenderingTests {
                 ? "thread-code-block-dark.png"
                 : "thread-code-block-light.png"
             try Self.write(image, name: name)
-            #expect(image.size.width == ConversationViewLayout.panelWidth)
-            #expect(image.size.height > ConversationViewLayout.bodyHeight)
+            #expect(image.size.width == PanelSizing.panelWidth)
+            #expect(image.size.height == PanelSizing.quickAIHeight)
         }
     }
 
@@ -144,18 +144,13 @@ struct ThreadRenderingTests {
 
     private func hostedThreadHost(message: String) -> NSHostingView<AnyView> {
         let vm = threadViewModel(message: message)
-        let host = NSHostingView(
-            rootView: AnyView(
-                ConversationView(viewModel: vm)
-                    .frame(width: ConversationViewLayout.panelWidth)
-            )
-        )
+        let host = NSHostingView(rootView: AnyView(QuickAIView(viewModel: vm)))
         host.appearance = NSAppearance(named: .darkAqua)
         host.frame = NSRect(
             x: 0,
             y: 0,
-            width: ConversationViewLayout.panelWidth,
-            height: ConversationViewLayout.bodyHeight
+            width: PanelSizing.panelWidth,
+            height: PanelSizing.quickAIHeight
         )
         host.layoutSubtreeIfNeeded()
         return host
@@ -165,14 +160,14 @@ struct ThreadRenderingTests {
     /// it and gives it its appearance.
     private func renderThreadProof(appearance: NSAppearance.Name) throws -> NSImage {
         let vm = threadViewModel(message: codeMessage)
-        let width = ConversationViewLayout.panelWidth
+        let width = vm.currentPanelWidth
         let host = NSHostingView(rootView: OverlayView(viewModel: vm).frame(width: width))
         host.appearance = NSAppearance(named: appearance)
         host.frame = NSRect(
             x: 0,
             y: 0,
             width: width,
-            height: max(vm.estimatedWindowHeight, ConversationViewLayout.bodyHeight)
+            height: vm.estimatedWindowHeight
         )
         host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
@@ -213,7 +208,7 @@ struct ThreadRenderingTests {
                 QuickMessage(role: .assistant, content: message),
             ]
         )
-        vm.openConversationView()
+        vm.openQuickAI()
         return vm
     }
 

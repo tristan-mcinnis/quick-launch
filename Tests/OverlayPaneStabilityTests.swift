@@ -71,7 +71,7 @@ struct OverlayPaneStabilityTests {
         #expect(Self.estimatedWindowHeight(vm) == before, "closing ⌘K restores nothing because nothing moved")
     }
 
-    @Test func shortWindowGrowsExactlyToFitThePalette() async throws {
+    @Test func thePaletteFloatsInsideTheFixedQuickAIWindow() async throws {
         let vm = Self.makeViewModel()
         let mock = MockQuickService()
         await mock.setResponses([StreamDelta(text: "Argentina won.", finishReason: "stop")])
@@ -81,13 +81,16 @@ struct OverlayPaneStabilityTests {
         await vm.submit()
 
         let before = Self.estimatedWindowHeight(vm)
+        #expect(before == PanelSizing.quickAIHeight, "an answer lives on the fixed Quick AI surface")
         vm.handleCommandK()
         #expect(vm.isActionPalettePresented)
         let during = Self.estimatedWindowHeight(vm)
-        let required = PanelSizing.inputHeight
+        #expect(during == before, "the palette floats over the fixed surface; the window never moves")
+        // The pane fits above the composer row with room to spare.
+        let required = QuickAIView.composerRowHeight
             + PanelSizing.actionPaletteHeight(rows: vm.actionPaletteEntryCount)
             + PanelSizing.paneBottomMargin
-        #expect(during == max(before, required))
+        #expect(required <= during)
         try Self.renderAtWindowSize(vm, name: "pane-answer-palette.png")
     }
 
@@ -111,12 +114,10 @@ struct OverlayPaneStabilityTests {
         vm.settings.autoCopy = false
         vm.input = "long answer"
         await vm.submit()
-        // Far past the cap: the body takes exactly maxBodyHeight and the
-        // text scrolls inside it instead of clipping below the window.
-        #expect(
-            Self.estimatedWindowHeight(vm)
-                >= PanelSizing.inputHeight + PanelSizing.maxBodyHeight
-        )
+        // However long the answer, the surface keeps its one height and the
+        // thread scrolls inside it instead of clipping below the window.
+        #expect(Self.estimatedWindowHeight(vm) == PanelSizing.quickAIHeight)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
         try Self.renderAtWindowSize(vm, name: "pane-answer-long.png")
     }
 

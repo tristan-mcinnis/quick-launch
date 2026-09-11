@@ -426,6 +426,184 @@ struct OverlayRenderProofTests {
         }
     }
 
+    /// The Quick AI surface, after Raycast's: empty, the search phase of an
+    /// ask (the question pill and the search line, through the real submit
+    /// path), an answered thread with a user pill and prose, the `⌘K`
+    /// palette over it, a local answer under its own pill, and Recent
+    /// Chats, in both appearances. Output: quick-ai-{state}-{dark,light}.png.
+    @Test func rendersQuickAISurfaceSet() async throws {
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
+
+            let empty = Self.makeViewModel(appearance: preference)
+            empty.input = ""
+            #expect(empty.handleTab())
+            #expect(empty.isQuickAIPresented)
+            #expect(empty.quickAITitle == "Quick AI")
+            try Self.save(
+                try Self.renderQuickAI(empty, appearance: appearance),
+                name: "quick-ai-empty-\(suffix).png"
+            )
+
+            // The search phase as the real flow has it: Tab with a search
+            // ask, rendered while the search is still out. The question is
+            // a pill of its own (it joins the thread with the model call)
+            // with the search line under it, and nothing else streams.
+            let streaming = Self.makeViewModel(appearance: preference)
+            let search = GatedWebSearchService(result: "## [1] Raycast\nURL: https://www.raycast.com/about")
+            streaming.webSearchService = search
+            streaming.service = MockQuickService()
+            streaming.settings.autoCopy = false
+            streaming.input = "search web raycast founder"
+            #expect(streaming.handleTab())
+            let searchSubmit = streaming.tabSubmitTask
+            await search.waitUntilSearching()
+            #expect(streaming.isStreaming)
+            #expect(streaming.output.isEmpty)
+            #expect(streaming.pendingQuestion == "search web raycast founder")
+            #expect(streaming.webSearchNote?.hasPrefix("Search web: ") == true)
+            #expect(streaming.quickAIComposerAction.label == "Stop")
+            try Self.save(
+                try Self.renderQuickAI(streaming, appearance: appearance),
+                name: "quick-ai-streaming-\(suffix).png"
+            )
+            streaming.cancel()
+            await search.release()
+            await searchSubmit?.value
+            #expect(streaming.output.isEmpty, "the stopped ask never reached the model")
+
+            let answered = Self.makeViewModel(appearance: preference)
+            answered.input = ""
+            let mock = MockQuickService()
+            await mock.setResponses([StreamDelta(
+                text: "Raycast was co-founded by **Thomas Paul Mann** (CEO) and **Petr Nikolaev** (CTO) in 2020. Both are former Meta (Facebook) engineers who previously worked on developer tools and productivity workflows. The company was part of Y Combinator's Winter 2020 batch and is headquartered in London, UK.",
+                finishReason: "stop"
+            )])
+            answered.service = mock
+            answered.settings.autoCopy = false
+            answered.input = "raycast founder"
+            #expect(answered.handleTab())
+            await answered.tabSubmitTask?.value
+            answered.webSearchNote = "Search web: Raycast founder and 2 more terms"
+            #expect(answered.isQuickAIPresented)
+            #expect(answered.quickAITitle == "raycast founder")
+            #expect(answered.quickAIComposerAction.label == "Paste Response")
+            let answeredImage = try Self.renderQuickAI(answered, appearance: appearance)
+            try Self.save(answeredImage, name: "quick-ai-answered-\(suffix).png")
+            #expect(answeredImage.size.width == PanelSizing.panelWidth)
+            #expect(answeredImage.size.height == PanelSizing.quickAIHeight)
+
+            // `⌘K` on the surface: the palette hugs the composer and leaves
+            // the header alone.
+            answered.handleCommandK()
+            #expect(answered.isActionPalettePresented)
+            let actionsImage = try Self.renderQuickAI(answered, appearance: appearance)
+            try Self.save(actionsImage, name: "quick-ai-actions-\(suffix).png")
+            let paneTop = Self.floatingPaneTop(in: actionsImage, over: answeredImage)
+            #expect(paneTop != nil, "the palette is drawn over the thread")
+            #expect(
+                (paneTop ?? 0) >= QuickAIView.headerHeight,
+                "the palette floats above the composer, not over the header (top at \(paneTop ?? -1) pt)"
+            )
+            #expect(
+                (paneTop ?? 0) < PanelSizing.quickAIHeight - QuickAIView.composerRowHeight,
+                "the palette sits inside the thread area, above the composer"
+            )
+            answered.closeActionPalette()
+
+            // A local answer on a kept chat: not a turn, still drawn.
+            let local = Self.makeViewModel(appearance: preference)
+            local.input = ""
+            local.service = MockQuickService()
+            local.settings.autoCopy = false
+            local.currentConversation = answered.currentConversation
+            local.openQuickAI()
+            local.input = "2+2"
+            await local.submit()
+            #expect(local.output == "4")
+            #expect(local.quickAIDetachedAnswer == "4")
+            #expect(local.pendingQuestion == "2+2", "the answer draws under its own question pill")
+            #expect(local.input.isEmpty)
+            #expect(local.quickAIComposerAction.label == "Paste Response")
+            try Self.save(
+                try Self.renderQuickAI(local, appearance: appearance),
+                name: "quick-ai-local-answer-\(suffix).png"
+            )
+
+            let recent = answered
+            recent.history = [
+                recent.currentConversation!,
+                QuickConversation(
+                    providerID: InferenceProvider.deepSeekID,
+                    model: "deepseek-v4-pro",
+                    messages: [
+                        QuickMessage(role: .user, content: "summarise the Q3 plan"),
+                        QuickMessage(role: .assistant, content: "Three priorities."),
+                    ]
+                ),
+                QuickConversation(
+                    providerID: InferenceProvider.deepSeekID,
+                    model: InferenceProvider.deepSeekDefaultModel,
+                    messages: [
+                        QuickMessage(role: .user, content: "what is the capital of Peru"),
+                        QuickMessage(role: .assistant, content: "Lima."),
+                    ]
+                ),
+            ]
+            recent.openRecentChats()
+            #expect(recent.isRecentChatsPresented)
+            try Self.save(
+                try Self.renderQuickAI(recent, appearance: appearance),
+                name: "quick-ai-recent-chats-\(suffix).png"
+            )
+        }
+    }
+
+    /// The top edge, in points, of a pane floating over the surface: the
+    /// first row down the panel's clear middle column where the pane's
+    /// hairline stroke shows against the plain render and the row under it
+    /// is glass again (the pane's glass matches the panel offscreen, and
+    /// the shadow above the stroke is a smooth ramp, never followed by a
+    /// matching row). `nil` when no pane is drawn.
+    private static func floatingPaneTop(in paneImage: NSImage, over plainImage: NSImage) -> CGFloat? {
+        guard let pane = paneImage.representations.first as? NSBitmapImageRep,
+              let plain = plainImage.representations.first as? NSBitmapImageRep,
+              pane.pixelsWide == plain.pixelsWide, pane.pixelsHigh == plain.pixelsHigh
+        else { return nil }
+        let scale = CGFloat(pane.pixelsWide) / paneImage.size.width
+        let x = Int(PanelSizing.panelWidth / 2 * scale)
+        let lookahead = max(1, Int(scale.rounded()))
+        func delta(_ y: Int) -> CGFloat {
+            guard let a = pane.colorAt(x: x, y: y), let b = plain.colorAt(x: x, y: y) else { return 0 }
+            return max(
+                abs(a.redComponent - b.redComponent),
+                abs(a.greenComponent - b.greenComponent),
+                abs(a.blueComponent - b.blueComponent)
+            )
+        }
+        let stroke = 6.0 / 255.0
+        let same = 1.5 / 255.0
+        for y in 1..<(pane.pixelsHigh - lookahead) where delta(y) > stroke && delta(y + lookahead) <= same {
+            return CGFloat(y) / scale
+        }
+        return nil
+    }
+
+    /// The Quick AI surface at its one fixed size, exactly as the window
+    /// draws it.
+    private static func renderQuickAI(
+        _ vm: QuickViewModel,
+        appearance: NSAppearance.Name
+    ) throws -> NSImage {
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(vm.estimatedWindowHeight == PanelSizing.quickAIHeight)
+        return try renderFixedHeight(
+            viewModel: vm,
+            appearance: appearance,
+            height: vm.estimatedWindowHeight
+        )
+    }
+
     /// The Type to Click HUD: badges and a status pill, drawn by AppKit.
     @Test func rendersTypeToClickHUD() throws {
         let view = TypeToClickOverlayView()

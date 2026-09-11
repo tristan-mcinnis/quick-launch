@@ -22,7 +22,7 @@ struct InferenceProviderTests {
 
         #expect(settings.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(settings.selectedProvider?.kind == .openAICompatible)
-        #expect(settings.selectedModel == InferenceProvider.deepSeekVisionModel)
+        #expect(settings.selectedModel == InferenceProvider.deepSeekDefaultModel)
     }
 
     @Test func localProvidersAreClearlyMarked() {

@@ -116,14 +116,27 @@ enum AQDesign {
             weight: .medium,
             design: .monospaced
         )
-        /// Large symbol or emoji glyph in a row or icon slot.
-        static let glyph = Font.system(size: 18)
+        /// Large symbol or emoji glyph in a row or icon slot: the launcher's
+        /// magnifier and Add Context circle, set at the input size they sit
+        /// beside (16 regular).
+        static let glyph = Font.system(size: House.TypeToken.Size.input)
+        /// A symbol in a compact or pill-sized control slot (16 semibold):
+        /// the Quick AI expand glyph, the Add Context plus, the ⌘ square.
+        static let glyphMedium = Font.system(size: House.TypeToken.Size.heading, weight: .semibold)
+        /// A quieter symbol beside text (14 semibold): the back chevron.
+        static let glyphSmall = Font.system(size: House.TypeToken.Size.body, weight: .semibold)
 
         /// Letter spacing for `section`, in points.
         static let sectionTracking = House.TypeToken.Tracking.section
-        /// Line spacing to add so `prose` reaches its 1.55 line height.
-        static let proseLineSpacing =
-            House.TypeToken.Size.body * (House.TypeToken.LineHeight.body - 1)
+        /// Line spacing to add so `prose` reaches its 1.55 line height: the
+        /// target height minus the font's own line height, so the leading
+        /// is about 5 pt, not the whole 0.55 on top of SF's native leading.
+        static let proseLineSpacing: CGFloat = {
+            let font = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
+            let native = font.ascender - font.descender + font.leading
+            let target = House.TypeToken.Size.body * House.TypeToken.LineHeight.body
+            return max(0, target - native)
+        }()
 
         /// Body text that follows the Screen History detail pane's own
         /// accessibility scale rather than Dynamic Type.

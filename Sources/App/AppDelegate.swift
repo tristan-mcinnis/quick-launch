@@ -1267,11 +1267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.errorMessage
             _ = viewModel.isActionPalettePresented
             _ = viewModel.isTransformChooserPresented
-            // The model chooser, the Add Context menu, and the ⌘J conversation
-            // view are inline blocks: each one changes the window height.
+            // The model chooser and the Add Context menu are inline blocks on
+            // the root surface: each one changes the window height. The Quick
+            // AI surface (and Recent Chats inside it) is a fixed window.
             _ = viewModel.isModelChooserPresented
             _ = viewModel.isAddContextMenuPresented
-            _ = viewModel.isConversationViewPresented
+            _ = viewModel.isQuickAIPresented
+            _ = viewModel.isRecentChatsPresented
             _ = viewModel.modelChooserOptions.count
             _ = viewModel.addContextOptions.count
             _ = viewModel.isApplicationActionPanePresented

@@ -569,7 +569,8 @@ struct QuickViewModelTests {
 
         #expect(vm.settings.selectedProviderID == InferenceProvider.deepSeekID)
         #expect(vm.settings.selectedModel == "deepseek-v4-pro")
-        #expect(vm.activeModelDisplay == "deepseek-v4-pro")
+        #expect(vm.activeModelID == "deepseek-v4-pro")
+        #expect(vm.activeModelDisplay == "DeepSeek V4 Pro")
     }
 
     @Test func testSavedActionStartsFreshThread() async throws {

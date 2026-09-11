@@ -28,8 +28,10 @@ struct InputModeTests {
 
         vm.output = "Answer"
         vm.lastQuestion = "q"
+        #expect(vm.isQuickAIPresented)
         #expect(vm.popLayerForEmptyBackspace())
-        #expect(vm.output.isEmpty)
+        #expect(!vm.isQuickAIPresented, "Backspace leaves the surface")
+        #expect(vm.output == "Answer", "the thread is kept")
         #expect(!vm.popLayerForEmptyBackspace())
     }
 

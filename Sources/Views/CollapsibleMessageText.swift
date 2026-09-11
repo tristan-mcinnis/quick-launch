@@ -16,6 +16,12 @@ struct CollapsibleMessageText: View {
     /// is what gives a message its code blocks. The collapse rule, the
     /// control, and its announcement are shared either way.
     var rendersMarkdown = false
+    /// The font of a plain-text body. A user pill in the thread reads at
+    /// `prose`; the default is the transcript's `detail`.
+    var plainTextFont: Font = AQDesign.TypeToken.detail
+    /// Whether a plain-text body takes the full width (the transcript) or
+    /// hugs its text (a pill in the thread).
+    var fillsWidth = true
     /// Scopes the answer stack's controls, so the thread's Copy button and
     /// the overlay's are not the same accessibility element.
     var instanceID = "transcript"
@@ -68,9 +74,9 @@ struct CollapsibleMessageText: View {
             .accessibilityLabel(state.text)
         } else {
             Text(state.displayedText)
-                .font(AQDesign.TypeToken.detail)
+                .font(plainTextFont)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
                 .accessibilityLabel(state.text)
         }
     }

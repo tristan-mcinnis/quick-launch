@@ -7,8 +7,29 @@ import Observation
     // MARK: - Published state
 
     var input: String = ""
-    var output: String = ""
-    var isStreaming: Bool = false
+    /// The answer on screen. Any answer, from any lane, lives on the Quick AI
+    /// surface, so a non-empty answer presents it.
+    var output: String = "" {
+        didSet { if !output.isEmpty { isQuickAIPresented = true } }
+    }
+    var isStreaming: Bool = false {
+        didSet { if isStreaming { isQuickAIPresented = true } }
+    }
+    /// Which models the user turned off and the reasoning effort chosen
+    /// for each. The app's one store; tests pass an in-memory one.
+    @ObservationIgnored var modelPreferences: ModelPreferenceStore = .shared
+    /// The Quick AI surface: the thread with its own header and composer, in
+    /// place of the launcher. Opened by Tab, the Ask AI row, or any answer;
+    /// Escape and the back chevron return to root search with the thread
+    /// kept, so the surface and the thread are separate state.
+    var isQuickAIPresented = false
+    /// `⌘J`: Recent Chats replaces the thread inside the Quick AI surface.
+    var isRecentChatsPresented = false
+    /// Highlighted row of the Recent Chats list.
+    var recentChatsIndex = 0
+    /// "Search web: …" for the current answer, drawn as the tool line above
+    /// it while the search runs and after it finishes.
+    var webSearchNote: String?
     /// Short progress note from the service while streaming ("Searching
     /// the web…"); shown in place of "Thinking…" until answer text lands.
     var streamingStatus: String?
@@ -78,6 +99,13 @@ import Observation
     var screenshotIndexProgress = ScreenshotTextIndex.Progress()
     /// What the user typed for the answer on screen, shown above it.
     var lastQuestion: String?
+    /// The question of the ask in flight before it is a turn of the thread:
+    /// set when the web search or page read starts (the user message joins
+    /// the thread only once the model is called) and by a local answer,
+    /// which never becomes a turn; cleared when the message is appended,
+    /// when the ask is stopped, and with the thread. The surface draws it
+    /// as its own pill so an answer never draws without its question.
+    var pendingQuestion: String?
     /// The model's live multiple-choice question, nil when none is waiting.
     /// Kept after the pick (with `selectedIndex` set) until the answer
     /// finishes, so the card never blinks out of the thread mid-stream.
@@ -108,9 +136,6 @@ import Observation
     enum InputMode: Equatable, Sendable {
         case caffeinateUntil
         case renameChat(UUID)
-        /// Typing goes to the AI only; no launcher rows. Entered with Tab,
-        /// the Ask AI row, or its hotkey.
-        case askAI
         case vaultSearch(VaultSearchMode)
     }
 
@@ -1118,34 +1143,21 @@ import Observation
     }
 
     var currentPanelWidth: CGFloat {
-        if isConversationViewPresented { return ConversationViewLayout.panelWidth }
+        if isQuickAIPresented { return PanelSizing.panelWidth }
         if showsDetailPane { return PanelSizing.panelWidthWithDetail }
-        if isAnswerActive { return PanelSizing.panelWidthForAnswer }
         return PanelSizing.panelWidth
     }
 
     /// Window height for the current surface. The AppDelegate applies this
     /// and the pane render-proof tests assert against the same math, so the
-    /// drawn view and the window cannot drift apart. The answer body is
-    /// measured from the markdown actually rendered, not guessed from
-    /// character counts — the guess left long answers clipped at the bottom.
+    /// drawn view and the window cannot drift apart.
     var estimatedWindowHeight: CGFloat {
-        // The conversation view is a fixed full-height surface: the panel
-        // stops measuring the answer block the moment it opens.
-        if isConversationViewPresented { return ConversationViewLayout.panelHeight }
-        let measuredBody: CGFloat? = (!output.isEmpty || isStreaming)
-            ? MarkdownRenderer.measuredHeight(
-                markdown: output,
-                width: min(
-                    House.Layout.answerMaxWidth,
-                    currentPanelWidth - PanelSizing.answerHorizontalPadding
-                )
-            )
-            : nil
+        // The Quick AI surface, Recent Chats included, is one fixed window:
+        // the thread scrolls inside it, and every chooser and pane floats
+        // over it, so nothing on it is measured.
+        if isQuickAIPresented { return PanelSizing.quickAIHeight }
         let showsChooser = isTransformChooserPresented
         let base = PanelSizing.panelHeight(
-            output: output,
-            isStreaming: isStreaming,
             errorMessage: errorMessage,
             // The Transform chooser replaces the launcher list while open, so
             // the launcher block is not counted then.
@@ -1154,17 +1166,12 @@ import Observation
             hasAttachment: hasPendingAttachment,
             showsFooter: showsLauncherFooter,
             launcherRowCount: showsChooser ? 0 : launcherMatches.count,
-            showsQuestion: (lastQuestion?.isEmpty == false) && !isConversationHistoryPresented,
             gridRows: isGridCatalog
                 ? Int((Double(launcherMatches.count) / Double(Self.gridColumns)).rounded(.up))
                     + max(0, gridSections.count - 1)
                 : 0,
             gridSections: isGridCatalog ? gridSections.count : 0,
-            showsDetailPane: showsDetailPane,
-            measuredBodyHeight: measuredBody,
-            transcriptHeight: PanelSizing.transcriptBlockHeight(
-                messageCount: conversationMessages.count
-            )
+            showsDetailPane: showsDetailPane
         )
         // The launch-selection chip and an open chooser are inline content
         // (they sit in the VStack flow), not a floating pane: add their
@@ -1173,14 +1180,6 @@ import Observation
         // chip + chooser taller than the window and cut off the bottom.
         var total = base
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
-        // The live question card is inline content in the answer block, so
-        // the window has to grow for it or the last option is clipped.
-        if let question = pendingAskQuestion {
-            total += AskUserQuestionCard.blockHeight(
-                optionCount: question.options.count,
-                isInteractive: !question.isAnswered
-            )
-        }
         if showsChooser { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
         if isModelChooserPresented {
             total += PanelSizing.chooserBlockHeight(rows: modelChooserOptions.count)
@@ -1376,10 +1375,9 @@ import Observation
         return parts.joined(separator: "\u{1F}")
     }
 
-    /// An AI thread owns the panel: no launcher rows, typing is a follow-up.
-    var isAnswerActive: Bool {
-        isStreaming || !output.isEmpty || isConversationHistoryPresented
-    }
+    /// The Quick AI surface owns the panel: no launcher rows, typing asks
+    /// the model. A thread kept behind root search is not active.
+    var isAnswerActive: Bool { isQuickAIPresented }
 
     private func rankLauncherMatches() -> [LauncherSearchResult] {
         guard !hasPendingAttachment, !isAnswerActive, inputMode == nil else { return [] }
@@ -1566,13 +1564,12 @@ import Observation
         switch inputMode {
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
-        case .askAI: return "Ask AI · \(activeModelDisplay)"
         case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
         case nil: break
         }
         if let pendingQuickLink { return pendingQuickLink.title }
         if let catalogScope { return catalogScope.title }
-        if isStreaming || !output.isEmpty || pendingImage != nil { return activeModelDisplay }
+        if pendingImage != nil { return activeModelDisplay }
         if !launcherMatches.isEmpty, !input.trimmingCharacters(in: .whitespaces).isEmpty {
             return "Quick Launch"
         }
@@ -1601,14 +1598,6 @@ import Observation
                     FooterHint(label: "Save", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
-            case .askAI:
-                var hints = [FooterHint(label: "Ask", keys: ["↩"])]
-                if let direction = translationDirection {
-                    hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
-                }
-                hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
-                hints.append(FooterHint(label: "Back", keys: ["⌫"]))
-                return hints
             case .vaultSearch:
                 return [
                     FooterHint(label: "Search", keys: ["↩"]),
@@ -1656,31 +1645,6 @@ import Observation
             if catalogScope != nil {
                 hints.append(FooterHint(label: "Back", keys: ["⌫"]))
             }
-            return hints
-        }
-        if !output.isEmpty {
-            var hints: [FooterHint] = []
-            if let detail = resultActionDetail(.replaceSelection) {
-                hints.append(FooterHint(label: detail, keys: ResultAction.replaceSelection.shortcut.keyCaps))
-            }
-            if !input.trimmingCharacters(in: .whitespaces).isEmpty {
-                hints.append(FooterHint(label: "Follow up", keys: ["↩"]))
-            } else {
-                // Return runs the Quick AI primary action, so the hint has to
-                // name that action rather than always saying paste.
-                switch settings.quickAIPrimaryAction {
-                case .pasteToActiveApp:
-                    hints.append(FooterHint(
-                        label: resultActionDetail(.pasteBack) ?? "Paste back",
-                        keys: ResultAction.pasteBack.shortcut.keyCaps
-                    ))
-                case .copyToClipboard:
-                    hints.append(FooterHint(label: "Copy answer", keys: ["↩"]))
-                }
-            }
-            hints.append(FooterHint(label: "Copy", keys: ResultAction.copy.shortcut.keyCaps))
-            if history.count > 1 { hints.append(FooterHint(label: "Chats", keys: ["⌘", "[", "]"])) }
-            hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
             return hints
         }
         if !savedPromptMatches.isEmpty {
@@ -1966,21 +1930,66 @@ import Observation
         switch inputMode {
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
-        case .askAI: return "Ask anything…"
         case .vaultSearch(let mode): return mode.placeholder
         case nil: break
         }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
         if let catalogScope { return "Search \(catalogScope.title.lowercased())…" }
-        return isFollowUp ? "Ask a follow-up…" : "Search for apps and commands…"
+        return "Search for apps and commands…"
+    }
+
+    /// The Quick AI composer's placeholder, Raycast's own words.
+    static let quickAIPlaceholder = "Ask anything, @ tools, or / for commands…"
+
+    /// What Return does from the Quick AI composer right now, drawn inside
+    /// the field as a label and its key cap. The surface has no footer; this
+    /// is its one hint.
+    struct ComposerAction: Equatable, Sendable {
+        let label: String
+        let keys: [String]
+    }
+
+    var quickAIComposerAction: ComposerAction {
+        if isAskQuestionActive { return ComposerAction(label: "Pick", keys: ["↩"]) }
+        // In Recent Chats, Return opens the highlighted chat; ↩ means one
+        // thing on the screen.
+        if isRecentChatsPresented { return ComposerAction(label: "Open", keys: ["↩"]) }
+        if isStreaming { return ComposerAction(label: "Stop", keys: ["esc"]) }
+        if !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            switch settings.quickAIPrimaryAction {
+            case .pasteToActiveApp: return ComposerAction(label: "Paste Response", keys: ["↩"])
+            case .copyToClipboard: return ComposerAction(label: "Copy Response", keys: ["↩"])
+            }
+        }
+        return ComposerAction(label: "Ask", keys: ["↩"])
+    }
+
+    /// The Quick AI header title: the conversation once it has an answer,
+    /// "Quick AI" before that.
+    var quickAITitle: String {
+        guard let conversation = currentConversation,
+              conversation.messages.contains(where: { $0.role == .assistant })
+        else { return "Quick AI" }
+        return conversation.title
     }
 
     var activeProvider: InferenceProvider? { settings.quickAIProvider }
+
+    /// The id of the model that answers the next text message, or `nil`
+    /// with no provider. What the chooser compares against; the header
+    /// shows `activeModelDisplay`.
+    var activeModelID: String? {
+        guard let provider = activeProvider else { return nil }
+        return settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
+    }
+
+    /// The header's second line: the display name of the model that will
+    /// answer the next message (the vision model only while an image is
+    /// attached), falling back to the id when the catalogue has no name.
     var activeModelDisplay: String {
         if pendingImage != nil { return visionDisplayName }
-        guard let provider = activeProvider else { return "No model" }
-        let model = settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
-        return model.isEmpty ? provider.name : model
+        guard let provider = activeProvider, let model = activeModelID else { return "No model" }
+        return model.isEmpty ? provider.name : ModelProfile.displayName(forModelID: model)
     }
 
     /// Whether the ⇥ hint is drawn in root search. The key itself is not
@@ -1989,6 +1998,16 @@ import Observation
 
     var isFollowUp: Bool { !(currentConversation?.messages.isEmpty ?? true) }
     var conversationMessages: [QuickMessage] { currentConversation?.messages ?? [] }
+
+    /// A finished answer that is not the thread's last assistant turn: a
+    /// local answer (math, a conversion), a command action's result, a Vault
+    /// Search, or the partial text a failed stream left behind. The surface
+    /// draws it after the thread; a streaming answer is drawn live instead.
+    var quickAIDetachedAnswer: String? {
+        guard !isStreaming, !output.isEmpty else { return nil }
+        let lastAssistant = conversationMessages.last { $0.role == .assistant }?.content
+        return lastAssistant == output ? nil : output
+    }
     var conversationTranscriptText: String {
         conversationMessages.map(\.content).joined(separator: "\n")
     }
@@ -2105,10 +2124,9 @@ import Observation
             answerAskQuestion(index: askQuestionSelectionIndex)
             return
         }
-        if isConversationViewPresented, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // An empty composer in the conversation view: Return continues
-            // the highlighted chat instead of repeating a primary action.
-            openSelectedConversationFromView()
+        if isRecentChatsPresented {
+            // Return in Recent Chats opens the highlighted chat in the thread.
+            openSelectedRecentChat()
             return
         }
         if isModelChooserPresented {
@@ -2126,6 +2144,10 @@ import Observation
             await runTransformChooserSelection()
             return
         }
+        // The composer keeps focus while an answer streams; Return waits for
+        // the stream to end rather than queueing a second question. A
+        // chooser above still takes Return while the stream runs.
+        if isStreaming { return }
         switch classifySubmit() {
         case .attachment, .commandAlias, .prompt:
             await submit()
@@ -2238,6 +2260,10 @@ import Observation
     // MARK: - Input modes
 
     func enterInputMode(_ mode: InputMode) {
+        // A mode owns the root input row, so the Quick AI surface steps
+        // aside; the thread is kept behind it.
+        isQuickAIPresented = false
+        isRecentChatsPresented = false
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         inputMode = mode
@@ -2263,31 +2289,78 @@ import Observation
         pendingQuickLinkID = itemID
     }
 
-    func enterAskAIMode() {
+    func openQuickAI() {
         let preserved = input
-        inputMode = .askAI
+        inputMode = nil
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
+        isActionPalettePresented = false
+        actionQuery = ""
+        isRecentChatsPresented = false
         input = preserved
+        errorMessage = nil
+        applicationSelectionIndex = 0
+        isQuickAIPresented = true
+        requestInputFocus()
+    }
+
+    /// Escape, the back chevron, or an empty Backspace on the surface: back
+    /// to root search. The thread stays; `⌘N` is what starts a new one.
+    func closeQuickAI() {
+        guard isQuickAIPresented else { return }
+        if isStreaming { cancel() }
+        isRecentChatsPresented = false
+        isModelChooserPresented = false
+        isAddContextMenuPresented = false
+        isTransformChooserPresented = false
+        isActionPalettePresented = false
+        actionQuery = ""
+        isQuickAIPresented = false
         errorMessage = nil
         applicationSelectionIndex = 0
         requestInputFocus()
     }
 
+    /// The submit Tab started, kept so a test can await it.
+    @ObservationIgnored var tabSubmitTask: Task<Void, Never>?
+
+    /// The submit Return started from the Quick AI composer, kept so a test
+    /// can await it and a second Return cannot race the first.
+    @ObservationIgnored var composerSubmitTask: Task<Void, Never>?
+
+    /// Return in the Quick AI composer. One submit runs at a time: Return
+    /// while one is in flight is dropped, as it is while a stream runs.
+    func submitFromComposer() {
+        guard composerSubmitTask == nil else { return }
+        composerSubmitTask = Task { @MainActor [weak self] in
+            await self?.submitResolvingFuzzyAlias()
+            // `cancel()` drops the handle itself; a cancelled submit must
+            // not clear a newer one that took its place.
+            guard !Task.isCancelled else { return }
+            self?.composerSubmitTask = nil
+        }
+    }
+
     /// Tab in the launcher: complete a `/alias` when one matches, otherwise
-    /// switch the typed text to the AI. Returns `false` when Tab should be
-    /// left to the text field.
+    /// open Quick AI. Typed text is sent in the same gesture; an empty field
+    /// opens the surface empty. Returns `false` when Tab should be left to
+    /// the text field.
     func handleTab() -> Bool {
         if !savedPromptMatches.isEmpty {
             completeFirstFuzzyAlias()
             return true
         }
-        guard !isStreaming, !hasPendingAttachment, !isItemActionPanePresented,
-              !isActionPalettePresented, inputMode == nil, !isAnswerActive else { return false }
-        enterAskAIMode()
+        guard !isStreaming, !isItemActionPanePresented,
+              !isActionPalettePresented, inputMode == nil, !isQuickAIPresented else { return false }
+        openQuickAI()
+        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        learn(.item(askAIItem(query: input)))
+        tabSubmitTask = Task { @MainActor [weak self] in
+            await self?.submit()
+        }
         return true
     }
 
@@ -2304,11 +2377,6 @@ import Observation
     func submitInputMode() async -> Bool {
         guard let inputMode else { return false }
         switch inputMode {
-        case .askAI:
-            guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
-            learn(.item(askAIItem(query: input)))
-            self.inputMode = nil
-            await submit()
         case .vaultSearch(let mode):
             await submitVaultSearch(mode: mode, followUp: false)
         case .renameChat(let id):
@@ -2382,6 +2450,9 @@ import Observation
             if !isFresh { reloadScreenshotFiles() }
         }
         inputMode = nil
+        // A catalog is a root-search surface: Quick AI steps aside.
+        isQuickAIPresented = false
+        isRecentChatsPresented = false
         catalogScope = scope
         pendingQuickLinkID = nil
         self.input = ""
@@ -2611,12 +2682,14 @@ import Observation
             screenHistory.openMoment(frame)
         case .askAI:
             if item.value.isEmpty {
-                // Empty root row or global hotkey: capture the next typing for the AI.
-                enterAskAIMode()
+                // Empty root row or global hotkey: open Quick AI empty.
+                openQuickAI()
                 overlayPresenter.presentOverlay()
             } else {
+                // The row carries the query: open Quick AI and send it in
+                // the same gesture, exactly as Tab does.
                 input = item.value
-                inputMode = nil
+                openQuickAI()
                 await submit()
             }
         case .application:
@@ -3017,7 +3090,7 @@ import Observation
         }
         modelChooserOptions = options
         modelChooserPurpose = purpose
-        modelChooserIndex = options.firstIndex { $0.model == activeModelDisplay } ?? 0
+        modelChooserIndex = options.firstIndex { $0.model == activeModelID } ?? 0
         isModelChooserPresented = true
         isActionPalettePresented = false
         closeItemActionPane()
@@ -3512,7 +3585,9 @@ import Observation
     var visionDisplayName: String {
         guard let visionProvider else { return "No vision model" }
         let model = visionModelName
-        return model.isEmpty ? visionProvider.name : "\(visionProvider.name) · \(model)"
+        return model.isEmpty
+            ? visionProvider.name
+            : "\(visionProvider.name) · \(ModelProfile.displayName(forModelID: model))"
     }
 
     /// Title of the attachment card: "Screen Awareness · Safari" or "Screenshot attached".
@@ -4429,7 +4504,7 @@ import Observation
         case transformChooser
         case modelChooser
         case addContextMenu
-        case conversationView
+        case recentChats
         case streaming
         case attachment
         case typedText
@@ -4448,7 +4523,7 @@ import Observation
         if isTransformChooserPresented { return .transformChooser }
         if isModelChooserPresented { return .modelChooser }
         if isAddContextMenuPresented { return .addContextMenu }
-        if isConversationViewPresented { return .conversationView }
+        if isRecentChatsPresented { return .recentChats }
         if isStreaming { return .streaming }
         if !input.isEmpty { return .typedText }
         if hasPendingAttachment { return .attachment }
@@ -4474,8 +4549,8 @@ import Observation
             closeModelChooser()
         case .addContextMenu:
             closeAddContextMenu()
-        case .conversationView:
-            closeConversationView()
+        case .recentChats:
+            closeRecentChats()
         case .streaming:
             cancel()
         case .typedText:
@@ -4485,7 +4560,8 @@ import Observation
         case .attachment:
             removePendingImage()
         case .answer:
-            startNewConversation()
+            // Back to root search; the thread is kept behind it.
+            closeQuickAI()
         case .inputMode:
             leaveInputMode()
         case .quickLinkInput, .catalog:
@@ -4515,13 +4591,13 @@ import Observation
 
     /// Escape is handled at the NSPanel boundary so it works even when a
     /// SwiftUI field editor consumes cancelOperation. It walks the same
-    /// stack as Backspace, with two differences: typed text is cleared
-    /// before anything else closes, and a finished answer or the root
-    /// hides the overlay instead of discarding the thread.
+    /// stack as Backspace, with one difference: the root hides the overlay.
+    /// On the Quick AI surface Escape stops a stream, else returns to root
+    /// search with the thread kept; a second Escape there closes the window.
     @discardableResult
     func handleEscapeKey() -> Bool {
         switch topLayer {
-        case .answer, .root:
+        case .root:
             overlayPresenter.dismissOverlay()
         default:
             popTopLayer()
@@ -4558,12 +4634,12 @@ import Observation
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
     func performShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        if Self.conversationViewShortcut.matches(
+        if Self.recentChatsShortcut.matches(
             characters: characters,
             keyCode: keyCode,
             modifiers: modifiers
         ) {
-            toggleConversationView()
+            toggleRecentChats()
             return true
         }
         // ⌘⌥T toggles the keyboard-first Transform chooser (reachable without a
@@ -5276,6 +5352,7 @@ import Observation
         // A new request supersedes any prior answer's replaceable selection.
         replaceableSelectionContext = nil
         isConversationHistoryPresented = false
+        webSearchNote = nil
         let submittedInput = input
         let submittedImages = !pendingImages.isEmpty
             ? pendingImages
@@ -5403,6 +5480,13 @@ import Observation
         if let result = localAnswer(for: effectivePrompt, allowConversions: action == nil) {
             errorMessage = nil
             output = result
+            // Not a turn, but still a question with an answer: the surface
+            // pairs the pill with the prose, and the field empties as it
+            // does for a model answer.
+            let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            lastQuestion = question
+            pendingQuestion = question
+            input = ""
             if settings.autoCopy {
                 copyOutput()
                 markJustCopied()
@@ -5429,9 +5513,26 @@ import Observation
         )
     }
 
+    /// Marks the ask in flight: the typed question is on screen as its own
+    /// pill from the first moment of a search or page read.
+    private func beginPendingQuestion(_ submittedInput: String) {
+        let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastQuestion = question
+        pendingQuestion = question
+    }
+
+    /// Whether the ask that started an enrichment is still wanted after one
+    /// of its awaits: `cancel()` (Escape, the chevron, Recent Chats) turns
+    /// streaming off and cancels the submit task, and a cancelled submit
+    /// must never reach the model.
+    private var enrichmentContinues: Bool {
+        isStreaming && !Task.isCancelled
+    }
+
     /// Adds live context to the prompt: SearXNG results when the input asks
     /// for a web search, and the content of any http(s) URLs it names.
-    /// Returns `false` when the search failed and the request must stop.
+    /// Returns `false` when the search failed or the ask was stopped and
+    /// the request must not reach the model.
     func enrich(_ request: inout PreparedRequest) async -> Bool {
         if let query = webSearchQuery(
             submittedInput: request.submittedInput,
@@ -5443,10 +5544,17 @@ import Observation
                 return false
             }
             errorMessage = nil
-            output = "Searching the web…"
+            webSearchNote = "Search web: \(query)"
+            streamingStatus = webSearchNote
+            // The previous answer leaves before the search line draws, and
+            // the question being asked is on screen from the first moment,
+            // as its own pill until the model call makes it a turn.
+            output = ""
+            beginPendingQuestion(request.submittedInput)
             isStreaming = true
             do {
                 let searchBundle = try await webSearchService.search(query)
+                guard enrichmentContinues else { return false }
                 request.effectivePrompt = Self.webAnswerPrompt(
                     question: query,
                     searchBundle: searchBundle
@@ -5456,6 +5564,7 @@ import Observation
                 output = ""
                 isStreaming = false
             } catch {
+                guard enrichmentContinues else { return false }
                 output = ""
                 isStreaming = false
                 errorMessage = error.localizedDescription
@@ -5470,16 +5579,21 @@ import Observation
         let promptPageURLs = PromptURLScanner.urls(in: request.submittedInput)
         if !promptPageURLs.isEmpty, let pageReader {
             errorMessage = nil
-            output = promptPageURLs.count == 1
+            // Progress is the status line, never the answer text.
+            streamingStatus = promptPageURLs.count == 1
                 ? "Reading \(promptPageURLs[0].host ?? "page")\u{2026}"
                 : "Reading \(promptPageURLs.count) pages\u{2026}"
+            output = ""
+            beginPendingQuestion(request.submittedInput)
             isStreaming = true
             var sections: [String] = []
             for url in promptPageURLs {
                 do {
                     let content = try await pageReader.read(url)
+                    guard enrichmentContinues else { return false }
                     sections.append("### \(url.absoluteString)\n\(content)")
                 } catch {
+                    guard enrichmentContinues else { return false }
                     sections.append(
                         "### \(url.absoluteString)\n(Could not read this page: \(error.localizedDescription))"
                     )
@@ -5488,6 +5602,7 @@ import Observation
             request.effectivePrompt += "\n\n" + Self.pageContextSection(pages: sections.joined(separator: "\n\n"))
             request.usedPageRead = true
             output = ""
+            streamingStatus = nil
             isStreaming = false
         }
         return true
@@ -5570,6 +5685,8 @@ import Observation
         pendingImages.removeAll()
         pendingContext = nil
         lastQuestion = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The question is a turn of the thread now; the thread draws it.
+        pendingQuestion = nil
         if !submittedImages.isEmpty { conversationImages = submittedImages }
 
         errorMessage = nil
@@ -5677,7 +5794,8 @@ import Observation
             }
         }
 
-        if let task = streamTask,
+        let task = streamTask
+        if let task,
            usedWebSearch,
            let webSearchFallback = request.webSearchFallback {
             await waitForWebAnswer(
@@ -5686,8 +5804,11 @@ import Observation
                 submittedMessageID: submittedMessage.id
             )
         } else {
-            await streamTask?.value
+            await task?.value
         }
+        // A finished stream leaves no handle behind, so `cancel()` can tell
+        // a live model request from an ask still in its search phase.
+        if streamTask == task { streamTask = nil }
     }
 
     /// Run a command-lane saved action: execute the configured binary with
@@ -6039,7 +6160,7 @@ import Observation
         return makeService(provider: provider, model: model)
     }
 
-    private func makeService(
+    func makeService(
         provider: InferenceProvider,
         model: String
     ) -> (any QuickService)? {
@@ -6053,10 +6174,14 @@ import Observation
             if settings.modelWebSearchEnabled, let webSearchService {
                 webSearch = { query in try await webSearchService.search(query) }
             }
-            // Ask User Question has no setting: Raycast's card is always on.
-            let askUserQuestion: @Sendable (AskUserQuestion) async -> AskUserQuestionAnswer? = { [weak self] question in
-                guard let self else { return nil }
-                return await self.awaitAskQuestionAnswer(question)
+            // The question card is behind the Quick AI setting "Let the model
+            // ask clarifying questions"; off, the tool is not offered at all.
+            var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
+            if settings.quickAIClarifyingQuestionsEnabled {
+                askUserQuestion = { [weak self] question in
+                    guard let self else { return nil }
+                    return await self.awaitAskQuestionAnswer(question)
+                }
             }
             return OpenAICompatibleService(
                 baseURL: url,
@@ -6065,7 +6190,7 @@ import Observation
                 systemPrompt: settings.systemPrompt,
                 webSearch: webSearch,
                 askUserQuestion: askUserQuestion,
-                reasoningEffort: ModelPreferenceStore.shared
+                reasoningEffort: modelPreferences
                     .profile(providerID: provider.id, model: model)
                     .reasoningEffort
             )
@@ -6089,16 +6214,32 @@ import Observation
         // terminated.
         let wasStreaming = isStreaming
         let cancelledModelRequest = wasStreaming && streamTask != nil
+        // Streaming with the question still pending is the enrichment
+        // phase (a web search or page read): the submit itself is what is
+        // in flight, and the question was never a turn.
+        let cancelledEnrichment = wasStreaming && pendingQuestion != nil
         if cancelledModelRequest { streamWasCancelled = true }
         clearAskQuestion(with: nil)
         streamTask?.cancel()
         streamTask = nil
         commandTask?.cancel()
         commandTask = nil
+        // The submit that started the ask (Tab, or Return in the composer)
+        // is still awaiting its search; a stopped ask must not go on to
+        // call the model when that await returns.
+        tabSubmitTask?.cancel()
+        tabSubmitTask = nil
+        composerSubmitTask?.cancel()
+        composerSubmitTask = nil
         discardStreamBuffer()
         isStreaming = false
         streamingStatus = nil
         output = ""
+        if cancelledEnrichment {
+            pendingQuestion = nil
+            // The search line was made for an answer that will not come.
+            webSearchNote = nil
+        }
         guard wasStreaming, cancelledModelRequest else { return }
         recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
     }
@@ -6393,6 +6534,8 @@ import Observation
         if scope.contains(.mode) {
             screenHistory.resetForMode()
             catalogIdleResetTask?.cancel()
+            isQuickAIPresented = false
+            isRecentChatsPresented = false
             catalogScope = nil
             pendingQuickLinkID = nil
             inputMode = nil
@@ -6413,6 +6556,8 @@ import Observation
             output = ""
             errorMessage = nil
             lastQuestion = nil
+            pendingQuestion = nil
+            webSearchNote = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
@@ -6461,69 +6606,77 @@ import Observation
         requestInputFocus()
     }
 
-    // MARK: - Conversation view (⌘J)
+    // MARK: - Recent Chats (⌘J)
 
-    /// `⌘J`: the current thread at full height, with the chat history list
-    /// beside it. It stays inside the one overlay window.
-    static let conversationViewShortcut: KeyShortcut = .command("j")
+    /// `⌘J`: the recent chat list in place of the thread, inside the same
+    /// Quick AI window. One column; `↑↓` move, `↩` opens, `esc` returns to
+    /// the thread. The expand glyph in the header runs the same toggle.
+    static let recentChatsShortcut: KeyShortcut = .command("j")
 
-    var isConversationViewPresented = false
-    /// Highlighted row of the conversation view's chat list.
-    var conversationViewHistoryIndex = 0
-
-    /// Opens the conversation view on the current thread. The thread, the
-    /// model, and any attachments are already in state, so they carry over
-    /// untouched; this only changes what is drawn.
-    func openConversationView() {
-        guard currentConversation != nil || !output.isEmpty else {
-            errorMessage = "Ask a question first, then continue the thread here."
+    /// Opens Recent Chats. The thread, the model, and any attachments are
+    /// already in state, so they carry over untouched; this only changes
+    /// what is drawn.
+    func openRecentChats() {
+        guard !history.isEmpty || currentConversation != nil else {
+            errorMessage = "No chats yet. Ask a question first."
             requestInputFocus()
             return
         }
-        isConversationViewPresented = true
+        // The same entry as Tab: a catalog, an input mode, or a Quick Link
+        // input steps aside so the composer's Return asks.
+        openQuickAI()
+        isRecentChatsPresented = true
         isConversationHistoryPresented = false
-        isActionPalettePresented = false
         isModelChooserPresented = false
         isAddContextMenuPresented = false
-        closeItemActionPane()
-        actionQuery = ""
-        errorMessage = nil
-        conversationViewHistoryIndex = currentConversation
-            .flatMap { conversation in history.firstIndex { $0.id == conversation.id } } ?? 0
+        recentChatsIndex = currentConversation
+            .flatMap { conversation in
+                recentChatItems.firstIndex { $0.itemID == conversation.id.uuidString }
+            } ?? 0
         requestInputFocus()
     }
 
-    func closeConversationView() {
-        guard isConversationViewPresented else { return }
-        isConversationViewPresented = false
+    func closeRecentChats() {
+        guard isRecentChatsPresented else { return }
+        isRecentChatsPresented = false
         requestInputFocus()
     }
 
-    func toggleConversationView() {
-        if isConversationViewPresented {
-            closeConversationView()
+    func toggleRecentChats() {
+        if isRecentChatsPresented {
+            closeRecentChats()
         } else {
-            openConversationView()
+            openRecentChats()
         }
     }
 
-    func moveConversationViewSelection(_ delta: Int) {
-        guard !history.isEmpty else { return }
-        conversationViewHistoryIndex = ListSelection.wrappedIndex(
-            conversationViewHistoryIndex,
+    /// The rows of Recent Chats: the launcher's own chat rows (the Chats
+    /// catalog), pinned first, newest next. `recentChatsIndex` indexes
+    /// this list, so the keys and the drawn rows agree.
+    var recentChatItems: [LauncherCatalogItem] { conversationItems }
+
+    func moveRecentChatsSelection(_ delta: Int) {
+        let count = recentChatItems.count
+        guard count > 0 else { return }
+        recentChatsIndex = ListSelection.wrappedIndex(
+            recentChatsIndex,
             by: delta,
-            count: history.count
+            count: count
         )
     }
 
-    /// Return on an empty composer in the conversation view: continue the
-    /// highlighted chat, without leaving the view.
-    func openSelectedConversationFromView() {
-        guard history.indices.contains(conversationViewHistoryIndex) else { return }
-        loadConversation(id: history[conversationViewHistoryIndex].id)
-        conversationViewHistoryIndex = history.firstIndex {
-            $0.id == currentConversation?.id
-        } ?? conversationViewHistoryIndex
+    /// Return in Recent Chats: open the highlighted chat in the thread.
+    func openSelectedRecentChat() {
+        let items = recentChatItems
+        guard items.indices.contains(recentChatsIndex) else {
+            closeRecentChats()
+            return
+        }
+        // A stream still running belongs to the chat being left.
+        if isStreaming { cancel() }
+        continueConversation(itemID: items[recentChatsIndex].itemID)
+        isRecentChatsPresented = false
+        requestInputFocus()
     }
 
     // MARK: - Collapsed transcript messages
@@ -6545,14 +6698,10 @@ import Observation
         )
     }
 
-    /// The newest on-screen message that has a Show more control, the one the
-    /// keyboard shortcut acts on. The overlay's transcript block stops two
-    /// turns short of the end; the conversation view shows them all.
+    /// The newest message that has a Show more control, the one the
+    /// keyboard shortcut acts on. The thread shows every message.
     var keyboardToggleMessageID: UUID? {
-        let visible = isConversationViewPresented
-            ? conversationMessages
-            : Array(conversationMessages.dropLast(2))
-        return visible.last { MessageCollapsePolicy.shouldCollapse($0.content) }?.id
+        conversationMessages.last { MessageCollapsePolicy.shouldCollapse($0.content) }?.id
     }
 
     /// Toggles one message between collapsed and expanded. Returns `false`
@@ -6613,9 +6762,20 @@ import Observation
         expandedTranscriptMessageIDs.removeAll()
         isConversationHistoryPresented = false
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
-        settings.select(providerID: conversation.providerID, model: conversation.model)
+        // The chat's model carries over only while it is still offered; a
+        // chat written on a model since turned off (the sunset vision id)
+        // keeps the provider's current selection, so the header names the
+        // model that will answer and the migration is not undone.
+        let model = modelPreferences.isEnabled(providerID: conversation.providerID, model: conversation.model)
+            ? conversation.model
+            : nil
+        settings.select(providerID: conversation.providerID, model: model)
         settings.save()
         errorMessage = nil
+        // The finished-search line belongs to the answer it was made for,
+        // as does a question that never became a turn.
+        webSearchNote = nil
+        pendingQuestion = nil
         input = ""
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil

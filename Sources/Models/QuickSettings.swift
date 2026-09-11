@@ -120,7 +120,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 22
+    var configurationVersion: Int = 23
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -249,6 +249,10 @@ struct QuickSettings: Codable, Sendable {
     /// Offer the model a `search_web` tool (backed by SearXNG) so it can
     /// look things up mid-answer instead of guessing from training data.
     var modelWebSearchEnabled: Bool = true
+    /// Whether Quick AI offers the model the `ask_user_question` tool. Off by
+    /// default: the model answers instead of asking which kind of help is
+    /// wanted. On, the inline multiple-choice card is back.
+    var quickAIClarifyingQuestionsEnabled: Bool = false
 
     // Persistence key
     static let defaultsKey = "QuickSettings"
@@ -266,7 +270,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 22
+        configurationVersion = 23
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -391,6 +395,10 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .reopenRetentionSeconds
         ) ?? 10
+        quickAIClarifyingQuestionsEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .quickAIClarifyingQuestionsEnabled
+        ) ?? false
         modelWebSearchEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .modelWebSearchEnabled
@@ -525,6 +533,24 @@ struct QuickSettings: Codable, Sendable {
             newChatInterval = NewChatInterval.nearest(
                 toMinutes: legacyNewConversationAfterMinutes
             )
+        }
+        if decodedConfigurationVersion < 23 {
+            // 2026-09-11: `deepseek-v4-flash-vision-exp` is sunset for text.
+            // A DeepSeek selection still sitting on it moves to the flash
+            // text model; any other explicit choice stays. The vision route
+            // is untouched, and the id itself ships turned off in Manage
+            // Models (`ModelProfile.curatedTable`) so it leaves the pickers.
+            if let index = providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }),
+               providers[index].selectedModel == InferenceProvider.deepSeekVisionModel {
+                providers[index].selectedModel = InferenceProvider.deepSeekDefaultModel
+                if !providers[index].models.contains(InferenceProvider.deepSeekDefaultModel) {
+                    providers[index].models.insert(InferenceProvider.deepSeekDefaultModel, at: 0)
+                }
+            }
+            if quickAIProviderID == InferenceProvider.deepSeekID,
+               quickAIModel == InferenceProvider.deepSeekVisionModel {
+                quickAIModel = InferenceProvider.deepSeekDefaultModel
+            }
         }
         if let quickAIProviderID,
            !providers.contains(where: { $0.id == quickAIProviderID }) {

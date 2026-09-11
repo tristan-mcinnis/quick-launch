@@ -22,21 +22,36 @@ struct AnswerStateTests {
         #expect(vm.isAnswerActive)
         #expect(vm.lastQuestion == "who won the world cup")
         #expect(vm.launcherMatches.isEmpty)
-        #expect(vm.footerHints.map(\.label) == ["Paste back", "Copy", "Actions"])
+        #expect(vm.isQuickAIPresented, "an answer lives on the Quick AI surface")
+        // The surface has no footer: the composer names what Return does.
+        #expect(vm.quickAIComposerAction == .init(label: "Paste Response", keys: ["↩"]))
         vm.input = "and"
-        #expect(vm.footerHints.first?.label == "Follow up")
+        #expect(vm.quickAIComposerAction.label == "Ask")
         vm.input = ""
         #expect(vm.resultActions.contains(.pasteBack) && vm.resultActions.contains(.renameChat))
         #expect(!vm.resultActions.contains(.previousChat), "one chat: nothing to browse")
-        #expect(vm.footerContext == vm.activeModelDisplay)
+        #expect(vm.quickAITitle == "who won the world cup")
     }
 
-    @Test func backspaceOnEmptyPopsToTheRoot() async {
+    @Test func backspaceOnEmptyPopsToTheRootAndKeepsTheThread() async {
+        let (vm, _) = await answered("hello")
+        #expect(vm.popLayerForEmptyBackspace())
+        #expect(!vm.isAnswerActive)
+        #expect(!vm.isQuickAIPresented)
+        #expect(vm.output == "Argentina.", "the thread is kept behind root search")
+        #expect(vm.currentConversation != nil)
+        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
+        #expect(!vm.popLayerForEmptyBackspace(), "root: nothing left to pop")
+    }
+
+    @Test func newChatKeepsTheSurfaceAndEmptiesTheThread() async {
         let (vm, _) = await answered("hello")
         vm.startNewConversation()
-        #expect(!vm.isAnswerActive)
+        #expect(vm.isQuickAIPresented, "⌘N starts a new chat on the surface")
         #expect(vm.lastQuestion == nil)
-        #expect(vm.launcherMatches.count == LauncherCatalogScope.allCases.count + 1)
+        #expect(vm.output.isEmpty)
+        #expect(vm.quickAITitle == "Quick AI")
+        #expect(vm.launcherMatches.isEmpty)
     }
 
     @Test func copyShortcutCopiesTheAnswerAndCloses() async {
@@ -71,11 +86,21 @@ struct AnswerStateTests {
         #expect(vm.resultActions.first == .pasteBack)
     }
 
-    @Test func answerWidensThePanel() async {
+    @Test func anAnswerOpensTheFixedQuickAISurface() async {
         let (vm, _) = await answered("hello")
-        #expect(vm.currentPanelWidth == PanelSizing.panelWidthForAnswer)
-        vm.startNewConversation()
         #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(vm.estimatedWindowHeight == PanelSizing.quickAIHeight)
+        vm.closeQuickAI()
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(
+            vm.estimatedWindowHeight == PanelSizing.panelHeight(
+                errorMessage: nil,
+                suggestionCount: vm.launcherMatches.count,
+                showsFooter: true,
+                launcherRowCount: vm.launcherMatches.count
+            ),
+            "root search measures its rows again"
+        )
     }
 
     @Test func chatHistoryActionOpensTheChatsCatalog() async {

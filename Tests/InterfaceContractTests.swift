@@ -49,10 +49,16 @@ struct InterfaceContractTests {
     @Test("Answer actions are keys from the shared table, not buttons")
     func answerActionsAreKeys() throws {
         let overlay = try Self.source("Sources/Views/OverlayView.swift")
+        let quickAI = try Self.source("Sources/Views/QuickAIView.swift")
         let actions = try Self.source("Sources/Models/ItemAction.swift")
         #expect(!overlay.contains("Paste Back"))
+        #expect(!quickAI.contains("Paste Back"))
         #expect(!overlay.contains("keyboardShortcut(\"c\", modifiers: [.command, .shift])"))
-        #expect(overlay.contains("viewModel.lastQuestion"))
+        #expect(!quickAI.contains("keyboardShortcut(\"c\", modifiers: [.command, .shift])"))
+        // The composer's one hint comes from the view model, which reads the
+        // Primary Action setting; the view never names an action itself.
+        #expect(quickAI.contains("viewModel.quickAIComposerAction"))
+        #expect(overlay.contains("QuickAIView(viewModel: viewModel)"))
         #expect(overlay.contains("LauncherFooter(viewModel: viewModel)"))
         #expect(actions.contains("enum ResultAction"))
         #expect(actions.contains("case .copy: .commandShift(\"c\")"))

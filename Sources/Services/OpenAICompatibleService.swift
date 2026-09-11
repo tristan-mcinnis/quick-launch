@@ -78,6 +78,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
     static let systemPrompt = QuickSettings.defaultSystemPrompt
     static let maxToolRounds = 3
 
+    /// Whether the request body will carry the `ask_user_question` tool.
+    var offersAskUserQuestion: Bool { askUserQuestion != nil }
+
     /// `baseURL` is used as given; providers include `/v1` themselves when
     /// their endpoint needs it.
     init(
@@ -207,7 +210,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         "type": "function",
         "function": [
             "name": "ask_user_question",
-            "description": "Ask the user a short multiple-choice question when the request is ambiguous, when a decision is theirs to make, or when they asked you to offer options. The question appears inline in the conversation; the user picks one option with the keyboard and you continue with that answer. Ask one question at a time, with 2 to 5 short options. Prefer this over guessing.",
+            "description": "Ask the user a short multiple-choice question only when the request is genuinely ambiguous and cannot be answered without a decision the user must make, or when they asked you to offer options. Never ask on a request that has one reasonable reading: answer it. Do not ask which kind of help is wanted. The question appears inline in the conversation; the user picks one option with the keyboard and you continue with that answer. Ask one question at a time, with 2 to 5 short options.",
             "parameters": [
                 "type": "object",
                 "properties": [
