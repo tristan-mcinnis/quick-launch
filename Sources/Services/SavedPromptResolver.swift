@@ -68,11 +68,31 @@ enum SavedPromptResolver {
         )
     }
 
+    /// The assistant a bare `<prefix><alias>` names: nothing typed after the
+    /// alias, and the saved prompt is an assistant. Nil for a transform
+    /// (text after the alias), a command action, or any other input, which
+    /// all keep `resolveAction`'s behaviour.
+    static func assistant(
+        input: String,
+        prefix: String,
+        savedPrompts: [SavedPrompt]
+    ) -> SavedPrompt? {
+        guard let resolution = resolveAction(input: input, prefix: prefix, savedPrompts: savedPrompts),
+              resolution.context.isEmpty,
+              let match = savedPrompts.first(where: { $0.id == resolution.actionID }),
+              match.isAssistant
+        else { return nil }
+        return match
+    }
+
     static func prompt(for action: SavedPrompt, source: String) -> String {
         if action.prompt.contains("{selection}") {
             return action.prompt.replacingOccurrences(of: "{selection}", with: source)
         }
         guard !source.isEmpty else { return action.prompt }
+        // An assistant may leave its transform prompt empty: the text alone
+        // is the question, with no blank lines in front of it.
+        guard !action.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return source }
         return "\(action.prompt)\n\n\(source)"
     }
 

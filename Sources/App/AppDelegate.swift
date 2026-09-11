@@ -223,6 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.viewModel = vm
         vm.overlayPresenter = self
+        // Context skills for assistants, from ~/.claude/skills.
+        vm.skillLibrary = SkillLibrary()
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)

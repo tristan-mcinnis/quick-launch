@@ -33,15 +33,45 @@ struct CommandQuickService: QuickService, Sendable {
         }
     }
 
+    /// The argv and stdin for one request. A `.system` message (an
+    /// assistant's instructions and context skills) goes in front of this
+    /// service's system prompt in `{{systemPrompt}}`; a command whose
+    /// arguments have no such placeholder gets it at the top of stdin
+    /// instead, so the instructions are never dropped.
+    static func invocation(
+        arguments: [String],
+        model: String,
+        systemPrompt: String,
+        messages: [QuickMessage]
+    ) -> (arguments: [String], stdin: String) {
+        let extra = messages.filter { $0.role == .system }.map(\.content)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let turns = messages.filter { $0.role != .system }
+        let takesSystemPrompt = arguments.contains { $0.contains("{{systemPrompt}}") }
+        let system = (extra + [systemPrompt])
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+        var stdin = flatten(turns)
+        if !takesSystemPrompt, !extra.isEmpty {
+            stdin = extra.joined(separator: "\n\n") + "\n\n" + stdin
+        }
+        return (
+            expandedArguments(arguments, model: model, systemPrompt: system),
+            stdin
+        )
+    }
+
     func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        let invocation = Self.invocation(
+            arguments: arguments,
+            model: model,
+            systemPrompt: systemPrompt,
+            messages: messages
+        )
         let chunks = ProcessRunner.stream(
             executable: executable,
-            arguments: Self.expandedArguments(
-                arguments,
-                model: model,
-                systemPrompt: systemPrompt
-            ),
-            stdin: Data(Self.flatten(messages).utf8),
+            arguments: invocation.arguments,
+            stdin: Data(invocation.stdin.utf8),
             currentDirectory: FileManager.default.temporaryDirectory,
             onFailure: { status, stderr in
                 let message = String(data: stderr, encoding: .utf8)?

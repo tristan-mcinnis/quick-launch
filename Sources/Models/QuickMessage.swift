@@ -4,6 +4,11 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
     enum Role: String, Codable, Sendable {
         case user
         case assistant
+        /// Instructions for the model. Never a turn of a saved chat: the
+        /// view model puts an assistant's system message in front of the
+        /// turns of one request, and each service folds it into its own
+        /// system prompt.
+        case system
     }
 
     let id: UUID

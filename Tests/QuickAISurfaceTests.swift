@@ -502,7 +502,7 @@ struct QuickAISurfaceTests {
                 promptModel: "deepseek-v4-flash"
             )
             let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
-            #expect(settings.configurationVersion == 24)
+            #expect(settings.configurationVersion == 25)
             let provider = try #require(settings.providers.first { $0.id == InferenceProvider.deepSeekID })
             #expect(provider.selectedModel == "deepseek-flash")
             #expect(provider.models == ["deepseek-flash", "deepseek-v4-pro"], "the aliases leave the list")

@@ -87,23 +87,34 @@ struct QuickAIView: View {
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                // The model line is a button: it opens the model chooser
-                // to change the model for the next message.
-                Button {
-                    viewModel.toggleModelChooserFromHeader()
-                } label: {
-                    Text(viewModel.activeModelDisplay)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .contentShape(Rectangle())
+                HStack(spacing: House.Spacing.xxs) {
+                    // An assistant chat names its assistant ahead of the
+                    // model, in full ink: the name opens Change Assistant.
+                    if let assistant = viewModel.activeAssistant {
+                        assistantName(assistant.name)
+                        Text("·")
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                    // The model line is a button: it opens the model chooser
+                    // to change the model for the next message.
+                    Button {
+                        viewModel.toggleModelChooserFromHeader()
+                    } label: {
+                        Text(viewModel.activeModelDisplay)
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
+                    .accessibilityHint("Change the model")
+                    .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
+                    .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
-                .accessibilityHint("Change the model")
-                .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
-                .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
             }
             Spacer(minLength: House.Spacing.sm)
             // Raycast's expand glyph is a boxed up-right arrow; this is the
@@ -124,6 +135,26 @@ struct QuickAIView: View {
         .padding(.leading, House.Spacing.sm)
         .padding(.trailing, House.Spacing.lg)
         .frame(height: Self.headerHeight)
+    }
+
+    /// The assistant's name on the model line: a button for Change
+    /// Assistant, never truncated ahead of the model.
+    private func assistantName(_ name: String) -> some View {
+        Button {
+            viewModel.toggleAssistantChooser()
+        } label: {
+            Text(name)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .lineLimit(1)
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Assistant: \(name)")
+        .accessibilityHint("Change the assistant")
+        .accessibilityValue(viewModel.isAssistantChooserPresented ? "Open" : "Closed")
+        .help("Change assistant (\(ResultAction.changeAssistant.shortcut.keyCaps.joined()))")
     }
 
     private func glyphButton(
@@ -294,6 +325,9 @@ struct QuickAIView: View {
             ) {
                 viewModel.toggleTranscriptMessage(message.id)
             }
+        case .system:
+            // Never a saved turn; nothing to draw if one ever arrives.
+            EmptyView()
         case .assistant:
             if let question = message.askUserQuestion {
                 // The record of a question the model asked and the option
@@ -557,12 +591,15 @@ struct QuickAIView: View {
     private var floatingChooser: some View {
         if viewModel.isTransformChooserPresented
             || viewModel.isModelChooserPresented
+            || viewModel.isAssistantChooserPresented
             || viewModel.isAddContextMenuPresented {
             Group {
                 if viewModel.isTransformChooserPresented {
                     TransformChooserPane(viewModel: viewModel)
                 } else if viewModel.isModelChooserPresented {
                     ModelChooserPane(viewModel: viewModel)
+                } else if viewModel.isAssistantChooserPresented {
+                    AssistantChooserPane(viewModel: viewModel)
                 } else {
                     AddContextPane(viewModel: viewModel)
                 }
@@ -630,5 +667,71 @@ private struct RecentChatsList: View {
     private func open(_ item: LauncherCatalogItem) {
         viewModel.recentChatsIndex = viewModel.recentChatItems.firstIndex { $0.id == item.id } ?? 0
         viewModel.openSelectedRecentChat()
+    }
+}
+
+// MARK: - Change Assistant
+
+/// ⌘K › Change Assistant (`⌥⌘A`): No Assistant, then every assistant, with
+/// its alias and tools. ↑↓ move, Return picks, Esc closes. Floats above the
+/// composer, like the model chooser.
+private struct AssistantChooserPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        let options = viewModel.assistantChooserOptions
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text(ResultAction.changeAssistant.title)
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: QuickViewModel.assistantChooserConfirmTitle, keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: options,
+                selectedIndex: $viewModel.assistantChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { option in
+                    // A click picks the row it lands on, not the keyed one.
+                    if let index = options.firstIndex(of: option) {
+                        viewModel.assistantChooserIndex = index
+                    }
+                    viewModel.runAssistantChooserSelection()
+                }
+            ) { _, option, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: option.assistantID == nil
+                              ? "bubble.left"
+                              : ResultAction.changeAssistant.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(option.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(option.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .frame(height: PanelSizing.actionListHeight(rows: options.count, padded: false))
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(ResultAction.changeAssistant.title)
     }
 }

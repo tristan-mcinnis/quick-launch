@@ -127,14 +127,21 @@ struct OpenAICompatibleService: QuickService, Sendable {
         try buildRequest(wireMessages: wireMessages(messages: messages, images: images))
     }
 
-    /// The initial wire transcript: system prompt plus the conversation,
-    /// with images attached to the last user message.
+    /// The initial wire transcript: one system message, then the
+    /// conversation, with images attached to the last user message. A
+    /// `.system` message in `messages` (an assistant's instructions and
+    /// context skills) goes in front of this service's own system prompt,
+    /// so the wire carries one system message whatever the request holds.
     private func wireMessages(
-        messages: [QuickMessage],
+        messages allMessages: [QuickMessage],
         images: [QuickImageAttachment]
     ) -> [[String: Any]] {
+        let system = (allMessages.filter { $0.role == .system }.map(\.content) + [systemPrompt])
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+        let messages = allMessages.filter { $0.role != .system }
         var wireMessages: [[String: Any]] = [
-            ["role": "system", "content": systemPrompt]
+            ["role": "system", "content": system]
         ]
         for (index, message) in messages.enumerated() {
             let isLastUserMessage = index == messages.indices.last && message.role == .user
