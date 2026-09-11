@@ -16,6 +16,9 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
     var titleSource: String?
     /// Pinned chats sort first and are never pruned by the history limit.
     var isPinned: Bool
+    /// The tools this chat lets the model call. Nil uses the defaults; an
+    /// assistant writes its own set here.
+    var enabledTools: Set<ChatToolKind>?
 
     init(
         id: UUID = UUID(),
@@ -26,7 +29,8 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         messages: [QuickMessage] = [],
         customTitle: String? = nil,
         titleSource: String? = nil,
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        enabledTools: Set<ChatToolKind>? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -37,10 +41,11 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         self.customTitle = customTitle
         self.titleSource = titleSource
         self.isPinned = isPinned
+        self.enabledTools = enabledTools
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned
+        case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned, enabledTools
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +59,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         titleSource = try c.decodeIfPresent(String.self, forKey: .titleSource)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
     }
 
     /// The chat's name without the saved-prompt list, so no leading
