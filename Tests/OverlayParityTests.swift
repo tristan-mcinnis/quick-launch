@@ -4,7 +4,7 @@ import Testing
 @testable import QuickLaunch
 
 /// Raycast Quick AI parity: collapsed messages, the answer model actions,
-/// Add Context, the Tab hint, the `⌘J` conversation view, model visibility,
+/// Add Context, the Tab hint, the `⌘P` conversation view, model visibility,
 /// and the Fallback Command row copy.
 @Suite("Quick AI overlay parity", .serialized)
 @MainActor
@@ -375,9 +375,9 @@ struct OverlayParityTests {
         #expect(vm.askAIItem(query: "").title == "Ask AI")
     }
 
-    // MARK: - 5. ⌘J Recent Chats
+    // MARK: - 5. ⌘P Recent Chats
 
-    @Test func commandJCarriesTheThreadAndTheModelOver() async {
+    @Test func commandPCarriesTheThreadAndTheModelOver() async {
         let service = MockQuickService()
         var settings = QuickSettings()
         settings.historyEnabled = false
@@ -387,8 +387,8 @@ struct OverlayParityTests {
         let messages = vm.conversationMessages
 
         #expect(vm.performShortcut(
-            characters: "j",
-            keyCode: 38,
+            characters: "p",
+            keyCode: 35,
             modifiers: [.command]
         ))
 

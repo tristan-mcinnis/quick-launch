@@ -1,0 +1,596 @@
+// AIChatWindowTests — the AI Chat window (plan Phase B2): one conversation
+// window over the same providers and tools, its own view model sharing the
+// launcher's store, Continue in AI Chat (⌘J) from Quick AI, the chat list
+// rail, find in chat, the multi-line composer, Keep on Top, and the keys.
+
+import AppKit
+import Foundation
+import Testing
+@testable import QuickLaunch
+
+@MainActor
+final class FakeAIChatWindow: AIChatWindowPresenting {
+    var shows = 0
+    var captureHides = 0
+    var onTop: [Bool] = []
+    func showWindow() { shows += 1 }
+    func hideWindowForCapture() { captureHides += 1 }
+    func setAlwaysOnTop(_ onTop: Bool) { self.onTop.append(onTop) }
+}
+
+@Suite("AI Chat window", .serialized)
+@MainActor
+struct AIChatWindowTests {
+
+    /// The app's wiring, in memory: a launcher view model and the window's
+    /// own view model on one store, the window model, and a fake window.
+    struct Rig {
+        let launcher: QuickViewModel
+        let chat: QuickViewModel
+        let window: AIChatWindowModel
+        let fake: FakeAIChatWindow
+        let service: MockQuickService
+        let presenter: RecordingPresenter
+        let defaults: UserDefaults
+    }
+
+    private func makeRig(configure: (inout QuickSettings) -> Void = { _ in }) -> Rig {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = true
+        configure(&settings)
+        let service = MockQuickService()
+        let launcher = QuickViewModel(settings: settings, service: service)
+        let presenter = RecordingPresenter()
+        launcher.overlayPresenter = presenter
+        let chat = QuickViewModel(store: launcher.store, service: service)
+        let suite = "AIChatWindowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let window = AIChatWindowModel(chat: chat, defaults: defaults)
+        let fake = FakeAIChatWindow()
+        window.window = fake
+        launcher.aiChatOpener = { handoff in window.open(handoff: handoff) }
+        return Rig(
+            launcher: launcher, chat: chat, window: window, fake: fake,
+            service: service, presenter: presenter, defaults: defaults
+        )
+    }
+
+    private func ask(_ vm: QuickViewModel, _ mock: MockQuickService, _ question: String, reply: String) async {
+        await mock.setResponses([StreamDelta(text: reply, finishReason: "stop")])
+        vm.input = question
+        await vm.submit()
+    }
+
+    private func conversation(_ title: String, answer: String, pinned: Bool = false, age: TimeInterval) -> QuickConversation {
+        var conversation = QuickConversation(
+            providerID: QuickSettings().providers[0].id,
+            model: "model",
+            messages: [
+                QuickMessage(role: .user, content: title),
+                QuickMessage(role: .assistant, content: answer),
+            ]
+        )
+        conversation.isPinned = pinned
+        conversation.updatedAt = Date(timeIntervalSinceNow: -age)
+        return conversation
+    }
+
+    // MARK: - Contract
+
+    @Test func theContractNamesTheBoundary() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let contract = try String(contentsOf: root.appendingPathComponent("CLAUDE.md"), encoding: .utf8)
+        #expect(contract.contains(
+            "AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi."
+        ))
+        #expect(contract.contains("It is not a general chat workspace or an autonomous desktop agent."))
+    }
+
+    // MARK: - One store, two views
+
+    @Test func theWindowSharesTheStoreButNotTheComposer() async {
+        let rig = makeRig()
+        #expect(rig.chat.store === rig.launcher.store)
+        rig.launcher.input = "half a question"
+        rig.chat.input = "something else"
+        #expect(rig.launcher.input == "half a question", "the window never steals the launcher's composer")
+        await ask(rig.chat, rig.service, "asked in the window", reply: "Answer.")
+        #expect(rig.launcher.history.contains { $0.messages.first?.content == "asked in the window" })
+        #expect(rig.launcher.currentConversation == nil, "the launcher's thread is its own")
+        rig.chat.settings.quickAIPrimaryAction = .pasteToActiveApp
+        #expect(rig.launcher.settings.quickAIPrimaryAction == .pasteToActiveApp, "one settings value")
+    }
+
+    // MARK: - One store, two views: no stale copies
+
+    /// Both views on one chat: the window asks first, the launcher opens the
+    /// same chat from its list.
+    private func bothOnOneChat(_ rig: Rig) async throws -> UUID {
+        await ask(rig.chat, rig.service, "first", reply: "One.")
+        let id = try #require(rig.chat.currentConversation?.id)
+        rig.launcher.continueConversation(itemID: id.uuidString)
+        #expect(rig.launcher.currentConversation?.id == id)
+        return id
+    }
+
+    private func contents(_ vm: QuickViewModel, _ id: UUID) -> [String] {
+        vm.history.first { $0.id == id }?.messages.map(\.content) ?? []
+    }
+
+    @Test func aFollowUpAskedInTheOtherViewIsKept() async throws {
+        let rig = makeRig()
+        let id = try await bothOnOneChat(rig)
+        await ask(rig.launcher, rig.service, "asked in the launcher", reply: "A.")
+        await ask(rig.chat, rig.service, "asked in the window", reply: "B.")
+        #expect(contents(rig.chat, id) == ["first", "One.", "asked in the launcher", "A.", "asked in the window", "B."])
+        #expect(rig.chat.currentConversation?.messages.map(\.content) == contents(rig.chat, id),
+                "the window's thread shows the launcher's turn too")
+    }
+
+    @Test func aSaveMergesTheOtherViewsTurnsWrittenSinceItRead() async throws {
+        let rig = makeRig()
+        let id = try await bothOnOneChat(rig)
+        await ask(rig.launcher, rig.service, "asked in the launcher", reply: "A.")
+        // The window writes without asking first (a stream that began before
+        // the launcher's answer landed).
+        rig.chat.currentConversation?.messages.append(QuickMessage(role: .user, content: "late"))
+        rig.chat.currentConversation?.messages.append(QuickMessage(role: .assistant, content: "Late."))
+        rig.chat.currentConversation?.updatedAt = Date()
+        rig.chat.persistCurrentConversation()
+        #expect(contents(rig.chat, id) == ["first", "One.", "asked in the launcher", "A.", "late", "Late."])
+    }
+
+    @Test func reopeningTheWindowReadsTheStore() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        let id = try await bothOnOneChat(rig)
+        await ask(rig.launcher, rig.service, "asked in the launcher", reply: "A.")
+        rig.window.open(handoff: nil)
+        #expect(rig.chat.currentConversation?.id == id)
+        #expect(rig.chat.conversationMessages.map(\.content) == ["first", "One.", "asked in the launcher", "A."])
+        #expect(rig.chat.output == "A.")
+    }
+
+    @Test func aChatDeletedInTheOtherViewStaysDeleted() async throws {
+        let rig = makeRig()
+        let id = try await bothOnOneChat(rig)
+        rig.launcher.deleteConversation(id: id)
+        // A save from the window never brings it back...
+        rig.chat.persistCurrentConversation()
+        #expect(!rig.chat.history.contains { $0.id == id })
+        // ...and the next question starts a new chat.
+        await ask(rig.chat, rig.service, "after the delete", reply: "New.")
+        #expect(!rig.chat.history.contains { $0.id == id })
+        #expect(rig.chat.currentConversation?.id != id)
+        #expect(rig.chat.conversationMessages.map(\.content) == ["after the delete", "New."])
+    }
+
+    @Test func clearHistoryDropsTheChatTheOtherViewShows() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        _ = try await bothOnOneChat(rig)
+        rig.launcher.clearHistory()
+        rig.chat.refreshOpenChatFromStore()
+        #expect(rig.chat.currentConversation == nil)
+        rig.chat.persistCurrentConversation()
+        #expect(rig.chat.history.isEmpty)
+    }
+
+    @Test func aRenameOrPinInTheOtherViewIsNotReverted() async throws {
+        let rig = makeRig()
+        let id = try await bothOnOneChat(rig)
+        rig.window.showRail()
+        rig.window.beginRenamingChat(id: id)
+        rig.window.renameText = "Renamed in the window"
+        rig.window.commitRename()
+        rig.chat.togglePinConversation(id: id)
+        await ask(rig.launcher, rig.service, "asked in the launcher", reply: "A.")
+        let stored = try #require(rig.launcher.history.first { $0.id == id })
+        #expect(stored.customTitle == "Renamed in the window")
+        #expect(stored.isPinned)
+        #expect(rig.launcher.currentConversation?.customTitle == "Renamed in the window", "the launcher's header follows")
+        // And the other way round: the launcher renames, the window asks.
+        rig.launcher.renameConversation(id: id, title: "Renamed in the launcher")
+        rig.launcher.togglePinConversation(id: id)
+        await ask(rig.chat, rig.service, "asked in the window", reply: "B.")
+        let after = try #require(rig.chat.history.first { $0.id == id })
+        #expect(after.customTitle == "Renamed in the launcher")
+        #expect(!after.isPinned)
+        #expect(after.messages.map(\.content).suffix(4) == ["asked in the launcher", "A.", "asked in the window", "B."])
+    }
+
+    // MARK: - Lifecycle
+
+    @Test func openingShowsTheWindowOnTheLastChat() {
+        let rig = makeRig()
+        let older = conversation("Older", answer: "Old.", age: 600)
+        let newer = conversation("Newer", answer: "New.", pinned: false, age: 30)
+        let pinnedOld = conversation("Pinned", answer: "Pin.", pinned: true, age: 900)
+        rig.launcher.history = [pinnedOld, older, newer]
+
+        rig.window.open(handoff: nil)
+        #expect(rig.fake.shows == 1)
+        #expect(rig.chat.currentConversation?.id == newer.id, "the most recently updated chat, not the first pin")
+        #expect(rig.chat.isQuickAIPresented)
+        #expect(!rig.window.isRailVisible, "the chat list is hidden by default")
+    }
+
+    @Test func reopeningKeepsTheSameChat() async {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        await ask(rig.chat, rig.service, "first", reply: "One.")
+        let id = rig.chat.currentConversation?.id
+        #expect(id != nil)
+        rig.window.open(handoff: nil)
+        #expect(rig.chat.currentConversation?.id == id)
+        #expect(rig.fake.shows == 2)
+    }
+
+    @Test func aStaleChatStartsANewOneOnOpen() {
+        let rig = makeRig { $0.newChatInterval = .fifteenMinutes }
+        rig.launcher.history = [conversation("Yesterday", answer: "Old.", age: 86_400)]
+        rig.window.open(handoff: nil)
+        #expect(rig.chat.currentConversation == nil, "past the Start New Chat interval the window opens on a new chat")
+        #expect(rig.chat.conversationMessages.isEmpty)
+    }
+
+    @Test func theRootCommandOpensTheWindowAndClosesTheLauncher() async throws {
+        let rig = makeRig()
+        let command = try #require(rig.launcher.systemCommands.first { $0.itemID == QuickViewModel.aiChatCommandID })
+        #expect(command.title == "AI Chat")
+        await rig.launcher.performLauncherItem(command)
+        #expect(rig.fake.shows == 1)
+        #expect(rig.presenter.dismissals == 1)
+
+        let bare = QuickViewModel(service: MockQuickService())
+        #expect(!bare.systemCommands.contains { $0.itemID == QuickViewModel.aiChatCommandID },
+                "no command without a window to open")
+    }
+
+    // MARK: - ⌘J: Continue in AI Chat
+
+    @Test func commandJHandsTheConversationToTheWindow() async {
+        let rig = makeRig()
+        rig.launcher.pendingChatTools = [.web]
+        rig.launcher.openQuickAI()
+        await ask(rig.launcher, rig.service, "what happened", reply: "An answer.")
+        let id = rig.launcher.currentConversation?.id
+        let model = rig.launcher.activeModelID
+        rig.launcher.input = "and then"
+        let image = QuickImageAttachment(data: Data([1, 2, 3]), mimeType: "image/png", pixelWidth: 1, pixelHeight: 1)
+        rig.launcher.pendingImage = image
+
+        #expect(rig.launcher.resultActions.contains(.continueInAIChat))
+        #expect(rig.launcher.performShortcut(characters: "j", keyCode: 38, modifiers: [.command]))
+
+        #expect(rig.fake.shows == 1)
+        #expect(rig.chat.currentConversation?.id == id, "the same conversation id")
+        #expect(rig.chat.conversationMessages.map(\.content) == ["what happened", "An answer."])
+        #expect(rig.chat.activeModelID == model)
+        #expect(rig.chat.currentConversation?.enabledTools == [.web], "the chat's tools")
+        #expect(rig.chat.pendingImages == [image], "the attachments")
+        #expect(rig.chat.input == "and then", "what was typed")
+        #expect(rig.chat.output == "An answer.")
+        // The launcher lets the chat go and closes.
+        #expect(rig.launcher.currentConversation == nil)
+        #expect(rig.launcher.input.isEmpty)
+        #expect(rig.launcher.pendingImages.isEmpty)
+        #expect(rig.presenter.dismissals == 1)
+    }
+
+    @Test func commandJKeepsAModelChangedAfterTheLastAnswer() async throws {
+        let rig = makeRig()
+        rig.launcher.openQuickAI()
+        await ask(rig.launcher, rig.service, "question", reply: "Answer.")
+        let provider = try #require(rig.launcher.activeProvider)
+        rig.launcher.selectModel(providerID: provider.id, model: "another-model")
+        let chosen = rig.launcher.activeModelID
+        rig.launcher.continueInAIChat()
+        #expect(rig.chat.activeModelID == chosen)
+    }
+
+    @Test func commandJWorksOnTheEmptySurfaceToo() {
+        let rig = makeRig()
+        rig.launcher.openQuickAI()
+        rig.launcher.input = "draft"
+        #expect(rig.launcher.performShortcut(characters: "j", keyCode: 38, modifiers: [.command]))
+        #expect(rig.fake.shows == 1)
+        #expect(rig.chat.input == "draft")
+    }
+
+    @Test func commandJWithoutAWindowDoesNothing() async {
+        let vm = QuickViewModel(service: MockQuickService())
+        vm.openQuickAI()
+        #expect(!vm.performShortcut(characters: "j", keyCode: 38, modifiers: [.command]))
+        #expect(!vm.resultActions.contains(.continueInAIChat))
+    }
+
+    // MARK: - The window's own actions
+
+    @Test func theWindowLeavesOutLauncherOnlyActionsAndCopies() async {
+        let rig = makeRig { $0.quickAIPrimaryAction = .pasteToActiveApp }
+        rig.window.open(handoff: nil)
+        await ask(rig.chat, rig.service, "q", reply: "A.")
+        rig.chat.input = ""
+        let actions = rig.chat.resultActions
+        #expect(!actions.contains(.pasteBack))
+        #expect(!actions.contains(.chatHistory))
+        #expect(!actions.contains(.continueInAIChat))
+        #expect(actions.contains(.copy))
+        #expect(rig.chat.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
+        #expect(rig.launcher.primaryAnswerAction == .pasteToActiveApp, "the launcher keeps its setting")
+        #expect(rig.chat.paletteSurfaceActions == [.showChatList, .findInChat, .keepOnTop])
+    }
+
+    @Test func renameFromThePaletteGoesToTheChatList() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        await ask(rig.chat, rig.service, "rename me", reply: "Sure.")
+        let id = try #require(rig.chat.currentConversation?.id)
+        await rig.chat.performResultAction(.renameChat)
+        #expect(rig.chat.inputMode == nil, "never the launcher's rename mode")
+        #expect(rig.window.isRailVisible)
+        #expect(rig.window.renamingChatID == id)
+        #expect(rig.window.focus == .rename)
+        rig.window.renameText = "Renamed"
+        #expect(rig.window.handleReturn())
+        #expect(rig.chat.history.first { $0.id == id }?.customTitle == "Renamed")
+        #expect(rig.window.renamingChatID == nil)
+    }
+
+    @Test func keepOnTopIsRememberedAndAppliedToTheWindow() {
+        let rig = makeRig()
+        #expect(!rig.window.isAlwaysOnTop)
+        rig.chat.performQuickAISurfaceAction(.keepOnTop)
+        #expect(rig.window.isAlwaysOnTop)
+        #expect(rig.fake.onTop == [true])
+        #expect(rig.defaults.bool(forKey: AIChatWindowModel.alwaysOnTopDefaultsKey))
+        let again = AIChatWindowModel(chat: QuickViewModel(store: rig.launcher.store), defaults: rig.defaults)
+        #expect(again.isAlwaysOnTop, "remembered")
+        #expect(rig.chat.paletteSurfaceActions.contains(.stopKeepingOnTop))
+    }
+
+    // MARK: - The chat list rail
+
+    @Test func theRailTogglesOnItsKeyAndTheHeaderButton() {
+        let rig = makeRig()
+        rig.launcher.history = [conversation("One", answer: "1", age: 10)]
+        rig.window.open(handoff: nil)
+        #expect(!rig.window.isRailVisible)
+        #expect(rig.window.handleKeyEquivalent(characters: "\\", keyCode: 42, modifiers: [.command]))
+        #expect(rig.window.isRailVisible)
+        #expect(rig.window.focus == .rail, "the keyboard goes to its search")
+        #expect(rig.window.handleKeyEquivalent(characters: "\\", keyCode: 42, modifiers: [.command]))
+        #expect(!rig.window.isRailVisible)
+        #expect(rig.window.focus == .composer)
+        // The header button runs the same toggle.
+        rig.window.toggleRail()
+        #expect(rig.window.isRailVisible)
+        // ⌘P, Recent Chats in Quick AI, is the chat list here.
+        rig.window.hideRail()
+        #expect(rig.window.handleKeyEquivalent(characters: "p", keyCode: 35, modifiers: [.command]))
+        #expect(rig.window.isRailVisible)
+        #expect(!rig.chat.isRecentChatsPresented, "never Quick AI's Recent Chats in the window")
+    }
+
+    @Test func theRailListsPinnedThenRecentAndSearches() {
+        let rig = makeRig()
+        let a = conversation("Budget review", answer: "Numbers.", age: 60)
+        let b = conversation("Trip plan", answer: "Kyoto in spring.", pinned: true, age: 600)
+        let c = conversation("Release notes", answer: "v1.5.0.", age: 5)
+        rig.launcher.history = [a, b, c]
+        rig.window.showRail()
+        #expect(rig.window.pinnedRailItems.map(\.title) == ["Trip plan"])
+        #expect(rig.window.recentRailItems.map(\.title) == ["Release notes", "Budget review"])
+        #expect(rig.window.railItems.map(\.title) == ["Trip plan", "Release notes", "Budget review"])
+        rig.window.railQuery = "kyoto"
+        #expect(rig.window.railItems.map(\.title) == ["Trip plan"], "message text is searched too")
+        // Escape clears the search, then slides the list out.
+        #expect(rig.window.handleEscape())
+        #expect(rig.window.railQuery.isEmpty)
+        #expect(rig.window.isRailVisible)
+        #expect(rig.window.handleEscape())
+        #expect(!rig.window.isRailVisible)
+    }
+
+    @Test func arrowsAndReturnOpenAChatAndCommandDigitsJump() {
+        let rig = makeRig()
+        let a = conversation("Alpha", answer: "A.", age: 30)
+        let b = conversation("Beta", answer: "B.", age: 60)
+        let c = conversation("Gamma", answer: "C.", age: 90)
+        rig.launcher.history = [a, b, c]
+        rig.window.open(handoff: nil)
+        #expect(rig.chat.currentConversation?.id == a.id)
+        rig.window.showRail()
+        #expect(rig.window.railIndex == 0, "the open chat is highlighted")
+        #expect(rig.window.handleRailArrow(1))
+        #expect(rig.window.handleReturn())
+        #expect(rig.chat.currentConversation?.id == b.id)
+        #expect(rig.window.focus == .composer)
+        #expect(rig.window.handleKeyEquivalent(characters: "3", keyCode: 20, modifiers: [.command]))
+        #expect(rig.chat.currentConversation?.id == c.id)
+        #expect(rig.window.handleKeyEquivalent(characters: "9", keyCode: 25, modifiers: [.command]),
+                "a number past the list is still the window's")
+        #expect(rig.chat.currentConversation?.id == c.id)
+    }
+
+    @Test func commandKOnARowPinsRenamesAndDeletesTwice() throws {
+        let rig = makeRig()
+        let a = conversation("Alpha", answer: "A.", age: 30)
+        let b = conversation("Beta", answer: "B.", age: 60)
+        rig.launcher.history = [a, b]
+        rig.window.open(handoff: nil)
+        rig.window.showRail()
+        rig.window.moveRailSelection(1)
+        #expect(rig.window.highlightedRailItem?.title == "Beta")
+
+        #expect(rig.window.handleKeyEquivalent(characters: "k", keyCode: 40, modifiers: [.command]))
+        #expect(rig.window.railActionsPresented)
+        #expect(!rig.chat.isActionPalettePresented, "⌘K on a row is the row's, not the chat's")
+        #expect(rig.window.railActions == [.pin, .rename, .delete])
+        #expect(rig.window.title(of: .pin) == "Pin Chat")
+        rig.window.activateRailSelection()
+        #expect(rig.chat.history.first { $0.id == b.id }?.isPinned == true)
+        #expect(rig.window.highlightedRailItem?.title == "Beta", "the highlight follows the row into Pinned")
+
+        // The row keys work without the menu: ⌃X twice deletes.
+        #expect(rig.window.handleKeyEquivalent(characters: "x", keyCode: 7, modifiers: [.control]))
+        #expect(rig.chat.history.contains { $0.id == b.id }, "the first press arms")
+        #expect(rig.window.title(of: .delete) == "Press Again to Delete")
+        #expect(rig.window.handleKeyEquivalent(characters: "x", keyCode: 7, modifiers: [.control]))
+        #expect(!rig.chat.history.contains { $0.id == b.id })
+        #expect(rig.chat.currentConversation?.id == a.id, "the open chat stays")
+
+        // ⌘E renames the highlighted row in place.
+        #expect(rig.window.handleKeyEquivalent(characters: "e", keyCode: 14, modifiers: [.command]))
+        #expect(rig.window.renamingChatID == a.id)
+        #expect(rig.window.renameText == "Alpha")
+        #expect(rig.window.handleEscape())
+        #expect(rig.window.renamingChatID == nil)
+    }
+
+    // MARK: - Find in chat
+
+    @Test func findMovesNextAndPreviousAndOpensAFoldedQuestion() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        let long = String(repeating: "A long question about kyoto temples and old gardens. ", count: 30)
+        await ask(rig.chat, rig.service, long, reply: "Kyoto is lovely in spring.")
+        await ask(rig.chat, rig.service, "and in autumn?", reply: "Autumn in Kyoto has maples.")
+        let messages = rig.chat.conversationMessages
+        #expect(rig.chat.collapseState(for: messages[0]).isCollapsible)
+
+        #expect(rig.window.handleKeyEquivalent(characters: "f", keyCode: 3, modifiers: [.command]))
+        #expect(rig.window.isFindPresented)
+        #expect(rig.window.focus == .find)
+        rig.window.findQuery = "KYOTO"
+        #expect(rig.window.findMatches == [messages[0].id, messages[1].id, messages[3].id])
+        #expect(rig.window.currentMatchID == messages[0].id)
+        #expect(rig.window.findStatus == "1 of 3")
+        #expect(rig.chat.expandedTranscriptMessageIDs.contains(messages[0].id), "a folded match opens")
+        #expect(rig.chat.threadScrollRequest?.target == .messageTop(messages[0].id))
+
+        #expect(rig.window.handleReturn(), "↩ is the next match")
+        #expect(rig.window.currentMatchID == messages[1].id)
+        #expect(rig.window.handleKeyEquivalent(characters: "g", keyCode: 5, modifiers: [.command]))
+        #expect(rig.window.currentMatchID == messages[3].id)
+        #expect(rig.window.handleShiftReturn() == .handled, "⇧↩ is the previous match")
+        #expect(rig.window.currentMatchID == messages[1].id)
+        rig.window.findPrevious()
+        rig.window.findPrevious()
+        #expect(rig.window.currentMatchID == messages[3].id, "it wraps")
+
+        rig.window.findQuery = "nothing like this"
+        #expect(rig.window.findStatus == "No matches")
+        #expect(rig.window.currentMatchID == nil)
+
+        #expect(rig.window.handleEscape())
+        #expect(!rig.window.isFindPresented, "esc closes the bar")
+        #expect(rig.window.focus == .composer)
+    }
+
+    // MARK: - The multi-line composer
+
+    @Test func returnSendsAndShiftReturnIsANewLine() async {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        await rig.service.setResponses([StreamDelta(text: "Two lines, got it.", finishReason: "stop")])
+        rig.window.noteFocus(.composer, true)
+        #expect(rig.window.handleShiftReturn() == .insertNewline)
+        rig.chat.input = "first line\nsecond line"
+        #expect(rig.window.handleReturn())
+        await rig.chat.composerSubmitTask?.value
+        #expect(rig.chat.conversationMessages.first?.content == "first line\nsecond line")
+        #expect(rig.chat.output == "Two lines, got it.")
+    }
+
+    @Test func returnInThePaletteIsThePalettes() {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        rig.chat.handleCommandK()
+        #expect(rig.chat.isActionPalettePresented)
+        rig.window.noteFocus(.composer, false)
+        #expect(rig.window.focus == .other)
+        #expect(!rig.window.handleReturn(), "the palette's search keeps Return")
+        // Escape still closes it, and never closes the chat.
+        #expect(rig.window.handleEscape())
+        #expect(!rig.chat.isActionPalettePresented)
+        #expect(rig.chat.isQuickAIPresented)
+    }
+
+    @Test func escapeNeverLeavesTheThread() async {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        await ask(rig.chat, rig.service, "q", reply: "A.")
+        rig.chat.input = "a draft"
+        #expect(rig.window.handleEscape())
+        #expect(rig.chat.input == "a draft", "typed text stays")
+        #expect(rig.chat.isQuickAIPresented)
+        #expect(!rig.chat.conversationMessages.isEmpty)
+    }
+
+    // MARK: - Keys
+
+    /// ⌘P (Recent Chats), ⌘J (Continue in AI Chat), ⌘\ (the chat list), ⌘F
+    /// and ⌘G (find) were checked against every key table: the answer
+    /// actions, the overlay's own keys, the ⌘K row actions of every kind,
+    /// and the default global hotkeys.
+    @Test func theNewKeysAreFreeEverywhere() {
+        let kinds: [LauncherItemKind] = [
+            .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
+            .conversation, .askAI, .folder, .answer, .screenHistory, .color,
+        ]
+        var results: [LauncherSearchResult] = kinds.map { kind in
+            .item(LauncherCatalogItem(
+                kind: kind,
+                itemID: kind == .color ? "#FF0000" : "item",
+                title: "Item",
+                detail: "",
+                value: "https://example.com/?utm_source=proof",
+                keywords: "has-local-file"
+            ))
+        }
+        results.append(.catalog(.chats, count: 1))
+        let app = LaunchableApplication(name: "Notes", bundleIdentifier: "com.apple.Notes", url: URL(fileURLWithPath: "/Applications/Notes.app"))
+        results.append(.application(app))
+        var rowKeys = results.flatMap { ItemActionCatalog.actions(for: $0, pasteTarget: nil).compactMap(\.shortcut) }
+        rowKeys += ItemActionCatalog.actions(for: .application(app), pasteTarget: nil, isRunning: true).compactMap(\.shortcut)
+        let overlayKeys: [KeyShortcut] = [
+            QuickViewModel.transformChooserShortcut,
+            QuickViewModel.transcriptCollapseShortcut,
+        ]
+        let recent = QuickViewModel.recentChatsShortcut
+        let continueKey = ResultAction.continueInAIChat.shortcut
+        #expect(recent == .command("p"))
+        #expect(continueKey == .command("j"))
+        let windowKeys = [
+            AIChatWindowModel.chatListShortcut, AIChatWindowModel.findShortcut,
+            AIChatWindowModel.findNextShortcut, AIChatWindowModel.findPreviousShortcut,
+        ]
+        for key in [recent, continueKey] + windowKeys {
+            let others = ResultAction.allCases.filter { $0 != .continueInAIChat }.map(\.shortcut)
+            #expect(!others.contains(key), "\(key.keyCaps.joined()) is an answer action")
+            #expect(!overlayKeys.contains(key))
+            #expect(!rowKeys.contains(key), "\(key.keyCaps.joined()) is a row action")
+        }
+        #expect(Set(([recent, continueKey] + windowKeys).map(\.keyCaps)).count == 6, "no two alike")
+
+        // Global hotkeys are key codes: P 35, J 38, F 3, G 5, \ 42; ⌘ is 1_048_576.
+        let settings = QuickSettings()
+        var globals = [settings.clipboardHistoryHotkey, settings.translatorHotkey, settings.typeToClickHotkey]
+        globals += settings.savedPrompts.compactMap(\.hotkey)
+        globals += settings.launcherItemConfigurations.compactMap(\.hotkey)
+        for code: UInt16 in [35, 38, 3, 5, 42] {
+            #expect(!globals.contains(ActionHotkey(keyCode: code, modifiers: 1_048_576)))
+        }
+    }
+
+    @Test func theEmptySurfaceAndHeaderNameTheNewKeys() {
+        let vm = QuickViewModel(service: MockQuickService())
+        vm.openQuickAI()
+        #expect(vm.quickAIEmptyStateHints[1] == "⌘P opens recent chats")
+        #expect(ResultAction.continueInAIChat.title == "Continue in AI Chat")
+    }
+}

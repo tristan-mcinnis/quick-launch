@@ -327,7 +327,7 @@ struct QuickAISurfaceTests {
         #expect(vm.output == "One.")
     }
 
-    @Test func commandJFromAModeOrACatalogLeavesTheModeSoReturnAsks() async {
+    @Test func recentChatsFromAModeOrACatalogLeavesTheModeSoReturnAsks() async {
         let mock = MockQuickService()
         let vm = make(service: mock)
         await ask(vm, mock, "first", reply: "One.")
@@ -384,7 +384,7 @@ struct QuickAISurfaceTests {
 
     // MARK: - Recent Chats
 
-    @Test func commandJIsOneColumnInsideTheSameWindow() async {
+    @Test func commandPIsOneColumnInsideTheSameWindow() async {
         let mock = MockQuickService()
         let vm = make(service: mock)
         await ask(vm, mock, "first", reply: "One.")
@@ -400,7 +400,7 @@ struct QuickAISurfaceTests {
         older.updatedAt = Date(timeIntervalSinceNow: -3_600)
         vm.history = [vm.currentConversation!, older]
 
-        #expect(vm.performShortcut(characters: "j", keyCode: 38, modifiers: [.command]))
+        #expect(vm.performShortcut(characters: "p", keyCode: 35, modifiers: [.command]))
         #expect(vm.isRecentChatsPresented)
         #expect(vm.isQuickAIPresented)
         #expect(vm.topLayer == .recentChats)

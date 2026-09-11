@@ -13,6 +13,12 @@ enum PanelSizing {
     static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
     static let panelWidthWithDetail: CGFloat = 960
+    /// The `⌘K` palette and item pane floating over a surface, and how far
+    /// they keep from its sides.
+    static let actionPaletteWidth: CGFloat = 520
+    static let actionPaletteSideMargin = House.Spacing.lg + House.Spacing.xxs
+    /// The tallest the floating palette or pane grows before it scrolls.
+    static let actionPaletteMaxHeight: CGFloat = 460
 
     // MARK: - Heights
 

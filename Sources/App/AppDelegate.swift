@@ -123,6 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: KeyablePanel?
     private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
+    /// The AI Chat window, built on first open.
+    private var aiChatController: AIChatWindowController?
     private var globalHotKey: GlobalHotKey?
     private var clipboardHistoryHotKey: GlobalHotKey?
     private var translatorHotKey: GlobalHotKey?
@@ -261,6 +263,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.skillLibrary = SkillLibrary()
         vm.fileOpener = OpenCommandFileOpener()
         vm.piHandoff = PiHandoffService()
+        // ⌘J in Quick AI and the "AI Chat" command open the chat window.
+        vm.aiChatOpener = { [weak self] handoff in
+            self?.showAIChat(handoff: handoff)
+        }
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)
@@ -652,6 +658,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             viewModel?.captureImageFromClipboard()
         }
         applicationCatalog.refreshIfNeeded()
+        // A Quick AI thread kept from the last open shows the chat as the
+        // store has it now: the AI Chat window may have added to it,
+        // renamed it, or deleted it since.
+        viewModel?.refreshOpenChatFromStore()
         // Keep the Screenshots badge and first entry honest without ever
         // touching the disk on the keystroke path.
         viewModel?.warmScreenshotCatalogIfStale()
@@ -1241,6 +1251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settings.target = self
         menu.addItem(settings)
 
+        let aiChat = NSMenuItem(
+            title: "AI Chat",
+            action: #selector(showAIChatFromMenu),
+            keyEquivalent: ""
+        )
+        aiChat.target = self
+        menu.addItem(aiChat)
+
         let caffeinate = NSMenuItem(
             title: viewModel?.isCaffeinating == true ? "Turn Caffeinate Off" : "Turn Caffeinate On",
             action: #selector(toggleCaffeinateFromMenu),
@@ -1618,6 +1636,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.settingsPanel = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - AI Chat window
+
+    /// Opens the AI Chat window: on the chat Quick AI handed over, or on the
+    /// window's chat, the last chat, or a new one.
+    func showAIChat(handoff: AIChatHandoff? = nil) {
+        guard let controller = aiChatWindowController() else { return }
+        controller.model.open(handoff: handoff)
+    }
+
+    /// The window's own view model shares the launcher's store (settings
+    /// and chat history) and its services; its composer, thread, stream,
+    /// and layers are its own.
+    private func aiChatWindowController() -> AIChatWindowController? {
+        if let aiChatController { return aiChatController }
+        guard let launcher = viewModel else { return nil }
+        let chat = QuickViewModel(
+            store: launcher.store,
+            selectedTextService: selectedTextService,
+            applicationCatalog: applicationCatalog,
+            launcherCatalog: launcherCatalog,
+            webSearchService: webSearchService,
+            vaultSearchService: vaultSearchService,
+            pageReader: pageReader,
+            localSpeechService: localSpeechService,
+            launcherUsage: launcherUsage,
+            interactionJournal: interactionJournal,
+            screenshotService: screenshotService,
+            screenAwareness: screenAwareness,
+            pasteboard: SystemPasteboard(),
+            historyFileURL: QuickHistoryStore.defaultFileURL(),
+            currentVersion: Bundle.main.shortVersion
+        )
+        chat.memoryService = recall
+        chat.memoryCapture = recall
+        chat.skillLibrary = SkillLibrary()
+        chat.fileOpener = OpenCommandFileOpener()
+        chat.piHandoff = PiHandoffService()
+        let controller = AIChatWindowController(model: AIChatWindowModel(chat: chat), app: self)
+        aiChatController = controller
+        return controller
+    }
+
+    @objc private func showAIChatFromMenu() {
+        if panel?.isVisible == true { hideOverlay() }
+        showAIChat()
     }
 
     // MARK: - Welcome panel

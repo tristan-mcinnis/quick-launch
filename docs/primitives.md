@@ -107,8 +107,11 @@ overlay.
   never opens the surface; asked in a chat, it stays there under its own
   pill ("Local answer" in the header), never a turn. Copy and paste are
   keys, not buttons. Recent chats are a
-  catalog (Quick AI Chats) and a list in Quick AI (`⌘J`): continue, copy
-  last answer, rename, pin, delete, on the highlighted row.
+  catalog (Quick AI Chats) and a list in Quick AI (`⌘P`): continue, copy
+  last answer, rename, pin, delete, on the highlighted row. `⌘J` continues
+  the chat in the AI Chat window, one conversation window with the same
+  thread and composer, a multi-line composer, find (`⌘F`), and a chat list
+  hidden until `⌘\`.
 - **Settings.** A top tab strip, no system tab view. One searchable table
   lists every configurable item with its alias and hotkey in place.
 

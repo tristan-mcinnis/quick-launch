@@ -382,6 +382,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case copyChat
     /// `⌥⌘P`: the thread to a new pi session in tmux, opened in Ghostty.
     case continueInPi
+    /// `⌘J`: the chat, its model, tools, and attachments to the AI Chat
+    /// window; the launcher closes. Raycast's key for the same move.
+    case continueInAIChat
     case readAloud
     case saveSnippet
     case searchWeb
@@ -415,6 +418,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: "Copy Answer"
         case .copyChat: "Copy Chat"
         case .continueInPi: "Continue in pi"
+        case .continueInAIChat: "Continue in AI Chat"
         case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
@@ -442,6 +446,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: "doc.on.doc"
         case .copyChat: "text.bubble"
         case .continueInPi: "terminal"
+        case .continueInAIChat: "macwindow"
         case .readAloud: "speaker.wave.2"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
@@ -473,6 +478,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         // P for pi. Checked free against every key table (see
         // PiHandoffTests); `⇧⌘P` is Pin.
         case .continueInPi: .commandOption("p")
+        // Raycast's Continue in AI Chat. Recent Chats moved to `⌘P`.
+        case .continueInAIChat: .command("j")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")

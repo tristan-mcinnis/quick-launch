@@ -645,7 +645,7 @@ struct QuickAIPolishTests {
         #expect(vm.handleTab())
         #expect(vm.quickAIEmptyStateHints == [
             "@ adds a window, a selection, or a screen",
-            "⌘J opens recent chats",
+            "⌘P opens recent chats",
             "⇧⌘O changes the model",
         ])
         // The keys come from the tables, so a rebind renames the hint.

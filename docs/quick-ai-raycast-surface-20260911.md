@@ -84,6 +84,10 @@ surface is fixed and never measures its content. A catalog with a detail pane
   chevron is quieter: `TypeToken.glyphSmall` (14 semibold) in `textSecondary`,
   and the header's left inset is `Spacing.sm` (12) so the title starts at
   52 pt, where Raycast's does.
+
+  > Changed in v1.5.0 (Phase B2): the expand glyph continues the chat in the
+  > AI Chat window (`⌘J`), as Raycast's does. Before B2 it opened Recent
+  > Chats.
 - No divider under the header. Raycast has none.
 
 ### Thread (scrolling, fills between header and composer)
@@ -234,12 +238,19 @@ surface is fixed and never measures its content. A catalog with a detail pane
   > with one tool line in the same style as the search line, a `terminal`
   > glyph and "Opened in pi · tmux session ql-…", until the next question
   > or another chat.
-- `⌘J` opens Recent Chats: the same window, the thread replaced by the
+  >
+  > Added in v1.5.0 (Phase B2): `⌘J` means Continue in AI Chat, as in
+  > Raycast. It (and `⌘K` › Continue in AI Chat, and the header's expand
+  > glyph) opens the AI Chat window on the same conversation, with its
+  > model, tools, typed text, and attachments, and closes the launcher. It
+  > works before the first answer too. Recent Chats moved to `⌘P`, below.
+- `⌘P` (`⌘J` before v1.5.0 Phase B2; P for past chats, checked free in
+  every key table) opens Recent Chats: the same window, the thread replaced by the
   launcher's own chat rows (the Chats catalog rows: 26 px icon tile, `label`
   title, `meta` question count and time, 40 high), pinned first, then newest
   first. `↑↓` moves, `↩` opens that chat in the thread (the composer reads
   "Open ↩"), `esc` returns to the thread. One column. The split view is
-  deleted. `⌘J` enters through the same path as Tab, so a catalog, an input
+  deleted. `⌘P` enters through the same path as Tab, so a catalog, an input
   mode, or a Quick Link input steps aside and the composer's Return asks.
 
   > Changed in v1.5.0: the composer searches the list (title and message
@@ -329,7 +340,9 @@ surface is fixed and never measures its content. A catalog with a detail pane
 ## Not built
 
 - Dictation (`⌃M`). local-dictation owns that.
-- A separate AI Chat window. `⌘J` is Recent Chats inside this window.
+- ~~A separate AI Chat window.~~ Built in v1.5.0 (Phase B2, plan
+  `docs/ai-chat-plan-20260911.md` section 4.2): `⌘J` continues a chat there;
+  Recent Chats is `⌘P` inside this window.
 - Web search citations UI beyond the one status line.
 
 ## Proof

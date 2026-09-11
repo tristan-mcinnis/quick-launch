@@ -65,7 +65,7 @@ import Observation
     /// Escape and the back chevron return to root search with the thread
     /// kept, so the surface and the thread are separate state.
     var isQuickAIPresented = false
-    /// `⌘J`: Recent Chats replaces the thread inside the Quick AI surface.
+    /// `⌘P`: Recent Chats replaces the thread inside the Quick AI surface.
     var isRecentChatsPresented = false {
         didSet { if !isRecentChatsPresented { resumeQueuedFollowUp() } }
     }
@@ -96,15 +96,27 @@ import Observation
     /// the web…"); shown in place of "Thinking…" until answer text lands.
     var streamingStatus: String?
     var errorMessage: String? = nil
-    var settings: QuickSettings
+    /// Settings and chat history live in `store`, which the AI Chat window's
+    /// own view model shares: one store, two views.
+    let store: QuickStore
+    var settings: QuickSettings {
+        get { store.settings }
+        set { store.settings = newValue }
+    }
     var updateState: UpdateState = .idle
-    var history: [QuickConversation] = []
+    var history: [QuickConversation] {
+        get { store.history }
+        set { store.history = newValue }
+    }
     /// Where chat history is kept on disk. The app passes the real
     /// `chat-history.json`; nil (the default, and every test) keeps history
     /// in memory only, so a test run never reads, replaces, or deletes the
     /// user's chats.
     let historyFileURL: URL?
     var currentConversation: QuickConversation?
+    /// The store's copy of the open chat as this view last read or wrote
+    /// it. The other view's writes since then are what a save merges in.
+    @ObservationIgnored var openChatBase: StoredChatStamp?
     var modelRefreshMessage: String?
     var hotkeyRegistrationError: String?
     var clipboardHistoryHotkeyRegistrationError: String?
@@ -285,6 +297,17 @@ import Observation
     /// that does not set one) leaves the action out of `⌘K`, so no test
     /// can start tmux or open Ghostty.
     @ObservationIgnored var piHandoff: (any PiHandoffServicing)?
+    /// Opens the AI Chat window: on a hand-off from Quick AI (`⌘J`), or on
+    /// a new or the last chat (nil, the root "AI Chat" command). The app
+    /// sets it; nil (every test that does not set one) leaves both out.
+    @ObservationIgnored var aiChatOpener: ((AIChatHandoff?) -> Void)?
+    /// The AI Chat window, when this is that window's own view model. Nil
+    /// for the launcher. Set, the launcher-only answer actions leave `⌘K`,
+    /// the window's own actions join it, and Rename Chat goes to the
+    /// window's chat list. The window model lives in `AIChatWindowModel`,
+    /// not here.
+    @ObservationIgnored weak var chatWindowHost: (any AIChatWindowHosting)?
+    var isAIChatWindow: Bool { chatWindowHost != nil }
     /// Screen History lives behind this one hook; the core only knows the
     /// catalog scope, the ⌘K form, and the pause/resume command.
     let screenHistory: ScreenHistoryController
@@ -393,12 +416,15 @@ import Observation
     @ObservationIgnored private var selectionRecaptureSuppressed = false
     /// Image of the current thread, kept in memory only so follow-ups can
     /// refer to it. Never written to history or disk.
-    @ObservationIgnored private(set) var conversationImages: [QuickImageAttachment] = []
+    /// Set here and by the AI Chat hand-off (`adoptAIChatHandoff`), which
+    /// moves the thread's images to the window's own view model.
+    @ObservationIgnored var conversationImages: [QuickImageAttachment] = []
 
     // MARK: - Init
 
     init(
         settings: QuickSettings = QuickSettings(),
+        store: QuickStore? = nil,
         service: (any QuickService)? = nil,
         selectedTextService: (any SelectedTextServicing)? = nil,
         applicationCatalog: (any ApplicationCatalogServicing)? = nil,
@@ -432,7 +458,10 @@ import Observation
         screenGeometry: (any ScreenGeometryProviding)? = nil,
         currentVersion: String = "1.0.0"
     ) {
-        self.settings = settings
+        // A shared store (the AI Chat window's view model) brings its own
+        // settings; `settings` seeds a new one.
+        self.store = store ?? QuickStore(settings: settings)
+        let settings = self.store.settings
         self.service = service
         self.selectedTextService = selectedTextService
         self.applicationCatalog = applicationCatalog
@@ -867,6 +896,7 @@ import Observation
         // Only the status row lives at the root: typing "caffeinate" answers
         // "is it on?" in one line. Timers and Agent Watch sit in the catalog.
         commands.append(contentsOf: [translate, typeToClick, caffeine, readAloud])
+        if aiChatOpener != nil { commands.append(aiChatCommand) }
         if let speechStopRow { commands.append(speechStopRow) }
         if let screenHistoryControl { commands.append(screenHistoryControl) }
         commands.append(settings)
@@ -2238,7 +2268,7 @@ import Observation
             return ComposerAction(label: "Stop", keys: ["esc"])
         }
         if !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            switch settings.quickAIPrimaryAction {
+            switch primaryAnswerAction {
             case .pasteToActiveApp: return ComposerAction(label: "Paste Response", keys: ["↩"])
             case .copyToClipboard: return ComposerAction(label: "Copy Response", keys: ["↩"])
             }
@@ -3387,6 +3417,7 @@ import Observation
             actions.append(.copyChat)
             if piHandoff != nil { actions.append(.continueInPi) }
         }
+        if offersContinueInAIChat { actions.append(.continueInAIChat) }
         if fileOpener != nil, !answerSources.isEmpty { actions.append(.openSource) }
         if hasAnswer {
             actions.append(contentsOf: [.readAloud, .saveSnippet])
@@ -3402,7 +3433,21 @@ import Observation
             actions += [.renameChat, .pinChat, .deleteChat]
         }
         if history.count > 1 { actions += [.previousChat, .nextChat] }
+        // The window reads and copies; it has no app behind it to paste
+        // into, and its chat list is the rail, not the Chats catalog.
+        if isAIChatWindow { actions.removeAll { Self.launcherOnlyResultActions.contains($0) } }
         return actions
+    }
+
+    /// Answer actions the AI Chat window leaves out.
+    static let launcherOnlyResultActions: Set<ResultAction> = [
+        .replaceSelection, .pasteBack, .chatHistory, .continueInAIChat,
+    ]
+
+    /// `⌘J` hands the chat to the AI Chat window: on the Quick AI surface,
+    /// when the app can open the window.
+    var offersContinueInAIChat: Bool {
+        aiChatOpener != nil && !isAIChatWindow && isQuickAIPresented
     }
 
     /// The app name a destination answer action targets, for the palette row's
@@ -3429,6 +3474,8 @@ import Observation
             chatToolsSummary
         case .continueInPi:
             "New tmux session in Ghostty"
+        case .continueInAIChat:
+            "Open this chat in its own window"
         default:
             nil
         }
@@ -3449,6 +3496,9 @@ import Observation
             copyChatTranscript()
         case .continueInPi:
             await continueInPi()
+        case .continueInAIChat:
+            isActionPalettePresented = false
+            continueInAIChat()
         case .readAloud:
             isActionPalettePresented = false
             await performReadAloud(text: output)
@@ -3486,7 +3536,13 @@ import Observation
         case .renameChat:
             guard let id = currentConversation?.id else { return }
             isActionPalettePresented = false
-            enterInputMode(.renameChat(id))
+            // The AI Chat window renames in its chat list; the launcher's
+            // field becomes the rename field.
+            if let chatWindowHost {
+                chatWindowHost.beginRenamingChat(id: id)
+            } else {
+                enterInputMode(.renameChat(id))
+            }
         case .pinChat:
             guard let id = currentConversation?.id else { return }
             isActionPalettePresented = false
@@ -4234,6 +4290,11 @@ import Observation
             return
         }
 
+        if item.value == Self.aiChatCommandID {
+            openAIChatWindow()
+            return
+        }
+
         if item.value == "translate.mode" {
             input = ""
             overlayPresenter.dismissOverlay()
@@ -4892,6 +4953,9 @@ import Observation
     /// Actions on the Quick AI window itself, while the surface is up:
     /// Reset Quick AI Size once the user has dragged it off 750 × 475.
     var quickAISurfaceActions: [QuickAISurfaceAction] {
+        // The AI Chat window offers its own: the chat list, find, and
+        // Keep on Top.
+        if let chatWindowHost { return chatWindowHost.windowSurfaceActions }
         guard isQuickAIPresented, !settings.quickAISize.isStandard else { return [] }
         return [.resetSize]
     }
@@ -4908,6 +4972,10 @@ import Observation
         switch action {
         case .resetSize:
             resetQuickAISize()
+        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop:
+            chatWindowHost?.performWindowSurfaceAction(action)
+            // Find and the chat list take the focus themselves.
+            return
         }
         requestInputFocus()
     }
@@ -5187,6 +5255,17 @@ import Observation
             modifiers: modifiers
         ) {
             toggleRecentChats()
+            return true
+        }
+        // ⌘J on the Quick AI surface: Continue in AI Chat, as in Raycast,
+        // before the first answer too.
+        if offersContinueInAIChat, !isItemActionPanePresented,
+           ResultAction.continueInAIChat.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            continueInAIChat()
             return true
         }
         // ⌘⌥T toggles the keyboard-first Transform chooser (reachable without a
@@ -5565,6 +5644,7 @@ import Observation
     }
 
     func deleteConversation(id: UUID) {
+        store.deletedChatIDs.insert(id)
         history.removeAll { $0.id == id }
         if currentConversation?.id == id { startNewConversation() }
         saveHistory()
@@ -5597,6 +5677,7 @@ import Observation
     /// that finished, the partial one a Stop kept, or the error a failure
     /// left. Whatever is typed in the composer stays there.
     func regenerateLastAnswer() async {
+        refreshOpenChatFromStore()
         guard !isStreaming,
               var conversation = currentConversation,
               let lastUser = conversation.messages.lastIndex(where: { $0.role == .user })
@@ -6035,6 +6116,8 @@ import Observation
     /// request itself: `prepareRequest` (aliases, `{selection}`, local
     /// answers), `enrich` (web search, page reading), `stream` (provider).
     func submit() async {
+        // The other view may have added to, renamed, or deleted this chat.
+        refreshOpenChatFromStore()
         await submit(text: nil)
     }
 
@@ -7540,12 +7623,19 @@ import Observation
         return true
     }
 
+    /// What Return on an empty composer does with a finished answer: the
+    /// Primary Action setting in the launcher; always Copy in the AI Chat
+    /// window, which has no app behind it to paste into.
+    var primaryAnswerAction: QuickAIPrimaryAction {
+        isAIChatWindow ? .copyToClipboard : settings.quickAIPrimaryAction
+    }
+
     /// Return with an empty composer on a finished answer runs the Quick AI
     /// primary action. Automatic copy is untouched: `autoCopy` still decides
     /// what happens the moment an answer arrives.
     func runPrimaryAnswerAction() async {
         guard !output.isEmpty, !isStreaming else { return }
-        switch settings.quickAIPrimaryAction {
+        switch primaryAnswerAction {
         case .pasteToActiveApp:
             // Fails safe: it copies and explains when there is no target.
             _ = await pasteOutputToPreviousApp()
@@ -7791,12 +7881,15 @@ import Observation
         requestInputFocus()
     }
 
-    // MARK: - Recent Chats (⌘J)
+    // MARK: - Recent Chats (⌘P)
 
-    /// `⌘J`: the recent chat list in place of the thread, inside the same
+    /// `⌘P`: the recent chat list in place of the thread, inside the same
     /// Quick AI window. One column; `↑↓` move, `↩` opens, `esc` returns to
-    /// the thread. The expand glyph in the header runs the same toggle.
-    static let recentChatsShortcut: KeyShortcut = .command("j")
+    /// the thread. P for past chats: `⌘J` became Continue in AI Chat
+    /// (Raycast's key) in v1.5.0, and `⌘P` was free in every key table
+    /// (`⇧⌘P` is Pin, `⌥⌘P` is Continue in pi). In the AI Chat window the
+    /// same key opens the chat list.
+    static let recentChatsShortcut: KeyShortcut = .command("p")
 
     /// Opens Recent Chats. The thread, the model, and any attachments are
     /// already in state, so they carry over untouched; this only changes
@@ -8130,6 +8223,7 @@ import Observation
         requestInputFocus()
     }
     func clearHistory() {
+        store.deletedChatIDs.formUnion(history.map(\.id))
         history = []
         currentConversation = nil
         isConversationHistoryPresented = false
@@ -8142,7 +8236,14 @@ import Observation
 
     func loadConversation(id: UUID) {
         guard let conversation = history.first(where: { $0.id == id }) else { return }
+        loadConversation(conversation)
+    }
+
+    /// Puts a chat on the thread: the stored copy (`loadConversation(id:)`),
+    /// or the one a hand-off carried when history is off.
+    func loadConversation(_ conversation: QuickConversation) {
         currentConversation = conversation
+        openChatBase = history.first { $0.id == conversation.id }.map(StoredChatStamp.init)
         expandedTranscriptMessageIDs.removeAll()
         isConversationHistoryPresented = false
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
@@ -8194,12 +8295,16 @@ import Observation
     }
 
     func persistCurrentConversation() {
-        guard settings.historyEnabled, let conversation = currentConversation else { return }
+        guard settings.historyEnabled, let local = currentConversation,
+              let conversation = conversationToStore(local)
+        else { return }
+        currentConversation = conversation
         history = QuickHistoryStore.upserting(
             conversation,
             into: history,
             limit: settings.historyLimit
         )
+        openChatBase = StoredChatStamp(conversation)
         saveHistory()
     }
 

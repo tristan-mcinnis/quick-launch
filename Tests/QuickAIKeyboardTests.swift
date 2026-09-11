@@ -186,18 +186,18 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.output == "An answer.")
     }
 
-    @Test func commandJOpensAndClosesRecentChats() async throws {
+    @Test func commandPOpensAndClosesRecentChats() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
 
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("p", keyCode: 35, [.command]))
         #expect(viewModel.isRecentChatsPresented)
         #expect(viewModel.isQuickAIPresented, "Recent Chats lives inside the Quick AI window")
         #expect(viewModel.topLayer == .recentChats)
         #expect(!viewModel.conversationMessages.isEmpty)
         #expect(viewModel.currentPanelWidth == PanelSizing.panelWidth, "one column, no split view")
 
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("p", keyCode: 35, [.command]))
         #expect(!viewModel.isRecentChatsPresented)
         #expect(viewModel.isQuickAIPresented, "back to the thread")
         #expect(viewModel.output == "An answer.", "leaving the list keeps the thread")
@@ -288,7 +288,7 @@ struct QuickAIKeyboardTests {
     @Test func escapeClosesRecentChatsAndKeepsTheThread() async throws {
         let (overlay, _) = try await answered()
         let viewModel = overlay.viewModel
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("p", keyCode: 35, [.command]))
         #expect(viewModel.topLayer == .recentChats)
 
         try overlay.pressEscape()
@@ -305,7 +305,7 @@ struct QuickAIKeyboardTests {
         let viewModel = overlay.viewModel
         let conversation = try #require(viewModel.currentConversation)
 
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("p", keyCode: 35, [.command]))
         #expect(try overlay.press("r", keyCode: 15, [.command, .shift]))
         #expect(await waitFor { viewModel.topLayer == .modelChooser })
 
@@ -760,7 +760,7 @@ struct QuickAIKeyboardTests {
             messages: [QuickMessage(role: .user, content: "other chat"), QuickMessage(role: .assistant, content: "Other.")]
         )
         viewModel.history = [open, other]
-        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        #expect(try overlay.press("p", keyCode: 35, [.command]))
         viewModel.moveRecentChatsSelection(1)
         #expect(viewModel.recentChatItems[viewModel.recentChatsIndex].itemID == other.id.uuidString)
 

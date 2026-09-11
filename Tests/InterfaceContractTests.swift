@@ -49,7 +49,8 @@ struct InterfaceContractTests {
     @Test("Answer actions are keys from the shared table, not buttons")
     func answerActionsAreKeys() throws {
         let overlay = try Self.source("Sources/Views/OverlayView.swift")
-        let quickAI = try Self.source("Sources/Views/QuickAIView.swift")
+        // The Quick AI composer is its own view, shared with AI Chat.
+        let quickAI = try Self.source("Sources/Views/QuickAIComposer.swift")
         let actions = try Self.source("Sources/Models/ItemAction.swift")
         #expect(!overlay.contains("Paste Back"))
         #expect(!quickAI.contains("Paste Back"))

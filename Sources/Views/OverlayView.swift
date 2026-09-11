@@ -246,7 +246,7 @@ struct OverlayView: View {
                 QuickActionPalette(viewModel: viewModel)
             }
         }
-        .frame(width: min(520, viewModel.currentPanelWidth - 24))
+        .frame(width: min(PanelSizing.actionPaletteWidth, viewModel.currentPanelWidth - PanelSizing.actionPaletteSideMargin))
         // Chrome hugs the content: a `.frame(maxHeight:)` adopts the window's
         // proposal, so background applied outside it stretched into an empty
         // dark sheet whenever the window was tall.
@@ -259,7 +259,7 @@ struct OverlayView: View {
         .frame(
             maxHeight: viewModel.activeItemActionForm?.minimumWindowHeight
                 .map { $0 - PanelSizing.inputHeight - PanelSizing.paneBottomMargin }
-                ?? 460,
+                ?? PanelSizing.actionPaletteMaxHeight,
             alignment: viewModel.isQuickAIPresented ? .bottom : .top
         )
         // Below the input row and, when present, the attachment strip:
@@ -985,7 +985,10 @@ private struct ItemActionPane: View {
     }
 }
 
-private struct QuickActionPalette: View {
+/// The `⌘K` palette: answer actions, the window's own actions, attach
+/// commands, and saved prompts. Floats over the launcher, the Quick AI
+/// surface, and the AI Chat window.
+struct QuickActionPalette: View {
     @Bindable var viewModel: QuickViewModel
     @State private var selectedIndex = 0
     @FocusState private var searchFocused: Bool
@@ -1112,7 +1115,9 @@ private struct QuickActionPalette: View {
             }
         case .surface(let action):
             paletteRow(symbol: action.systemImage, title: action.title, detail: action.detail) {
-                EmptyView()
+                if let shortcut = action.shortcut {
+                    KeyCapGroup(keys: shortcut.keyCaps)
+                }
             }
         case .command(let item):
             paletteRow(symbol: item.systemImage, title: item.title, detail: item.detail) {

@@ -45,6 +45,8 @@ credential type without echoing the value, then rotate the credential.
 
 ## Product Boundaries
 
+AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi.
+
 Preserve:
 
 - the configurable global launcher hotkey;

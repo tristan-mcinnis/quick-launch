@@ -29,6 +29,7 @@ design. The window section below is the corrected one.
 | v1.5.0 | Phase A2 (items 16, 5, 3, 4, 11, 13, 14): local answers inline in root search, command and Vault Search output name their source; `↑` recalls the last question, PageUp/PageDown, `⌥↑↓`, `⌘↑↓` scroll the thread; Stop keeps the partial answer and `⌘R` asks that turn again; the thread follows only a reader at the bottom, "↓ Latest" otherwise; a provider error stays under its question with Retry; Return while streaming queues one follow-up; `⌘K` and the row keys in Recent Chats act on the highlighted chat, pin glyph on pinned rows |
 | v1.5.0 | Phase E: Continue in pi (`⌥⌘P`, and `⌘K`): the thread as Markdown in `pi-handoff/`, a detached tmux session `ql-<id>` running `pi @<file>`, and a Ghostty window attached to it |
 | v1.5.0 | Phase D: assistants. A saved prompt with instructions and no command is an assistant; `/alias` alone, `⌘K` › Change Assistant (`⌥⌘A`), or its hotkey picks it for the chat; instructions and context skills lead the system message; its tools are written to the chat's `enabledTools` (the tools themselves are Phase C); Vault researcher and STE editor seeded |
+| v1.5.0 | Phase B2: AI Chat, a normal resizable window (860 × 620, 720 × 480 at the least, frame kept) over the same providers and tools, in ⌘Tab and Mission Control while open. Its own view model on the launcher's `QuickStore` (settings and history): one store, two views. Quick AI's thread and composer as shared subviews; multi-line composer (↵ sends, ⇧↵ newline); find in chat (⌘F); a chat list hidden until ⌘\ (search, Pinned then Recent, ⌘K pin/rename/delete, ⌘1…⌘9); Keep on Top. ⌘J on Quick AI is Continue in AI Chat; Recent Chats moved to ⌘P; the root command "AI Chat" opens it on a new or the last chat |
 
 ## 2. Did v1.4.0 take liberties?
 
@@ -103,6 +104,16 @@ the split you rejected this morning.
 - Window size from the design system: settings is 860 × 620 and the rail is
   220 there. AI Chat reuses those numbers unless a token change lands in
   `design-system` first.
+
+  > Shipped in v1.5.0. The tokens landed first: `Layout.chatWidth` 860,
+  > `chatHeight` 620, `chatRail` 220, `chatMinWidth` 720, `chatMinHeight`
+  > 480. The window has its own `QuickViewModel` (so it never takes the
+  > launcher's composer, thread, or stream) sharing a new `QuickStore` with
+  > the launcher's; the rail, find, Keep on Top, and the window's keys live
+  > in `AIChatWindowModel`, so `QuickViewModel` gained only host seams. The
+  > chat list key is `⌘\` (`⌘P` opens it too); Recent Chats in Quick AI is
+  > `⌘P`, checked free in every key table. Return on an empty composer
+  > copies (no app behind the window to paste into). Archive is not built.
 - Keys: ⌘J in Raycast means "continue in AI Chat". Once B2 exists, ⌘J does
   that, and Recent Chats in Quick AI moves to another key checked against the
   shortcut table. `/` stays saved prompts; the model chooser is ⇧⌘O.
@@ -113,6 +124,9 @@ the split you rejected this morning.
 starts, the contract gets a boundary sentence: "AI Chat is one conversation
 window over the same providers and tools. No autonomy, no projects, no
 automations, no file changes; those belong to pi."
+
+> Done in v1.5.0: the sentence is in `CLAUDE.md` under Product Boundaries,
+> and a test reads it there (`AIChatWindowTests`).
 
 ## 5. Phase C: tools inside the chat
 
