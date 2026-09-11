@@ -167,6 +167,12 @@ surface is fixed and never measures its content. A catalog with a detail pane
   search closes the window as today.
 - `⌘R`, `⇧⌘R`, `⌘N`, `⌘[`, `⌘]`, `⌘K`, `⌘L`, `⇧⌘M`, `⇧⌘V` keep their v1.3.0
   meanings.
+
+  > Added in v1.5.0: `⌥⌘P` (and `⌘K` › Continue in pi) hands the thread to
+  > a new pi session in tmux and opens Ghostty on it. The thread then ends
+  > with one tool line in the same style as the search line, a `terminal`
+  > glyph and "Opened in pi · tmux session ql-…", until the next question
+  > or another chat.
 - `⌘J` opens Recent Chats: the same window, the thread replaced by the
   launcher's own chat rows (the Chats catalog rows: 26 px icon tile, `label`
   title, `meta` question count and time, 40 high), pinned first, then newest

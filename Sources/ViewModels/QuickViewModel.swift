@@ -41,6 +41,13 @@ import Observation
     /// A second list inside the `⌘K` palette: the chat's tools, or the
     /// answer's sources. Escape returns to the full list.
     var actionPaletteSubmenu: ActionPaletteSubmenu?
+    /// The thread's closing line after Continue in pi ("Opened in pi ·
+    /// tmux session ql-3fa9c1"). Like the search line it belongs to the
+    /// chat on screen: the next question, another chat, and a new chat
+    /// clear it, and it is never written to history.
+    var threadNotice: String?
+    /// True while Continue in pi runs, so a second press waits for it.
+    private(set) var isHandingOffToPi = false
     /// Short progress note from the service while streaming ("Searching
     /// the web…"); shown in place of "Thinking…" until answer text lands.
     var streamingStatus: String?
@@ -202,6 +209,10 @@ import Observation
     /// The folders Open Source may open from (the memory store and the
     /// vault clone); tests point it at a temporary folder.
     @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots
+    /// Continue in pi. The app sets `PiHandoffService`; nil (every test
+    /// that does not set one) leaves the action out of `⌘K`, so no test
+    /// can start tmux or open Ghostty.
+    @ObservationIgnored var piHandoff: (any PiHandoffServicing)?
     /// Screen History lives behind this one hook; the core only knows the
     /// catalog scope, the ⌘K form, and the pause/resume command.
     let screenHistory: ScreenHistoryController
@@ -3145,7 +3156,10 @@ import Observation
         var actions: [ResultAction] = []
         if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
         actions.append(contentsOf: [.pasteBack, .copy])
-        if !conversationMessages.isEmpty { actions.append(.copyChat) }
+        if !conversationMessages.isEmpty {
+            actions.append(.copyChat)
+            if piHandoff != nil { actions.append(.continueInPi) }
+        }
         if fileOpener != nil, !answerSources.isEmpty { actions.append(.openSource) }
         actions.append(contentsOf: [.readAloud, .saveSnippet])
         if memoryCapture != nil { actions.append(.captureToMemory) }
@@ -3183,6 +3197,8 @@ import Observation
             "Send this answer to recall"
         case .tools:
             chatToolsSummary
+        case .continueInPi:
+            "New tmux session in Ghostty"
         default:
             nil
         }
@@ -3201,6 +3217,8 @@ import Observation
         case .copyChat:
             isActionPalettePresented = false
             copyChatTranscript()
+        case .continueInPi:
+            await continueInPi()
         case .readAloud:
             isActionPalettePresented = false
             await performReadAloud(text: output)
@@ -5613,6 +5631,7 @@ import Observation
         isConversationHistoryPresented = false
         webSearchNote = nil
         liveToolRecords = []
+        threadNotice = nil
         let submittedInput = input
         let submittedImages = !pendingImages.isEmpty
             ? pendingImages
@@ -6659,6 +6678,65 @@ import Observation
         requestInputFocus()
     }
 
+    // MARK: - Continue in pi
+
+    /// Continue in pi (`⌥⌘P`): the thread goes to a new pi session in its
+    /// own tmux session, and Ghostty opens on it (`PiHandoffService`). The
+    /// surface stays open and the thread ends with a line naming the
+    /// session. When Ghostty does not open, the session still runs and the
+    /// attach command is copied instead.
+    func continueInPi() async {
+        isActionPalettePresented = false
+        guard let piHandoff,
+              let conversation = currentConversation,
+              !conversation.messages.isEmpty,
+              !isStreaming,
+              !isHandingOffToPi
+        else { return }
+        isHandingOffToPi = true
+        defer { isHandingOffToPi = false }
+        errorMessage = nil
+        let request = PiHandoffRequest(
+            title: title(of: conversation),
+            markdown: piHandoffMarkdown(for: conversation),
+            workingDirectory: nil
+        )
+        do {
+            let result = try await piHandoff.handOff(request)
+            // The line belongs to the chat that was handed off.
+            if currentConversation?.id == conversation.id {
+                if result.openedGhostty {
+                    threadNotice = "Opened in pi · tmux session \(result.sessionName)"
+                } else {
+                    pasteboard.writeString(result.attachCommand)
+                    threadNotice = "Started pi in tmux session \(result.sessionName) · "
+                        + "Ghostty did not open, attach command copied"
+                }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        requestInputFocus()
+    }
+
+    /// The thread as pi gets it. The search line on screen opens the answer
+    /// it was made for: the first answer after the newest question.
+    func piHandoffMarkdown(for conversation: QuickConversation, date: Date = Date()) -> String {
+        var toolLines: [UUID: [String]] = [:]
+        if let note = webSearchNote,
+           let lastQuestion = conversation.messages.lastIndex(where: { $0.role == .user }),
+           let answer = conversation.messages[lastQuestion...].first(where: { $0.role == .assistant }) {
+            toolLines[answer.id] = [note]
+        }
+        return PiHandoffDocument.markdown(
+            title: title(of: conversation),
+            modelName: ModelProfile.displayName(forModelID: conversation.model),
+            messages: conversation.messages,
+            toolLines: toolLines,
+            date: date
+        )
+    }
+
     /// Shows `message` with a checkmark in the composer for
     /// `composerConfirmationDuration`. A second copy restarts the clock.
     func confirmInComposer(_ message: String) {
@@ -6948,6 +7026,7 @@ import Observation
             webSearchNote = nil
             liveToolRecords = []
             pendingChatTools = nil
+            threadNotice = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
@@ -7245,9 +7324,11 @@ import Observation
         settings.save()
         errorMessage = nil
         // The finished-search line belongs to the answer it was made for,
-        // as does a question that never became a turn.
+        // as does a question that never became a turn, and the hand-off
+        // line to the chat it was for.
         webSearchNote = nil
         liveToolRecords = []
+        threadNotice = nil
         pendingQuestion = nil
         input = ""
         activeVaultSearchMode = nil

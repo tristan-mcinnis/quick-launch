@@ -260,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.memoryCapture = recall
         vm.skillLibrary = SkillLibrary()
         vm.fileOpener = OpenCommandFileOpener()
+        vm.piHandoff = PiHandoffService()
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)

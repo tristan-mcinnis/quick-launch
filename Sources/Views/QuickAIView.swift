@@ -44,6 +44,7 @@ struct QuickAIView: View {
     private static let liveQuestionID = "quick-ai-live-question"
     private static let statusLineID = "quick-ai-status"
     private static let webSearchNoteID = "quick-ai-web-search"
+    private static let threadNoticeID = "quick-ai-thread-notice"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -264,6 +265,11 @@ struct QuickAIView: View {
                         answerProse(answer, isStreaming: false, instanceID: "answer")
                             .id(Self.detachedAnswerID)
                     }
+                    // Where the thread went after Continue in pi.
+                    if let notice = viewModel.threadNotice {
+                        toolLine(notice, symbol: "terminal")
+                            .id(Self.threadNoticeID)
+                    }
                     Color.clear
                         .frame(height: House.hairline)
                         .id(Self.bottomID)
@@ -286,6 +292,18 @@ struct QuickAIView: View {
             .onChange(of: viewModel.streamingStatus) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.liveToolRecords.count) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.threadNotice) { _, notice in
+                scrollToEnd(proxy)
+                guard let notice else { return }
+                NSAccessibility.post(
+                    element: NSApplication.shared,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: notice,
+                        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                    ]
+                )
+            }
             // Show more and Collapse bring the message's head to the top.
             .onChange(of: viewModel.threadScrollRequest) { _, request in
                 guard let request else { return }
