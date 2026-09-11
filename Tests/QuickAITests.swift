@@ -76,14 +76,14 @@ struct QuickAITests {
         #expect(vm.catalogItems.first?.value == "Second answer")
         let first = vm.catalogItems[1]
         #expect(ItemActionCatalog.actions(for: .item(first), pasteTarget: nil).map(\.title)
-            == ["Continue Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Delete Chat"])
+            == ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Delete Chat"])
 
-        await vm.perform(ItemActionCatalog.actions(for: .item(first), pasteTarget: nil)[3], on: .item(first))
+        await vm.perform(ItemActionCatalog.actions(for: .item(first), pasteTarget: nil)[4], on: .item(first))
         #expect(vm.catalogItems.first?.title == "First question")
         #expect(vm.catalogItems.first?.isPinned == true)
 
         let pinned = vm.catalogItems[0]
-        await vm.perform(ItemActionCatalog.actions(for: .item(pinned), pasteTarget: nil)[2], on: .item(pinned))
+        await vm.perform(ItemActionCatalog.actions(for: .item(pinned), pasteTarget: nil)[3], on: .item(pinned))
         #expect(vm.inputMode == .renameChat(UUID(uuidString: pinned.itemID)!))
         #expect(vm.input == "First question", "Rename starts from the title")
         vm.input = "Budget thread"
@@ -94,6 +94,8 @@ struct QuickAITests {
         let budget = vm.catalogItems[0]
         await vm.perform(ItemActionCatalog.actions(for: .item(budget), pasteTarget: nil)[0], on: .item(budget))
         #expect(vm.isAnswerActive)
+        #expect(vm.isQuickAIPresented, "Return on a Chats row continues the chat in Quick AI")
+        #expect(vm.catalogScope == nil)
         #expect(vm.output == "First answer")
         #expect(vm.currentConversation?.title == "Budget thread")
         #expect(vm.lastQuestion == "first question")

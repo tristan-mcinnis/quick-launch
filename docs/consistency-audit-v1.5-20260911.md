@@ -11,6 +11,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - Why it matters: ⌘K and the row keys act on the highlighted row (the v1.5.0 A2 fix). The header's ⌘J chip sits right above the list (`quick-ai-recent-chats-pinned-dark.png`).
 - Also: no conversation row action offers "Open in AI Chat" (`Sources/Models/ItemAction.swift:266-272`), in the root catalog or in Recent Chats.
 - Fix: in Recent Chats, ⌘J hands off the highlighted row. Add "Open in AI Chat ⌘J" to the `.conversation` actions.
+- Fixed in v1.5.0 (group G1): ⌘J and the header button move the highlighted Recent Chats row; every chat row offers Open in AI Chat ⌘J.
 
 **2. Four chat lists behave four ways. (M)**
 - Root "Quick AI Chats" catalog: searches title, alias and keywords only (`QuickViewModel.swift:1509`). Actions: Continue, Copy Last Answer, Rename, Pin, Delete.
@@ -19,6 +20,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - Quick AI ⌘K offers "Browse Chat History ⌘H" (`ItemAction.swift:430,491`; `QuickViewModel.swift:3431,8285`). It leaves Quick AI and opens the root catalog. Recent Chats (⌘P) is not in ⌘K at all.
 - Opening a chat from the root catalog always goes to Quick AI (`continueConversation`, `:3072`), never to AI Chat.
 - Fix: point ⌘H and "Browse Chat History" at in-surface Recent Chats, and list it in ⌘K. Share one chat-filter helper across the lists. Add message-text search to the catalog.
+- Fixed in v1.5.0 (group G1): one search and order (`QuickHistoryStore.matching`) for the catalog, Recent Chats and the rail; ⌘H and ⌘K › Recent Chats (⌘P) open Recent Chats in Quick AI; catalog Return continues in Quick AI, ⌘J opens AI Chat; both lists share one row-action set.
 
 **3. The names do not agree. (S)**
 - Catalog title: "Quick AI Chats" (`Sources/Models/LauncherCatalogItem.swift:137`).
@@ -26,12 +28,14 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - ⋯ menu: "New AI Chat" and "Recent AI Chats" (`OverlayView.swift:460,470`) act on Quick AI, not on the AI Chat window.
 - In-progress chip says "Open in Chat". ⌘K, README and CHANGELOG say "Continue in AI Chat".
 - Fix: pick one noun. Suggestion: "Chats" catalog, "Chat" row type, keep "AI Chat" only for the window.
+- Fixed in v1.5.0 (group G1): "Chats" catalog, "Chat" row type, ⋯ entries New Chat, Recent Chats, Open AI Chat, and "Open in AI Chat" for the chip and every action.
 
 **4. ⋯ › New AI Chat throws away the chat. (S)**
 - `startNewConversation` calls `reset([.thread, .input])` (`QuickViewModel.swift:8220`). Nothing opens and the chat Escape kept is gone.
 - "Recent AI Chats" shows `history.prefix(10)` with no explicit sort (the other lists call `QuickHistoryStore.ordered`). It calls `loadConversation`, so ↑ has no last question to recall and the catalog scope is not cleared.
 - The menu has no entry to open the AI Chat window.
 - Fix: New should call `openQuickAI()` on an empty chat. Recent should call `continueConversation` on the ordered list. Add "Open AI Chat".
+- Fixed in v1.5.0 (group G1): New Chat saves the kept chat and opens Quick AI empty; Recent Chats opens in-surface Recent Chats by the ⌘P path; Open AI Chat added.
 
 **5. Auto-copy writes every answer to the clipboard, in both windows. (S)**
 - Evidence: `QuickViewModel.swift:6754, 6961, 6349, 6361`. `writeString` adds no transient marker (`Sources/Services/SystemServices.swift:21`), so each answer also lands in Clipboard History.
@@ -67,6 +71,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 **9. AI Chat as a fallback command drops the typed text. (S)**
 - AI Chat is in the fallback choices (`QuickViewModel.swift:899, 3264`). `runFallbackCommand` sets the input, then `openAIChatWindow()` clears it (`QuickViewModel+AIChat.swift:77-81`).
 - Fix: pass the text as the handoff input, or remove AI Chat from the fallback choices.
+- Fixed in v1.5.0 (group G1): the fallback passes the typed text as the handoff input, so the window opens a new chat with it as the draft.
 
 **10. The Ask AI row can say the wrong thing for math. (S)**
 - The row is always listed (`QuickViewModel.swift:1633-1640`). Its detail says "“2+2” to DeepSeek… ⇥ opens Quick AI" (`:1138-1146`), but Tab and Return answer inline.
@@ -92,6 +97,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 
 **14. The ⌘K palette labels chat actions "Answer". (S)**
 - `Sources/Views/OverlayView.swift:1113` falls back to "Answer" for every result action. New Chat, Tools, Delete Chat and Continue in AI Chat all show it.
+- Fixed in v1.5.0 (group G1): chat actions have their own detail line; the fallback is `ResultAction.paletteGroup`, "Chat" or "Answer".
 
 **15. Keep on Top uses the pin glyph. (S)**
 - Evidence: `Sources/Models/QuickAISurfaceAction.swift:54`.
@@ -107,6 +113,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 **17. Dead code from the old conversation view. (S)**
 - `isConversationHistoryPresented` and `toggleConversationHistory` have no view and no caller (`QuickViewModel.swift:156, 8276`). `AppDelegate.swift:1366` still observes the flag.
 - Old comments refer to an "overlay answer" (`Sources/Views/CodeBlockView.swift:140`; `Sources/Views/MarkdownTextView.swift:9`).
+- Fixed in v1.5.0 (group G1): the flag, the toggle and the AppDelegate observation are deleted; both comments now describe the thread and root-search answers.
 
 **18. README describes the pre-v1.4 overlay. (M)**
 - `README.md:7-9`: "streams into the overlay and is copied… not a full chat workspace".

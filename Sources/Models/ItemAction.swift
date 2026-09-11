@@ -99,6 +99,8 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case saveToVault
     case acceptScreenHistoryReview
     case flagScreenHistoryReview
+    /// `⌘J` on a chat row: that chat moves to the AI Chat window.
+    case openInAIChat
 }
 
 /// One row in the ⌘K pane. The same table drives direct shortcuts from the
@@ -266,6 +268,13 @@ enum ItemActionCatalog {
         case .conversation:
             return [
                 ItemAction(kind: .primary, title: "Continue Chat", systemImage: "bubble.left.and.text.bubble.right", shortcut: .returnKey),
+                // The same move, title, and key as `⌘J` on the open chat.
+                ItemAction(
+                    kind: .openInAIChat,
+                    title: ResultAction.continueInAIChat.title,
+                    systemImage: ResultAction.continueInAIChat.systemImage,
+                    shortcut: ResultAction.continueInAIChat.shortcut
+                ),
                 ItemAction(kind: .secondary, title: "Copy Last Answer", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .edit, title: "Rename Chat", systemImage: "pencil", shortcut: .command("e")),
                 pinAction(for: item),
@@ -382,8 +391,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case copyChat
     /// `⌥⌘P`: the thread to a new pi session in tmux, opened in Ghostty.
     case continueInPi
-    /// `⌘J`: the chat, its model, tools, and attachments to the AI Chat
-    /// window; the launcher closes. Raycast's key for the same move.
+    /// `⌘J`, Open in AI Chat: the chat, its model, tools, and attachments
+    /// to the AI Chat window; the launcher closes. Raycast's key for the
+    /// same move.
     case continueInAIChat
     case readAloud
     case saveSnippet
@@ -396,7 +406,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     /// `⌥⌘A`: start or switch the chat to an assistant, or back to a plain chat.
     case changeAssistant
     case newChat
-    case chatHistory
+    /// `⌘P`: Recent Chats inside Quick AI (`⌘H` too, the v1.4 key).
+    case recentChats
     case previousChat
     case nextChat
     case renameChat
@@ -418,7 +429,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copy: "Copy Answer"
         case .copyChat: "Copy Chat"
         case .continueInPi: "Continue in pi"
-        case .continueInAIChat: "Continue in AI Chat"
+        case .continueInAIChat: "Open in AI Chat"
         case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
@@ -427,7 +438,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .changeModel: "Change Model"
         case .changeAssistant: "Change Assistant"
         case .newChat: "New Chat"
-        case .chatHistory: "Browse Chat History"
+        case .recentChats: "Recent Chats"
         case .previousChat: "Previous Chat"
         case .nextChat: "Next Chat"
         case .renameChat: "Rename Chat"
@@ -455,7 +466,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .changeModel: "cpu"
         case .changeAssistant: "person.crop.circle"
         case .newChat: "plus.bubble"
-        case .chatHistory: "clock.arrow.circlepath"
+        case .recentChats: "clock.arrow.circlepath"
         case .previousChat: "chevron.left"
         case .nextChat: "chevron.right"
         case .renameChat: "pencil"
@@ -478,7 +489,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         // P for pi. Checked free against every key table (see
         // PiHandoffTests); `⇧⌘P` is Pin.
         case .continueInPi: .commandOption("p")
-        // Raycast's Continue in AI Chat. Recent Chats moved to `⌘P`.
+        // Raycast's key for the same move. Recent Chats moved to `⌘P`.
         case .continueInAIChat: .command("j")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
@@ -488,7 +499,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .changeModel: .commandShift("o")
         case .changeAssistant: .commandOption("a")
         case .newChat: .command("n")
-        case .chatHistory: .command("h")
+        // P for past chats; `QuickViewModel.recentChatsShortcut` is this key.
+        case .recentChats: .command("p")
         case .previousChat: .command("[")
         case .nextChat: .command("]")
         case .renameChat: .command("e")
@@ -503,4 +515,18 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     }
 
     var isDestructive: Bool { self == .deleteChat }
+
+    /// The `⌘K` palette's second line when an action has no detail of its
+    /// own: what the action works on. The answer on screen, or the chat.
+    var paletteGroup: String {
+        switch self {
+        case .replaceSelection, .pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb,
+             .regenerate, .regenerateWithModel, .openSource, .captureToMemory:
+            "Answer"
+        case .copyChat, .continueInPi, .continueInAIChat, .changeModel, .changeAssistant,
+             .newChat, .recentChats, .previousChat, .nextChat, .renameChat, .pinChat,
+             .deleteChat, .tools:
+            "Chat"
+        }
+    }
 }

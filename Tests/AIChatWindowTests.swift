@@ -1,6 +1,6 @@
 // AIChatWindowTests — the AI Chat window (plan Phase B2): one conversation
 // window over the same providers and tools, its own view model sharing the
-// launcher's store, Continue in AI Chat (⌘J) from Quick AI, the chat list
+// launcher's store, Open in AI Chat (⌘J) from Quick AI, the chat list
 // rail, find in chat, the multi-line composer, Keep on Top, and the keys.
 
 import AppKit
@@ -249,7 +249,7 @@ struct AIChatWindowTests {
                 "no command without a window to open")
     }
 
-    // MARK: - ⌘J: Continue in AI Chat
+    // MARK: - ⌘J: Open in AI Chat
 
     @Test func commandJHandsTheConversationToTheWindow() async {
         let rig = makeRig()
@@ -316,7 +316,7 @@ struct AIChatWindowTests {
         rig.chat.input = ""
         let actions = rig.chat.resultActions
         #expect(!actions.contains(.pasteBack))
-        #expect(!actions.contains(.chatHistory))
+        #expect(!actions.contains(.recentChats))
         #expect(!actions.contains(.continueInAIChat))
         #expect(actions.contains(.copy))
         #expect(rig.chat.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
@@ -533,7 +533,7 @@ struct AIChatWindowTests {
 
     // MARK: - Keys
 
-    /// ⌘P (Recent Chats), ⌘J (Continue in AI Chat), ⌘\ (the chat list), ⌘F
+    /// ⌘P (Recent Chats), ⌘J (Open in AI Chat), ⌘\ (the chat list), ⌘F
     /// and ⌘G (find) were checked against every key table: the answer
     /// actions, the overlay's own keys, the ⌘K row actions of every kind,
     /// and the default global hotkeys.
@@ -555,7 +555,13 @@ struct AIChatWindowTests {
         results.append(.catalog(.chats, count: 1))
         let app = LaunchableApplication(name: "Notes", bundleIdentifier: "com.apple.Notes", url: URL(fileURLWithPath: "/Applications/Notes.app"))
         results.append(.application(app))
-        var rowKeys = results.flatMap { ItemActionCatalog.actions(for: $0, pasteTarget: nil).compactMap(\.shortcut) }
+        // A chat row's Open in AI Chat is `⌘J` itself: the same move on
+        // that row's chat, so it is left out of the rows checked.
+        var rowKeys = results.flatMap {
+            ItemActionCatalog.actions(for: $0, pasteTarget: nil)
+                .filter { $0.kind != .openInAIChat }
+                .compactMap(\.shortcut)
+        }
         rowKeys += ItemActionCatalog.actions(for: .application(app), pasteTarget: nil, isRunning: true).compactMap(\.shortcut)
         let overlayKeys: [KeyShortcut] = [
             QuickViewModel.transformChooserShortcut,
@@ -570,7 +576,8 @@ struct AIChatWindowTests {
             AIChatWindowModel.findNextShortcut, AIChatWindowModel.findPreviousShortcut,
         ]
         for key in [recent, continueKey] + windowKeys {
-            let others = ResultAction.allCases.filter { $0 != .continueInAIChat }.map(\.shortcut)
+            // Recent Chats is `⌘P` itself, in `⌘K`.
+            let others = ResultAction.allCases.filter { $0 != .continueInAIChat && $0 != .recentChats }.map(\.shortcut)
             #expect(!others.contains(key), "\(key.keyCaps.joined()) is an answer action")
             #expect(!overlayKeys.contains(key))
             #expect(!rowKeys.contains(key), "\(key.keyCaps.joined()) is a row action")
@@ -591,6 +598,6 @@ struct AIChatWindowTests {
         let vm = QuickViewModel(service: MockQuickService())
         vm.openQuickAI()
         #expect(vm.quickAIEmptyStateHints[1] == "⌘P opens recent chats")
-        #expect(ResultAction.continueInAIChat.title == "Continue in AI Chat")
+        #expect(ResultAction.continueInAIChat.title == "Open in AI Chat")
     }
 }

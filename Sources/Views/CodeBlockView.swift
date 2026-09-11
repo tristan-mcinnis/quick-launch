@@ -136,9 +136,10 @@ enum CodeBlockControl: String {
 /// fence language, Copy, and the wrap toggle, over the code itself.
 struct CodeBlockView: View {
     let content: CodeBlockContent
-    /// Names the surface this block belongs to. The same code can be on
-    /// screen twice (an overlay answer and a `⌘J` thread message), so the
-    /// controls carry an identifier scoped to the instance they belong to.
+    /// Names the answer this block belongs to. The same code can be on
+    /// screen more than once (two answers in the thread, or a local answer
+    /// in root search), so the controls carry an identifier scoped to the
+    /// instance they belong to.
     var instanceID = "answer"
 
     /// The identifier one of this block's controls carries.

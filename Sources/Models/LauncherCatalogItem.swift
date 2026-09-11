@@ -134,7 +134,7 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .emoji: "Emoji & Symbols"
         case .screenshots: "Screenshots"
         case .caffeinate: "Caffeinate"
-        case .chats: "Quick AI Chats"
+        case .chats: "Chats"
         case .commands: "Commands"
         case .folders: "Folders"
         case .vaultSearch: "Vault Search"
