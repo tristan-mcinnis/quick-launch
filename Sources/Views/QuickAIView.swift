@@ -212,14 +212,12 @@ struct QuickAIView: View {
                     ForEach(viewModel.conversationMessages) { message in
                         turn(message)
                             .id(message.id)
-                        // The search line belongs to the newest question;
-                        // while that question is still pending it hangs
-                        // under the pending pill instead.
-                        if pendingQuestion == nil,
-                           message.id == lastUserMessageID,
-                           let note = viewModel.webSearchNote {
-                            toolLine(note, symbol: "globe")
-                                .id(Self.webSearchNoteID)
+                        // The search line and the lines of the calls still
+                        // streaming belong to the newest question; while that
+                        // question is pending they hang under its pill
+                        // instead. A finished answer draws its own lines.
+                        if pendingQuestion == nil, message.id == lastUserMessageID {
+                            liveToolLines
                         }
                     }
                     // A question that is not a thread turn (the one being
@@ -229,10 +227,7 @@ struct QuickAIView: View {
                     if let question = pendingQuestion {
                         userPill(MessageCollapseState(text: question, collapses: false), toggle: nil)
                             .id(Self.detachedQuestionID)
-                        if let note = viewModel.webSearchNote {
-                            toolLine(note, symbol: "globe")
-                                .id(Self.webSearchNoteID)
-                        }
+                        liveToolLines
                     }
                     // The model paused to ask. The live card sits where the
                     // answer will; once picked it joins the thread as the
@@ -289,6 +284,7 @@ struct QuickAIView: View {
             .onChange(of: viewModel.output) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.isStreaming) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.streamingStatus) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: viewModel.liveToolRecords.count) { _, _ in scrollToEnd(proxy) }
             .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in scrollToEnd(proxy) }
             // Show more and Collapse bring the message's head to the top.
             .onChange(of: viewModel.threadScrollRequest) { _, request in
@@ -321,13 +317,122 @@ struct QuickAIView: View {
                 // the user picked.
                 AskUserQuestionCard(question: question, isInteractive: false)
             } else {
-                // Answers never collapse: Raycast folds only what you send.
-                answerProse(
-                    message.content,
-                    isStreaming: false,
-                    instanceID: "message-\(message.id.uuidString)"
-                )
+                answerTurn(message)
             }
+        }
+    }
+
+    /// An answer with what its tools left: the tool lines above the prose,
+    /// the sources under it, and a Capture to Memory checkmark last. Saved
+    /// with the chat, so a reopened chat draws the same lines.
+    private func answerTurn(_ message: QuickMessage) -> some View {
+        let records = message.tools
+        let sources = message.sources
+        let above = records.filter(\.drawsAboveAnswer)
+        return VStack(alignment: .leading, spacing: House.Spacing.md) {
+            if !above.isEmpty {
+                toolLineGroup(above.map { ($0.summary, $0.systemImage) })
+            }
+            // Answers never collapse: Raycast folds only what you send.
+            answerProse(
+                message.content,
+                isStreaming: false,
+                instanceID: "message-\(message.id.uuidString)"
+            )
+            if !sources.isEmpty {
+                sourceList(sources)
+            }
+            ForEach(Array(records.filter { !$0.drawsAboveAnswer }.enumerated()), id: \.offset) { _, record in
+                toolLine(record.summary, symbol: record.systemImage)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The lines of the ask in flight: an explicit web search, then each
+    /// tool call as it finishes. Grouped as a finished answer groups them,
+    /// so nothing moves when the answer lands.
+    @ViewBuilder
+    private var liveToolLines: some View {
+        let lines = (viewModel.webSearchNote.map { [($0, "globe")] } ?? [])
+            + viewModel.liveToolRecords.map { ($0.summary, $0.systemImage) }
+        if !lines.isEmpty {
+            toolLineGroup(lines)
+                .id(Self.webSearchNoteID)
+        }
+    }
+
+    /// Consecutive tool lines, closer together than the turns around them.
+    private func toolLineGroup(_ lines: [(text: String, symbol: String)]) -> some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xs) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                toolLine(line.text, symbol: line.symbol)
+            }
+        }
+    }
+
+    /// Sources listed under an answer before the rest are left to `⌘K` ›
+    /// Open Source.
+    static let listedSourceLimit = 5
+
+    /// The answer's sources: a quiet list under the prose, one row each
+    /// (the title or file, then its day). A row with a local file opens it
+    /// on click, as `⌘K` › Open Source (`⌘O`) does.
+    private func sourceList(_ sources: [ChatSource]) -> some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+            ForEach(sources.prefix(Self.listedSourceLimit)) { source in
+                sourceRow(source)
+            }
+            if sources.count > Self.listedSourceLimit {
+                Text("\(sources.count - Self.listedSourceLimit) more in ⌘K › Open Source")
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .padding(.leading, House.Control.keyCap + House.Spacing.xs)
+            }
+        }
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sources")
+    }
+
+    @ViewBuilder
+    private func sourceRow(_ source: ChatSource) -> some View {
+        let label = HStack(spacing: House.Spacing.xs) {
+            // The tool lines' glyph column, so every line's text starts at
+            // one edge.
+            Image(systemName: "doc.text")
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(width: House.Control.keyCap)
+            Text(source.title)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let day = source.day {
+                Text(day)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .frame(minHeight: House.Control.keyCap)
+        .contentShape(Rectangle())
+        if let path = source.path, viewModel.fileOpener != nil {
+            Button {
+                viewModel.requestOpenSource(source)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .help("Open \(path)")
+            .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+            .accessibilityHint("Opens the file")
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
         }
     }
 
@@ -375,18 +480,24 @@ struct QuickAIView: View {
 
     /// The model is working and nothing has landed yet: the breathing dots,
     /// or the globe when the status is a web search, and the status text.
+    /// A memory, vault, or skill call keeps the dots while it runs; its
+    /// line, with its own glyph, lands when it finishes.
     private var statusLine: some View {
         let status = viewModel.streamingStatus ?? "Thinking…"
-        return toolLine(status, symbol: status.hasPrefix("Search") ? "globe" : nil)
+        let isWebSearch = status.hasPrefix("Search web") || status.hasPrefix("Searching the web")
+        return toolLine(status, symbol: isWebSearch ? "globe" : nil)
     }
 
     /// One quiet line: a glyph (or the thinking dots) and tertiary text.
+    /// The glyph sits in a fixed column, so the text of consecutive lines
+    /// starts at one edge whatever the symbol's width.
     private func toolLine(_ text: String, symbol: String?) -> some View {
         HStack(spacing: House.Spacing.xs) {
             if let symbol {
                 Image(systemName: symbol)
                     .font(AQDesign.TypeToken.body)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .frame(width: House.Control.keyCap)
             } else {
                 ThinkingIndicator()
             }

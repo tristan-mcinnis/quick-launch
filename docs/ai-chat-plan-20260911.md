@@ -113,6 +113,18 @@ automations, no file changes; those belong to pi."
 
 ## 5. Phase C: tools inside the chat
 
+> Shipped in v1.5.0. What landed differs from the plan below in three places.
+> Citations needed no remote change: `vault-search.py` already returns
+> `source_path` (vault-relative, or under `/home/ubuntu/vault-private/`), a
+> title, and dates on each `evidence` or `results` row, so the app reads them
+> from the JSON it already gets and maps them onto `~/vault/`. The context
+> budget cuts rather than summarises: the results of the answer's older tool
+> rounds, then oldest turns, then the newest round's results, never the first
+> or the current question, with a line saying what was left
+> out. Capture to Memory is on the answer on screen (the thread has no
+> message selection), `⌥⌘M`. Tools per chat live in `⌘K` › Tools (`⌥⌘K`);
+> the wall-clock budget is 30 seconds, not counting time on a question card.
+
 The app declares two tools today (`search_web`, `ask_user_question`) in
 `OpenAICompatibleService` and runs them itself, three rounds at most. New
 tools follow the same pattern: a CLI called with an argv array, no shell, a

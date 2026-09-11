@@ -17,19 +17,22 @@ struct SkillLibrary: Sendable {
         self.root = root
     }
 
-    /// Folder names that hold a `SKILL.md`, sorted. Hidden entries are skipped.
+    /// Folder names that hold a `SKILL.md`, sorted. Hidden entries, and any
+    /// name with a dot (which `isValid` would refuse), are skipped.
     func names() -> [String] {
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return entries
-            .filter { !$0.hasPrefix(".") }
+            .filter { !$0.contains(".") }
             .filter { FileManager.default.fileExists(atPath: skillFile($0).path) }
             .sorted()
     }
 
-    /// True only for a plain folder name that is actually listed.
+    /// True only for a plain folder name that is actually listed. A name
+    /// with a slash, a backslash, or any dot is refused before the listing
+    /// is read: no skill folder has one, and it is how a path would sneak in.
     func isValid(_ name: String) -> Bool {
         guard !name.isEmpty, !name.contains("/"), !name.contains("\\"),
-              !name.hasPrefix("."), name != ".."
+              !name.contains(".")
         else { return false }
         return names().contains(name)
     }
