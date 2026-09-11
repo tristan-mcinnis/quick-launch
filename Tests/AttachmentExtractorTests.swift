@@ -217,7 +217,7 @@ struct AttachmentExtractorTests {
     @Test("A docx written by AppKit reads through the ZIP path")
     func docxFromAppKit() async throws {
         let text = "\(AttachmentFixtures.english)\n\(AttachmentFixtures.accents)\n\(AttachmentFixtures.chinese)"
-        let data = AttachmentFixtures.attributed(text, type: .officeOpenXML)
+        let data = await AttachmentFixtures.attributed(text, type: .officeOpenXML)
         let result = try await read(file("appkit.docx", data))
         #expect(result.text == text)
     }
@@ -230,7 +230,7 @@ struct AttachmentExtractorTests {
             ("sample.rtf", .rtf),
             ("sample.odt", .openDocument),
         ] {
-            let result = try await read(file(name, AttachmentFixtures.attributed(text, type: type)))
+            let result = try await read(file(name, await AttachmentFixtures.attributed(text, type: type)))
             #expect(result.text == text, "\(name)")
             #expect(result.ref.kind == .word, "\(name)")
         }
@@ -238,7 +238,7 @@ struct AttachmentExtractorTests {
 
     @Test("A .doc saved as RTF reads as RTF")
     func docThatIsRTF() async throws {
-        let data = AttachmentFixtures.attributed(AttachmentFixtures.english, type: .rtf)
+        let data = await AttachmentFixtures.attributed(AttachmentFixtures.english, type: .rtf)
         #expect(try await read(file("old.doc", data)).text == AttachmentFixtures.english)
     }
 
@@ -732,10 +732,10 @@ struct AttachmentTimingTests {
             ("txt", "t.txt", Data(text.utf8), 1.0, 3),
             ("html", "t.html", Data(html.utf8), 1.0, 3),
             ("docx", "t.docx", AttachmentFixtures.docx(paragraphs: [text], table: [["a", "b"]]), 0.1, 3),
-            ("docx (AppKit)", "a.docx", AttachmentFixtures.attributed(text, type: .officeOpenXML), 1.7, 3),
-            ("doc", "t.doc", AttachmentFixtures.attributed(text, type: .docFormat), 18, 3),
-            ("rtf", "t.rtf", AttachmentFixtures.attributed(text, type: .rtf), 18, 3),
-            ("odt", "t.odt", AttachmentFixtures.attributed(text, type: .openDocument), 18, 3),
+            ("docx (AppKit)", "a.docx", await AttachmentFixtures.attributed(text, type: .officeOpenXML), 1.7, 3),
+            ("doc", "t.doc", await AttachmentFixtures.attributed(text, type: .docFormat), 18, 3),
+            ("rtf", "t.rtf", await AttachmentFixtures.attributed(text, type: .rtf), 18, 3),
+            ("odt", "t.odt", await AttachmentFixtures.attributed(text, type: .openDocument), 18, 3),
             ("pptx, 12 slides", "t.pptx", AttachmentFixtures.pptx(slides), 0.8, 3),
             ("xlsx", "t.xlsx", AttachmentFixtures.xlsx(), 0.2, 3),
             ("pdf, 1 page", "t.pdf", AttachmentFixtures.textPDF(pages: [text]), 28, 3),

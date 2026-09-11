@@ -112,8 +112,9 @@ struct AttachmentTruncation: Codable, Sendable, Equatable, Hashable {
 }
 
 /// What the chat history keeps for one attachment: a reference, never the
-/// text. The extracted text lives in the owner-only attachment cache, keyed
-/// by `contentHash` and `extractorVersion`. An image or screenshot keeps
+/// text. The extracted text lives in memory for the app session
+/// (`AttachmentSessionStore`), keyed by `contentHash` and
+/// `extractorVersion`. An image or screenshot keeps
 /// its kind, a display name, and its pixel size only: no path, no hash, no
 /// URL, and no pixels. The init and the decoder both hold that rule, and
 /// the fields it covers are constants.
@@ -292,7 +293,17 @@ enum AttachmentLimits {
     /// Longest attachment name in a model block's attributes.
     static let blockNameCharacters = 120
 
-    // MARK: Cache
+    // MARK: Session store
+
+    /// Characters of extracted text the app keeps in memory for the session,
+    /// across every chat; past it the least recently used text goes first.
+    /// About ten attachments at their hard cap.
+    static let sessionTextCharacters = 2_000_000
+    /// Bytes of attached images the app keeps in memory for the session, so
+    /// a follow-up can send an image with its own turn again.
+    static let sessionImageBytes = 64 * 1_024 * 1_024
+
+    // MARK: Cache (built, off: see `AttachmentSessionStore.attachmentCacheEnabled`)
 
     /// Cached text expires this long after its last use.
     static let cacheLifetime: Duration = .seconds(7 * 24 * 60 * 60)

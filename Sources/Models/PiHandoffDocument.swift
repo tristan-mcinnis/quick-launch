@@ -8,6 +8,11 @@ import Foundation
 /// the thread showed ("Searched memory: 4 hits", "Search web: …") open the
 /// answer they belong to; the sources its tools found follow it as a list,
 /// with each local path, and links the answer wrote stay where it put them.
+///
+/// A question's attachments follow it: one line each (the file's path, the
+/// link's URL), then the text Quick Launch read from each, in a fenced
+/// block, so pi has it even when the file moved or the page changed. Images
+/// are named and never carried. Nothing is written beside the thread file.
 enum PiHandoffDocument {
     /// The speaker label on a user turn, as Copy Chat writes it.
     static let userLabel = "You"
@@ -22,11 +27,14 @@ enum PiHandoffDocument {
     ///   for a line the thread shows that is not yet saved on the answer
     ///   (the live search line). Saved lines come from
     ///   `QuickMessage.toolRecords`; a line saved there is not repeated.
+    /// - `attachmentText`: an attachment's text as this session read it,
+    ///   or nil when it is not loaded (the line then says so).
     static func markdown(
         title: String,
         modelName: String,
         messages: [QuickMessage],
         toolLines: [UUID: [String]] = [:],
+        attachmentText: (ChatAttachmentRef) -> String? = { _ in nil },
         date: Date,
         timeZone: TimeZone = .current
     ) -> String {
@@ -41,6 +49,7 @@ enum PiHandoffDocument {
             case .user:
                 turn.append("\(userLabel):")
                 turn.append(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                turn += attachmentBlocks(message.attachmentRefs, text: attachmentText)
             case .assistant:
                 turn.append("\(answerLabel):")
                 let saved = message.tools
@@ -74,6 +83,73 @@ enum PiHandoffDocument {
             blocks.append(turn.filter { !$0.isEmpty }.joined(separator: "\n\n"))
         }
         return blocks.joined(separator: "\n\n") + "\n"
+    }
+
+    /// The attachment list under a question, then each text read.
+    static func attachmentBlocks(
+        _ refs: [ChatAttachmentRef],
+        text: (ChatAttachmentRef) -> String?
+    ) -> [String] {
+        guard !refs.isEmpty else { return [] }
+        var texts: [(ChatAttachmentRef, String)] = []
+        var lines: [String] = []
+        for ref in refs {
+            var line = "- \(ref.name) (\(description(of: ref)))"
+            if ref.kind.isImage {
+                line += ": not carried to pi"
+            } else {
+                if let path = ref.path {
+                    line += ": `\(path)`"
+                } else if let url = ref.url {
+                    line += ": \(url.absoluteString)"
+                }
+                if let body = text(ref), !body.isEmpty {
+                    texts.append((ref, body))
+                } else {
+                    line += ", text not loaded in this session"
+                }
+            }
+            lines.append(line)
+        }
+        var blocks = ["Attachments:\n" + lines.joined(separator: "\n")]
+        for (ref, body) in texts {
+            let fence = fence(for: body)
+            blocks.append("Text of \(ref.name):\n\n\(fence)text\n\(body)\n\(fence)")
+        }
+        return blocks
+    }
+
+    /// "PDF, 42 pages", "Web page", "Screenshot, 1944 × 1464".
+    static func description(of ref: ChatAttachmentRef) -> String {
+        var parts = [ref.kind.displayName]
+        if let width = ref.pixelWidth, let height = ref.pixelHeight, ref.kind.isImage {
+            parts.append("\(width) × \(height)")
+        } else if let count = ref.pageCount {
+            let unit: String
+            switch ref.kind {
+            case .powerpoint: unit = count == 1 ? "slide" : "slides"
+            case .excel: unit = count == 1 ? "sheet" : "sheets"
+            default: unit = count == 1 ? "page" : "pages"
+            }
+            parts.append("\(count) \(unit)")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    /// A code fence longer than any run of backticks in `body`, so the text
+    /// cannot close it.
+    static func fence(for body: String) -> String {
+        var longest = 0
+        var run = 0
+        for character in body {
+            if character == "`" {
+                run += 1
+                longest = max(longest, run)
+            } else {
+                run = 0
+            }
+        }
+        return String(repeating: "`", count: max(3, longest + 1))
     }
 
     /// One source as a Markdown list item: its title, its day, and the local

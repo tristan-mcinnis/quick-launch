@@ -156,4 +156,39 @@ struct ContextBudgetTests {
         ]
         #expect(ContextBudget.characters(in: image) == "what is this".utf8.count + ContextBudget.imageCharacters)
     }
+
+    // MARK: - Attachments (WP-D)
+
+    @Test func aTurnThatCarriesAnAttachmentBlockIsNeverDropped() {
+        let attached: [String: Any] = [
+            "role": "user",
+            "content": "<untrusted_attachment index=\"1\" name=\"Q3.pdf\" kind=\"PDF\">\n" + String(repeating: "x", count: 300) + "\n</untrusted_attachment>\n\nQuestion: u2-",
+        ]
+        let messages: [[String: Any]] = [
+            Self.message("system", 10, tag: "sys"),
+            Self.message("user", 100, tag: "u1-"),
+            Self.message("assistant", 100, tag: "a1-"),
+            attached,
+            Self.message("assistant", 100, tag: "a2-"),
+            Self.message("user", 100, tag: "u3-"),
+            Self.message("assistant", 100, tag: "a3-"),
+            Self.message("user", 100, tag: "cur"),
+        ]
+        let fitted = ContextBudget(characterLimit: 720).fit(messages)
+        #expect(Self.contents(fitted.messages) == ["sys", "u1-", "<un", "a2-", "cur"])
+        #expect(fitted.trim.turns == 3, "the first answer and the turn without a block went")
+    }
+
+    @Test func aTrimAddsUpAndKeepsTheFilesNames() {
+        let first = ContextBudget.Trim(attachmentsCut: ["Deck.pptx"], attachmentsLeftOut: ["Old.pdf"])
+        let later = ContextBudget.Trim(toolResults: 1, turns: 2, attachmentsLeftOut: ["Old.pdf"])
+        let total = first.adding(later)
+        #expect(total == ContextBudget.Trim(
+            toolResults: 1, turns: 2, attachmentsCut: ["Deck.pptx"], attachmentsLeftOut: ["Old.pdf"]
+        ))
+        #expect(total.summary
+            == "Cut Deck.pptx, left out Old.pdf, 2 older messages and 1 earlier tool result to fit the context window")
+        #expect(!total.isEmpty)
+        #expect(ContextBudget.Trim(attachmentsCut: ["a"]).isEmpty == false)
+    }
 }

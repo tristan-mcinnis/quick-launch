@@ -15,6 +15,8 @@ import SwiftUI
 struct AIChatWindowView: View {
     @Bindable var model: AIChatWindowModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A tray from the environment (render proofs) wins over the chat's own.
+    @Environment(\.attachmentTray) private var environmentTray
 
     /// Room for the traffic lights at the window's top-left, which sit in
     /// the header row (or the rail's top row while the rail is out).
@@ -74,6 +76,9 @@ struct AIChatWindowView: View {
                 // The scroll view would otherwise draw up under the header
                 // and the transparent title bar.
                 .clipped()
+                // A file, link, or picture dropped on the thread attaches to
+                // the next question, as on the composer.
+                .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }

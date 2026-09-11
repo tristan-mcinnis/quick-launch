@@ -15,8 +15,8 @@ import SwiftUI
 struct QuickAIComposer: View {
     @Bindable var viewModel: QuickViewModel
     /// The tray the chips come from. Nil falls back to the environment's
-    /// (`\.attachmentTray`); with neither, only the view model's own
-    /// screenshots and context show as chips.
+    /// (`\.attachmentTray`), then to the view model's own
+    /// (`QuickViewModel.attachmentTray`).
     var tray: AttachmentTray? = nil
     /// The AI Chat window's field grows to `AIChatWindowModel.composerLineLimit`
     /// lines; the Quick AI surface's stays one line.
@@ -26,7 +26,7 @@ struct QuickAIComposer: View {
     @FocusState private var composerFocused: Bool
     @Environment(\.attachmentTray) private var environmentTray
 
-    private var activeTray: AttachmentTray? { tray ?? environmentTray }
+    private var activeTray: AttachmentTray? { tray ?? environmentTray ?? viewModel.attachmentTray }
 
     /// The field's name. In the AI Chat window it is a message field, not
     /// "Ask Quick AI"; in Recent Chats it searches.

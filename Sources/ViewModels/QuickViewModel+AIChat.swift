@@ -4,14 +4,18 @@ import Foundation
 /// window: the chat (its history, model, and tools ride on it), what is
 /// typed, and the attachments. The launcher's view model makes it and the
 /// window's view model adopts it; the launcher then lets the chat go, so one
-/// chat is open in one window.
+/// chat is open in one window. Sent attachments need nothing: they are
+/// references on the chat's messages, and both views read their text and
+/// pictures from the one session store.
 struct AIChatHandoff {
     var conversation: QuickConversation?
     var pendingChatTools: Set<ChatToolKind>?
     var input: String
     var pendingImages: [QuickImageAttachment]
     var pendingContext: CaptureContext?
-    var conversationImages: [QuickImageAttachment]
+    /// The chips not yet sent, each in its phase; a read still running moves
+    /// over and goes on there, not started again.
+    var pendingAttachments = AttachmentTray.Handoff()
     /// A Change Model on the empty surface, before a chat exists: the model
     /// the next chat starts on. A chat carries its own.
     var pendingModel: ChatModelChoice? = nil
@@ -19,7 +23,7 @@ struct AIChatHandoff {
     /// Whether the hand-off brings anything for the composer: text or an
     /// attachment. One that brings none leaves the window's own draft.
     var bringsDraft: Bool {
-        !input.isEmpty || !pendingImages.isEmpty || pendingContext != nil
+        !input.isEmpty || !pendingImages.isEmpty || pendingContext != nil || !pendingAttachments.isEmpty
     }
 }
 
@@ -114,8 +118,7 @@ extension QuickViewModel {
             pendingChatTools: nil,
             input: "",
             pendingImages: [],
-            pendingContext: nil,
-            conversationImages: []
+            pendingContext: nil
         ))
     }
 
@@ -150,8 +153,7 @@ extension QuickViewModel {
             pendingChatTools: nil,
             input: draft,
             pendingImages: [],
-            pendingContext: nil,
-            conversationImages: []
+            pendingContext: nil
         ))
     }
 
@@ -194,7 +196,8 @@ extension QuickViewModel {
             input: input,
             pendingImages: pendingImages,
             pendingContext: pendingContext,
-            conversationImages: conversationImages,
+            // The chips leave this tray now, reads and all.
+            pendingAttachments: attachmentTray.handOff(),
             pendingModel: pendingModelChoice
         )
     }
@@ -226,7 +229,12 @@ extension QuickViewModel {
                 stoppedChatTitle = title(of: streamingChat)
             }
         }
-        let draft = (input: input, images: pendingImages, context: pendingContext)
+        let draft = (
+            input: input,
+            images: pendingImages,
+            context: pendingContext,
+            chips: attachmentTray.handOff()
+        )
         reset([.layers, .thread, .attachments, .input])
         isQuickAIPresented = true
         if let conversation = handoff.conversation {
@@ -238,14 +246,15 @@ extension QuickViewModel {
         }
         pendingChatTools = handoff.pendingChatTools
         pendingModelChoice = handoff.pendingModel
-        conversationImages = handoff.conversationImages
         if handoff.bringsDraft {
             pendingImages = handoff.pendingImages
             pendingContext = handoff.pendingContext
+            attachmentTray.adopt(handoff.pendingAttachments)
             input = handoff.input
         } else {
             pendingImages = draft.images
             pendingContext = draft.context
+            attachmentTray.adopt(draft.chips)
             input = draft.input
         }
         if let stoppedChatTitle {

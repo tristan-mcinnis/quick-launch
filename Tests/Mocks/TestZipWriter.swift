@@ -364,6 +364,11 @@ enum AttachmentFixtures {
 
     // MARK: Attributed documents (doc, rtf, odt, docx through AppKit)
 
+    /// AppKit's document writers run on the main thread. Called off it
+    /// from a parallel test, the first use can race `NSApplication`'s class
+    /// initialisation against a test that builds a view on the main thread,
+    /// and both wait forever (seen 2026-09-12: the whole suite hung).
+    @MainActor
     static func attributed(_ text: String, type: NSAttributedString.DocumentType) -> Data {
         let string = NSAttributedString(string: text)
         return try! string.data(

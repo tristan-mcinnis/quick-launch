@@ -295,13 +295,19 @@ struct QuickAIThread: View {
     private func turn(_ message: QuickMessage) -> some View {
         switch message.role {
         case .user:
-            userPill(
-                viewModel.collapseState(for: message),
-                showsShortcut: viewModel.showsCollapseShortcut(for: message),
-                findRanges: find?.ranges(in: message.id, part: .question) ?? [],
-                findCurrent: find?.current(in: message.id).flatMap { $0.part == .question ? $0 : nil }
-            ) {
-                viewModel.toggleTranscriptMessage(message.id)
+            VStack(alignment: .trailing, spacing: House.Spacing.xs) {
+                // The question's attachments sit over its pill, read only.
+                if !message.attachmentRefs.isEmpty {
+                    pillChips(for: message)
+                }
+                userPill(
+                    viewModel.collapseState(for: message),
+                    showsShortcut: viewModel.showsCollapseShortcut(for: message),
+                    findRanges: find?.ranges(in: message.id, part: .question) ?? [],
+                    findCurrent: find?.current(in: message.id).flatMap { $0.part == .question ? $0 : nil }
+                ) {
+                    viewModel.toggleTranscriptMessage(message.id)
+                }
             }
         case .system:
             // Never a saved turn; nothing to draw if one ever arrives.
@@ -315,6 +321,31 @@ struct QuickAIThread: View {
                 answerTurn(message)
             }
         }
+    }
+
+    /// A sent question's chips: a click opens the file in Quick Look or the
+    /// link in the browser; a "Not loaded" chip offers Re-attach.
+    private func pillChips(for message: QuickMessage) -> some View {
+        let refs = Dictionary(message.attachmentRefs.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
+        return AttachmentPillChips(
+            chips: viewModel.attachmentChips(for: message),
+            onOpen: { chip in
+                guard let ref = refs[chip.id] else { return }
+                if let url = viewModel.attachmentFileURL(ref) {
+                    AttachmentQuickLook.shared.preview(url)
+                } else {
+                    viewModel.openAttachment(ref)
+                }
+            },
+            onReattach: { chip in
+                if let ref = refs[chip.id] { viewModel.reattach(ref) }
+            },
+            canReattach: { chip in
+                refs[chip.id].map(viewModel.canReattach) ?? false
+            }
+        )
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .trailing)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     /// An answer with what its tools left: the tool lines above the prose,

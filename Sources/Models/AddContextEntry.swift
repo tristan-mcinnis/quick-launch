@@ -74,6 +74,17 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         return rows
     }
 
+    /// The menu with the captures the surface offers (the AI Chat window
+    /// drops the two that need an app behind it while it knows none), then
+    /// File…, Link…, and Finder Selection when Finder is behind.
+    static func menu(captures: [AddContextEntry], finderIsBehind: Bool) -> [AddContextRow] {
+        var rows = captures.map(AddContextRow.capture)
+        rows.append(.file)
+        rows.append(.link)
+        if finderIsBehind { rows.append(.finderSelection) }
+        return rows
+    }
+
     /// The menu for the app behind the overlay, by its bundle identifier.
     static func menu(appBehind bundleIdentifier: String?) -> [AddContextRow] {
         menu(finderIsBehind: bundleIdentifier == finderBundleIdentifier)

@@ -80,6 +80,10 @@ struct OpenAICompatibleService: QuickService, Sendable {
     let tools: ChatToolbox
     /// How much of the chat one request may carry.
     let contextBudget: ContextBudget
+    /// What fitting the attachments into their share cut or left out
+    /// before this request (`AttachmentRequestComposer`), so the thread's
+    /// one line names the files too.
+    let attachmentTrim: ContextBudget.Trim
     /// Wall-clock time the whole tool loop may take before the model is
     /// asked to answer with what it has.
     let toolTimeBudget: Duration
@@ -120,6 +124,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)? = nil,
         tools: ChatToolbox = ChatToolbox(),
         contextBudget: ContextBudget = .unlimited,
+        attachmentTrim: ContextBudget.Trim = ContextBudget.Trim(),
         toolTimeBudget: Duration = OpenAICompatibleService.defaultToolTimeBudget,
         reasoningEffort: ReasoningEffort? = nil,
         reasoningEffortFormat: ReasoningEffortWireFormat? = nil,
@@ -133,6 +138,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         self.askUserQuestion = askUserQuestion
         self.tools = tools
         self.contextBudget = contextBudget
+        self.attachmentTrim = attachmentTrim
         self.toolTimeBudget = toolTimeBudget
         self.reasoningEffort = reasoningEffort
         self.reasoningEffortFormat = reasoningEffortFormat ?? .forEndpoint(baseURL)
@@ -161,14 +167,34 @@ struct OpenAICompatibleService: QuickService, Sendable {
         try buildRequest(wireMessages: wireMessages(messages: messages, images: images))
     }
 
+    func buildRequest(
+        messages: [QuickMessage],
+        turnImages: [UUID: [QuickImageAttachment]]
+    ) throws -> URLRequest {
+        try buildRequest(wireMessages: wireMessages(messages: messages, turnImages: turnImages))
+    }
+
+    /// Images on the last user message: the one-turn form.
+    private func wireMessages(
+        messages: [QuickMessage],
+        images: [QuickImageAttachment]
+    ) -> [[String: Any]] {
+        let lastUser = messages.last { $0.role == .user }
+        let turnImages = lastUser.map { [$0.id: images] } ?? [:]
+        return wireMessages(messages: messages, turnImages: turnImages, lastOnly: true)
+    }
+
     /// The initial wire transcript: one system message, then the
-    /// conversation, with images attached to the last user message. A
+    /// conversation, each user turn with the images attached to it. A
     /// `.system` message in `messages` (an assistant's instructions and
     /// context skills) goes in front of this service's own system prompt,
     /// so the wire carries one system message whatever the request holds.
+    /// `lastOnly` keeps the old rule: images only when the last message is
+    /// the user turn they belong to.
     private func wireMessages(
         messages allMessages: [QuickMessage],
-        images: [QuickImageAttachment]
+        turnImages: [UUID: [QuickImageAttachment]],
+        lastOnly: Bool = false
     ) -> [[String: Any]] {
         let system = (allMessages.filter { $0.role == .system }.map(\.content) + [systemPrompt])
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -179,7 +205,10 @@ struct OpenAICompatibleService: QuickService, Sendable {
         ]
         for (index, message) in messages.enumerated() {
             let isLastUserMessage = index == messages.indices.last && message.role == .user
-            if isLastUserMessage, !images.isEmpty {
+            let images = message.role == .user && (!lastOnly || isLastUserMessage)
+                ? turnImages[message.id] ?? []
+                : []
+            if !images.isEmpty {
                 var parts: [[String: Any]] = [["type": "text", "text": message.content]]
                 for image in images {
                     parts.append(["type": "image_url", "image_url": ["url": image.dataURL]])
@@ -306,11 +335,27 @@ struct OpenAICompatibleService: QuickService, Sendable {
         messages: [QuickMessage],
         images: [QuickImageAttachment]
     ) -> AsyncThrowingStream<StreamDelta, Error> {
+        stream { wireMessages(messages: messages, images: images) }
+    }
+
+    /// Each image rides the user turn it was attached to.
+    func send(
+        messages: [QuickMessage],
+        turnImages: [UUID: [QuickImageAttachment]]
+    ) -> AsyncThrowingStream<StreamDelta, Error> {
+        stream { wireMessages(messages: messages, turnImages: turnImages) }
+    }
+
+    /// Runs the tool loop on the transcript `transcript` builds. It is built
+    /// inside the task, since a wire transcript is not Sendable.
+    private func stream(
+        _ transcript: @escaping @Sendable () -> [[String: Any]]
+    ) -> AsyncThrowingStream<StreamDelta, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     try await runToolLoop(
-                        transcript: wireMessages(messages: messages, images: images),
+                        transcript: transcript(),
                         continuation: continuation
                     )
                     continuation.finish()
@@ -338,7 +383,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
         // Time on the question card is the user's, not the loop's.
         var waitedOnUser: Duration = .zero
         func remaining() -> Duration { toolTimeBudget - (clock.now - started - waitedOnUser) }
-        var reportedTrim = ContextBudget.Trim()
+        // What the attachment fitting already cut: the thread's line names
+        // those files with whatever this loop leaves out.
+        var reportedTrim = attachmentTrim
         var answerNow = false
         var round = 0
 
@@ -394,10 +441,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         continuation: AsyncThrowingStream<StreamDelta, Error>.Continuation
     ) -> ContextBudget.Trim {
         guard !trim.isEmpty else { return reported }
-        let total = ContextBudget.Trim(
-            toolResults: reported.toolResults + trim.toolResults,
-            turns: reported.turns + trim.turns
-        )
+        let total = reported.adding(trim)
         if let summary = total.summary {
             continuation.yield(StreamDelta(
                 text: nil,

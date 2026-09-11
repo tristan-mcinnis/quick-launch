@@ -200,6 +200,109 @@ struct PiHandoffTests {
         """))
     }
 
+    @Test func attachmentsAreListedUnderTheirQuestionWithTheirTextAndNoPictures() {
+        let pdf = ChatAttachmentRef(
+            kind: .pdf, name: "Q3 report.pdf", pageCount: 42, contentHash: "h1", extractorVersion: 1,
+            path: "/Users/me/Documents/Q3 report.pdf"
+        )
+        let link = ChatAttachmentRef(
+            kind: .link, name: "Pricing | Example", contentHash: "h2", extractorVersion: 1,
+            url: URL(string: "https://example.com/pricing")
+        )
+        let shot = ChatAttachmentRef(kind: .screenshot, name: "Screenshot", pixelWidth: 1_944, pixelHeight: 1_464)
+        let gone = ChatAttachmentRef(
+            kind: .word, name: "Old notes.docx", contentHash: "h3", extractorVersion: 1,
+            path: "/Users/me/Old notes.docx"
+        )
+        let texts = [pdf.id: "--- Page 1 ---\nRevenue rose 12%.", link.id: "Pricing\n```js\ncode()\n```\nFree, Pro."]
+        let markdown = PiHandoffDocument.markdown(
+            title: "Quarter",
+            modelName: "DeepSeek V4.1 Flash",
+            messages: [
+                QuickMessage(role: .user, content: "Compare these", attachments: [pdf, link, shot, gone]),
+                QuickMessage(role: .assistant, content: "Revenue rose."),
+            ],
+            attachmentText: { texts[$0.id] },
+            date: Self.date,
+            timeZone: Self.utc
+        )
+        #expect(markdown == """
+        # Quarter
+
+        A Quick AI chat from Quick Launch, 2026-09-11 08:27, with DeepSeek V4.1 Flash.
+
+        ---
+
+        You:
+
+        Compare these
+
+        Attachments:
+        - Q3 report.pdf (PDF, 42 pages): `/Users/me/Documents/Q3 report.pdf`
+        - Pricing | Example (Web page): https://example.com/pricing
+        - Screenshot (Screenshot, 1944 × 1464): not carried to pi
+        - Old notes.docx (Word document): `/Users/me/Old notes.docx`, text not loaded in this session
+
+        Text of Q3 report.pdf:
+
+        ```text
+        --- Page 1 ---
+        Revenue rose 12%.
+        ```
+
+        Text of Pricing | Example:
+
+        ````text
+        Pricing
+        ```js
+        code()
+        ```
+        Free, Pro.
+        ````
+
+        ---
+
+        DeepSeek V4.1 Flash:
+
+        Revenue rose.
+
+        """)
+    }
+
+    @Test func continueInPiCarriesTheSessionsAttachmentTextAndWritesNoSidecar() async throws {
+        let extractor = FakeAttachmentExtractor()
+        await extractor.set(.content(AttachmentFlowTests.document("brief.txt", text: "The brief text.")), for: "brief.txt")
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "Read.", finishReason: "stop")])
+        let vm = QuickViewModel(settings: settings, service: mock, workspace: FakeWorkspace(), attachmentExtractor: extractor)
+        vm.openQuickAI()
+        vm.attachmentTray.add(.file(AttachmentFlowTests.file("brief.txt")))
+        vm.attachmentTray.add(.image(AttachmentFlowTests.image, name: "Pasted image", kind: .image))
+        await vm.attachmentTray.waitUntilRead()
+        vm.input = "read it"
+        await vm.submit()
+        let box = try sandbox()
+        defer { try? FileManager.default.removeItem(at: box.root) }
+        let runner = FakePiHandoffRunner.standard()
+        vm.piHandoff = service(box, runner: runner)
+
+        await vm.continueInPi()
+
+        let calls = await runner.calls
+        let fileArgument = try #require(calls[1].arguments.first { $0.hasPrefix("@") })
+        let path = String(fileArgument.dropFirst())
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        #expect(text.contains("- brief.txt (Text file): `/tmp/quick-launch-attachment-flow/brief.txt`"))
+        #expect(text.contains("```text\nThe brief text.\n```"))
+        #expect(text.contains("- Pasted image (Image, 40 × 30): not carried to pi"))
+        #expect(try permissions(URL(fileURLWithPath: path)) == 0o600)
+        let written = try FileManager.default.contentsOfDirectory(atPath: box.directory.path)
+        #expect(written == [URL(fileURLWithPath: path).lastPathComponent], "one thread file, no sidecar, no image")
+    }
+
     @Test func fileNamesSortByTimeAndCarryATitleSlug() {
         #expect(PiHandoffDocument.fileName(date: Self.date, title: "Who founded Raycast?", timeZone: Self.utc)
             == "20260911-082737-who-founded-raycast.md")

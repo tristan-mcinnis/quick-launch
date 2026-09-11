@@ -23,10 +23,10 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// used no tool (and on every answer saved before v1.5.0).
     var toolRecords: [ChatToolRecord]?
     /// Set on a question: the files, links, images, and selections attached
-    /// to it, in the order they were added. References only; the extracted text lives in the
-    /// attachment cache, so `content` stays what was typed. Nil on answers,
-    /// on questions without attachments, and on every message saved before
-    /// attachments.
+    /// to it, in the order they were added. References only; the extracted
+    /// text lives in memory for the session (`AttachmentSessionStore`), so
+    /// `content` stays what was typed. Nil on answers, on questions without
+    /// attachments, and on every message saved before attachments.
     var attachments: [ChatAttachmentRef]?
 
     init(

@@ -10,7 +10,9 @@ struct OverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.attachmentTray) private var inheritedTray
 
-    private var activeTray: AttachmentTray? { tray ?? inheritedTray }
+    /// The tray passed in, else the environment's, else the view model's
+    /// own: the composer's attachments always have a home.
+    private var activeTray: AttachmentTray? { tray ?? inheritedTray ?? viewModel.attachmentTray }
 
     var body: some View {
         Group {
@@ -1689,19 +1691,19 @@ struct ModelChooserPane: View {
 /// turns the pane into a one-line field: `↩` attaches, `esc` goes back.
 struct AddContextPane: View {
     @Bindable var viewModel: QuickViewModel
-    /// Nil falls back to the environment's; with neither, the pane lists
-    /// the four captures only.
+    /// Nil falls back to the environment's, then to the view model's own
+    /// (`QuickViewModel.attachmentTray`).
     var tray: AttachmentTray? = nil
     @Environment(\.attachmentTray) private var environmentTray
     @FocusState private var linkFocused: Bool
 
-    private var activeTray: AttachmentTray? { tray ?? environmentTray }
+    private var activeTray: AttachmentTray? { tray ?? environmentTray ?? viewModel.attachmentTray }
 
-    /// The rows in order: the view model's captures, or the whole menu
-    /// when files and links can be attached.
+    /// The rows in order: the view model's captures, then, when files and
+    /// links can be attached, File…, Link…, and Finder Selection.
     static func rows(captures: [AddContextEntry], tray: AttachmentTray?) -> [AddContextRow] {
         guard let tray else { return captures.map(AddContextRow.capture) }
-        return AddContextRow.menu(finderIsBehind: tray.finderIsBehind)
+        return AddContextRow.menu(captures: captures, finderIsBehind: tray.finderIsBehind)
     }
 
     var body: some View {
@@ -1770,6 +1772,12 @@ struct AddContextPane: View {
             return
         }
         guard let tray = activeTray else { return }
+        if tray === viewModel.attachmentTray {
+            // The view model runs its own rows: File… through the open
+            // panel, Finder Selection, and Link… as the field.
+            viewModel.runAddContextRow(row)
+            return
+        }
         tray.run(row, clipboard: NSPasteboard.general.string(forType: .string))
         // File… and Finder Selection hand over to their owner; the menu's
         // work is done. Link… stays open as its field.

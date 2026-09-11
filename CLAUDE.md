@@ -65,7 +65,9 @@ off by default, enabled by "Enable owned screen capture" in its own Settings
 tab, local only, and hard-locked in the current build until its privacy review
 and soak test pass. A user-copied screenshot attached to an AI request is
 ephemeral: it is routed locally and never persisted in settings or conversation
-history. The single local exception is the Clipboard History, which may keep the
+history. Attachment text is held in memory for the session only; chat history
+keeps a reference (name, kind, size, hash, path or URL), never the text. The
+single local exception is the Clipboard History, which may keep the
 user's copy (text, image, rich text, or a file URL) on this Mac so it can be
 restored later; it honours concealed/transient pasteboard markers, stays
 owner-only, and is bounded by the history limit plus a total-byte budget. AI

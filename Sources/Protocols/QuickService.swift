@@ -8,10 +8,26 @@ protocol QuickService: Sendable {
         messages: [QuickMessage],
         images: [QuickImageAttachment]
     ) -> AsyncThrowingStream<StreamDelta, Error>
+    /// Each image rides the user turn it was attached to (`turnImages` is
+    /// keyed by that message's id). Services that place images only on the
+    /// last message get every image there; services without images ignore
+    /// them.
+    func send(
+        messages: [QuickMessage],
+        turnImages: [UUID: [QuickImageAttachment]]
+    ) -> AsyncThrowingStream<StreamDelta, Error>
     func healthCheck() async throws -> Bool
 }
 
 extension QuickService {
+    func send(
+        messages: [QuickMessage],
+        turnImages: [UUID: [QuickImageAttachment]]
+    ) -> AsyncThrowingStream<StreamDelta, Error> {
+        let images = messages.filter { $0.role == .user }.flatMap { turnImages[$0.id] ?? [] }
+        return send(messages: messages, images: images)
+    }
+
     func send(
         messages: [QuickMessage],
         images: [QuickImageAttachment]

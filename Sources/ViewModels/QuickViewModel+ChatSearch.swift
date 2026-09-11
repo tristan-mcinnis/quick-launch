@@ -53,7 +53,11 @@ extension QuickViewModel {
         query: ChatSearchQuery,
         index: ChatSearchIndex
     ) -> ChatSnippet? {
-        let source = ChatSearchSource(conversation, title: title(of: conversation))
+        let source = ChatSearchSource(
+            conversation,
+            title: title(of: conversation),
+            attachments: ChatSearchSource.attachments(in: conversation)
+        )
         return ChatSearch.snippet(document: index.document(for: source), source: source, query: query)
     }
 

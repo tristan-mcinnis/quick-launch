@@ -143,9 +143,14 @@ protocol AIChatWindowPresenting: AnyObject {
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.syncAlwaysOnTopFromDefaults() }
+            // Delivered on the posting thread and handed to the main actor
+            // without waiting: a `.main` queue here made every UserDefaults
+            // write off the main thread block until the main thread ran this
+            // (a suite-wide hang in tests). One re-read per change; nothing
+            // to cancel, so no handle is kept.
+            Task { @MainActor [weak self] in self?.syncAlwaysOnTopFromDefaults() }
         }
     }
 

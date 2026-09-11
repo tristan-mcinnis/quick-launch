@@ -129,6 +129,11 @@ final class AttachmentTray {
 
     @ObservationIgnored private let extractor: any AttachmentExtracting
     @ObservationIgnored private let readTimeout: Duration
+    /// The reads themselves, by chip. A read runs on its own task, so a
+    /// hand-off (`handOff()`, `adopt(_:)`) can move it to another tray
+    /// without starting it again.
+    @ObservationIgnored private var reads: [UUID: Task<Result<AttachmentContent, AttachmentReadFailure>, Never>] = [:]
+    /// Per chip, the task that waits on its read and files the result here.
     @ObservationIgnored private var readTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var intakeTask: Task<Void, Never>?
 
@@ -238,9 +243,17 @@ final class AttachmentTray {
         let extractor = extractor
         let timeout = readTimeout
         let source = item.source
-        let id = item.id
+        let read = Task {
+            await Self.read(source, with: extractor, timeout: timeout)
+        }
+        watch(item.id, read)
+    }
+
+    /// Files the result of `read` on chip `id` when it ends.
+    private func watch(_ id: UUID, _ read: Task<Result<AttachmentContent, AttachmentReadFailure>, Never>) {
+        reads[id] = read
         readTasks[id] = Task { [weak self] in
-            let result = await Self.read(source, with: extractor, timeout: timeout)
+            let result = await read.value
             self?.finishReading(id, result: result)
         }
     }
@@ -276,6 +289,7 @@ final class AttachmentTray {
 
     private func finishReading(_ id: UUID, result: Result<AttachmentContent, AttachmentReadFailure>) {
         readTasks[id] = nil
+        reads[id] = nil
         // A chip removed or cancelled while it read is already gone.
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].isReading else { return }
         switch result {
@@ -337,7 +351,7 @@ final class AttachmentTray {
     }
 
     func removeAll() {
-        for id in readTasks.keys { stopReading(id) }
+        for id in Set(readTasks.keys).union(reads.keys) { stopReading(id) }
         intakeTask?.cancel()
         intakeTask = nil
         items.removeAll()
@@ -356,8 +370,54 @@ final class AttachmentTray {
     }
 
     private func stopReading(_ id: UUID) {
+        reads[id]?.cancel()
+        reads[id] = nil
         readTasks[id]?.cancel()
         readTasks[id] = nil
+    }
+
+    // MARK: - Hand-off
+
+    /// The chips as they move to another tray (Open in AI Chat): each chip
+    /// in its phase, and the reads still running, which go on where they
+    /// land instead of starting again.
+    struct Handoff: Sendable {
+        var items: [Item] = []
+        var reads: [UUID: Task<Result<AttachmentContent, AttachmentReadFailure>, Never>] = [:]
+
+        var isEmpty: Bool { items.isEmpty }
+    }
+
+    /// Empties this tray into a hand-off without stopping a read.
+    func handOff() -> Handoff {
+        let handoff = Handoff(items: items, reads: reads)
+        // The waiters go; the reads keep running for the tray that adopts
+        // them. A waiter that still wakes finds no chip here and does nothing.
+        for task in readTasks.values { task.cancel() }
+        readTasks.removeAll()
+        reads.removeAll()
+        intakeTask?.cancel()
+        intakeTask = nil
+        items.removeAll()
+        focusedItemID = nil
+        pastedLink = nil
+        notice = nil
+        linkDraft = nil
+        return handoff
+    }
+
+    /// Takes chips handed over from another tray, after its own; a read
+    /// still running reports here.
+    func adopt(_ handoff: Handoff) {
+        for item in handoff.items where !items.contains(where: { $0.id == item.id }) {
+            items.append(item)
+            guard item.isReading else { continue }
+            if let read = handoff.reads[item.id] {
+                watch(item.id, read)
+            } else {
+                startReading(item)
+            }
+        }
     }
 
     private func afterRemoval() {

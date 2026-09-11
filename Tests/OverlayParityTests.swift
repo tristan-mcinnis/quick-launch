@@ -307,7 +307,7 @@ struct OverlayParityTests {
         vm.moveAddContextSelection(-1)
         #expect(vm.addContextIndex == 0)
         vm.moveAddContextSelection(-1)
-        #expect(vm.addContextIndex == AddContextEntry.allCases.count - 1, "wraps")
+        #expect(vm.addContextIndex == vm.addContextRows.count - 1, "wraps to Link…, the last row")
 
         #expect(vm.topLayer == .addContextMenu)
         #expect(vm.popTopLayer())

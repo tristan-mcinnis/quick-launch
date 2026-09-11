@@ -287,6 +287,41 @@ struct AIChatWindowTests {
         #expect(rig.presenter.dismissals == 1)
     }
 
+    @Test func commandJCarriesPendingChipsAndAReadStillRunningGoesOnThere() async throws {
+        let extractor = FakeAttachmentExtractor()
+        await extractor.set(.content(AttachmentFlowTests.document("ready.txt", text: "Ready text.")), for: "ready.txt")
+        await extractor.set(.content(AttachmentFlowTests.document("slow.pdf", text: "Slow text.")), for: "slow.pdf")
+        await extractor.hold("slow.pdf")
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let service = MockQuickService()
+        let launcher = QuickViewModel(settings: settings, service: service, attachmentExtractor: extractor)
+        launcher.overlayPresenter = RecordingPresenter()
+        let chat = QuickViewModel(store: launcher.store, service: service, attachmentExtractor: extractor)
+        let suite = "AIChatWindowTests.\(UUID().uuidString)"
+        let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: suite)!)
+        window.window = FakeAIChatWindow()
+        launcher.aiChatOpener = { handoff in window.open(handoff: handoff) }
+
+        launcher.openQuickAI()
+        launcher.attachmentTray.add(.file(AttachmentFlowTests.file("ready.txt")))
+        await launcher.attachmentTray.waitUntilRead()
+        launcher.attachmentTray.add(.file(AttachmentFlowTests.file("slow.pdf")))
+        launcher.input = "compare"
+        #expect(launcher.attachmentTray.isReading)
+
+        launcher.continueInAIChat()
+
+        #expect(launcher.attachmentTray.isEmpty, "the chips left the launcher")
+        #expect(chat.attachmentTray.items.map(\.name) == ["ready.txt", "slow.pdf"])
+        #expect(chat.attachmentTray.items.last?.isReading == true)
+        #expect(chat.input == "compare")
+        await extractor.release("slow.pdf")
+        await chat.attachmentTray.waitUntilRead()
+        #expect(chat.attachmentTray.readyContents.map(\.ref.name) == ["ready.txt", "slow.pdf"])
+        #expect(await extractor.requested.filter { $0 == "slow.pdf" }.count == 1, "moved over, not read again")
+    }
+
     @Test func commandJKeepsAModelChangedAfterTheLastAnswer() async throws {
         let rig = makeRig()
         rig.launcher.openQuickAI()

@@ -27,10 +27,20 @@ import Observation
     /// that still shows one drops it instead of saving it back. In memory
     /// only: the ids are random, so they never come back on their own.
     @ObservationIgnored var deletedChatIDs: Set<UUID> = []
+    /// The text (and pictures) of the chats' attachments, in memory for this
+    /// session only. History keeps each attachment's reference, never its
+    /// text; both views read the text here, so a chat moved between them
+    /// keeps its attachments.
+    let attachments: AttachmentSessionStore
 
-    init(settings: QuickSettings = QuickSettings(), history: [QuickConversation] = []) {
+    init(
+        settings: QuickSettings = QuickSettings(),
+        history: [QuickConversation] = [],
+        attachments: AttachmentSessionStore = AttachmentSessionStore()
+    ) {
         self.settings = settings
         self.history = history
+        self.attachments = attachments
     }
 
     // MARK: - The views on this store

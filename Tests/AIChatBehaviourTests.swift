@@ -402,7 +402,7 @@ struct AIChatBehaviourTests {
         rig.chat.input = "typing"
         rig.window.open(handoff: AIChatHandoff(
             conversation: rig.chat.currentConversation,
-            pendingChatTools: nil, input: "", pendingImages: [], pendingContext: nil, conversationImages: []
+            pendingChatTools: nil, input: "", pendingImages: [], pendingContext: nil
         ))
         #expect(rig.chat.currentConversation?.id == id)
         #expect(rig.chat.input == "typing")

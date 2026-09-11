@@ -444,11 +444,31 @@ import Observation
     /// launch or an explicit attachment, so a dismissed chip is not silently
     /// re-read.
     @ObservationIgnored private var selectionRecaptureSuppressed = false
-    /// Image of the current thread, kept in memory only so follow-ups can
-    /// refer to it. Never written to history or disk.
-    /// Set here and by the AI Chat hand-off (`adoptAIChatHandoff`), which
-    /// moves the thread's images to the window's own view model.
-    @ObservationIgnored var conversationImages: [QuickImageAttachment] = []
+    // MARK: - Attachments (QuickViewModel+Attachments.swift)
+
+    /// The chips waiting to ride the next question: files, links, pictures,
+    /// and selections, one tray per view. Every way to attach lands here.
+    let attachmentTray: AttachmentTray
+    /// Reads a source for Re-attach; the tray reads through the same one.
+    @ObservationIgnored let attachmentReader: any AttachmentExtracting
+    /// File…'s open panel. The app sets the system one; nil in tests unless
+    /// a test passes a fake.
+    @ObservationIgnored var attachmentFilePicker: (any AttachmentFilePicking)?
+    /// Reads the text of a picture on this Mac, for the OCR fallback when no
+    /// vision model can take it.
+    @ObservationIgnored var recognizeImageText: @Sendable (Data) async -> String = { data in
+        await ScreenshotTextIndex.recognizeText(in: data)
+    }
+    /// Sent chips being read again (Re-attach), or whose read failed.
+    var reattachStates: [UUID: AttachmentChipModel.Phase] = [:]
+    @ObservationIgnored var reattachTasks: [UUID: Task<Void, Never>] = [:]
+    /// True while a send waits for chips still reading.
+    var isWaitingForAttachments = false
+    /// An Add Context row's work (File…, a capture), kept so a test can
+    /// await it.
+    @ObservationIgnored var addContextTask: Task<Void, Never>?
+    /// `⌘R`: the turn asked again keeps the attachments it had.
+    @ObservationIgnored var reaskedAttachments: [ChatAttachmentRef]?
 
     // MARK: - Init
 
@@ -486,8 +506,12 @@ import Observation
         workspace: (any WorkspaceOpening)? = nil,
         runningApplications: (any RunningApplicationsQuerying)? = nil,
         screenGeometry: (any ScreenGeometryProviding)? = nil,
+        attachmentExtractor: (any AttachmentExtracting)? = nil,
         currentVersion: String = "1.0.0"
     ) {
+        let reader = attachmentExtractor ?? Self.sharedAttachmentExtractor
+        self.attachmentReader = reader
+        self.attachmentTray = AttachmentTray(extractor: reader)
         // A shared store (the AI Chat window's view model) brings its own
         // settings; `settings` seeds a new one.
         self.store = store ?? QuickStore(settings: settings)
@@ -538,6 +562,12 @@ import Observation
             self?.invalidateLauncherRanking()
         }
         self.store.register(self)
+        attachmentTray.onChooseFiles = { [weak self] in
+            self?.runAddContextRow(.file)
+        }
+        attachmentTray.onReadFinderSelection = { [weak self] in
+            self?.attachFinderSelection()
+        }
     }
 
     // MARK: - Submit
@@ -1423,7 +1453,7 @@ import Observation
             total += PanelSizing.chooserBlockHeight(rows: modelChooserOptions.count)
         }
         if isAddContextMenuPresented {
-            total += PanelSizing.chooserBlockHeight(rows: addContextOptions.count)
+            total += PanelSizing.chooserBlockHeight(rows: addContextRows.count)
         }
         var pane: CGFloat?
         if isItemActionPanePresented {
@@ -1878,11 +1908,15 @@ import Observation
     var footerHints: [FooterHint] {
         if isStreaming { return [FooterHint(label: "Stop", keys: ["esc"])] }
         if hasPendingAttachment {
-            return [
+            var hints = [
                 FooterHint(label: "Ask", keys: ["↩"]),
                 FooterHint(label: "Remove", keys: ["⌫"]),
-                FooterHint(label: "Retake", keys: ScreenshotKind.window.overlayKeyCaps),
             ]
+            // Retake is a screenshot's; a file or a link has nothing to retake.
+            if !pendingImages.isEmpty || pendingContext != nil {
+                hints.append(FooterHint(label: "Retake", keys: ScreenshotKind.window.overlayKeyCaps))
+            }
+            return hints
         }
         if let inputMode {
             switch inputMode {
@@ -2496,7 +2530,7 @@ import Observation
     }
 
     func classifySubmit() -> SubmitIntent {
-        if pendingImage != nil { return .attachment }
+        if pendingImage != nil || !attachmentTray.isEmpty { return .attachment }
         if inputMode != nil { return .inputMode }
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if pendingQuickLink == nil, exactCommandAlias() != nil { return .commandAlias }
@@ -3822,6 +3856,8 @@ import Observation
         guard !isStreaming else { return }
         isAddContextMenuPresented = true
         addContextIndex = 0
+        attachmentTray.cancelLinkEntry()
+        attachmentTray.finderIsBehind = isFinderBehind
         isModelChooserPresented = false
         isAssistantChooserPresented = false
         isActionPalettePresented = false
@@ -3841,12 +3877,13 @@ import Observation
     func closeAddContextMenu() {
         guard isAddContextMenuPresented else { return }
         isAddContextMenuPresented = false
+        attachmentTray.cancelLinkEntry()
         requestInputFocus()
     }
 
     func moveAddContextSelection(_ delta: Int) {
-        let options = addContextOptions
-        guard !options.isEmpty else { return }
+        let options = addContextRows
+        guard !options.isEmpty, !attachmentTray.isEnteringLink else { return }
         addContextIndex = ListSelection.wrappedIndex(
             addContextIndex,
             by: delta,
@@ -3854,11 +3891,23 @@ import Observation
         )
     }
 
-    /// Return in the open Add Context menu.
+    /// Return in the open Add Context menu: the highlighted row, or, in the
+    /// Link field, the link.
     func runAddContextSelection() async {
-        let options = addContextOptions
+        if attachmentTray.isEnteringLink {
+            submitAttachmentLink()
+            return
+        }
+        let options = addContextRows
         guard options.indices.contains(addContextIndex) else { return }
-        await addContext(options[addContextIndex])
+        switch options[addContextIndex] {
+        case .capture(let entry):
+            await addContext(entry)
+        case .file:
+            await chooseAttachmentFiles()
+        case let row:
+            runAddContextRow(row)
+        }
     }
 
     /// Runs one entry through the capture path it already had. The half-typed
@@ -4264,12 +4313,16 @@ import Observation
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    /// Anything waiting to travel with the next question.
-    var hasPendingAttachment: Bool { !pendingImages.isEmpty || pendingContext != nil }
+    /// Anything waiting to travel with the next question: a screenshot, the
+    /// Add Context context, or a chip on the tray.
+    var hasPendingAttachment: Bool {
+        !pendingImages.isEmpty || pendingContext != nil || !attachmentTray.isEmpty
+    }
 
     func clearAttachments() {
         pendingImages.removeAll()
         pendingContext = nil
+        attachmentTray.removeAll()
         // A cleared attachment strip also drops the launch-scoped selection
         // so it cannot ride a later request.
         clearLaunchScopedState()
@@ -5311,7 +5364,12 @@ import Observation
         case .assistantChooser:
             closeAssistantChooser()
         case .addContextMenu:
-            closeAddContextMenu()
+            // The Link field goes back to the rows first.
+            if attachmentTray.cancelLinkEntry() {
+                requestInputFocus()
+            } else {
+                closeAddContextMenu()
+            }
         case .recentChats:
             popRecentChatsLayer()
         case .streaming:
@@ -5353,6 +5411,8 @@ import Observation
             return true
         }
         if isAddContextMenuPresented {
+            // Backspace in the Link field edits the link.
+            if attachmentTray.isEnteringLink { return false }
             closeAddContextMenu()
             return true
         }
@@ -5834,7 +5894,13 @@ import Observation
 
     func deleteConversation(id: UUID) {
         store.deletedChatIDs.insert(id)
+        let deleted = history.filter { $0.id == id }
         history.removeAll { $0.id == id }
+        if currentConversation?.id == id {
+            forgetAttachments(of: deleted + [currentConversation].compactMap { $0 })
+        } else {
+            forgetAttachments(of: deleted)
+        }
         if currentConversation?.id == id { startNewConversation() }
         saveHistory()
         invalidateLauncherRanking()
@@ -5879,11 +5945,10 @@ import Observation
         currentConversation = conversation
         output = ""
         threadError = nil
-        // A first question asked with a screenshot is asked with it again;
-        // a follow-up already carries the thread's images.
-        let reattachesImages = conversation.messages.isEmpty && pendingImages.isEmpty
-            && !conversationImages.isEmpty
-        if reattachesImages { pendingImages = conversationImages }
+        // The turn is asked with the attachments it had: its references,
+        // read from the session store (pictures included).
+        reaskedAttachments = replaced.first?.attachments
+        defer { reaskedAttachments = nil }
         await submit(text: question)
         // The ask never went out (no provider, no key): the thread is left
         // as it was, and the bottom line says why.
@@ -5892,7 +5957,6 @@ import Observation
             currentConversation?.messages.append(contentsOf: replaced)
             output = previousOutput
             threadError = previousError
-            if reattachesImages { pendingImages.removeAll() }
         }
     }
 
@@ -6291,6 +6355,17 @@ import Observation
         /// the Start New Chat interval.
         var reasksTurn = false
         let submittedImages: [QuickImageAttachment]
+        /// What the question carries, in the order added: a reference for
+        /// each attachment (on the saved message), with what reading it gave
+        /// (text, pixels) for the session store. A page read of a URL in
+        /// the question joins here as a Link attachment.
+        var attachments: [AttachmentContent] = []
+        /// The tray chips `attachments` came from, which leave the tray when
+        /// the question becomes a turn.
+        var trayItemIDs: [UUID] = []
+        /// Attachments whose text already rides this request's prompt (the
+        /// page read's web-content section), so no block repeats it.
+        var inlineAttachmentIDs: Set<UUID> = []
         let action: SavedPromptResolver.Resolution?
         let actionDefinition: SavedPrompt?
         var effectivePrompt: String
@@ -6303,6 +6378,9 @@ import Observation
         var chatShowedAnswer = false
 
         var submittedImage: QuickImageAttachment? { submittedImages.last }
+
+        /// The references the saved question keeps.
+        var attachmentRefs: [ChatAttachmentRef] { attachments.map(\.ref) }
     }
 
     /// Return on the input. Three stages, each of which may finish the
@@ -6317,6 +6395,8 @@ import Observation
     /// `text` asks that question instead of the composer's (⌘R asking a
     /// turn again); the composer then keeps what is typed in it.
     private func submit(text: String?) async {
+        // Chips still reading hold the send, with their status line.
+        guard await waitForReadingAttachments() else { return }
         guard var request = await prepareRequest(text: text) else { return }
         guard await enrich(&request) else { return }
         await stream(request)
@@ -6329,19 +6409,24 @@ import Observation
         let takesComposerText = text == nil
         let reasksTurn = text != nil
         let submittedInput = text ?? input
-        guard !submittedInput.isEmpty || pendingImage != nil else { return nil }
+        // A turn asked again keeps its attachments; a new question takes
+        // the screenshots and the chips that were read.
+        let attachments: [AttachmentContent] = reasksTurn
+            ? (reaskedAttachments ?? []).map { AttachmentContent(ref: $0) }
+            : pendingAttachmentContents()
+        let trayItemIDs = reasksTurn ? [] : attachmentTray.items.filter { $0.content != nil }.map(\.id)
+        guard !submittedInput.isEmpty || pendingImage != nil || !attachments.isEmpty else { return nil }
         // A new request supersedes any prior answer's replaceable selection.
         replaceableSelectionContext = nil
         webSearchNote = nil
-        // A turn asked again stays in its chat, so it keeps the chat's
-        // images even past the Start New Chat interval.
-        let keepsThread = reasksTurn || !shouldStartNewConversation
         liveToolRecords = []
         threadNotice = nil
-        let submittedImages = !pendingImages.isEmpty
-            ? pendingImages
-            : ((isFollowUp && keepsThread) ? conversationImages : [])
+        // The pictures this turn carries. The thread's earlier pictures ride
+        // their own turns, from the session store (`turnImages`), and a turn
+        // asked again finds its own there by reference.
+        let submittedImages = attachments.compactMap(\.image)
         let submittedImage = submittedImages.last
+        let hasDocuments = attachments.contains { !$0.ref.kind.isImage }
 
         // Expand saved-prompt aliases before anything else. Non-matches
         // (including inputs that look like `/foo` but reference an unknown
@@ -6436,14 +6521,19 @@ import Observation
                 effectivePrompt = preamble + "\n\n" + effectivePrompt
             }
         } else {
-            effectivePrompt = plainPrompt(submittedInput, hasImage: submittedImage != nil, launchText: launchText)
+            effectivePrompt = plainPrompt(
+                submittedInput,
+                hasImage: submittedImage != nil,
+                hasDocuments: hasDocuments,
+                launchText: launchText
+            )
         }
 
         // Math, conversions, dates, system facts: the same deterministic
         // resolver the live ranking uses, so Return and the inline row agree.
         // Unit conversions only apply to raw typed input, never to an
         // expanded saved prompt.
-        if answerLocally(
+        if attachments.isEmpty, answerLocally(
             prompt: effectivePrompt,
             question: submittedInput,
             allowConversions: action == nil,
@@ -6466,6 +6556,8 @@ import Observation
             takesComposerText: takesComposerText,
             reasksTurn: reasksTurn,
             submittedImages: submittedImages,
+            attachments: attachments,
+            trayItemIDs: trayItemIDs,
             action: action,
             actionDefinition: actionDefinition,
             effectivePrompt: effectivePrompt,
@@ -6476,10 +6568,19 @@ import Observation
     /// What the model gets for typed text that names no saved prompt: the
     /// text (or, for a bare attachment, a stock question), after any Add
     /// Context and launch-selection preamble.
-    private func plainPrompt(_ text: String, hasImage: Bool, launchText: String?) -> String {
+    private func plainPrompt(
+        _ text: String,
+        hasImage: Bool,
+        hasDocuments: Bool = false,
+        launchText: String?
+    ) -> String {
         var prompt = text
-        if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, hasImage {
-            prompt = "Describe this screenshot and answer the most likely useful question about it."
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if hasDocuments {
+                prompt = AttachmentRequestComposer.bareAttachmentQuestion
+            } else if hasImage {
+                prompt = "Describe this screenshot and answer the most likely useful question about it."
+            }
         }
         // Screen Awareness context plus the launch-scoped background
         // selection become context for this question.
@@ -6576,6 +6677,7 @@ import Observation
     private func localAnswerPrompt(for text: String) -> String? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               pendingImage == nil,
+              attachmentTray.isEmpty,
               SavedPromptResolver.resolveAction(
                   input: text,
                   prefix: settings.savedPromptPrefix,
@@ -6707,6 +6809,15 @@ import Observation
                         return false
                     }
                     sections.append("### \(url.absoluteString)\n\(content)")
+                    // The page stays with this question as a Link
+                    // attachment, so a follow-up still has it. This request
+                    // already carries it in the section below.
+                    if request.attachments.count < AttachmentLimits.attachmentsPerMessage,
+                       !request.attachments.contains(where: { $0.ref.url == url }) {
+                        let page = Self.pageAttachment(url: url, text: content)
+                        request.attachments.append(page)
+                        request.inlineAttachmentIDs.insert(page.ref.id)
+                    }
                 } catch {
                     guard enrichmentContinues else {
                         restoreEnrichmentInput()
@@ -6734,7 +6845,6 @@ import Observation
         // cancellation must not later read as an abandoned search.
         noteActedQuery(submittedInput)
         let submittedImages = request.submittedImages
-        let submittedImage = request.submittedImage
         let action = request.action
         let actionDefinition = request.actionDefinition
         let effectivePrompt = request.effectivePrompt
@@ -6768,25 +6878,47 @@ import Observation
             return
         }
 
+        // Pictures move the request to the vision model: this turn's, a
+        // turn asked again with its own, or the thread's earlier ones still
+        // in memory. With no vision route, this turn's pictures are read as
+        // text on this Mac instead, and the chat's own model answers.
+        var attachments = request.attachments
+        let threadImages = startsNewChat ? [] : (currentConversation?.messages ?? [])
+            .flatMap(\.attachmentRefs)
+            .compactMap { attachmentStore.storedImage(for: $0) }
+        let reaskedImages = attachments.compactMap { attachmentStore.storedImage(for: $0.ref) }
+        var visionImage = submittedImages.last ?? reaskedImages.last ?? threadImages.last
+        if visionImage != nil, !visionRouteWorks {
+            visionImage = nil
+            if attachments.contains(where: { $0.image != nil }) {
+                attachments = await readImagesAsText(attachments)
+                guard !Task.isCancelled else {
+                    restoreEnrichmentInput()
+                    return
+                }
+            }
+        }
+        let routesToVision = visionImage != nil
+
         guard let provider = provider(
             for: usedWebSearch ? nil : action?.providerID,
-            image: submittedImage
+            image: visionImage
         ),
               let model = resolvedModel(
                 for: provider,
-                override: submittedImage != nil
+                override: routesToVision
                     ? (settings.visionModel.isEmpty ? nil : settings.visionModel)
                     : (action?.model ?? chatModelOverride(for: provider))
               )
         else {
             restoreEnrichmentInput()
-            errorMessage = submittedImage != nil
+            errorMessage = routesToVision
                 ? "Choose a vision model in Settings › Models."
                 : "Choose a provider and model in Settings."
             recordJournal(
                 kind: .aiFailed,
                 scope: learningScope,
-                detail: submittedImage != nil ? "missing-vision-model" : "missing-model"
+                detail: routesToVision ? "missing-vision-model" : "missing-model"
             )
             requestInputFocus()
             return
@@ -6828,9 +6960,13 @@ import Observation
         }
         currentConversation?.providerID = provider.id
         currentConversation?.model = model
+        // The saved question keeps references only; the text and pictures
+        // live in the session store, in memory.
+        for content in attachments { attachmentStore.store(content) }
         let submittedMessage = QuickMessage(
             role: .user,
-            content: usedWebSearch || usedPageRead ? submittedInput : effectivePrompt
+            content: usedWebSearch || usedPageRead ? submittedInput : effectivePrompt,
+            attachments: attachments.isEmpty ? nil : attachments.map(\.ref)
         )
         // The title comes from what the user typed, not from the expanded
         // saved prompt or the Add Context preamble the model receives. Set
@@ -6850,6 +6986,25 @@ import Observation
         if (usedWebSearch || usedPageRead), !requestMessages.isEmpty {
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
+        // Each turn's attachments in front of its question, fitted into
+        // their share of the answering model's window first.
+        let attachmentBudget = attachmentContextBudget(provider: provider, model: model)
+        let composed = AttachmentRequestComposer.compose(
+            messages: requestMessages,
+            text: { [attachmentStore] ref in attachmentStore.text(for: ref) },
+            share: AttachmentRequestComposer.share(
+                characterLimit: attachmentBudget.characterLimit,
+                reserved: (requestMessages.last?.content.utf8.count ?? 0)
+                    + settings.systemPrompt.utf8.count
+                    + (assistantSystem?.utf8.count ?? 0)
+            ),
+            excluded: request.inlineAttachmentIDs
+        )
+        requestMessages = composed.messages
+        let requestImages = routesToVision ? turnImages(for: requestMessages) : [:]
+        if let summary = composed.trim.summary {
+            noteLiveToolRecord(ChatToolRecord(kind: .context, summary: summary))
+        }
         // The system message rides this request only; the saved chat keeps
         // the turns, and the assistant is looked up again next time.
         if let assistantSystem {
@@ -6858,12 +7013,23 @@ import Observation
         if request.takesComposerText { input = "" }
         // The question is a turn now; a stream failure keeps it there.
         enrichmentSubmittedInput = nil
+        let sentPendingImages = pendingImages
         pendingImages.removeAll()
         pendingContext = nil
+        // The chips that rode leave the tray (and so does a failed one); a
+        // chip added while a search ran stays for the next question.
+        var takenChips = AttachmentTray.Handoff()
+        if !request.reasksTurn {
+            takenChips = attachmentTray.handOff()
+            let sent = Set(request.trayItemIDs)
+            let waiting = takenChips.items.filter { !sent.contains($0.id) && !$0.isFailed }
+            if !waiting.isEmpty {
+                attachmentTray.adopt(AttachmentTray.Handoff(items: waiting, reads: takenChips.reads))
+            }
+        }
         lastQuestion = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
         // The question is a turn of the thread now; the thread draws it.
         pendingQuestion = nil
-        if !submittedImages.isEmpty { conversationImages = submittedImages }
 
         errorMessage = nil
         threadError = nil
@@ -6872,15 +7038,20 @@ import Observation
         // A new question brings the reader back to the newest text.
         followThreadBottom()
         isStreaming = true
-        guard let service = makeService(provider: provider, model: model) else {
+        guard let service = makeService(provider: provider, model: model, attachmentTrim: composed.trim) else {
             isStreaming = false
+            liveToolRecords = []
             // Only a question that came from the composer goes back there,
             // with its attachments; ⌘R leaves what is typed alone.
             rollbackSubmission(
                 messageID: submittedMessage.id,
                 restoring: request.takesComposerText ? submittedInput : nil
             )
-            if request.takesComposerText { pendingImages = submittedImages }
+            if request.takesComposerText {
+                pendingImages = sentPendingImages
+                // Back on the tray; a chip still waiting there is kept as is.
+                attachmentTray.adopt(takenChips)
+            }
             errorMessage = "\(provider.name) is not available. Check its model, endpoint, or installed command."
             recordJournal(kind: .aiFailed, scope: learningScope, detail: "service-unavailable")
             isFollowUpQueued = false
@@ -6894,7 +7065,7 @@ import Observation
         streamTask?.cancel()
         streamTask = nil
         discardStreamBuffer()
-        let stream = service.send(messages: requestMessages, images: submittedImages)
+        let stream = service.send(messages: requestMessages, turnImages: requestImages)
         streamGeneration &+= 1
         let generation = streamGeneration
         inFlightTurn = currentConversation.map { ($0.id, submittedMessage.id) }
@@ -7071,7 +7242,8 @@ import Observation
     /// Return while an answer streams: queue what is typed. It stays in the
     /// composer ("Queued ↩") and is sent when the stream ends.
     private func queueFollowUp() {
-        guard isStreaming, !isAskQuestionActive,
+        // Waiting for chips to read is the same send, not a new one.
+        guard isStreaming, !isAskQuestionActive, !isWaitingForAttachments,
               !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
         isFollowUpQueued = true
@@ -7485,7 +7657,7 @@ import Observation
         return settings.selectedProvider
     }
 
-    private func resolvedModel(for provider: InferenceProvider, override: String?) -> String? {
+    func resolvedModel(for provider: InferenceProvider, override: String?) -> String? {
         let model = override.flatMap { $0.isEmpty ? nil : $0 } ?? provider.selectedModel
         return model.isEmpty ? nil : model
     }
@@ -7509,7 +7681,8 @@ import Observation
     func makeService(
         provider: InferenceProvider,
         model: String,
-        chatTools: Bool = true
+        chatTools: Bool = true,
+        attachmentTrim: ContextBudget.Trim = ContextBudget.Trim()
     ) -> (any QuickService)? {
         if let service { return service }
         switch provider.kind {
@@ -7549,6 +7722,7 @@ import Observation
                     )
                     : ChatToolbox(),
                 contextBudget: ContextBudget(contextWindow: profile.contextWindow),
+                attachmentTrim: attachmentTrim,
                 reasoningEffort: profile.reasoningEffort
             )
         case .commandLine:
@@ -7575,6 +7749,8 @@ import Observation
         // itself is what is in flight, and the question was never a turn.
         let cancelledEnrichment = wasStreaming && streamTask == nil && commandTask == nil
             && pendingQuestion != nil
+        // A send waiting for its chips: the reads stop, the typed text stays.
+        cancelAttachmentWait()
         clearAskQuestion(with: nil)
         if cancelledModelRequest {
             // Stop keeps the question and what the model said so far, as the
@@ -7774,11 +7950,13 @@ import Observation
            let answer = conversation.messages[lastQuestion...].first(where: { $0.role == .assistant }) {
             toolLines[answer.id] = [note]
         }
+        let attachments = attachmentStore
         return PiHandoffDocument.markdown(
             title: title(of: conversation),
             modelName: ModelProfile.displayName(forModelID: conversation.model),
             messages: conversation.messages,
             toolLines: toolLines,
+            attachmentText: { attachments.text(for: $0)?.text },
             date: date
         )
     }
@@ -8067,6 +8245,7 @@ import Observation
         if scope.contains(.attachments) {
             pendingImages.removeAll()
             pendingContext = nil
+            attachmentTray.removeAll()
             clearLaunchScopedState()
         }
         if scope.contains(.thread) {
@@ -8095,7 +8274,7 @@ import Observation
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
-            conversationImages = []
+            reattachStates = [:]
             activeVaultSearchMode = nil
             vaultSearchAnchor = nil
         }
@@ -8131,6 +8310,10 @@ import Observation
 
     /// Backspace: drop the newest attachment; the × button clears all.
     func removePendingImage() {
+        if attachmentTray.removeNewest() {
+            requestInputFocus()
+            return
+        }
         if pendingImages.count > 1 {
             pendingImages.removeLast()
             return
@@ -8477,6 +8660,8 @@ import Observation
     func clearHistory() {
         store.deletedChatIDs.formUnion(history.map(\.id))
         history = []
+        // The attachments' text goes with the chats: it lived in memory only.
+        attachmentStore.removeAll()
         currentConversation = nil
         if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
         output = ""

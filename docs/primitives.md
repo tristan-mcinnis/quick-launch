@@ -180,6 +180,12 @@ one toggle, one Forget button.
   history or on disk. The text of a capture bundle or a selected-text chip is
   part of the question it went with, so it is saved in chat history
   (owner-only) and goes to the provider again with the chat's later questions.
+- Attachment text is held in memory for the session only; chat history keeps a
+  reference (name, kind, size, hash, path or URL), never the text. The text of
+  a chat's attached files and links goes to the provider again with the chat's
+  later questions, as long as the session holds it; after a relaunch a file is
+  read again, or a link fetched again, only when the user chooses Re-attach.
+  Attached images stay in memory for the session and are never written.
 - Screen History frames and OCR remain in owner-only local stores. The search-only beta hard-locks capture. The latent capture path requires FileVault and visible consent after each launch, and all browsers are refused before pixels are read. The editable application and domain exclusions govern capture, search, and migration. A result proves only that something was visible at that time. It never reports current project truth.
 - The screenshot text index is on-device OCR (Vision), one local JSON file,
   switchable off in Settings › General.
@@ -187,7 +193,8 @@ one toggle, one Forget button.
 - A cloud provider receives the whole chat, not only the current question:
   every earlier question and answer, the app's instruction, a saved command's
   or assistant's instructions and context skills, the capture or selection
-  text, web search snippets and typed-page text, and, for an OpenAI-compatible
+  text, the text of attached files and links, web search snippets and
+  typed-page text, and, for an OpenAI-compatible
   provider, what the chat tools return (memory hits from `recall`, vault
   results over SSH, a skill's `SKILL.md`, web results). The Claude Code CLI
   provider runs with no tools. Screenshots go to the Vision model setting,

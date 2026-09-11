@@ -344,8 +344,9 @@ struct ChatSearchSource: Sendable, Equatable {
         self.answers = answers
     }
 
-    /// One saved chat. Attachment names come from `attachments`: the
-    /// message model carries none yet, so the caller passes them.
+    /// One saved chat. Attachment names come from `attachments`; callers
+    /// pass `ChatSearchSource.attachments(in:)`, the names on the chat's
+    /// message references.
     init(
         _ conversation: QuickConversation,
         title: String,
@@ -839,7 +840,11 @@ struct ChatSnippet: Equatable, Sendable {
     func update(_ conversations: [QuickConversation], title: (QuickConversation) -> String) {
         var stale: [ChatSearchSource] = []
         for conversation in conversations where !isCurrent(conversation.id, ChatSearchStamp(conversation)) {
-            stale.append(ChatSearchSource(conversation, title: title(conversation)))
+            stale.append(ChatSearchSource(
+                conversation,
+                title: title(conversation),
+                attachments: ChatSearchSource.attachments(in: conversation)
+            ))
         }
         update(live: Set(conversations.map(\.id)), stale: stale)
     }
@@ -923,5 +928,23 @@ struct ChatSnippet: Equatable, Sendable {
         rowCache.removeAll { $0.key.query == key.query }
         rowCache.append((key, rows))
         if rowCache.count > Self.rowCacheLimit { rowCache.removeFirst(rowCache.count - Self.rowCacheLimit) }
+    }
+}
+
+extension ChatSearchSource {
+    /// The names chat search matches for a chat's attachments: files by
+    /// name, links by title and host. Pictures and selections have no name
+    /// worth finding.
+    static func attachments(in conversation: QuickConversation) -> [Attachment] {
+        conversation.messages.flatMap(\.attachmentRefs).compactMap { ref in
+            switch ref.kind {
+            case .link:
+                Attachment(kind: .link, name: [ref.name, ref.host].compactMap { $0 }.joined(separator: " "))
+            case .image, .screenshot, .selection:
+                nil
+            default:
+                Attachment(kind: .file, name: ref.name)
+            }
+        }
     }
 }

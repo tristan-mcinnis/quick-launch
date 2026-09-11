@@ -56,11 +56,25 @@ struct AttachmentContent: Sendable, Equatable {
     var ref: ChatAttachmentRef
     var text: String?
     var image: QuickImageAttachment?
+    /// The kind the model block names ("PDF", "Swift source"); nil falls
+    /// back to the kind's own name.
+    var kindLabel: String?
+    /// How the text was read (OCR pages, serial dates, a cut download),
+    /// said to the model inside the block.
+    var notes: [AttachmentNote]
 
-    init(ref: ChatAttachmentRef, text: String? = nil, image: QuickImageAttachment? = nil) {
+    init(
+        ref: ChatAttachmentRef,
+        text: String? = nil,
+        image: QuickImageAttachment? = nil,
+        kindLabel: String? = nil,
+        notes: [AttachmentNote] = []
+    ) {
         self.ref = ref
         self.text = text
         self.image = image
+        self.kindLabel = kindLabel
+        self.notes = notes
     }
 }
 

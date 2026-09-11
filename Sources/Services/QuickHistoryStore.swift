@@ -114,7 +114,11 @@ enum QuickHistoryStore {
             query: parsed,
             document: { conversation in
                 index.document(id: conversation.id)
-                    ?? index.document(for: ChatSearchSource(conversation, title: title(conversation)))
+                    ?? index.document(for: ChatSearchSource(
+                        conversation,
+                        title: title(conversation),
+                        attachments: ChatSearchSource.attachments(in: conversation)
+                    ))
             },
             now: now
         )

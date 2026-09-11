@@ -12,6 +12,12 @@ import Foundation
 /// just fetched. The system prompt, the chat's first question, and the
 /// current question, with every call the tool loop added after it, are
 /// never left out. What was left out is reported, so the thread can say so.
+///
+/// Attachments are fitted first, before this runs
+/// (`AttachmentRequestComposer`): they get their own share of the limit,
+/// and what that cut or left out rides in `Trim` with the files' names. A
+/// turn that still carries an attachment block (at full size or as a head
+/// excerpt) is protected here like the first and the current question.
 struct ContextBudget: Sendable, Equatable {
     /// Characters the transcript may hold.
     let characterLimit: Int
@@ -42,22 +48,78 @@ struct ContextBudget: Sendable, Equatable {
     /// No limit worth checking.
     static let unlimited = ContextBudget(characterLimit: .max)
 
-    /// What `fit` left out.
+    /// The opening of an attachment block in a user turn. A turn that holds
+    /// one is never dropped to make room.
+    static let attachmentBlockMarker = "<untrusted_attachment "
+
+    /// What `fit` left out, and what the attachment fitting cut or left out
+    /// before it, by name.
     struct Trim: Sendable, Equatable {
         var toolResults = 0
         var turns = 0
-        var isEmpty: Bool { toolResults == 0 && turns == 0 }
+        /// Attachments sent as a head excerpt to fit, by name.
+        var attachmentsCut: [String] = []
+        /// Attachments left out to fit (sent as a one-line stub), by name.
+        var attachmentsLeftOut: [String] = []
 
-        /// The line the thread shows, or nil when nothing was left out.
-        var summary: String? {
-            var parts: [String] = []
-            if turns > 0 { parts.append("\(turns) older \(turns == 1 ? "message" : "messages")") }
-            if toolResults > 0 {
-                parts.append("\(toolResults) earlier tool \(toolResults == 1 ? "result" : "results")")
-            }
-            guard !parts.isEmpty else { return nil }
-            return "Left out \(parts.joined(separator: " and ")) to fit the context window"
+        var isEmpty: Bool {
+            toolResults == 0 && turns == 0 && attachmentsCut.isEmpty && attachmentsLeftOut.isEmpty
         }
+
+        /// The line the thread shows, or nil when nothing was left out:
+        /// "Left out Q3 report.pdf and 2 older messages to fit the context
+        /// window".
+        var summary: String? {
+            var leftOut = Self.names(attachmentsLeftOut)
+            if turns > 0 { leftOut.append("\(turns) older \(turns == 1 ? "message" : "messages")") }
+            if toolResults > 0 {
+                leftOut.append("\(toolResults) earlier tool \(toolResults == 1 ? "result" : "results")")
+            }
+            var clauses: [String] = []
+            if !attachmentsCut.isEmpty { clauses.append("Cut \(Self.list(Self.names(attachmentsCut)))") }
+            if !leftOut.isEmpty {
+                clauses.append("\(clauses.isEmpty ? "Left out" : "left out") \(Self.list(leftOut))")
+            }
+            guard !clauses.isEmpty else { return nil }
+            return clauses.joined(separator: ", ") + " to fit the context window"
+        }
+
+        /// This trim and a later one as one record, names first seen first.
+        func adding(_ other: Trim) -> Trim {
+            Trim(
+                toolResults: toolResults + other.toolResults,
+                turns: turns + other.turns,
+                attachmentsCut: Self.merged(attachmentsCut, other.attachmentsCut),
+                attachmentsLeftOut: Self.merged(attachmentsLeftOut, other.attachmentsLeftOut)
+            )
+        }
+
+        private static func merged(_ first: [String], _ second: [String]) -> [String] {
+            first + second.filter { !first.contains($0) }
+        }
+
+        /// At most three names; past that, two and a count.
+        private static func names(_ names: [String]) -> [String] {
+            guard names.count > 3 else { return names }
+            return Array(names.prefix(2)) + ["\(names.count - 2) more attachments"]
+        }
+
+        /// "a", "a and b", "a, b and c".
+        private static func list(_ parts: [String]) -> String {
+            guard parts.count > 1, let last = parts.last else { return parts.first ?? "" }
+            return parts.dropLast().joined(separator: ", ") + " and " + last
+        }
+    }
+
+    /// Whether a wire message is a user turn that carries an attachment
+    /// block.
+    static func carriesAttachment(_ message: [String: Any]) -> Bool {
+        guard message["role"] as? String == "user" else { return false }
+        if let text = message["content"] as? String { return text.contains(attachmentBlockMarker) }
+        if let parts = message["content"] as? [[String: Any]] {
+            return parts.contains { ($0["text"] as? String)?.contains(attachmentBlockMarker) == true }
+        }
+        return false
     }
 
     /// Characters one wire message counts for.
@@ -103,24 +165,30 @@ struct ContextBudget: Sendable, Equatable {
 
         // 2. Turns between the first question and the current one, oldest
         //    first, a question and its answer together; the first answer
-        //    goes last.
+        //    goes last. A turn that carries an attachment block stays.
         while total > characterLimit {
             let roles = messages.map { $0["role"] as? String }
             guard let first = roles.firstIndex(of: "user"),
                   let current = roles.lastIndex(of: "user"),
                   first < current
             else { break }
-            var dropStart = first + 1
-            // The first answer stays while any later turn can go.
-            if roles[dropStart] == "assistant", dropStart + 1 < current { dropStart += 1 }
-            guard dropStart < current else { break }
-            var dropEnd = dropStart + 1
-            if roles[dropStart] == "user", dropEnd < current, roles[dropEnd] == "assistant" {
-                dropEnd += 1
+            var groups: [Range<Int>] = []
+            var start = first + 1
+            while start < current {
+                var end = start + 1
+                if roles[start] == "user", end < current, roles[end] == "assistant" { end += 1 }
+                groups.append(start..<end)
+                start = end
             }
-            for index in dropStart..<dropEnd { total -= Self.characters(in: messages[index]) }
-            messages.removeSubrange(dropStart..<dropEnd)
-            trim.turns += dropEnd - dropStart
+            let droppable = groups.filter { group in
+                !group.contains { Self.carriesAttachment(messages[$0]) }
+            }
+            // The first answer stays while any later turn can go.
+            let firstAnswer = groups.first.flatMap { roles[$0.lowerBound] == "assistant" ? $0 : nil }
+            guard let drop = droppable.first(where: { $0 != firstAnswer }) ?? droppable.first else { break }
+            for index in drop { total -= Self.characters(in: messages[index]) }
+            messages.removeSubrange(drop)
+            trim.turns += drop.count
         }
 
         // 3. Only when the chat is down to what it must keep: the newest

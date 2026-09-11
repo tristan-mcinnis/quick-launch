@@ -351,6 +351,47 @@ Ghostty's own help names for macOS). Needs `tmux` and `pi` in `~/.local/bin`,
 session still runs and `tmux attach -t ql-<id>` is copied. Quick Launch does
 not stop the session; close it in tmux as usual.
 
+## Attachments
+
+Quick AI and AI Chat take files, links, pictures, and selected text as
+context for a question. The model reads them; nothing is changed.
+
+**How to attach.** Add Context (the plus circle, or `@` in the composer)
+lists the four captures, then File…, Link…, and Finder Selection (only when
+Finder is the app behind the overlay). You can also paste files, an image, or a
+lone web link into the composer (`⌘Z` turns a pasted link back into text), or
+drop them on Quick AI or on the AI Chat thread and composer. A web address in
+your question is read once and kept with that question.
+
+**What you can attach.** PDF; Word (docx, doc, rtf, odt); PowerPoint (pptx);
+Excel (xlsx); HTML; plain text, Markdown, and code; web pages; and images
+(PNG, JPEG, HEIC, TIFF, GIF, WebP). Pages, Numbers, Keynote, archives, audio,
+video, and folders are refused with a line that says why. A scanned PDF is read
+with on-device OCR (the first 10 pages without text).
+
+**Limits.** 10 attachments and 6 images a question. 50 MB a document, 20 MB an
+image, 5 MB a text file. 200,000 characters of text a file (100,000 for a web
+page) and 400,000 a question; a cut is said on the chip and to the model. A
+link is one fetch: http or https, 15 seconds, 5 MB.
+
+**How it reaches the model.** Each attachment goes in front of its question as
+one block the model is told is data, never instructions. Later questions in the
+same chat send it again, so you never re-attach for a follow-up. Pictures go to
+the vision model with their own question; with no vision model available, they
+are read as text on this Mac instead. Long attachments are cut to fit the
+model's window (older ones first), and the thread names what was cut or left
+out.
+
+**What is stored.** Chat history keeps a reference to each attachment (its
+name, kind, size, a content hash, and the file path or link), never its text
+and never a picture. The text is held in memory while the app runs, bounded,
+oldest out first; Clear History empties it. After a relaunch an old
+attachment's chip reads "Not loaded" with Re-attach: the file is read again,
+or the link fetched again, only when you choose it, and a file that changed
+since is not used in its place. Pictures read "Image not kept". Continue in pi
+writes each attachment's line and its text into the hand-off file; pictures
+are named, never written. No attachment is written to the Clipboard History.
+
 ## Privacy boundary
 
 - Math and LM Studio stay local.
@@ -363,9 +404,11 @@ not stop the session; close it in tmux as usual.
   question, every earlier question and answer of the chat, the app's
   instruction, a saved command's or an assistant's instructions and context
   skills, any Add Context or selected text that went with this or an earlier
-  question, web search snippets, and the text of a page whose address you
-  typed. An OpenAI-compatible provider also receives what the chat's tools
-  return; the Claude Code CLI provider runs with no tools.
+  question, the text of files and links attached to the chat (while this
+  session holds it; see "Attachments"), web search snippets, and the text of a
+  page whose address you typed. An OpenAI-compatible provider also receives
+  what the chat's tools return; the Claude Code CLI provider runs with no
+  tools.
 - The memory and skill tools read local files only. The vault tool sends its
   query over SSH to vault-vps, as Vault Search does. What a tool returns goes to
   the chat's model while it writes that answer, so a cloud model sees the lines
@@ -374,7 +417,8 @@ not stop the session; close it in tmux as usual.
 - Chat history is local, optional, and owner-only
   (`~/Library/Application Support/Quick Launch/chat-history.json`, `0600`). Each
   question is saved with any Add Context or selected text in front of it; web
-  search snippets and page text are not saved. A new install keeps 100 chats
+  search snippets and page text are not saved. An attachment is saved as a
+  reference only (name, kind, size, hash, path or URL), never its text. A new install keeps 100 chats
   (20, 50, 100, or 200 in Settings › General › History); pinned chats are never
   pruned.
 - Continue in pi writes the thread's text (never its screenshots) to

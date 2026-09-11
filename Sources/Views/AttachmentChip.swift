@@ -25,6 +25,10 @@ struct AttachmentChipModel: Identifiable, Equatable {
         case reading
         case ready
         case failed(String)
+        /// A sent attachment whose text (or picture) this session does not
+        /// hold: "Not loaded" after a relaunch, "Image not kept" for a
+        /// picture. Never colour; the line says it.
+        case notLoaded(String)
     }
 
     let id: String
@@ -51,6 +55,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
         switch phase {
         case .reading: return "Reading…"
         case .failed(let line): return line
+        case .notLoaded(let line): return line
         case .ready: return cut == nil ? detail : [detail, "cut"].filter { !$0.isEmpty }.joined(separator: " · ")
         }
     }
@@ -59,6 +64,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
     var help: String {
         switch phase {
         case .failed(let line): return "\(name): \(line)"
+        case .notLoaded(let line): return "\(name): \(line)"
         case .reading: return "Reading \(name)…"
         case .ready:
             guard let cut else { return name }
@@ -73,7 +79,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
         switch phase {
         case .reading:
             parts.append("reading")
-        case .failed(let line):
+        case .failed(let line), .notLoaded(let line):
             parts.append(line)
         case .ready:
             if let spoken = spokenDetail, !spoken.isEmpty { parts.append(spoken) }
@@ -168,20 +174,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
     }
 
     static func kindName(for kind: ChatAttachmentKind) -> String {
-        switch kind {
-        case .pdf: "PDF"
-        case .word: "Word document"
-        case .powerpoint: "PowerPoint deck"
-        case .excel: "Excel workbook"
-        case .html: "HTML file"
-        case .text: "Text file"
-        case .markdown: "Markdown file"
-        case .code: "Code file"
-        case .link: "Web page"
-        case .image: "Image"
-        case .screenshot: "Screenshot"
-        case .selection: "Selected text"
-        }
+        kind.displayName
     }
 
     /// "42 pp · 1.2 MB", "12 slides", "3 sheets", "18 KB", "1944 × 1464",
@@ -325,6 +318,9 @@ struct AttachmentChip: View {
     var onRemove: (() -> Void)? = nil
     /// Opens the attachment (a pill chip in the thread).
     var onOpen: (() -> Void)? = nil
+    /// Reads a "Not loaded" attachment again: the same file, or the link
+    /// fetched again. Only when the user clicks it.
+    var onReattach: (() -> Void)? = nil
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -343,7 +339,7 @@ struct AttachmentChip: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.accessibilityLabel)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .modifier(ChipAccessibilityActions(onRemove: onRemove, onOpen: onOpen))
+            .modifier(ChipAccessibilityActions(onRemove: onRemove, onOpen: onOpen, onReattach: onReattach))
     }
 
     private var content: some View {
@@ -357,8 +353,24 @@ struct AttachmentChip: View {
                     .frame(width: House.Spacing.sm, height: House.Spacing.sm)
                     .accessibilityHidden(true)
             }
+            if let onReattach { reattachButton(onReattach) }
             if let onRemove { removeButton(onRemove) }
         }
+    }
+
+    /// "Re-attach" at the chip's end, in secondary ink: a word, not a colour.
+    private func reattachButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("Re-attach")
+                .font(House.TypeToken.meta)
+                .foregroundStyle(House.ColorToken.textSecondary)
+                .underline(isHovering)
+                .lineLimit(1)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.kind == .link ? "Fetch \(model.name) again" : "Read \(model.name) again from the same file")
+        .accessibilityHidden(true)
     }
 
     private var nameText: some View {
@@ -439,11 +451,13 @@ struct AttachmentChip: View {
 private struct ChipAccessibilityActions: ViewModifier {
     let onRemove: (() -> Void)?
     let onOpen: (() -> Void)?
+    let onReattach: (() -> Void)?
 
     func body(content: Content) -> some View {
         content.accessibilityActions {
             if let onRemove { Button("Remove", action: onRemove) }
             if let onOpen { Button("Open", action: onOpen) }
+            if let onReattach { Button("Re-attach", action: onReattach) }
         }
     }
 }
@@ -560,7 +574,7 @@ struct ComposerAttachmentStrip: View {
 
     private var routingLine: String? {
         if let line = tray?.routingLine { return line }
-        return viewModel.pendingImages.isEmpty ? nil : viewModel.visionRoutingNote
+        return viewModel.attachmentRoutingLine
     }
 
     private func remove(_ id: String) {
@@ -586,11 +600,19 @@ struct ComposerAttachmentStrip: View {
 struct AttachmentPillChips: View {
     let chips: [AttachmentChipModel]
     var onOpen: ((AttachmentChipModel) -> Void)? = nil
+    /// Offered on a chip whose phase is `.notLoaded` and that can be read
+    /// again (`canReattach`).
+    var onReattach: ((AttachmentChipModel) -> Void)? = nil
+    var canReattach: (AttachmentChipModel) -> Bool = { _ in false }
 
     var body: some View {
         ChipFlowLayout(spacing: House.Spacing.xs) {
             ForEach(chips) { chip in
-                AttachmentChip(model: chip, onOpen: onOpen.map { open in { open(chip) } })
+                AttachmentChip(
+                    model: chip,
+                    onOpen: onOpen.map { open in { open(chip) } },
+                    onReattach: canReattach(chip) ? onReattach.map { reattach in { reattach(chip) } } : nil
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)

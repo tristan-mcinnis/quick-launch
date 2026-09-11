@@ -262,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.memoryCapture = recall
         vm.skillLibrary = SkillLibrary()
         vm.fileOpener = OpenCommandFileOpener()
+        vm.attachmentFilePicker = SystemAttachmentFilePicker()
         vm.piHandoff = PiHandoffService()
         // Settings › General › Chat asks it whether tmux, pi, Ghostty,
         // recall, and the vault host are there.
@@ -1628,6 +1629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         chat.memoryCapture = recall
         chat.skillLibrary = SkillLibrary()
         chat.fileOpener = OpenCommandFileOpener()
+        chat.attachmentFilePicker = SystemAttachmentFilePicker()
         chat.piHandoff = PiHandoffService()
         let controller = AIChatWindowController(model: AIChatWindowModel(chat: chat), app: self)
         aiChatController = controller
