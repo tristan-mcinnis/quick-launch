@@ -30,6 +30,13 @@ struct KeyShortcut: Equatable, Sendable {
         )
     }
 
+    static func controlCommand(_ character: Character) -> KeyShortcut {
+        KeyShortcut(
+            key: .character(character),
+            modifiers: NSEvent.ModifierFlags([.control, .command]).rawValue
+        )
+    }
+
     static func control(_ character: Character) -> KeyShortcut {
         KeyShortcut(key: .character(character), modifiers: NSEvent.ModifierFlags.control.rawValue)
     }

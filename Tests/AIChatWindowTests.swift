@@ -402,10 +402,13 @@ struct AIChatWindowTests {
         rig.launcher.history = [conversation("One", answer: "1", age: 10)]
         rig.window.open(handoff: nil)
         #expect(!rig.window.isRailVisible)
-        #expect(rig.window.handleKeyEquivalent(characters: "\\", keyCode: 42, modifiers: [.command]))
+        // ⌘\ belongs to RTI's global hotkey; the list is ⌃⌘S, the macOS sidebar key.
+        #expect(!rig.window.handleKeyEquivalent(characters: "\\", keyCode: 42, modifiers: [.command]))
+        #expect(!rig.window.isRailVisible)
+        #expect(rig.window.handleKeyEquivalent(characters: "s", keyCode: 1, modifiers: [.control, .command]))
         #expect(rig.window.isRailVisible)
         #expect(rig.window.focus == .rail, "the keyboard goes to its search")
-        #expect(rig.window.handleKeyEquivalent(characters: "\\", keyCode: 42, modifiers: [.command]))
+        #expect(rig.window.handleKeyEquivalent(characters: "s", keyCode: 1, modifiers: [.control, .command]))
         #expect(!rig.window.isRailVisible)
         #expect(rig.window.focus == .composer)
         // The header button runs the same toggle.

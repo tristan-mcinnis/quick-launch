@@ -28,7 +28,7 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Keys
 
     /// `⌘\`: slide the chat list in or out. Free in every key table.
-    nonisolated static let chatListShortcut: KeyShortcut = .command("\\")
+    nonisolated static let chatListShortcut: KeyShortcut = .controlCommand("s")
     /// `⌘F`: find in chat.
     nonisolated static let findShortcut: KeyShortcut = .command("f")
     /// `⌘G` and `⇧⌘G`: the next and the previous match, as in every Mac app.

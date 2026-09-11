@@ -47,7 +47,10 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         edit.addItem(item("Find in Chat", #selector(find), "f"))
 
         let view = submenu(in: main, title: "View")
-        view.addItem(item("Show Chat List", #selector(toggleChatList), "\\"))
+        let chatList = item("Show Chat List", #selector(toggleChatList), "s")
+        // ⌃⌘S, the macOS sidebar key; RTI owns ⌘\ as a global hotkey.
+        chatList.keyEquivalentModifierMask = [.control, .command]
+        view.addItem(chatList)
 
         let window = submenu(in: main, title: "Window")
         window.addItem(item("Minimize", #selector(minimize), "m"))

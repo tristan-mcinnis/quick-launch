@@ -77,7 +77,7 @@ The same key means the same thing on every layer.
 | `⌘P` | Recent Chats inside Quick AI, from root search too; the chat list in AI Chat; nothing in the Translator |
 | `⌘H` | Recent Chats on the Quick AI surface (the v1.4 key); in AI Chat it is Hide Quick Launch |
 | `⌘J` | Open in AI Chat: the Quick AI chat (in Recent Chats and the Chats catalog, the highlighted chat) moves to the AI Chat window, and the launcher closes |
-| `⌘\` | Show or hide the AI Chat chat list |
+| `⌃⌘S` | Show or hide the AI Chat chat list |
 | `⌘F` | Find in the AI Chat thread; `↩` or `⌘G` next, `⇧↩` or `⇧⌘G` previous |
 | `⌘1…9` | AI Chat: open the chat list's first nine chats, shown or not |
 | `⌘O` | Open the answer's source (memory and vault hits), or list them when there are several |
@@ -149,7 +149,7 @@ the root. Opening Settings or AI Chat from the launcher hides the launcher.
   Last Answer, Rename, Pin, Delete, on the highlighted row. `⌘J` moves the
   chat to the AI Chat window, one conversation window with the same thread
   and composer, a multi-line composer, find (`⌘F`), and a chat list hidden
-  until `⌘\` (Pin, Rename, and Delete on its rows).
+  until `⌃⌘S` (Pin, Rename, and Delete on its rows).
 - **Settings.** A sidebar of seven tabs (`⌘1…⌘7`), no system tab view. The
   Items tab is one searchable table of every configurable item with its alias
   and hotkey in place.
