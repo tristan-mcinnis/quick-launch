@@ -431,10 +431,16 @@ struct ScreenHistoryWorkflowTests {
     }
 
     @Test func coastPreviewShowsProgressAndFailsBeforeImportStages() async throws {
-        let slowImporter = FakeScreenHistoryCoastImporter(previewDelay: .milliseconds(120))
+        // A long preview and a poll, not a fixed 30 ms nap: under a loaded
+        // machine the task could start late, and the check ran before it.
+        let slowImporter = FakeScreenHistoryCoastImporter(previewDelay: .seconds(2))
         let slowVM = QuickViewModel(screenHistoryCoastImporter: slowImporter)
         let preview = Task { await slowVM.screenHistory.previewCoastImport() }
-        try await Task.sleep(for: .milliseconds(30))
+        let clock = ContinuousClock()
+        let deadline = clock.now + .milliseconds(1_500)
+        while slowVM.screenHistory.coastImportState != .previewingMetadata, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(slowVM.screenHistory.coastImportState == .previewingMetadata)
         #expect(slowVM.screenHistory.coastImportIsRunning)
         await preview.value

@@ -158,12 +158,19 @@ final class TranslatorModel {
     init(
         lastTarget: TranslationTarget = .simplifiedChinese,
         serviceFactory: @escaping () -> (any QuickService)? = { nil },
-        selectedTextService: (any SelectedTextServicing)? = nil
+        selectedTextService: (any SelectedTextServicing)? = nil,
+        pasteboard: (any PasteboardWriting)? = nil
     ) {
         self.target = lastTarget
         self.serviceFactory = serviceFactory
         self.selectedTextService = selectedTextService
+        // In memory unless the app passes the system pasteboard, so a test
+        // never reads or overwrites the user's clipboard.
+        self.pasteboard = pasteboard ?? InMemoryPasteboard()
     }
+
+    /// Where Copy writes and Paste reads. The app passes its system pasteboard.
+    @ObservationIgnored private let pasteboard: any PasteboardWriting
 
     /// Open: remember the app behind the window and start from its selection.
     /// `retainedSelection` is the Quick Launch launch snapshot, kept so the
@@ -285,7 +292,7 @@ final class TranslatorModel {
     }
 
     func useClipboardAsSource() {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+        guard let text = pasteboard.readString(), !text.isEmpty else {
             message = "The clipboard has no text"
             return
         }
@@ -350,16 +357,14 @@ final class TranslatorModel {
             return
         }
         guard !translation.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(translation, forType: .string)
+        pasteboard.writeString(translation)
         record()
         message = "Copied translation"
     }
 
     func copySource() {
         guard !source.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(source, forType: .string)
+        pasteboard.writeString(source)
         message = "Copied source text"
     }
 
@@ -379,8 +384,7 @@ final class TranslatorModel {
         }
         record()
         guard await selectedTextService.paste(translation, to: pasteTarget) else {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(translation, forType: .string)
+            pasteboard.writeString(translation)
             message = "Could not paste into \(pasteTarget.applicationName). Copied instead."
             return false
         }

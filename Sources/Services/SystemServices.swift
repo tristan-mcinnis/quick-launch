@@ -37,6 +37,10 @@ final class SystemPasteboard: PasteboardWriting {
 
     /// Writes `text` with the transient markers. Each marker carries empty
     /// data, so it is on the pasteboard whichever way a manager checks.
+    @MainActor func writeImageFile(at url: URL) -> Bool {
+        ScreenshotLibrary.copyImage(at: url)
+    }
+
     static func writeTransient(_ text: String, to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
         pasteboard.declareTypes([.string] + transientMarkers, owner: nil)

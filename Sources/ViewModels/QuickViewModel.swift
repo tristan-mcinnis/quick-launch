@@ -4167,7 +4167,7 @@ import Observation
     /// Copies an image file to the pasteboard and presses ⌘V in the previous app.
     @discardableResult
     func pasteImageFile(_ url: URL) async -> Bool {
-        guard ScreenshotLibrary.copyImage(at: url) else {
+        guard pasteboard.writeImageFile(at: url) else {
             errorMessage = "Could not read \(url.lastPathComponent)."
             requestInputFocus()
             return false
@@ -5702,7 +5702,7 @@ import Observation
                 closeItemActionPane()
                 Task { _ = await pasteLauncherItem(item) }
             case .item(let item) where item.kind == .screenshot:
-                if ScreenshotLibrary.copyImage(at: URL(fileURLWithPath: item.value)) {
+                if pasteboard.writeImageFile(at: URL(fileURLWithPath: item.value)) {
                     markJustCopied()
                     closeItemActionPane()
                     input = ""

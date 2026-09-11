@@ -987,7 +987,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let model = TranslatorModel(
             lastTarget: TranslationTarget.named(vm.settings.lastTranslationTarget) ?? .simplifiedChinese,
             serviceFactory: { [weak vm] in vm?.makeCurrentService() },
-            selectedTextService: selectedTextService
+            selectedTextService: selectedTextService,
+            pasteboard: vm.pasteboard
         )
         model.onTargetChange = { [weak vm] target in
             vm?.settings.lastTranslationTarget = target.code
