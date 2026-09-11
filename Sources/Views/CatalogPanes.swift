@@ -591,3 +591,65 @@ enum ScreenHistoryOCRBoxLayout {
         )
     }
 }
+
+// MARK: - Chat rows found by their text
+
+/// A search snippet on one line: the field's label and the text around the
+/// hit, in `meta` `textTertiary`, with each term in `meta` medium weight
+/// `textPrimary`. The hit is marked by ink, not colour (DESIGN rule 2).
+struct ChatSnippetText: View {
+    let snippet: ChatSnippet
+
+    var body: some View {
+        Text(Self.attributed(snippet))
+            .font(AQDesign.TypeToken.metadata)
+            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .accessibilityLabel(snippet.plainText)
+    }
+
+    static func attributed(_ snippet: ChatSnippet) -> AttributedString {
+        var text = AttributedString(snippet.label.isEmpty ? "" : snippet.label + " ")
+        for run in snippet.runs {
+            var piece = AttributedString(run.text)
+            if run.isMatch {
+                piece.font = AQDesign.TypeToken.metadata.weight(.medium)
+                piece.foregroundColor = AQDesign.ColorToken.textPrimary
+            }
+            text.append(piece)
+        }
+        return text
+    }
+}
+
+/// The text of a chat row a search found by its text (the Chats catalog,
+/// Recent Chats): the title with the question count and time on the
+/// trailing edge, the snippet under it (spec 4.6).
+///
+///     [tile]  Pricing notes for Oreo              3 questions · 2 d
+///             You: …does the quarterly revenue include the rebate…
+struct ChatSnippetRowText: View {
+    let title: String
+    let detail: String
+    let snippet: ChatSnippet
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: AQDesign.Space.standard) {
+                Text(title)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: AQDesign.Space.standard)
+                Text(detail)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            ChatSnippetText(snippet: snippet)
+        }
+    }
+}

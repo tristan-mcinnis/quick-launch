@@ -91,26 +91,34 @@ enum QuickHistoryStore {
     }
 
     /// The one chat search every chat list uses (the Chats catalog, Recent
-    /// Chats, the AI Chat rail): `ordered`, then kept when every typed word
-    /// is in the title or in a message, case and accents folded. An empty
-    /// query keeps every chat.
-    static func matching(
+    /// Chats, the AI Chat rail), through `ChatSearch`. An empty query keeps
+    /// every chat in `ordered` order (pinned first, then newest). A query
+    /// keeps the chats where every term matches the title, an attachment
+    /// name, a question, or an answer (case, accents, and width folded; CJK
+    /// as a substring), ranked: title hits first, recent chats above old
+    /// ones, pinned chats only a little higher. `index` keeps the folded
+    /// text between calls; without one the text is folded for this call.
+    @MainActor static func matching(
         _ conversations: [QuickConversation],
         query: String,
-        title: (QuickConversation) -> String
+        title: (QuickConversation) -> String,
+        index: ChatSearchIndex? = nil,
+        now: Date = Date()
     ) -> [QuickConversation] {
-        let terms = FuzzyMatcher.fold(query)
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-        let sorted = ordered(conversations)
-        guard !terms.isEmpty else { return sorted }
-        return sorted.filter { conversation in
-            let haystack = FuzzyMatcher.fold(
-                ([title(conversation)] + conversation.messages.map(\.content))
-                    .joined(separator: "\n")
-            )
-            return terms.allSatisfy { haystack.contains($0) }
-        }
+        let parsed = ChatSearchQuery(query)
+        guard !parsed.isEmpty else { return ordered(conversations) }
+        let index = index ?? ChatSearchIndex(backgroundThreshold: nil)
+        index.update(conversations, title: title)
+        return ChatSearch.rank(
+            conversations,
+            query: parsed,
+            document: { conversation in
+                index.document(id: conversation.id)
+                    ?? index.document(for: ChatSearchSource(conversation, title: title(conversation)))
+            },
+            now: now
+        )
+        .map(\.conversation)
     }
 
     /// Keeps every pinned chat and the newest `limit` unpinned ones.

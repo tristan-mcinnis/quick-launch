@@ -22,6 +22,11 @@ struct CollapsibleMessageText: View {
     /// Whether the body takes the full width or hugs its text (a pill in
     /// the thread).
     var fillsWidth = true
+    /// Find in Chat: hits in the text (hover fill) and the current one
+    /// (selection fill). Hits past a collapsed preview are not drawn; find
+    /// opens the message when its current hit is inside.
+    var findRanges: [TextRange] = []
+    var findCurrent: TextRange? = nil
     var onToggle: () -> Void
 
     var body: some View {
@@ -64,11 +69,20 @@ struct CollapsibleMessageText: View {
     }
 
     private var messageBody: some View {
-        Text(state.displayedText)
+        Text(highlightedText)
             .font(plainTextFont)
             .textSelection(.enabled)
             .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
             .accessibilityLabel(state.text)
+    }
+
+    /// The shown text, with find's hits painted when there are any.
+    private var highlightedText: AttributedString {
+        let shown = state.displayedText
+        guard !findRanges.isEmpty || findCurrent != nil, state.text.hasPrefix(shown) else {
+            return AttributedString(shown)
+        }
+        return FindHitGeometry.highlighted(shown, ranges: findRanges, current: findCurrent)
     }
 
     private func toggle() {
