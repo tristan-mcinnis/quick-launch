@@ -462,9 +462,9 @@ struct QuickAISurfaceTests {
         vm.openQuickAI()
         let text = vm.activeModelDisplay
         #expect(vm.activeModelID == InferenceProvider.deepSeekDefaultModel)
-        #expect(text == "DeepSeek V4 Flash", "the header shows the display name, not the id")
+        #expect(text == "DeepSeek V4.1 Flash", "the header shows the display name, not the id")
         vm.pendingImage = QuickImageAttachment(data: Data([1, 2, 3]), mimeType: "image/png", pixelWidth: 1, pixelHeight: 1)
-        #expect(vm.activeModelDisplay.contains("DeepSeek V4 Flash Vision"))
+        #expect(vm.activeModelDisplay.contains("DeepSeek V4.1 Flash"), "images go to the same flash model")
         #expect(!vm.activeModelDisplay.contains(InferenceProvider.deepSeekVisionModel))
         vm.clearAttachments()
         #expect(vm.activeModelDisplay == text)
@@ -472,70 +472,85 @@ struct QuickAISurfaceTests {
 
     // MARK: - Model migration
 
-    @Test func theMigrationMovesADeepSeekSelectionOffTheVisionModel() throws {
+    /// Settings as v1.4.0 left them: DeepSeek on the retired flash aliases.
+    private func legacyDeepSeekJSON(version: Int, selected: String, quickAIModel: String,
+                                    visionModel: String, promptModel: String) -> String {
         let deepSeek = InferenceProvider.deepSeekID.uuidString
-        let json = """
-        {"configurationVersion":22,
+        return """
+        {"configurationVersion":\(version),
          "selectedProviderID":"\(deepSeek)",
          "quickAIProviderID":"\(deepSeek)",
-         "quickAIModel":"\(InferenceProvider.deepSeekVisionModel)",
+         "quickAIModel":"\(quickAIModel)",
+         "visionProviderID":"\(deepSeek)",
+         "visionModel":"\(visionModel)",
+         "savedPrompts":[{"id":"\(UUID().uuidString)","name":"Fix","alias":"fix","prompt":"Fix: {input}",
+           "providerID":"\(deepSeek)","model":"\(promptModel)","outputBehavior":"showInOverlay"}],
          "providers":[{"id":"\(deepSeek)","name":"DeepSeek API","kind":"openAICompatible","location":"cloud",
            "baseURL":"https://api.deepseek.com",
-           "models":["deepseek-v4-flash","deepseek-v4-pro","\(InferenceProvider.deepSeekVisionModel)"],
-           "selectedModel":"\(InferenceProvider.deepSeekVisionModel)","discovery":"openAI","isBuiltIn":true}]}
+           "models":["deepseek-v4-flash","deepseek-v4-pro","deepseek-v4-flash-vision-exp"],
+           "selectedModel":"\(selected)","discovery":"openAI","isBuiltIn":true}]}
         """
-        let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
-        #expect(settings.configurationVersion == 23)
-        let provider = try #require(settings.providers.first { $0.id == InferenceProvider.deepSeekID })
-        #expect(provider.selectedModel == InferenceProvider.deepSeekDefaultModel)
-        #expect(settings.quickAIModel == InferenceProvider.deepSeekDefaultModel)
-        #expect(settings.visionModel == InferenceProvider.deepSeekVisionModel, "the image route is untouched")
-        #expect(provider.models.contains(InferenceProvider.deepSeekVisionModel), "the id stays known")
+    }
+
+    @Test func everyRetiredFlashIdMovesToDeepSeekFlash() throws {
+        for version in [22, 23] {
+            let json = legacyDeepSeekJSON(
+                version: version,
+                selected: "deepseek-v4-flash",
+                quickAIModel: "deepseek-v4-flash-vision-exp",
+                visionModel: "deepseek-v4-flash-vision-exp",
+                promptModel: "deepseek-v4-flash"
+            )
+            let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
+            #expect(settings.configurationVersion == 24)
+            let provider = try #require(settings.providers.first { $0.id == InferenceProvider.deepSeekID })
+            #expect(provider.selectedModel == "deepseek-flash")
+            #expect(provider.models == ["deepseek-flash", "deepseek-v4-pro"], "the aliases leave the list")
+            #expect(settings.quickAIModel == "deepseek-flash")
+            #expect(settings.visionModel == "deepseek-flash", "images go to the same model")
+            #expect(settings.savedPrompts.first?.model == "deepseek-flash")
+        }
     }
 
     @Test func anExplicitOtherChoiceStays() throws {
-        let deepSeek = InferenceProvider.deepSeekID.uuidString
-        let json = """
-        {"configurationVersion":22,
-         "providers":[{"id":"\(deepSeek)","name":"DeepSeek API","kind":"openAICompatible","location":"cloud",
-           "baseURL":"https://api.deepseek.com",
-           "models":["deepseek-v4-flash","deepseek-v4-pro"],
-           "selectedModel":"deepseek-v4-pro","discovery":"openAI","isBuiltIn":true}]}
-        """
+        let json = legacyDeepSeekJSON(
+            version: 23,
+            selected: "deepseek-v4-pro",
+            quickAIModel: "deepseek-v4-pro",
+            visionModel: "deepseek-v4-pro",
+            promptModel: "deepseek-v4-pro"
+        )
         let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
         let provider = try #require(settings.providers.first { $0.id == InferenceProvider.deepSeekID })
         #expect(provider.selectedModel == "deepseek-v4-pro")
+        #expect(settings.quickAIModel == "deepseek-v4-pro")
+        #expect(settings.visionModel == "deepseek-v4-pro")
+        #expect(settings.savedPrompts.first?.model == "deepseek-v4-pro")
     }
 
-    @Test func theVisionModelShipsOffInManageModelsAndLeavesTheTextPickers() {
+    @Test func freshSettingsUseDeepSeekFlashForTextAndImages() {
+        let settings = QuickSettings()
+        let provider = InferenceProvider.defaults.first { $0.id == InferenceProvider.deepSeekID }!
+        #expect(provider.selectedModel == "deepseek-flash")
+        #expect(provider.models == ["deepseek-flash", "deepseek-v4-pro"])
+        #expect(settings.visionModel == "deepseek-flash")
+        #expect(ModelProfile.displayName(forModelID: "deepseek-flash") == "DeepSeek V4.1 Flash")
+    }
+
+    @Test func theRetiredAliasesShipOffInManageModels() {
         let store = ModelPreferenceStore(fileURL: nil)
         let provider = InferenceProvider.defaults.first { $0.id == InferenceProvider.deepSeekID }!
-        #expect(!store.isEnabled(providerID: provider.id, model: InferenceProvider.deepSeekVisionModel))
-        #expect(!store.profile(providerID: provider.id, model: InferenceProvider.deepSeekVisionModel).enabled)
-        #expect(store.isEnabled(providerID: provider.id, model: InferenceProvider.deepSeekDefaultModel))
-
+        for alias in InferenceProvider.legacyDeepSeekFlashModels {
+            #expect(!store.isEnabled(providerID: provider.id, model: alias))
+        }
+        #expect(store.isEnabled(providerID: provider.id, model: "deepseek-flash"))
         let visible = ModelCatalogService.visibleModels(
             for: provider,
             currentModel: provider.selectedModel,
             preferences: store
         )
-        #expect(!visible.contains(InferenceProvider.deepSeekVisionModel))
-        #expect(visible.contains(InferenceProvider.deepSeekDefaultModel))
-
-        // The vision picker still lists it as the current image route.
-        let visionPicker = ModelCatalogService.visibleModels(
-            for: provider,
-            currentModel: InferenceProvider.deepSeekVisionModel,
-            preferences: store
-        )
-        #expect(visionPicker.contains(InferenceProvider.deepSeekVisionModel))
-
-        // Manage Models can switch it back on, and Reset returns to the
-        // curated default (off), never to "on".
-        store.setEnabled(true, providerID: provider.id, model: InferenceProvider.deepSeekVisionModel)
-        #expect(store.isEnabled(providerID: provider.id, model: InferenceProvider.deepSeekVisionModel))
-        store.reset()
-        #expect(!store.isEnabled(providerID: provider.id, model: InferenceProvider.deepSeekVisionModel))
+        #expect(visible.contains("deepseek-flash"))
+        #expect(visible.allSatisfy { !InferenceProvider.legacyDeepSeekFlashModels.contains($0) })
     }
 
     @Test func aFreshInstallDefaultsToTheFlashTextModel() {
@@ -549,7 +564,7 @@ struct QuickAISurfaceTests {
     @Test func anUncuratedIdIsItsOwnDisplayName() {
         #expect(ModelProfile.displayName(forModelID: "older-model") == "older-model")
         #expect(ModelProfile.displayName(forModelID: "deepseek-v4-pro") == "DeepSeek V4 Pro")
-        #expect(ModelProfile.displayName(forModelID: "DEEPSEEK-V4-FLASH") == "DeepSeek V4 Flash", "ids come back from servers in any case")
+        #expect(ModelProfile.displayName(forModelID: "DEEPSEEK-FLASH") == "DeepSeek V4.1 Flash", "ids come back from servers in any case")
         #expect(ModelProfile.displayName(forModelID: "") == "")
     }
 

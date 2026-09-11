@@ -9,7 +9,7 @@ struct ModelPreferenceStoreTests {
     private let otherProviderID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000002")!
 
     /// A reasoning model the curated table ships support for.
-    private let reasoningModel = "deepseek-v4-flash"
+    private let reasoningModel = "deepseek-flash"
     /// A second reasoning model, so carry-over can be observed.
     private let otherReasoningModel = "kimi-k3"
     /// A model the curated table ships no reasoning effort for.

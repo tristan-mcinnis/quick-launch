@@ -93,11 +93,11 @@ extension ModelProfile {
     /// flagship tier rated for intelligence. Anything not listed here, and
     /// anything listed without a number, reads as unknown in the UI.
     static let curatedTable: [String: ModelProfile] = [
-        // DeepSeek API (api-docs.deepseek.com). V4 is a thinking family, so
-        // every V4 id takes a reasoning effort, and all three serve a
-        // 1M-token context.
-        "deepseek-v4-flash": ModelProfile(
-            displayName: "DeepSeek V4 Flash",
+        // DeepSeek API (api-docs.deepseek.com). A thinking family, so every
+        // id takes a reasoning effort; both serve a 1M-token context.
+        // `deepseek-flash` is V4.1 Flash and reads images too.
+        "deepseek-flash": ModelProfile(
+            displayName: "DeepSeek V4.1 Flash",
             speed: .five,
             intelligence: .four,
             contextWindow: 1_000_000,
@@ -110,12 +110,19 @@ extension ModelProfile {
             contextWindow: 1_000_000,
             supportsReasoningEffort: true
         ),
-        // The image-capable V4 id. Sunset for text (2026-09-11): it ships
-        // turned off so it leaves every text picker, and stays the vision
-        // route. Manage Models can switch it back on.
+        // Retired aliases of `deepseek-flash` (2026-09-11). Settings move
+        // off them on load; the rows stay so an old chat still names them.
+        "deepseek-v4-flash": ModelProfile(
+            enabled: false,
+            displayName: "DeepSeek V4 Flash (retired)",
+            speed: .five,
+            intelligence: .four,
+            contextWindow: 1_000_000,
+            supportsReasoningEffort: true
+        ),
         "deepseek-v4-flash-vision-exp": ModelProfile(
             enabled: false,
-            displayName: "DeepSeek V4 Flash Vision",
+            displayName: "DeepSeek V4 Flash Vision (retired)",
             speed: .four,
             intelligence: .four,
             contextWindow: 1_000_000,

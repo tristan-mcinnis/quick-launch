@@ -120,7 +120,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 23
+    var configurationVersion: Int = 24
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -270,7 +270,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 23
+        configurationVersion = 24
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -550,6 +550,34 @@ struct QuickSettings: Codable, Sendable {
             if quickAIProviderID == InferenceProvider.deepSeekID,
                quickAIModel == InferenceProvider.deepSeekVisionModel {
                 quickAIModel = InferenceProvider.deepSeekDefaultModel
+            }
+        }
+        if decodedConfigurationVersion < 24 {
+            // 2026-09-11: DeepSeek serves one flash model, `deepseek-flash`
+            // (V4.1 Flash, text and images). `deepseek-v4-flash` and
+            // `deepseek-v4-flash-vision-exp` are aliases of it; every
+            // setting on either moves to the real id, and they leave the
+            // provider's list. Other explicit choices stay.
+            let legacy = InferenceProvider.legacyDeepSeekFlashModels
+            let flash = InferenceProvider.deepSeekDefaultModel
+            if let index = providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }) {
+                var models = providers[index].models.filter { !legacy.contains($0) }
+                if !models.contains(flash) { models.insert(flash, at: 0) }
+                providers[index].models = models
+                if legacy.contains(providers[index].selectedModel) {
+                    providers[index].selectedModel = flash
+                }
+            }
+            if quickAIProviderID == InferenceProvider.deepSeekID, legacy.contains(quickAIModel) {
+                quickAIModel = flash
+            }
+            if visionProviderID == InferenceProvider.deepSeekID, legacy.contains(visionModel) {
+                visionModel = flash
+            }
+            for index in savedPrompts.indices
+            where savedPrompts[index].providerID == InferenceProvider.deepSeekID
+                && legacy.contains(savedPrompts[index].model ?? "") {
+                savedPrompts[index].model = flash
             }
         }
         if let quickAIProviderID,

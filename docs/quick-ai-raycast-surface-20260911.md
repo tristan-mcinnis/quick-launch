@@ -178,6 +178,9 @@ surface is fixed and never measures its content. A catalog with a detail pane
 
 ## Model
 
+> Superseded in v1.4.1: the DeepSeek API serves one flash model, `deepseek-flash`
+> (V4.1 Flash, text and images). Both ids below are aliases of it and migrate to it.
+
 - Quick AI's model is chosen in Quick AI settings (default model) and mid-thread
   through `⌘K` › Change Model, as in v1.3.0. Both must show only enabled models.
 - Default text model: `deepseek-v4-flash`. A settings migration (bump the
