@@ -4,9 +4,10 @@ import Foundation
 /// to a fresh pi session (`pi @file`), so it is plain Markdown a model reads
 /// as the first message: the chat title, one line saying where it came
 /// from, then every turn under its speaker, "You:" for the user and the
-/// model's display name for the answers, separated by rules. A tool line
-/// the thread showed ("Search web: …") opens the answer it belongs to;
-/// sources stay where the answer put them, as its own Markdown links.
+/// model's display name for the answers, separated by rules. The tool lines
+/// the thread showed ("Searched memory: 4 hits", "Search web: …") open the
+/// answer they belong to; the sources its tools found follow it as a list,
+/// with each local path, and links the answer wrote stay where it put them.
 enum PiHandoffDocument {
     /// The speaker label on a user turn, as Copy Chat writes it.
     static let userLabel = "You"
@@ -17,8 +18,10 @@ enum PiHandoffDocument {
     /// The slug when a title has no letters or digits to keep.
     static let fallbackSlug = "chat"
 
-    /// - `toolLines`: lines keyed by the assistant message they open, in
-    ///   the order the thread drew them.
+    /// - `toolLines`: extra lines keyed by the assistant message they open,
+    ///   for a line the thread shows that is not yet saved on the answer
+    ///   (the live search line). Saved lines come from
+    ///   `QuickMessage.toolRecords`; a line saved there is not repeated.
     static func markdown(
         title: String,
         modelName: String,
@@ -40,7 +43,10 @@ enum PiHandoffDocument {
                 turn.append(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
             case .assistant:
                 turn.append("\(answerLabel):")
-                for line in toolLines[message.id] ?? [] {
+                let saved = message.tools
+                let above = saved.filter(\.drawsAboveAnswer).map(\.summary)
+                let extra = (toolLines[message.id] ?? []).filter { !above.contains($0) }
+                for line in above + extra {
                     turn.append("Tool: \(line)")
                 }
                 if let question = message.askUserQuestion {
@@ -51,11 +57,32 @@ enum PiHandoffDocument {
                 } else {
                     turn.append(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
+                let sources = message.sources
+                if !sources.isEmpty {
+                    turn.append("Sources:\n" + sources.map(sourceLine).joined(separator: "\n"))
+                }
+                // A line under the answer (Captured to memory) stays under it.
+                for record in saved where !record.drawsAboveAnswer {
+                    turn.append("Tool: \(record.summary)")
+                }
+            case .system:
+                // Instructions ride one request only; a saved chat has none,
+                // and pi gets its own.
+                continue
             }
             blocks.append("---")
             blocks.append(turn.filter { !$0.isEmpty }.joined(separator: "\n\n"))
         }
         return blocks.joined(separator: "\n\n") + "\n"
+    }
+
+    /// One source as a Markdown list item: its title, its day, and the local
+    /// file when it has one.
+    static func sourceLine(_ source: ChatSource) -> String {
+        var line = "- \(source.title)"
+        if let day = source.day { line += ", \(day)" }
+        if let path = source.path { line += " (`\(path)`)" }
+        return line
     }
 
     /// `<timestamp>-<slug>.md`: a timestamp that sorts by name, so the

@@ -6837,8 +6837,9 @@ import Observation
         requestInputFocus()
     }
 
-    /// The thread as pi gets it. The search line on screen opens the answer
-    /// it was made for: the first answer after the newest question.
+    /// The thread as pi gets it: every answer with its saved tool lines and
+    /// sources. A search line still on screen and not yet saved opens the
+    /// answer it was made for: the first answer after the newest question.
     func piHandoffMarkdown(for conversation: QuickConversation, date: Date = Date()) -> String {
         var toolLines: [UUID: [String]] = [:]
         if let note = webSearchNote,

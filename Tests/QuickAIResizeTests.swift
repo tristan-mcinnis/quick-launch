@@ -191,7 +191,7 @@ struct QuickAIResizeTests {
 
         let loaded = QuickSettings.load(from: defaults)
         #expect(loaded.quickAISize == QuickAISize(Self.large))
-        #expect(loaded.configurationVersion == 24, "a new key needs no migration")
+        #expect(loaded.configurationVersion == QuickSettings().configurationVersion, "a new key needs no migration")
 
         let vm = make { $0 = loaded }
         vm.openQuickAI()

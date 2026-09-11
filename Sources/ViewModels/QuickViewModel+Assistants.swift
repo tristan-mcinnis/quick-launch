@@ -74,6 +74,8 @@ extension QuickViewModel {
         }
         currentConversation?.assistantID = assistant?.id
         currentConversation?.enabledTools = assistant?.enabledTools
+        // Tools picked on the empty surface give way to the assistant's.
+        pendingChatTools = nil
         currentConversation?.updatedAt = Date()
         if currentConversation?.messages.isEmpty == false { persistCurrentConversation() }
         openQuickAI()
