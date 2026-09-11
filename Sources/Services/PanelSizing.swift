@@ -8,7 +8,8 @@ enum PanelSizing {
 
     // MARK: - Widths
 
-    /// The house launcher width. The Quick AI surface is the same width.
+    /// The house launcher width. The Quick AI surface opens at the same
+    /// width and can be dragged wider (`QuickAISize`).
     static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
     static let panelWidthWithDetail: CGFloat = 960
@@ -16,7 +17,8 @@ enum PanelSizing {
     // MARK: - Heights
 
     static let inputHeight = House.Control.input
-    /// The Quick AI surface: one fixed height, the thread scrolls inside it.
+    /// The Quick AI surface's standard (and smallest) height; the thread
+    /// scrolls inside it. The user can drag it taller (`QuickAISize`).
     static let quickAIHeight = House.Layout.quickAIHeight
     static let errorBannerHeight = House.Control.footer
     static let attachmentHeight = House.Control.input
@@ -112,8 +114,78 @@ enum PanelSizing {
         return max(base, paneTop + paneHeight + paneBottomMargin)
     }
 
+    // MARK: - Quick AI size (user-resizable)
+
+    /// What the user may drag the launcher panel between. Only the Quick AI
+    /// surface (Recent Chats included) has limits; root search is measured,
+    /// not user-sized, so the panel is not resizable there.
+    struct ResizeLimits: Equatable, Sendable {
+        let minimum: CGSize
+        let maximum: CGSize
+
+        /// A size the drag proposes, held between the limits.
+        func clamp(_ size: CGSize) -> CGSize {
+            CGSize(
+                width: min(maximum.width, max(minimum.width, size.width)),
+                height: min(maximum.height, max(minimum.height, size.height))
+            )
+        }
+
+        /// A size a live drag proposes, held between the limits and inside
+        /// `room`, how far the moving edges may go before they leave the
+        /// display (`ScreenPlacement.dragRoom`). The display wins over the
+        /// minimum.
+        func clamp(_ size: CGSize, room: CGSize?) -> CGSize {
+            let clamped = clamp(size)
+            guard let room else { return clamped }
+            return CGSize(
+                width: min(clamped.width, room.width),
+                height: min(clamped.height, room.height)
+            )
+        }
+    }
+
+    /// The largest Quick AI surface a display can hold: its visible frame
+    /// less the placement margin on every side, never below the standard
+    /// 750 × 475 (the surface keeps its minimum on a tiny display).
+    static func quickAIMaximumSize(visibleFrame: CGRect) -> CGSize {
+        let margin = ScreenPlacement.edgeMargin * 2
+        return CGSize(
+            width: max(QuickAISize.standard.width, visibleFrame.width - margin),
+            height: max(QuickAISize.standard.height, visibleFrame.height - margin)
+        )
+    }
+
+    /// The size the Quick AI surface is placed at on a display: the
+    /// remembered size held between the drag limits, and never larger than
+    /// the display holds. This is the size `ScreenPlacement.frameHanging`
+    /// gives a Quick AI frame (`risingToFit`), so the resize pass compares
+    /// the window with the frame it would apply: a stored size from a larger
+    /// display is never re-applied on every observation tick.
+    static func quickAIPlacedSize(_ size: CGSize, visibleFrame: CGRect) -> CGSize {
+        let clamped = ResizeLimits(
+            minimum: QuickAISize.standard.cgSize,
+            maximum: quickAIMaximumSize(visibleFrame: visibleFrame)
+        ).clamp(size)
+        let margin = ScreenPlacement.edgeMargin * 2
+        return CGSize(
+            width: min(clamped.width, max(1, visibleFrame.width - margin)),
+            height: min(clamped.height, max(1, visibleFrame.height - margin))
+        )
+    }
+
+    /// The drag limits for the surface on screen: the standard Quick AI size
+    /// to the display's maximum while Quick AI is up, none at root search.
+    static func userResizeLimits(isQuickAIPresented: Bool, visibleFrame: CGRect) -> ResizeLimits? {
+        guard isQuickAIPresented else { return nil }
+        return ResizeLimits(
+            minimum: QuickAISize.standard.cgSize,
+            maximum: quickAIMaximumSize(visibleFrame: visibleFrame)
+        )
+    }
+
     /// The root launcher window. Answers never add to it: they live on the
-    /// fixed Quick AI surface (`quickAIHeight`).
+    /// Quick AI surface, which has its own remembered size (`QuickAISize`).
     static func panelHeight(
         errorMessage: String?,
         suggestionCount: Int = 0,

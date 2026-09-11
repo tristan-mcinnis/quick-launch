@@ -86,7 +86,9 @@ the split you rejected this morning.
 
 - **B1, resizable Quick AI.** Let the Quick AI surface resize and remember
   its size, with 750 × 475 as the minimum. This alone answers "I need more
-  room for a longer chat". Size S.
+  room for a longer chat". Size S. Shipped in v1.5.0: drag any edge while
+  Quick AI is up, the size persists, the thread stays a centred column,
+  `⌘K` › Reset Quick AI Size.
 - **B2, AI Chat window.** A separate, normal window (it shows in ⌘Tab and
   Mission Control and stays open while you use the launcher for something
   else, which the launcher panel cannot do). Inside it: the same thread and
