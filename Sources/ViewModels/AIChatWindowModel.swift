@@ -108,13 +108,29 @@ protocol AIChatWindowPresenting: AnyObject {
     var renameFocusRequest = 0
 
     /// Find in chat (`⌘F`): the bar above the thread, its text, and which
-    /// match is current. A match is a message that holds the text.
+    /// hit is current. A hit is a range inside the text the thread draws,
+    /// not a message: "3 of 17" counts hits.
     var isFindPresented = false
     var findQuery = "" {
         didSet { if findQuery != oldValue { moveToFirstMatch() } }
     }
+    /// The current hit, over `findHits`.
     var currentMatchIndex: Int?
     var findFocusRequest = 0
+    /// ⌘ is down: the rail shows every row's ⌘1…⌘9 number.
+    var isCommandHeld = false
+    /// The hits of the last query, and what they were found in, so a
+    /// render that reads them several times searches once.
+    @ObservationIgnored private var findCache: (query: String, messages: [QuickMessage], hits: [FindHit])?
+    /// What each message draws, as find reads it: the question's text, or
+    /// each answer segment's rendered text. Kept per message and content.
+    @ObservationIgnored private var findCorpus: [UUID: FindCorpusEntry] = [:]
+    /// Where the thread measured each hit, under its message's head.
+    @ObservationIgnored private var measuredHitOffsets: [FindHit: CGFloat] = [:]
+    /// The offset last asked of the thread for the current hit.
+    @ObservationIgnored private var requestedHitOffset: (hit: FindHit, y: CGFloat)?
+    /// Rail rows' question counts and times, per history.
+    @ObservationIgnored private var railFactsCache: (history: [QuickConversation], facts: [String: RailFacts])?
 
     init(chat: QuickViewModel, defaults: UserDefaults = .standard) {
         self.chat = chat
@@ -165,26 +181,73 @@ protocol AIChatWindowPresenting: AnyObject {
 
     // MARK: - Rail
 
-    /// The rail's rows: pinned first, then recent, narrowed by the search
-    /// every chat list shares (title and message text).
+    /// The rail's rows: pinned first, then recent, narrowed and ranked by
+    /// the search every chat list shares. The view model caches the rows
+    /// per query, so reading them again costs nothing.
     var railItems: [LauncherCatalogItem] { chat.chatItems(matching: railQuery) }
 
-    var pinnedRailItems: [LauncherCatalogItem] { railItems.filter(\.isPinned) }
+    /// While a query is typed the rail is one ranked list under "Results";
+    /// pinned rows keep their glyph but are not floated (spec 4.5).
+    var isRailSearching: Bool { !ChatSearchQuery(railQuery).isEmpty }
+
+    var pinnedRailItems: [LauncherCatalogItem] { isRailSearching ? [] : railItems.filter(\.isPinned) }
+    var recentRailItems: [LauncherCatalogItem] { isRailSearching ? [] : railItems.filter { !$0.isPinned } }
+
+    /// What a rail row needs from its chat besides the item: the question
+    /// count and the time.
+    struct RailFacts: Equatable {
+        let questions: Int
+        let updatedAt: Date
+    }
+
+    /// Every chat's facts, read once per history.
+    private var railFacts: [String: RailFacts] {
+        let history = chat.history
+        if let railFactsCache, railFactsCache.history == history { return railFactsCache.facts }
+        var facts: [String: RailFacts] = [:]
+        for conversation in history {
+            facts[conversation.id.uuidString] = RailFacts(
+                questions: conversation.messages.lazy.filter { $0.role == .user }.count,
+                updatedAt: conversation.updatedAt
+            )
+        }
+        railFactsCache = (history, facts)
+        return facts
+    }
 
     /// A rail row's second line, short enough for the rail: the question
-    /// count and the time today, the day before that.
+    /// count and the time today, the day before that. A row found by its
+    /// text shows its snippet there instead, and this moves to the tooltip.
     func railDetail(for item: LauncherCatalogItem, now: Date = Date()) -> String {
-        guard let conversation = chat.history.first(where: { $0.id.uuidString == item.itemID }) else {
-            return item.detail
-        }
-        let turns = conversation.messages.filter { $0.role == .user }.count
-        let count = turns == 1 ? "1 question" : "\(turns) questions"
-        let stamp = Calendar.current.isDate(conversation.updatedAt, inSameDayAs: now)
-            ? conversation.updatedAt.formatted(date: .omitted, time: .shortened)
-            : conversation.updatedAt.formatted(.dateTime.month(.abbreviated).day())
+        guard let facts = railFacts[item.itemID] else { return item.detail }
+        let count = facts.questions == 1 ? "1 question" : "\(facts.questions) questions"
+        let stamp = Calendar.current.isDate(facts.updatedAt, inSameDayAs: now)
+            ? facts.updatedAt.formatted(date: .omitted, time: .shortened)
+            : facts.updatedAt.formatted(.dateTime.month(.abbreviated).day())
         return "\(count) · \(stamp)"
     }
-    var recentRailItems: [LauncherCatalogItem] { railItems.filter { !$0.isPinned } }
+
+    /// Characters a rail snippet keeps before its hit: the rail is narrow.
+    static let railSnippetLead = 8
+
+    /// The snippet a rail row shows under its title, cut to the rail.
+    func railSnippet(for item: LauncherCatalogItem) -> ChatSnippet? {
+        item.chatSnippet?.keepingLead(Self.railSnippetLead)
+    }
+
+    /// The `⌘` number a row answers to (`⌘1`…`⌘9`), by drawn position.
+    func railNumber(at index: Int) -> Int? {
+        index < Self.jumpRowCount ? index + 1 : nil
+    }
+
+    /// What the rail says when it has no row.
+    var railEmptyText: String {
+        if !railQuery.isEmpty { return "No chats match" }
+        return chat.settings.historyEnabled ? "No chats yet" : "Chat history is off"
+    }
+
+    /// The open chat's id, for its marker in the rail.
+    var openChatItemID: String? { chat.currentConversation?.id.uuidString }
 
     /// The open chat's row, when the rail shows it.
     var currentRailIndex: Int? {
@@ -303,15 +366,31 @@ protocol AIChatWindowPresenting: AnyObject {
 
     /// A row action's title for the highlighted chat.
     func title(of action: RailAction) -> String {
+        title(of: action, for: highlightedRailItem)
+    }
+
+    /// A row action's title for one row (its context menu, VoiceOver).
+    func title(of action: RailAction, for item: LauncherCatalogItem?) -> String {
         switch action {
-        case .pin: highlightedRailItem?.isPinned == true ? "Unpin Chat" : "Pin Chat"
+        case .pin: item?.isPinned == true ? "Unpin Chat" : "Pin Chat"
         case .rename: "Rename Chat"
         case .delete:
-            highlightedRailItem.flatMap { UUID(uuidString: $0.itemID) } == deleteArmedChatID
+            item.flatMap { UUID(uuidString: $0.itemID) } == deleteArmedChatID
                 && deleteArmedChatID != nil
                 ? "Press Again to Delete"
                 : "Delete Chat"
         }
+    }
+
+    /// A row action from the row's context menu or a VoiceOver action: the
+    /// row is highlighted first, so the action is the one `⌘K` would run.
+    func performRailAction(_ action: RailAction, itemID: String) {
+        guard let index = railItems.firstIndex(where: { $0.itemID == itemID }) else { return }
+        if index != railIndex {
+            if deleteArmedChatID?.uuidString != itemID { deleteArmedChatID = nil }
+            railIndex = index
+        }
+        performRailAction(action)
     }
 
     func toggleRailActions() {
@@ -391,27 +470,70 @@ protocol AIChatWindowPresenting: AnyObject {
 
     // MARK: - Find in chat
 
-    /// The messages of the open chat that hold the find text, in thread
-    /// order. Case and accents are ignored, as in the launcher's search.
-    var findMatches: [UUID] {
-        let needle = FuzzyMatcher.fold(findQuery).trimmingCharacters(in: .whitespaces)
-        guard isFindPresented, !needle.isEmpty else { return [] }
-        return chat.conversationMessages
-            .filter { $0.role != .system && FuzzyMatcher.fold($0.content).contains(needle) }
-            .map(\.id)
+    /// Every hit of the find text in the open chat, in document order: the
+    /// rendered text of each answer (so Markdown syntax, link targets, and
+    /// code fences never match), the text of its code blocks, and each
+    /// question. The query is one phrase, folded as the chat search folds
+    /// it (case, accents, width).
+    var findHits: [FindHit] {
+        let query = Self.findNeedle(findQuery)
+        guard isFindPresented, !query.isEmpty else { return [] }
+        let messages = chat.conversationMessages
+        if let findCache, findCache.query == query, findCache.messages == messages { return findCache.hits }
+        var hits: [FindHit] = []
+        var live = Set<UUID>()
+        for message in messages {
+            live.insert(message.id)
+            for part in corpus(for: message).parts {
+                for range in SearchText.ranges(of: query, in: part.text) {
+                    hits.append(FindHit(messageID: message.id, part: part.part, range: range))
+                }
+            }
+        }
+        findCorpus = findCorpus.filter { live.contains($0.key) }
+        // Offsets were measured for the last hits; the thread measures anew.
+        measuredHitOffsets = [:]
+        findCache = (query, messages, hits)
+        return hits
     }
 
-    /// The message the find bar is on, drawn with the selection fill.
-    var currentMatchID: UUID? {
-        let matches = findMatches
-        guard let index = currentMatchIndex, matches.indices.contains(index) else { return nil }
-        return matches[index]
+    /// The find text as searched: compatibility forms mapped, white space
+    /// as one space, trimmed.
+    static func findNeedle(_ query: String) -> String {
+        SearchText.collapsingWhitespace(query.precomposedStringWithCompatibilityMapping)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// "2 of 5", "No matches", or nothing before anything is typed.
+    /// What one message draws, as find searches it.
+    private func corpus(for message: QuickMessage) -> FindCorpusEntry {
+        if let entry = findCorpus[message.id], entry.content == message.content { return entry }
+        let entry = FindCorpusEntry(message)
+        findCorpus[message.id] = entry
+        return entry
+    }
+
+    /// The hit the find bar is on, drawn with the selection fill.
+    var currentHit: FindHit? {
+        let hits = findHits
+        guard let index = currentMatchIndex, hits.indices.contains(index) else { return nil }
+        return hits[index]
+    }
+
+    /// The message the current hit is in.
+    var currentMatchID: UUID? { currentHit?.messageID }
+
+    /// What the thread draws: every hit with the hover fill, the current
+    /// one with the selection fill.
+    var findHighlights: ThreadFindHighlights? {
+        let hits = findHits
+        guard !hits.isEmpty else { return nil }
+        return ThreadFindHighlights(hits: hits, current: currentHit)
+    }
+
+    /// "3 of 17", "No matches", or nothing before anything is typed.
     var findStatus: String {
-        guard !findQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return "" }
-        let count = findMatches.count
+        guard !Self.findNeedle(findQuery).isEmpty else { return "" }
+        let count = findHits.count
         guard count > 0, let index = currentMatchIndex else { return "No matches" }
         return "\(index + 1) of \(count)"
     }
@@ -428,16 +550,17 @@ protocol AIChatWindowPresenting: AnyObject {
         isFindPresented = false
         findQuery = ""
         currentMatchIndex = nil
+        requestedHitOffset = nil
         focusComposer()
     }
 
-    /// Return and `⌘G`: the next match, wrapping. `⇧↩` and `⇧⌘G`: the
-    /// previous one.
+    /// Return and `⌘G`: the next hit, across messages, wrapping. `⇧↩` and
+    /// `⇧⌘G`: the previous one.
     func findNext() { stepMatch(1) }
     func findPrevious() { stepMatch(-1) }
 
     private func stepMatch(_ delta: Int) {
-        let count = findMatches.count
+        let count = findHits.count
         guard count > 0 else {
             currentMatchIndex = nil
             return
@@ -448,24 +571,39 @@ protocol AIChatWindowPresenting: AnyObject {
     }
 
     private func moveToFirstMatch() {
-        guard !findMatches.isEmpty else {
+        guard !findHits.isEmpty else {
             currentMatchIndex = nil
             return
         }
         reveal(0)
     }
 
-    /// Makes a match current: a folded question opens so the text shows,
-    /// and the message's head scrolls to the top of the thread.
+    /// Makes a hit current: a folded question with the hit in it opens,
+    /// and the thread scrolls the hit (not the message's head) a third of
+    /// the way down the view.
     private func reveal(_ index: Int) {
         currentMatchIndex = index
-        let id = findMatches[index]
-        if let message = chat.conversationMessages.first(where: { $0.id == id }),
+        let hit = findHits[index]
+        if hit.part == .question,
+           let message = chat.conversationMessages.first(where: { $0.id == hit.messageID }),
            chat.collapseState(for: message).isCollapsible,
-           !chat.expandedTranscriptMessageIDs.contains(id) {
-            chat.expandedTranscriptMessageIDs.insert(id)
+           !chat.expandedTranscriptMessageIDs.contains(hit.messageID) {
+            chat.expandedTranscriptMessageIDs.insert(hit.messageID)
         }
-        chat.scrollThread(.messageTop(id))
+        let y = measuredHitOffsets[hit] ?? 0
+        requestedHitOffset = (hit, y)
+        chat.scrollThread(.messageOffset(hit.messageID, y))
+    }
+
+    /// The thread measured where a hit sits under its message's head. The
+    /// current hit's first measure (or a new one, after the text reflowed)
+    /// scrolls again, so the hit itself lands in view.
+    func noteFindHitOffset(_ y: CGFloat, for hit: FindHit) {
+        measuredHitOffsets[hit] = y
+        guard hit == currentHit else { return }
+        if let requestedHitOffset, requestedHitOffset.hit == hit, abs(requestedHitOffset.y - y) < 1 { return }
+        requestedHitOffset = (hit, y)
+        chat.scrollThread(.messageOffset(hit.messageID, y))
     }
 
     // MARK: - Focus
@@ -635,5 +773,96 @@ protocol AIChatWindowPresenting: AnyObject {
             return true
         }
         return chat.performShortcut(characters: characters, keyCode: keyCode, modifiers: modifiers)
+    }
+}
+
+// MARK: - Find in chat: hits
+
+/// A part of a message Find in Chat searches: the question the user sent,
+/// or one segment of an answer (a prose run or a code block, as
+/// `MarkdownRenderer.segments` splits it; the index is the segment's id).
+enum FindPart: Hashable, Sendable {
+    case question
+    case segment(Int)
+}
+
+/// One hit: a range inside the text one part of one message draws.
+struct FindHit: Hashable, Sendable {
+    let messageID: UUID
+    let part: FindPart
+    /// UTF-16 range in the part's drawn text.
+    let range: TextRange
+}
+
+/// What one message draws, as find reads it. An answer's prose segments
+/// are the rendered text (`MarkdownRenderer.render`), the same string its
+/// text view holds, so a range found here is a range there.
+struct FindCorpusEntry {
+    struct Part {
+        let part: FindPart
+        let text: String
+    }
+
+    let content: String
+    let parts: [Part]
+
+    init(_ message: QuickMessage) {
+        content = message.content
+        switch message.role {
+        case .user:
+            parts = [Part(part: .question, text: message.content)]
+        case .system:
+            parts = []
+        case .assistant:
+            // A question the model asked draws as a card, not as prose.
+            guard message.askUserQuestion == nil else {
+                parts = []
+                return
+            }
+            parts = MarkdownRenderer.segments(message.content).map { segment in
+                switch segment.content {
+                case .prose(let source):
+                    Part(part: .segment(segment.id), text: MarkdownRenderer.render(source).string)
+                case .code(let code):
+                    Part(part: .segment(segment.id), text: code.code)
+                }
+            }
+        }
+    }
+}
+
+/// What the thread draws for Find in Chat: every hit in the hover fill,
+/// the current one in the selection fill ("hover is half the selection
+/// fill", applied to text).
+struct ThreadFindHighlights: Equatable {
+    let current: FindHit?
+    private let ranges: [UUID: [FindPart: [TextRange]]]
+
+    init(hits: [FindHit], current: FindHit?) {
+        self.current = current
+        var ranges: [UUID: [FindPart: [TextRange]]] = [:]
+        for hit in hits {
+            ranges[hit.messageID, default: [:]][hit.part, default: []].append(hit.range)
+        }
+        self.ranges = ranges
+    }
+
+    /// The hits in one part of one message.
+    func ranges(in messageID: UUID, part: FindPart) -> [TextRange] {
+        ranges[messageID]?[part] ?? []
+    }
+
+    /// Every segment's hits in one answer, by segment id.
+    func segmentRanges(in messageID: UUID) -> [Int: [TextRange]] {
+        var output: [Int: [TextRange]] = [:]
+        for (part, list) in ranges[messageID] ?? [:] {
+            if case .segment(let id) = part { output[id] = list }
+        }
+        return output
+    }
+
+    /// The current hit when it is in this message.
+    func current(in messageID: UUID) -> FindHit? {
+        current?.messageID == messageID ? current : nil
     }
 }

@@ -141,6 +141,10 @@ struct CodeBlockView: View {
     /// in root search), so the controls carry an identifier scoped to the
     /// instance they belong to.
     var instanceID = "answer"
+    /// Find in Chat: hits in the code, in the hover fill, and the current
+    /// one in the selection fill.
+    var findRanges: [TextRange] = []
+    var findCurrent: TextRange? = nil
 
     /// The identifier one of this block's controls carries.
     static func accessibilityIdentifier(
@@ -291,7 +295,7 @@ struct CodeBlockView: View {
     }
 
     private var codeText: some View {
-        Text(content.code)
+        Text(FindHitGeometry.highlighted(content.code, ranges: findRanges, current: findCurrent))
             .font(AQDesign.TypeToken.code)
             .foregroundStyle(AQDesign.ColorToken.textPrimary)
             .textSelection(.enabled)

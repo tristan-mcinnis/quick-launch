@@ -10,9 +10,12 @@ import SwiftUI
 /// surface (`QuickAIView.threadColumnWidth`), narrower when the window is.
 struct QuickAIThread: View {
     @Bindable var viewModel: QuickViewModel
-    /// The message find in chat is on (AI Chat), drawn with the selection
-    /// fill and ring. Nil on the Quick AI surface.
-    var highlightedMessageID: UUID? = nil
+    /// Find in Chat's hits (AI Chat): each drawn in the hover fill inside
+    /// the text, the current one in the selection fill. Nil on the Quick AI
+    /// surface.
+    var find: ThreadFindHighlights? = nil
+    /// Where the current hit sits under its message's head, once laid out.
+    var onFindHitOffset: ((FindHit, CGFloat) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Where the thread is scrolled. Every scroll the thread makes goes
     /// through it: to a message's head, to an edge, or by a page.
@@ -22,6 +25,16 @@ struct QuickAIThread: View {
     /// Whether the thread is still, tracked by the reader, or animating a
     /// scroll it was asked for.
     @State private var scrollPhase = ScrollPhase.idle
+    /// Where laid-out turns start in the thread's content, and a find
+    /// scroll waiting for its message to be laid out. Not observed: a
+    /// geometry report must never redraw the thread.
+    @State private var turnGeometry = TurnGeometry()
+
+    /// The thread's content, where `scrollTo(y:)` measures from.
+    private nonisolated static let contentSpace = "quick-ai-thread-content"
+
+    /// One message's own coordinate space, where a find hit is measured.
+    nonisolated static func turnSpace(_ id: UUID) -> String { "quick-ai-turn-\(id.uuidString)" }
 
     private static let threadErrorID = "quick-ai-thread-error"
     private static let liveAnswerID = "quick-ai-live-answer"
@@ -78,7 +91,13 @@ struct QuickAIThread: View {
                 let pendingQuestion = pendingQuestion
                 ForEach(viewModel.conversationMessages) { message in
                     turn(message)
-                        .findHighlight(message.id == highlightedMessageID)
+                        .coordinateSpace(.named(Self.turnSpace(message.id)))
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .named(Self.contentSpace)).minY
+                        } action: { top in
+                            turnGeometry.tops[message.id] = top
+                            performPendingFindScroll(for: message.id)
+                        }
                         .id(message.id)
                     // The search line belongs to the newest question;
                     // while that question is still pending it hangs
@@ -153,6 +172,7 @@ struct QuickAIThread: View {
             .padding(.bottom, House.Spacing.md)
             // Centred in a window wider than the standard surface.
             .frame(maxWidth: .infinity)
+            .coordinateSpace(.named(Self.contentSpace))
         }
         .scrollPosition($threadPosition)
         .onScrollGeometryChange(for: ThreadGeometry.self) { geometry in
@@ -235,6 +255,19 @@ struct QuickAIThread: View {
         var maximumTop: CGFloat { max(0, contentHeight - visibleHeight) }
         /// One page: the view's height less a line of overlap to keep place.
         var page: CGFloat { max(visibleHeight - House.Spacing.xxxl, House.Spacing.xxxl) }
+
+        /// The view's top that puts a find hit at content `y` a third of
+        /// the way down the view, inside the scroll range.
+        func findScrollTop(hitAt y: CGFloat) -> CGFloat {
+            min(max(0, y - visibleHeight / 3), maximumTop)
+        }
+    }
+
+    /// Laid-out turns' tops in the content, and the find scroll waiting for
+    /// one. A reference the view keeps, so writing it never redraws.
+    @MainActor final class TurnGeometry {
+        var tops: [UUID: CGFloat] = [:]
+        var pending: (id: UUID, offset: CGFloat)?
     }
 
     /// "↓ Latest": the reader scrolled up from newer text. Clicking it, or
@@ -263,7 +296,9 @@ struct QuickAIThread: View {
         case .user:
             userPill(
                 viewModel.collapseState(for: message),
-                showsShortcut: viewModel.showsCollapseShortcut(for: message)
+                showsShortcut: viewModel.showsCollapseShortcut(for: message),
+                findRanges: find?.ranges(in: message.id, part: .question) ?? [],
+                findCurrent: find?.current(in: message.id).flatMap { $0.part == .question ? $0 : nil }
             ) {
                 viewModel.toggleTranscriptMessage(message.id)
             }
@@ -296,7 +331,8 @@ struct QuickAIThread: View {
             answerProse(
                 message.content,
                 isStreaming: false,
-                instanceID: "message-\(message.id.uuidString)"
+                instanceID: "message-\(message.id.uuidString)",
+                messageID: message.id
             )
             if !sources.isEmpty {
                 sourceList(sources)
@@ -400,6 +436,8 @@ struct QuickAIThread: View {
     private func userPill(
         _ state: MessageCollapseState,
         showsShortcut: Bool = false,
+        findRanges: [TextRange] = [],
+        findCurrent: FindHit? = nil,
         toggle: (() -> Void)?
     ) -> some View {
         HStack(spacing: 0) {
@@ -408,9 +446,28 @@ struct QuickAIThread: View {
                 state: state,
                 showsShortcut: showsShortcut,
                 plainTextFont: AQDesign.TypeToken.body,
-                fillsWidth: false
+                fillsWidth: false,
+                findRanges: findRanges,
+                findCurrent: findCurrent?.range
             ) {
                 toggle?()
+            }
+            .overlay(alignment: .topLeading) {
+                if let findCurrent, let onFindHitOffset {
+                    GeometryReader { proxy in
+                        FindHitMarker(
+                            rect: FindHitGeometry.plainRect(
+                                text: state.displayedText,
+                                font: NSFont.systemFont(ofSize: House.TypeToken.Size.bodySmall),
+                                range: findCurrent.range,
+                                width: proxy.size.width
+                            ),
+                            space: Self.turnSpace(findCurrent.messageID)
+                        ) { offset in
+                            onFindHitOffset(findCurrent, offset)
+                        }
+                    }
+                }
             }
             .foregroundStyle(AQDesign.ColorToken.textSecondary)
             .multilineTextAlignment(.leading)
@@ -427,12 +484,27 @@ struct QuickAIThread: View {
         .accessibilityLabel("You: \(state.text)")
     }
 
-    private func answerProse(_ markdown: String, isStreaming: Bool, instanceID: String) -> some View {
-        MarkdownTextView(
+    private func answerProse(
+        _ markdown: String,
+        isStreaming: Bool,
+        instanceID: String,
+        messageID: UUID? = nil
+    ) -> some View {
+        let current = messageID.flatMap { find?.current(in: $0) }
+        return MarkdownTextView(
             markdown: markdown,
             isStreaming: isStreaming,
             scrolls: false,
-            instanceID: instanceID
+            instanceID: instanceID,
+            findRanges: messageID.flatMap { find?.segmentRanges(in: $0) } ?? [:],
+            findCurrent: current.flatMap { hit in
+                guard case .segment(let segment) = hit.part else { return nil }
+                return SegmentFindHit(segment: segment, range: hit.range)
+            },
+            findSpace: messageID.map(Self.turnSpace),
+            onFindCurrentOffset: current.flatMap { hit in
+                onFindHitOffset.map { report in { offset in report(hit, offset) } }
+            }
         )
         .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
     }
@@ -483,15 +555,45 @@ struct QuickAIThread: View {
 
     private func scroll(to target: QuickViewModel.ThreadScrollRequest.Target) {
         let geometry = threadGeometry
+        var findTarget: CGFloat?
+        if case .messageOffset(let id, let offset) = target {
+            if let top = turnGeometry.tops[id] {
+                findTarget = geometry.findScrollTop(hitAt: top + offset)
+                turnGeometry.pending = nil
+            } else {
+                // Not laid out yet: bring its head in first; once it is laid
+                // out, `performPendingFindScroll` puts the hit in place.
+                turnGeometry.pending = (id, offset)
+            }
+        }
         let move = {
             switch target {
             case .messageTop(let id): threadPosition.scrollTo(id: id, anchor: .top)
+            case .messageOffset(let id, _):
+                if let findTarget {
+                    threadPosition.scrollTo(y: findTarget)
+                } else {
+                    threadPosition.scrollTo(id: id, anchor: .top)
+                }
             case .top: threadPosition.scrollTo(edge: .top)
             case .bottom: threadPosition.scrollTo(edge: .bottom)
             case .pageUp: threadPosition.scrollTo(y: max(0, geometry.top - geometry.page))
             case .pageDown: threadPosition.scrollTo(y: min(geometry.maximumTop, geometry.top + geometry.page))
             }
         }
+        animate(move)
+    }
+
+    /// A find scroll that waited for its message: the message is laid out
+    /// now, so the hit goes a third of the way down the view.
+    private func performPendingFindScroll(for id: UUID) {
+        guard let pending = turnGeometry.pending, pending.id == id, let top = turnGeometry.tops[id] else { return }
+        turnGeometry.pending = nil
+        let target = threadGeometry.findScrollTop(hitAt: top + pending.offset)
+        animate { threadPosition.scrollTo(y: target) }
+    }
+
+    private func animate(_ move: @escaping () -> Void) {
         if reduceMotion {
             move()
         } else {
@@ -529,21 +631,5 @@ struct QuickAIThread: View {
         .frame(minHeight: House.Control.keyCap)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Error: \(message)")
-    }
-}
-
-private extension View {
-    /// Find in chat's current match: the house selection (fill, inset ring,
-    /// drop) just outside the message, so nothing in the thread moves.
-    @ViewBuilder
-    func findHighlight(_ isOn: Bool) -> some View {
-        if isOn {
-            self
-                .padding(House.Spacing.xs)
-                .background { RowHighlight(isSelected: true, radius: House.Radius.lg) }
-                .padding(-House.Spacing.xs)
-        } else {
-            self
-        }
     }
 }

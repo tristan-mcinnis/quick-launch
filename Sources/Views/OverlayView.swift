@@ -480,6 +480,8 @@ struct LauncherResultRow: View {
             icon
             if let screenHistoryRow {
                 screenHistoryRow
+            } else if let chatSnippet {
+                ChatSnippetRowText(title: title, detail: detail, snippet: chatSnippet)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: AQDesign.Space.standard) {
                     Text(title)
@@ -496,7 +498,8 @@ struct LauncherResultRow: View {
                     }
                 }
             }
-            Spacer(minLength: AQDesign.Space.standard)
+            // A snippet row runs its own count and time to the trailing edge.
+            if chatSnippet == nil { Spacer(minLength: AQDesign.Space.standard) }
             if case .item(let item) = result, item.isPinned {
                 Image(systemName: "pin.fill")
                     .font(AQDesign.TypeToken.footnote.weight(.semibold))
@@ -508,7 +511,7 @@ struct LauncherResultRow: View {
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
             } else if let statusLight {
                 StatusLightLabel(light: statusLight)
-            } else if screenHistoryRow == nil {
+            } else if screenHistoryRow == nil, chatSnippet == nil {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -564,6 +567,11 @@ struct LauncherResultRow: View {
     }
     private var statusLight: LauncherStatusLight? {
         if case .item(let item) = result { return item.statusLight }
+        return nil
+    }
+    /// A chat a search found by its text: the row shows where.
+    private var chatSnippet: ChatSnippet? {
+        if case .item(let item) = result { return item.chatSnippet }
         return nil
     }
     private var detail: String {

@@ -35,6 +35,10 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     /// and restore the original representation. Nil for plain-text entries
     /// and for every non-clipboard kind.
     var clipboardPayload: ClipboardPayload? = nil
+    /// Chats found by a search in their text: the line that shows where
+    /// (`ChatSearch`). The row draws it under the title, with the count and
+    /// time on the trailing edge. Nil for a title hit and every other kind.
+    var chatSnippet: ChatSnippet? = nil
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 

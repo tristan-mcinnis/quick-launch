@@ -52,6 +52,10 @@ struct AIChatWindowView: View {
             guard let error else { return }
             QuickAIAnnouncement.post("Error. \(error.message)", priority: .high)
         }
+        // Holding ⌘ shows every rail row's ⌘1…⌘9 number.
+        .onModifierKeysChanged(mask: .command) { _, keys in
+            model.isCommandHeld = keys.contains(.command)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("AI Chat")
     }
@@ -63,7 +67,9 @@ struct AIChatWindowView: View {
             if model.isFindPresented {
                 AIChatFindBar(model: model)
             }
-            QuickAIThread(viewModel: chat, highlightedMessageID: model.currentMatchID)
+            QuickAIThread(viewModel: chat, find: model.findHighlights) { hit, offset in
+                model.noteFindHitOffset(offset, for: hit)
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The scroll view would otherwise draw up under the header
                 // and the transparent title bar.
@@ -142,8 +148,9 @@ struct AIChatWindowView: View {
 
 // MARK: - Find bar
 
-/// `⌘F`: a search field over the thread. `↩` (or `⌘G`) the next match,
-/// `⇧↩` (or `⇧⌘G`) the previous, `esc` closes. A match in a folded
+/// `⌘F`: a search field over the thread. `↩` (or `⌘G`) the next hit,
+/// `⇧↩` (or `⇧⌘G`) the previous, across messages; `esc` closes. The count
+/// is hits ("3 of 17"), each highlighted in the text. A hit in a folded
 /// question opens it.
 struct AIChatFindBar: View {
     @Bindable var model: AIChatWindowModel
@@ -222,10 +229,13 @@ struct AIChatFindBar: View {
 
 // MARK: - Rail
 
-/// The chat list: a search field, then Pinned and Recent. `↑↓` move, `↩`
-/// opens, `⌘K` the highlighted row's actions (pin, rename, delete, with
-/// their own keys), `⌘1`…`⌘9` jump, `esc` clears the search and then
-/// slides the list out.
+/// The chat list: a search field, then Pinned and Recent, or one ranked
+/// "Results" list while a query is typed. `↑↓` move, `↩` opens, `⌘K` the
+/// highlighted row's actions (pin, rename, delete, with their own keys, and
+/// on the row's context menu and VoiceOver actions too), `⌘1`…`⌘9` jump
+/// (every number shows while `⌘` is held), `esc` clears the search and
+/// then slides the list out. The open chat carries an ink bar on its
+/// leading edge, apart from the keyboard highlight.
 struct AIChatRail: View {
     @Bindable var model: AIChatWindowModel
     @FocusState private var searchFocused: Bool
@@ -243,16 +253,22 @@ struct AIChatRail: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: House.Spacing.xxs) {
                         if items.isEmpty {
-                            Text(model.railQuery.isEmpty ? "No chats yet" : "No chats match")
+                            Text(model.railEmptyText)
                                 .font(AQDesign.TypeToken.body)
                                 .foregroundStyle(AQDesign.ColorToken.textTertiary)
                                 .frame(maxWidth: .infinity, minHeight: House.Control.row)
                         }
-                        if !pinned.isEmpty {
-                            section("Pinned", rows: pinned, offset: 0, total: items.count)
-                        }
-                        if !recent.isEmpty {
-                            section("Recent", rows: recent, offset: pinned.count, total: items.count)
+                        if model.isRailSearching {
+                            if !items.isEmpty {
+                                section("Results", rows: items, offset: 0, total: items.count)
+                            }
+                        } else {
+                            if !pinned.isEmpty {
+                                section("Pinned", rows: pinned, offset: 0, total: items.count)
+                            }
+                            if !recent.isEmpty {
+                                section("Recent", rows: recent, offset: pinned.count, total: items.count)
+                            }
                         }
                     }
                     .padding(.horizontal, House.Spacing.xs)
@@ -335,52 +351,118 @@ struct AIChatRail: View {
     @ViewBuilder
     private func row(_ item: LauncherCatalogItem, index: Int, total: Int) -> some View {
         let isSelected = index == model.railIndex
-        let isOpen = item.itemID == model.chat.currentConversation?.id.uuidString
-        let isRenaming = item.itemID == model.renamingChatID?.uuidString
-        Button {
-            model.railIndex = index
-            model.openChat(itemID: item.itemID)
-        } label: {
-            HStack(spacing: House.Spacing.xs) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if isRenaming {
-                        TextField(text: $model.renameText, prompt: Text("")) {
-                            Text("Chat name")
-                        }
-                        .textFieldStyle(.plain)
-                        .labelsHidden()
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .focused($renameFocused)
-                        .onSubmit { model.commitRename() }
-                    } else {
+        let isOpen = item.itemID == model.openChatItemID
+        let detail = model.railDetail(for: item)
+        let snippet = model.railSnippet(for: item)
+        let number = model.railNumber(at: index)
+        let showsNumber = number != nil && (model.isCommandHeld || isSelected || isOpen)
+        // In one Results list a pinned row keeps its pin, as Pinned would say.
+        let showsPin = item.isPinned && model.isRailSearching
+        Group {
+            if item.itemID == model.renamingChatID?.uuidString {
+                // The rename field sits outside the row's button, so a click
+                // in it edits the name and never opens the chat.
+                rowLayout(isSelected: isSelected, isOpen: isOpen, isPinned: showsPin, number: showsNumber ? number : nil) {
+                    TextField(text: $model.renameText, prompt: Text("")) {
+                        Text("Chat name")
+                    }
+                    .textFieldStyle(.plain)
+                    .labelsHidden()
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .focused($renameFocused)
+                    .onSubmit { model.commitRename() }
+                    rowSecondLine(detail: detail, snippet: snippet)
+                }
+            } else {
+                Button {
+                    model.railIndex = index
+                    model.openChat(itemID: item.itemID)
+                } label: {
+                    rowLayout(isSelected: isSelected, isOpen: isOpen, isPinned: showsPin, number: showsNumber ? number : nil) {
                         Text(item.title)
                             .font(AQDesign.TypeToken.label)
                             .foregroundStyle(AQDesign.ColorToken.textPrimary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        rowSecondLine(detail: detail, snippet: snippet)
                     }
-                    Text(model.railDetail(for: item))
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
                 }
-                Spacer(minLength: 0)
-                if index < AIChatWindowModel.jumpRowCount, isSelected || isOpen {
-                    KeyCap(text: "⌘\(index + 1)")
+                .buttonStyle(.plain)
+                // A row found by its text shows the snippet; the count and
+                // time move here.
+                .help(snippet == nil ? item.title : "\(item.title), \(detail)")
+            }
+        }
+        .contextMenu {
+            ForEach(AIChatWindowModel.RailAction.allCases) { action in
+                Button(role: action == .delete ? .destructive : nil) {
+                    model.performRailAction(action, itemID: item.itemID)
+                } label: {
+                    Label(model.title(of: action, for: item), systemImage: action.systemImage)
                 }
             }
-            .padding(.horizontal, House.Spacing.xs)
-            .frame(height: House.Control.row)
-            .background { RowHighlight(isSelected: isSelected) }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.title), \(model.railDetail(for: item))\(item.isPinned ? ", pinned" : "")\(isOpen ? ", open" : "")")
+        .accessibilityLabel(
+            "\(item.title), \(snippet?.plainText ?? detail)\(item.isPinned ? ", pinned" : "")\(isOpen ? ", open" : "")"
+        )
         .accessibilityValue(isSelected ? "Selected, \(index + 1) of \(total)" : "\(index + 1) of \(total)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityActions {
+            ForEach(AIChatWindowModel.RailAction.allCases) { action in
+                Button(model.title(of: action, for: item)) {
+                    model.performRailAction(action, itemID: item.itemID)
+                }
+            }
+        }
+    }
+
+    /// One rail row: the open-chat bar, two lines, and the `⌘` number.
+    private func rowLayout<Lines: View>(
+        isSelected: Bool,
+        isOpen: Bool,
+        isPinned: Bool,
+        number: Int?,
+        @ViewBuilder lines: () -> Lines
+    ) -> some View {
+        HStack(spacing: House.Spacing.xs) {
+            VStack(alignment: .leading, spacing: 0) {
+                lines()
+            }
+            Spacer(minLength: 0)
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(AQDesign.TypeToken.footnote.weight(.semibold))
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            if let number {
+                KeyCap(text: "⌘\(number)")
+            }
+        }
+        .padding(.horizontal, House.Spacing.xs)
+        .frame(height: House.Control.row)
+        .background { RowHighlight(isSelected: isSelected) }
+        .overlay(alignment: .leading) {
+            if isOpen { OpenChatMarker() }
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// The row's second line: the snippet while a search found the chat by
+    /// its text, else the question count and time.
+    @ViewBuilder
+    private func rowSecondLine(detail: String, snippet: ChatSnippet?) -> some View {
+        if let snippet {
+            ChatSnippetText(snippet: snippet)
+        } else {
+            Text(detail)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     /// `⌘K` on a row: its actions, over the foot of the rail.
@@ -422,5 +504,16 @@ struct AIChatRail: View {
         .padding(House.Spacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chat actions")
+    }
+}
+
+/// The open chat's mark in the rail: a short ink bar on the row's leading
+/// edge. Ink, not colour, and apart from the keyboard highlight's fill.
+private struct OpenChatMarker: View {
+    var body: some View {
+        Capsule(style: .continuous)
+            .fill(AQDesign.ColorToken.textPrimary)
+            .frame(width: House.Spacing.xxs / 2, height: House.Control.keyCap)
+            .accessibilityHidden(true)
     }
 }

@@ -169,6 +169,9 @@ import Observation
     struct ThreadScrollRequest: Equatable, Sendable {
         enum Target: Equatable, Sendable {
             case messageTop(UUID)
+            /// Find in Chat: the hit `y` points below the message's head,
+            /// as the thread measured it, a third of the way down the view.
+            case messageOffset(UUID, CGFloat)
             case pageUp
             case pageDown
             case top
@@ -1198,14 +1201,21 @@ import Observation
     /// Every chat, pinned first, newest next, as launcher items.
     var conversationItems: [LauncherCatalogItem] { chatItems(matching: "") }
 
+    /// The folded text of every chat, for the chat lists' search
+    /// (`QuickViewModel+ChatSearch.swift`).
+    @ObservationIgnored let chatSearchIndex = ChatSearchIndex()
+
     /// The rows of every chat list (the Chats catalog, Recent Chats, the AI
-    /// Chat rail): one order and one search, title and message text.
+    /// Chat rail): one search (`ChatSearch`), ranked while a query is typed,
+    /// with a snippet on rows found by their text. Read once per query: a
+    /// render that reads the rows again gets the cached rows.
     func chatItems(matching query: String) -> [LauncherCatalogItem] {
-        QuickHistoryStore.matching(history, query: query, title: title(of:)).map(conversationItem)
+        searchedChatItems(matching: query)
     }
 
-    /// One chat as a launcher row: its title, question count, and time.
-    private func conversationItem(_ conversation: QuickConversation) -> LauncherCatalogItem {
+    /// One chat as a launcher row: its title, question count, and time,
+    /// and the snippet when a search found it by its text.
+    func conversationItem(_ conversation: QuickConversation, snippet: ChatSnippet? = nil) -> LauncherCatalogItem {
         let turns = conversation.messages.filter { $0.role == .user }.count
         let stamp = conversation.updatedAt.formatted(date: .abbreviated, time: .shortened)
         let count = turns == 1 ? "1 question" : "\(turns) questions"
@@ -1217,7 +1227,8 @@ import Observation
             detail: "\(count) · \(stamp)",
             value: conversation.lastAnswer ?? "",
             keywords: conversation.isPinned ? "pinned" : "",
-            isPinned: conversation.isPinned
+            isPinned: conversation.isPinned,
+            chatSnippet: snippet
         )
     }
 
@@ -8207,7 +8218,7 @@ import Observation
     func scrollThread(_ target: ThreadScrollRequest.Target) {
         switch target {
         case .bottom: isThreadFollowingBottom = true
-        case .top, .pageUp, .messageTop: isThreadFollowingBottom = false
+        case .top, .pageUp, .messageTop, .messageOffset: isThreadFollowingBottom = false
         case .pageDown: break
         }
         threadScrollRequest = ThreadScrollRequest(

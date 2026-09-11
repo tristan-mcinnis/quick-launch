@@ -18,6 +18,15 @@ struct MarkdownTextView: View {
     /// Scopes every control inside the answer, so two answers' Copy buttons
     /// are never the same accessibility element.
     var instanceID = "answer"
+    /// Find in Chat: each segment's hits (by segment id), drawn in the
+    /// hover fill. Empty everywhere else.
+    var findRanges: [Int: [TextRange]] = [:]
+    /// The current hit, drawn in the selection fill.
+    var findCurrent: SegmentFindHit? = nil
+    /// The coordinate space the current hit is measured in (its message's),
+    /// and where the measure goes.
+    var findSpace: String? = nil
+    var onFindCurrentOffset: ((CGFloat) -> Void)? = nil
 
     /// Scroll target that keeps the newest streamed text at the bottom edge.
     private static let bottomAnchor = "answer-bottom-anchor"
@@ -56,12 +65,43 @@ struct MarkdownTextView: View {
 
     @ViewBuilder
     private func segmentView(_ segment: AnswerSegment, isLast: Bool) -> some View {
+        let current = findCurrent?.segment == segment.id ? findCurrent?.range : nil
         switch segment.content {
         case .prose(let source):
             // Only the final run carries the streaming caret.
-            ProseSegmentView(markdown: source, showsCaret: isStreaming && isLast)
+            ProseSegmentView(
+                markdown: source,
+                showsCaret: isStreaming && isLast,
+                highlights: findRanges[segment.id] ?? [],
+                current: current
+            )
+            .overlay(alignment: .topLeading) {
+                if let current, let findSpace, let onFindCurrentOffset {
+                    GeometryReader { proxy in
+                        FindHitMarker(
+                            rect: FindHitGeometry.proseRect(markdown: source, range: current, width: proxy.size.width),
+                            space: findSpace,
+                            onOffset: onFindCurrentOffset
+                        )
+                    }
+                }
+            }
         case .code(let content):
-            CodeBlockView(content: content, instanceID: "\(instanceID)-\(segment.id)")
+            CodeBlockView(
+                content: content,
+                instanceID: "\(instanceID)-\(segment.id)",
+                findRanges: findRanges[segment.id] ?? [],
+                findCurrent: current
+            )
+            .overlay(alignment: .topLeading) {
+                if let current, let findSpace, let onFindCurrentOffset {
+                    FindHitMarker(
+                        rect: FindHitGeometry.codeRect(code: content.code, range: current),
+                        space: findSpace,
+                        onOffset: onFindCurrentOffset
+                    )
+                }
+            }
         }
     }
 
@@ -93,10 +133,15 @@ private struct StreamingCaret: View {
 private struct ProseSegmentView: NSViewRepresentable {
     let markdown: String
     let showsCaret: Bool
+    /// Find in Chat's hits in this run, and the current one.
+    var highlights: [TextRange] = []
+    var current: TextRange? = nil
 
     final class Coordinator {
         var shownMarkdown: String?
         var shownCaret = false
+        var shownHighlights: [TextRange] = []
+        var shownCurrent: TextRange?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -117,9 +162,12 @@ private struct ProseSegmentView: NSViewRepresentable {
 
     func updateNSView(_ textView: NSTextView, context: Context) {
         let coordinator = context.coordinator
-        if coordinator.shownMarkdown != markdown || coordinator.shownCaret != showsCaret {
+        if coordinator.shownMarkdown != markdown || coordinator.shownCaret != showsCaret
+            || coordinator.shownHighlights != highlights || coordinator.shownCurrent != current {
             coordinator.shownMarkdown = markdown
             coordinator.shownCaret = showsCaret
+            coordinator.shownHighlights = highlights
+            coordinator.shownCurrent = current
             textView.textStorage?.setAttributedString(renderedText())
         }
     }
@@ -141,13 +189,18 @@ private struct ProseSegmentView: NSViewRepresentable {
 
     private func renderedText() -> NSAttributedString {
         let rendered = MarkdownRenderer.cachedRender(markdown)
-        guard showsCaret else { return rendered }
+        guard showsCaret || !highlights.isEmpty || current != nil else { return rendered }
         let text = NSMutableAttributedString(attributedString: rendered)
-        // The streaming caret is house ink at the prose size.
-        text.append(NSAttributedString(string: "\u{258B}", attributes: [
-            .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
-            .foregroundColor: House.NSColorToken.textPrimary,
-        ]))
+        // Find in Chat: every hit in the hover fill, the current one in the
+        // selection fill. Ink, never colour.
+        FindHitGeometry.addHighlights(highlights, current: current, to: text)
+        if showsCaret {
+            // The streaming caret is house ink at the prose size.
+            text.append(NSAttributedString(string: "\u{258B}", attributes: [
+                .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
+                .foregroundColor: House.NSColorToken.textPrimary,
+            ]))
+        }
         return text
     }
 
@@ -160,5 +213,107 @@ private struct ProseSegmentView: NSViewRepresentable {
         let caretLine = (caretFont.ascender - caretFont.descender + caretFont.leading)
             .rounded(.up)
         return measured + caretLine
+    }
+}
+
+// MARK: - Find in Chat
+
+/// The current find hit inside an answer: which segment, which range.
+struct SegmentFindHit: Equatable {
+    let segment: Int
+    let range: TextRange
+}
+
+/// Where find hits sit in drawn text, and how they are painted.
+enum FindHitGeometry {
+    /// Paints the hits on `text`: the hover fill on each, the selection
+    /// fill on the current one. Ranges past the end are dropped.
+    static func addHighlights(_ ranges: [TextRange], current: TextRange?, to text: NSMutableAttributedString) {
+        let length = text.length
+        for range in ranges {
+            guard let range = range.clamped(toLength: length) else { continue }
+            text.addAttribute(.backgroundColor, value: House.NSColorToken.hoverFill, range: range.nsRange)
+        }
+        if let current = current?.clamped(toLength: length) {
+            text.addAttribute(.backgroundColor, value: House.NSColorToken.selectionFill, range: current.nsRange)
+        }
+    }
+
+    /// Plain text (a code block, a question pill) with the hits painted the
+    /// same way, for a SwiftUI `Text`. Plain text when there are none.
+    static func highlighted(_ string: String, ranges: [TextRange], current: TextRange?) -> AttributedString {
+        var text = AttributedString(string)
+        guard !ranges.isEmpty || current != nil else { return text }
+        let length = (string as NSString).length
+        for range in ranges {
+            guard let clamped = range.clamped(toLength: length),
+                  let span = Range(clamped.nsRange, in: text) else { continue }
+            text[span].backgroundColor = AQDesign.ColorToken.hoverFill
+        }
+        if let clamped = current?.clamped(toLength: length), let span = Range(clamped.nsRange, in: text) {
+            text[span].backgroundColor = AQDesign.ColorToken.selectionFill
+        }
+        return text
+    }
+
+    /// The hit's rectangle in a prose run laid out `width` wide, from the
+    /// layout manager, as the text view lays it out.
+    @MainActor static func proseRect(markdown: String, range: TextRange, width: CGFloat) -> CGRect {
+        rect(of: range, in: MarkdownRenderer.cachedRender(markdown), width: width)
+    }
+
+    /// The hit's rectangle in plain text set in `font`, `width` wide (a
+    /// question pill).
+    static func plainRect(text: String, font: NSFont, range: TextRange, width: CGFloat) -> CGRect {
+        rect(of: range, in: NSAttributedString(string: text, attributes: [.font: font]), width: width)
+    }
+
+    /// The hit's rectangle in a code block: its line, under the header.
+    /// Long lines scroll sideways, so only the line counts.
+    static func codeRect(code: String, range: TextRange) -> CGRect {
+        let prefix = (code as NSString).substring(to: min(range.location, (code as NSString).length))
+        let line = prefix.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        return CGRect(
+            x: CodeBlockMetrics.bodyHorizontalPadding,
+            y: CodeBlockMetrics.chromeHeight + CodeBlockMetrics.bodyVerticalPadding
+                + CGFloat(line) * CodeBlockMetrics.lineHeight,
+            width: AQDesign.hairline,
+            height: CodeBlockMetrics.lineHeight
+        )
+    }
+
+    private static func rect(of range: TextRange, in text: NSAttributedString, width: CGFloat) -> CGRect {
+        guard width > 0, let range = range.clamped(toLength: text.length) else { return .zero }
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        let glyphs = layout.glyphRange(forCharacterRange: range.nsRange, actualCharacterRange: nil)
+        return layout.boundingRect(forGlyphRange: glyphs, in: container)
+    }
+}
+
+/// An invisible mark where the current find hit sits. It reports how far
+/// the hit is below the origin of `space` (its message), so the thread can
+/// scroll the hit, not the message's head, into view.
+struct FindHitMarker: View {
+    let rect: CGRect
+    let space: String
+    let onOffset: (CGFloat) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: max(rect.width, AQDesign.hairline), height: max(rect.height, AQDesign.hairline))
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .named(space)).minY
+            } action: { offset in
+                onOffset(offset)
+            }
+            .padding(.leading, max(0, rect.minX))
+            .padding(.top, max(0, rect.minY))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }

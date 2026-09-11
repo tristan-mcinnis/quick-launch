@@ -451,44 +451,226 @@ struct AIChatWindowTests {
         #expect(rig.window.renamingChatID == nil)
     }
 
+    @Test func aRailSearchIsOneRankedResultsListWithSnippets() throws {
+        let rig = makeRig()
+        let pinned = conversation("Old notes", answer: "The kyoto budget, in short.", pinned: true, age: 60)
+        let title = conversation("Kyoto trip", answer: "Temples.", age: 86_400 * 3)
+        let body = conversation("Spring plans", answer: "Kyoto in spring is busy.", age: 30)
+        rig.launcher.history = [pinned, title, body]
+        rig.window.showRail()
+        #expect(!rig.window.isRailSearching)
+        #expect(rig.window.pinnedRailItems.map(\.title) == ["Old notes"])
+
+        rig.window.railQuery = "kyoto"
+        #expect(rig.window.isRailSearching, "Pinned and Recent give way to Results")
+        #expect(rig.window.pinnedRailItems.isEmpty)
+        #expect(rig.window.recentRailItems.isEmpty)
+        let items = rig.window.railItems
+        #expect(items.map(\.title) == ["Kyoto trip", "Old notes", "Spring plans"],
+                "the title hit first; the pin is only a small boost")
+        #expect(items[1].isPinned, "a pinned row keeps its glyph")
+        #expect(rig.window.railSnippet(for: items[0]) == nil, "a title hit needs no snippet")
+        let snippet = try #require(rig.window.railSnippet(for: items[2]))
+        #expect(snippet.label == "Answer:")
+        #expect(snippet.runs.filter(\.isMatch).map(\.text) == ["Kyoto"])
+        // ⌘1…⌘9 follow the drawn order.
+        #expect(rig.window.handleKeyEquivalent(characters: "3", keyCode: 20, modifiers: [.command]))
+        #expect(rig.chat.currentConversation?.id == body.id)
+        // One letter is not a search.
+        rig.window.railQuery = "k"
+        #expect(!rig.window.isRailSearching)
+        #expect(rig.window.railItems.count == 3)
+    }
+
+    @Test func theOpenChatIsMarkedApartFromTheHighlightAndCommandShowsNumbers() {
+        let rig = makeRig()
+        let a = conversation("Alpha", answer: "A.", age: 30)
+        let b = conversation("Beta", answer: "B.", age: 60)
+        rig.launcher.history = [a, b]
+        rig.window.open(handoff: nil)
+        rig.window.showRail()
+        rig.window.moveRailSelection(1)
+        #expect(rig.window.highlightedRailItem?.title == "Beta")
+        #expect(rig.window.openChatItemID == a.id.uuidString, "the open chat is Alpha, not the highlight")
+        #expect(rig.window.railNumber(at: 0) == 1)
+        #expect(rig.window.railNumber(at: 8) == 9)
+        #expect(rig.window.railNumber(at: 9) == nil)
+        #expect(!rig.window.isCommandHeld)
+        rig.window.isCommandHeld = true
+        #expect(rig.window.isCommandHeld)
+        #expect(rig.window.railDetail(for: rig.window.railItems[0]).hasPrefix("1 question · "))
+    }
+
+    @Test func theRowContextMenuPinsRenamesAndDeletesThatRow() throws {
+        let rig = makeRig()
+        let a = conversation("Alpha", answer: "A.", age: 30)
+        let b = conversation("Beta", answer: "B.", age: 60)
+        let c = conversation("Gamma", answer: "C.", age: 90)
+        rig.launcher.history = [a, b, c]
+        rig.window.open(handoff: nil)
+        rig.window.showRail()
+        #expect(rig.window.highlightedRailItem?.title == "Alpha")
+        let gamma = try #require(rig.window.railItems.first { $0.title == "Gamma" })
+        #expect(rig.window.title(of: .pin, for: gamma) == "Pin Chat")
+
+        // The menu acts on its own row, not on the highlighted one.
+        rig.window.performRailAction(.pin, itemID: gamma.itemID)
+        #expect(rig.chat.history.first { $0.id == c.id }?.isPinned == true)
+        #expect(rig.window.highlightedRailItem?.title == "Gamma")
+        #expect(rig.window.title(of: .pin, for: rig.window.highlightedRailItem) == "Unpin Chat")
+
+        // Delete twice, as everywhere.
+        rig.window.performRailAction(.delete, itemID: b.id.uuidString)
+        #expect(rig.chat.history.contains { $0.id == b.id })
+        let beta = try #require(rig.window.railItems.first { $0.itemID == b.id.uuidString })
+        #expect(rig.window.title(of: .delete, for: beta) == "Press Again to Delete")
+        rig.window.performRailAction(.delete, itemID: b.id.uuidString)
+        #expect(!rig.chat.history.contains { $0.id == b.id })
+
+        rig.window.performRailAction(.rename, itemID: a.id.uuidString)
+        #expect(rig.window.renamingChatID == a.id)
+        #expect(rig.window.focus == .rename)
+    }
+
+    @Test func theEmptyRailSaysWhyItIsEmpty() {
+        let rig = makeRig { $0.historyEnabled = false }
+        rig.window.open(handoff: nil)
+        rig.window.showRail()
+        #expect(rig.window.railItems.isEmpty)
+        #expect(rig.window.railEmptyText == "Chat history is off")
+        rig.window.railQuery = "anything"
+        #expect(rig.window.railEmptyText == "No chats match")
+        let on = makeRig()
+        #expect(on.window.railEmptyText == "No chats yet")
+    }
+
     // MARK: - Find in chat
 
-    @Test func findMovesNextAndPreviousAndOpensAFoldedQuestion() async throws {
+    @Test func findCountsHitsAndMovesAcrossMessagesAndOpensAFoldedQuestion() async throws {
         let rig = makeRig()
         rig.window.open(handoff: nil)
-        let long = String(repeating: "A long question about kyoto temples and old gardens. ", count: 30)
-        await ask(rig.chat, rig.service, long, reply: "Kyoto is lovely in spring.")
+        let long = String(repeating: "A long question about temples and old gardens. ", count: 30) + "Is kyoto best?"
+        await ask(rig.chat, rig.service, long, reply: "Kyoto is lovely in spring. Kyoto has maples too.")
         await ask(rig.chat, rig.service, "and in autumn?", reply: "Autumn in Kyoto has maples.")
         let messages = rig.chat.conversationMessages
         #expect(rig.chat.collapseState(for: messages[0]).isCollapsible)
+        #expect(!rig.chat.collapseState(for: messages[0]).displayedText.contains("kyoto"), "the hit is past the preview")
 
         #expect(rig.window.handleKeyEquivalent(characters: "f", keyCode: 3, modifiers: [.command]))
         #expect(rig.window.isFindPresented)
         #expect(rig.window.focus == .find)
         rig.window.findQuery = "KYOTO"
-        #expect(rig.window.findMatches == [messages[0].id, messages[1].id, messages[3].id])
+        // Hits, not messages: one in the question, two in the first answer,
+        // one in the last.
+        #expect(rig.window.findHits.map(\.messageID) == [messages[0].id, messages[1].id, messages[1].id, messages[3].id])
+        #expect(rig.window.findHits.map(\.part) == [.question, .segment(0), .segment(0), .segment(0)])
+        #expect(rig.window.findStatus == "1 of 4")
         #expect(rig.window.currentMatchID == messages[0].id)
-        #expect(rig.window.findStatus == "1 of 3")
-        #expect(rig.chat.expandedTranscriptMessageIDs.contains(messages[0].id), "a folded match opens")
-        #expect(rig.chat.threadScrollRequest?.target == .messageTop(messages[0].id))
+        #expect(rig.chat.expandedTranscriptMessageIDs.contains(messages[0].id), "a folded question with the hit opens")
+        #expect(rig.chat.threadScrollRequest?.target == .messageOffset(messages[0].id, 0),
+                "the hit, not the message's head, is what the thread scrolls to")
 
-        #expect(rig.window.handleReturn(), "↩ is the next match")
-        #expect(rig.window.currentMatchID == messages[1].id)
+        #expect(rig.window.handleReturn(), "↩ is the next hit")
+        #expect(rig.window.currentHit?.messageID == messages[1].id)
+        #expect(rig.window.currentHit?.range == TextRange(location: 0, length: 5))
         #expect(rig.window.handleKeyEquivalent(characters: "g", keyCode: 5, modifiers: [.command]))
-        #expect(rig.window.currentMatchID == messages[3].id)
-        #expect(rig.window.handleShiftReturn() == .handled, "⇧↩ is the previous match")
-        #expect(rig.window.currentMatchID == messages[1].id)
-        rig.window.findPrevious()
-        rig.window.findPrevious()
-        #expect(rig.window.currentMatchID == messages[3].id, "it wraps")
+        #expect(rig.window.currentHit?.messageID == messages[1].id, "the second hit in the same answer")
+        #expect(rig.window.currentHit?.range == TextRange(location: 27, length: 5))
+        #expect(rig.window.findStatus == "3 of 4")
+        rig.window.findNext()
+        #expect(rig.window.currentHit?.messageID == messages[3].id)
+        #expect(rig.window.handleShiftReturn() == .handled, "⇧↩ is the previous hit")
+        #expect(rig.window.findStatus == "3 of 4")
+        rig.window.findNext()
+        rig.window.findNext()
+        #expect(rig.window.currentMatchID == messages[0].id, "it wraps")
 
         rig.window.findQuery = "nothing like this"
         #expect(rig.window.findStatus == "No matches")
         #expect(rig.window.currentMatchID == nil)
+        #expect(rig.window.findHighlights == nil)
 
         #expect(rig.window.handleEscape())
         #expect(!rig.window.isFindPresented, "esc closes the bar")
         #expect(rig.window.focus == .composer)
+    }
+
+    @Test func findMatchesTheRenderedTextNotTheMarkdown() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        let answer = """
+        **Build** the app on _Thursday_. See [the notes](https://example.com/secret-plan) first.
+
+        ```swift
+        let build = Build()
+        print(build)
+        ```
+
+        Then ship.
+        """
+        await ask(rig.chat, rig.service, "the plan?", reply: answer)
+        let answerID = try #require(rig.chat.conversationMessages.last?.id)
+        rig.window.openFind()
+
+        // Across bold: the reader sees "Build the".
+        rig.window.findQuery = "build the"
+        #expect(rig.window.findHits.count == 1)
+        #expect(rig.window.findHits.first?.part == .segment(0))
+        #expect(rig.window.findHits.first?.range == TextRange(location: 0, length: 9))
+
+        // Markdown syntax and a link's hidden target never match.
+        for syntax in ["**", "_Thursday_", "secret-plan", "example.com", "```"] {
+            rig.window.findQuery = syntax
+            #expect(rig.window.findHits.isEmpty, "\(syntax) is not drawn")
+        }
+        // The link's text is drawn, so it matches.
+        rig.window.findQuery = "the notes"
+        #expect(rig.window.findHits.count == 1)
+
+        // Code blocks are searched in their own text: "build" is twice in
+        // the code and once in the prose.
+        rig.window.findQuery = "build"
+        let hits = rig.window.findHits
+        #expect(hits.count == 4)
+        #expect(hits.map(\.part) == [.segment(0), .segment(1), .segment(1), .segment(1)])
+        #expect(hits.allSatisfy { $0.messageID == answerID })
+        rig.window.findNext()
+        #expect(rig.window.currentHit?.part == .segment(1), "next moves into the code block")
+        let highlights = try #require(rig.window.findHighlights)
+        #expect(highlights.segmentRanges(in: answerID)[1]?.count == 3)
+        #expect(highlights.current(in: answerID)?.part == .segment(1))
+
+        // Accents and width fold, as in the chat search.
+        rig.window.findQuery = "ＴＨＵＲＳＤＡＹ"
+        #expect(rig.window.findHits.count == 1)
+    }
+
+    @Test func aMeasuredHitScrollsAgainOnlyWhenItMoved() async throws {
+        let rig = makeRig()
+        rig.window.open(handoff: nil)
+        await ask(rig.chat, rig.service, "question", reply: "one match here, and a match there")
+        rig.window.openFind()
+        rig.window.findQuery = "match"
+        let hit = try #require(rig.window.currentHit)
+        #expect(rig.chat.threadScrollRequest?.target == .messageOffset(hit.messageID, 0))
+        let revision = rig.chat.threadScrollRequest?.revision
+
+        // The thread measured the hit 120 points under the message's head.
+        rig.window.noteFindHitOffset(120, for: hit)
+        #expect(rig.chat.threadScrollRequest?.target == .messageOffset(hit.messageID, 120))
+        let measured = rig.chat.threadScrollRequest?.revision
+        #expect(measured != revision)
+        // The same measure again does not scroll again.
+        rig.window.noteFindHitOffset(120, for: hit)
+        #expect(rig.chat.threadScrollRequest?.revision == measured)
+        // A hit that is not current never scrolls.
+        let other = try #require(rig.window.findHits.last)
+        rig.window.noteFindHitOffset(300, for: other)
+        #expect(rig.chat.threadScrollRequest?.revision == measured)
+        // Back on a hit that was measured, the scroll uses the measure.
+        rig.window.findNext()
+        rig.window.findPrevious()
+        #expect(rig.chat.threadScrollRequest?.target == .messageOffset(hit.messageID, 120))
     }
 
     // MARK: - The multi-line composer
