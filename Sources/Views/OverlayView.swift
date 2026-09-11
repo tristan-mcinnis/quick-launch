@@ -1111,10 +1111,15 @@ private struct QuickActionPalette: View {
                 EmptyView()
             }
         case .prompt(let action):
+            // An assistant row picks the assistant for the chat; every other
+            // row runs its prompt on the text.
             paletteRow(
-                symbol: action.outputBehavior == .replaceSelection ? "text.cursor" : "sparkles",
+                symbol: action.isAssistant
+                    ? ResultAction.changeAssistant.systemImage
+                    : (action.outputBehavior == .replaceSelection ? "text.cursor" : "sparkles"),
                 title: action.name,
-                detail: "\(viewModel.settings.savedPromptPrefix)\(action.alias) · \(action.outputBehavior.displayName)"
+                detail: "\(viewModel.settings.savedPromptPrefix)\(action.alias) · "
+                    + (action.isAssistant ? "Assistant" : action.outputBehavior.displayName)
             ) {
                 if let hotkey = action.hotkey {
                     KeyCapGroup(keys: hotkey.keyCaps)
@@ -1373,6 +1378,10 @@ struct ComposerKeyRouting: ViewModifier {
         }
         if viewModel.isModelChooserPresented {
             viewModel.moveModelChooserSelection(delta)
+            return .handled
+        }
+        if viewModel.isAssistantChooserPresented {
+            viewModel.moveAssistantChooserSelection(delta)
             return .handled
         }
         if viewModel.isAddContextMenuPresented {

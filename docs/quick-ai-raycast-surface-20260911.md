@@ -69,6 +69,12 @@ surface is fixed and never measures its content. A catalog with a detail pane
   `textSecondary`. Title falls back to the first user
   message, truncated middle, one line. Before the first answer the title is
   "Quick AI".
+- In an assistant chat (v1.5.0, plan Phase D) the model line starts with the
+  assistant's name in `TypeToken.metadata` `textPrimary`, a `textTertiary`
+  middle dot, then the model: "Vault researcher · DeepSeek V4.1 Flash". The
+  name is its own button for Change Assistant (`⌥⌘A`); the model stays the
+  Change Model button. Chosen over a chip before the title: a 28 pt chip does
+  not fit the 13 pt title line, and the prefix keeps the header two lines.
 - Right: an `arrow.up.right.square` (expand) glyph button, same size, inset
   `Spacing.lg`. Raycast draws a boxed up-right arrow; this is the nearest SF
   Symbol, at `TypeToken.glyphMedium` (16 semibold) in `textPrimary`. The back

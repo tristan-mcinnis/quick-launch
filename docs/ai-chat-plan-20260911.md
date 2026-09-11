@@ -27,6 +27,7 @@ design. The window section below is the corrected one.
 | v1.4.1 | DeepSeek on `deepseek-flash`, the only flash id the DeepSeek API lists. It is DeepSeek V4.1 Flash, it reads images (tested), and it is the id pi uses. `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` were aliases of it; settings migrated (configuration version 24). |
 | v1.5.0 | Phase A1 (items 1, 2, 6, 7, 8, 9, 10, 12, 15): answers never collapse; Show more and Collapse scroll the head to the top; the threshold is measured at the thread's width; Recent Chats search; cleaned-up titles; state-aware placeholder; Copy Answer stays open, Copy Chat (`⌥⌘C`); empty-state hints; the model line opens the chooser |
 | v1.5.0 | Phase E: Continue in pi (`⌥⌘P`, and `⌘K`): the thread as Markdown in `pi-handoff/`, a detached tmux session `ql-<id>` running `pi @<file>`, and a Ghostty window attached to it |
+| v1.5.0 | Phase D: assistants. A saved prompt with instructions and no command is an assistant; `/alias` alone, `⌘K` › Change Assistant (`⌥⌘A`), or its hotkey picks it for the chat; instructions and context skills lead the system message; its tools are written to the chat's `enabledTools` (the tools themselves are Phase C); Vault researcher and STE editor seeded |
 
 ## 2. Did v1.4.0 take liberties?
 

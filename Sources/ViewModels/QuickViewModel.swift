@@ -188,6 +188,9 @@ import Observation
     /// Test seam. When set, every provider resolves to this service.
     /// Production leaves it nil and builds a client per provider.
     var service: (any QuickService)?
+    /// The context skills the open assistant chat has loaded, so each chat
+    /// reads its skill files once (`assistantSystemMessage(for:)`).
+    @ObservationIgnored var assistantSkillCache: AssistantSkillCache?
     var selectedTextService: (any SelectedTextServicing)?
     var applicationCatalog: (any ApplicationCatalogServicing)?
     var launcherCatalog: (any LauncherCatalogServicing)?
@@ -2106,6 +2109,9 @@ import Observation
         if isModelChooserPresented {
             return ComposerAction(label: modelChooserPurpose.confirmTitle, keys: ["↩"])
         }
+        if isAssistantChooserPresented {
+            return ComposerAction(label: Self.assistantChooserConfirmTitle, keys: ["↩"])
+        }
         if isAddContextMenuPresented {
             return ComposerAction(label: Self.addContextConfirmTitle, keys: ["↩"])
         }
@@ -2301,6 +2307,11 @@ import Observation
             await runModelChooserSelection()
             return
         }
+        if isAssistantChooserPresented {
+            // Return in Change Assistant picks the assistant the keys are on.
+            runAssistantChooserSelection()
+            return
+        }
         if isAddContextMenuPresented {
             // Return in Add Context attaches the highlighted entry.
             await runAddContextSelection()
@@ -2483,6 +2494,7 @@ import Observation
         if isRecentChatsPresented { input = "" }
         isRecentChatsPresented = false
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         isActionPalettePresented = false
@@ -3167,6 +3179,7 @@ import Observation
             .searchWeb,
             .regenerate, .regenerateWithModel, .changeModel,
         ])
+        if !assistants.isEmpty { actions.append(.changeAssistant) }
         if isQuickAIPresented { actions.append(.tools) }
         actions.append(.newChat)
         if !history.isEmpty { actions.append(.chatHistory) }
@@ -3187,6 +3200,8 @@ import Observation
             selectionTarget.map { "Paste into \($0.applicationName)" }
         case .changeModel:
             "Using \(activeModelDisplay)"
+        case .changeAssistant:
+            activeAssistant.map { "Using \($0.name)" } ?? "No assistant"
         case .regenerateWithModel:
             "Run this question again on another model"
         case .openSource:
@@ -3236,6 +3251,10 @@ import Observation
             // Switching model mid-conversation sends nothing: the next
             // question simply goes to the new model.
             openModelChooser(.change)
+        case .changeAssistant:
+            // Nothing is sent either: the next question goes to the chat
+            // as the picked assistant.
+            openAssistantChooser()
         case .newChat:
             isActionPalettePresented = false
             startNewConversation()
@@ -3281,6 +3300,10 @@ import Observation
     /// True while the keyboard model chooser is open. ↑↓ move, Return picks,
     /// Escape closes. Opened by `⇧⌘R` and by Change Model.
     var isModelChooserPresented = false
+    /// ⌘K › Change Assistant (`⌥⌘A`): the keyboard list of assistants over
+    /// the Quick AI composer. ↑↓ move, Return picks, Escape closes.
+    var isAssistantChooserPresented = false
+    var assistantChooserIndex = 0
     var modelChooserPurpose: ModelChooserPurpose = .change
     var modelChooserIndex = 0
     var modelChooserOptions: [ModelChooserOption] = []
@@ -3302,6 +3325,7 @@ import Observation
         modelChooserPurpose = purpose
         modelChooserIndex = options.firstIndex { $0.model == activeModelID } ?? 0
         isModelChooserPresented = true
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         isApplicationActionPanePresented = false
@@ -3386,6 +3410,7 @@ import Observation
         isAddContextMenuPresented = true
         addContextIndex = 0
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         errorMessage = nil
@@ -4475,6 +4500,7 @@ import Observation
         guard !chipTransformOptions.isEmpty else { return }
         isTransformChooserPresented = true
         transformChooserIndex = 0
+        isAssistantChooserPresented = false
         isActionPalettePresented = false
         isApplicationActionPanePresented = false
         isCatalogActionPanePresented = false
@@ -4616,6 +4642,11 @@ import Observation
     var paletteResultActions: [ResultAction] {
         var actions = resultActions
         if isQuickAIPresented, !actions.contains(.tools) { actions.append(.tools) }
+        // Change Assistant is on the Quick AI surface before the first
+        // answer too: picking one is how an assistant chat starts.
+        if isQuickAIPresented, !assistants.isEmpty, !actions.contains(.changeAssistant) {
+            actions.append(.changeAssistant)
+        }
         guard !actionQuery.isEmpty else { return actions }
         return Self.rankByQuery(actions, query: actionQuery, title: \.title)
     }
@@ -4752,6 +4783,7 @@ import Observation
         case actionPalette
         case transformChooser
         case modelChooser
+        case assistantChooser
         case addContextMenu
         case recentChats
         case streaming
@@ -4771,6 +4803,7 @@ import Observation
         if isActionPalettePresented { return .actionPalette }
         if isTransformChooserPresented { return .transformChooser }
         if isModelChooserPresented { return .modelChooser }
+        if isAssistantChooserPresented { return .assistantChooser }
         if isAddContextMenuPresented { return .addContextMenu }
         if isRecentChatsPresented { return .recentChats }
         if isStreaming { return .streaming }
@@ -4802,6 +4835,8 @@ import Observation
             closeTransformChooser()
         case .modelChooser:
             closeModelChooser()
+        case .assistantChooser:
+            closeAssistantChooser()
         case .addContextMenu:
             closeAddContextMenu()
         case .recentChats:
@@ -4835,6 +4870,10 @@ import Observation
         guard input.isEmpty, !isItemActionPanePresented, !isActionPalettePresented else { return false }
         if isModelChooserPresented {
             closeModelChooser()
+            return true
+        }
+        if isAssistantChooserPresented {
+            closeAssistantChooser()
             return true
         }
         if isAddContextMenuPresented {
@@ -4931,6 +4970,16 @@ import Observation
                modifiers: modifiers
            ) {
             openActionPaletteSubmenu(.tools)
+            return true
+        }
+        // Change Assistant, too: picking one is how an assistant chat starts.
+        if isQuickAIPresented, !isItemActionPanePresented,
+           ResultAction.changeAssistant.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            toggleAssistantChooser()
             return true
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
@@ -5509,6 +5558,16 @@ import Observation
     }
 
     func perform(action: SavedPrompt) async {
+        // With nothing selected, an assistant is picked, not run: the
+        // palette row and its hotkey start or switch the Quick AI chat to
+        // it, and nothing is sent. With a selection it runs its prompt on
+        // the selection, as any saved prompt does.
+        if action.isAssistant, !hasSelectedActionSource {
+            isActionPalettePresented = false
+            actionQuery = ""
+            selectAssistant(action)
+            return
+        }
         let source: String
         // Explicit Screen Awareness selection, then text typed into the
         // launcher, then the launch-scoped background selection, then a fresh
@@ -5545,6 +5604,17 @@ import Observation
 
     func requestInputFocus() {
         inputFocusRequest &+= 1
+    }
+
+    /// Whether a saved action has selected text to work on: a source a
+    /// picker or hotkey stashed, an attached Screen Awareness selection, or
+    /// the launch selection chip. An assistant's alias alone, its palette
+    /// row, or its hotkey runs its prompt on that text instead of picking
+    /// the assistant.
+    var hasSelectedActionSource: Bool {
+        [pendingActionSource, pendingContext?.selectedText, launchSelection?.text].contains { text in
+            text.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+        }
     }
 
     func openAccessibilitySettings() {
@@ -5646,6 +5716,21 @@ import Observation
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
+
+        // An assistant's alias alone, with nothing selected, picks the
+        // assistant for the chat and sends nothing. With text after it, or
+        // with selected text, the alias is a transform like any other saved
+        // prompt, below.
+        if !hasSelectedActionSource, let assistant = SavedPromptResolver.assistant(
+            input: input,
+            prefix: settings.savedPromptPrefix,
+            savedPrompts: settings.savedPrompts
+        ) {
+            noteActedQuery(submittedInput)
+            input = ""
+            selectAssistant(assistant)
+            return nil
+        }
 
         // The launch-scoped selection is a single-use snapshot captured before
         // the overlay took focus. Read it once so every branch below uses the
@@ -5935,6 +6020,28 @@ import Observation
         let effectivePrompt = request.effectivePrompt
         let usedWebSearch = request.usedWebSearch
         let usedPageRead = request.usedPageRead
+        // A saved-prompt transform (`/alias text`) runs in a plain chat of
+        // its own: after an answer, and in an assistant chat, it starts one.
+        let startsNewChat = shouldStartNewConversation
+            || (action != nil && (isFollowUp || currentConversation?.assistantID != nil))
+        // A question runs as the open chat's assistant, the one the header
+        // names. When the new-chat interval moves it to a fresh chat, the
+        // assistant goes along. A transform never runs as an assistant.
+        let requestAssistant = action == nil ? activeAssistant : nil
+        let newChatID = UUID()
+        // The assistant's instructions and context skills, the skill files
+        // read once per chat.
+        var assistantSystem: String?
+        if let requestAssistant {
+            assistantSystem = await assistantSystemMessage(
+                requestAssistant,
+                conversationID: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID)
+            )
+        }
+        guard !Task.isCancelled else {
+            restoreEnrichmentInput()
+            return
+        }
 
         guard let provider = provider(
             for: usedWebSearch ? nil : action?.providerID,
@@ -5975,15 +6082,21 @@ import Observation
 
         // The tools chosen for the open chat carry into a chat this question
         // starts on its own (the new-chat interval, a saved-prompt follow-up).
-        let carriedTools = currentConversation?.enabledTools ?? pendingChatTools
-        if shouldStartNewConversation || (action != nil && isFollowUp) {
+        // An assistant's tools stay with the assistant: a transform that
+        // leaves an assistant chat starts from the defaults.
+        let carriedTools = requestAssistant == nil && activeAssistant != nil
+            ? pendingChatTools
+            : currentConversation?.enabledTools ?? pendingChatTools
+        if startsNewChat {
             startNewConversation()
         }
         if currentConversation == nil {
             currentConversation = QuickConversation(
+                id: newChatID,
                 providerID: provider.id,
                 model: model,
-                enabledTools: carriedTools
+                enabledTools: carriedTools ?? requestAssistant?.enabledTools,
+                assistantID: requestAssistant?.id
             )
             pendingChatTools = nil
         }
@@ -6007,6 +6120,11 @@ import Observation
         ]
         if (usedWebSearch || usedPageRead), !requestMessages.isEmpty {
             requestMessages[requestMessages.count - 1].content = effectivePrompt
+        }
+        // The system message rides this request only; the saved chat keeps
+        // the turns, and the assistant is looked up again next time.
+        if let assistantSystem {
+            requestMessages.insert(QuickMessage(role: .system, content: assistantSystem), at: 0)
         }
         input = ""
         // The question is a turn now; a stream failure rolls it back itself.
@@ -6913,6 +7031,7 @@ import Observation
         streamingStatus = nil
         // The card takes ↑↓ and Return, so no chooser stays open over it.
         isModelChooserPresented = false
+        isAssistantChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         // The composer was disabled while the model worked, so its focus
@@ -7270,8 +7389,12 @@ import Observation
     /// Whether the next question starts a fresh chat. "Always" and "Never"
     /// are not windows: one starts a new chat every time, the other keeps the
     /// thread until the user starts a new chat by hand.
-    private var shouldStartNewConversation: Bool {
-        guard let updatedAt = currentConversation?.updatedAt else { return false }
+    var shouldStartNewConversation: Bool {
+        guard let conversation = currentConversation else { return false }
+        // A picked assistant with nothing asked yet is the chat the next
+        // question starts, however long ago it was picked.
+        if conversation.messages.isEmpty, conversation.assistantID != nil { return false }
+        let updatedAt = conversation.updatedAt
         switch settings.newChatInterval {
         case .always:
             return true

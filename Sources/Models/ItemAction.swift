@@ -390,6 +390,8 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case regenerateWithModel
     /// `⌘⇧O`: make the picked model the active one, without answering again.
     case changeModel
+    /// `⌥⌘A`: start or switch the chat to an assistant, or back to a plain chat.
+    case changeAssistant
     case newChat
     case chatHistory
     case previousChat
@@ -419,6 +421,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .regenerate: "Regenerate Answer"
         case .regenerateWithModel: "Regenerate with Model…"
         case .changeModel: "Change Model"
+        case .changeAssistant: "Change Assistant"
         case .newChat: "New Chat"
         case .chatHistory: "Browse Chat History"
         case .previousChat: "Previous Chat"
@@ -445,6 +448,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .regenerate: "arrow.clockwise"
         case .regenerateWithModel: "arrow.clockwise.circle"
         case .changeModel: "cpu"
+        case .changeAssistant: "person.crop.circle"
         case .newChat: "plus.bubble"
         case .chatHistory: "clock.arrow.circlepath"
         case .previousChat: "chevron.left"
@@ -475,6 +479,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .regenerate: .command("r")
         case .regenerateWithModel: .commandShift("r")
         case .changeModel: .commandShift("o")
+        case .changeAssistant: .commandOption("a")
         case .newChat: .command("n")
         case .chatHistory: .command("h")
         case .previousChat: .command("[")

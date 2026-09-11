@@ -71,6 +71,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Command-K keyboard action picker with Paste, Copy, Copy & Paste, Edit, and guarded Delete for snippets, plus fuzzy slash aliases such as `/eml`
 - Empty Backspace leaves a nested catalogue, and inactive catalogue views return to the launcher root after 15 seconds
 - Editable action names, prompts, aliases, output behavior, provider, model, and global hotkey
+- Assistants: a saved AI command with Instructions is an assistant. Its alias alone (`/vault`, then Return), `⌘K` › Change Assistant (`⌥⌘A`), or its hotkey, with nothing selected, starts or switches the Quick AI chat to it: the header reads "Vault researcher · model", its instructions and context skills (read once from `~/.claude/skills`) lead the system message, its tools become the chat's tool set, and its pinned provider and model apply. The alias with text after it (`/vault pricing`), or the alias or hotkey with text selected, still runs its prompt as a one-shot command, in a plain chat of its own. When the new-chat interval starts a fresh chat, the assistant goes along. Two ship by default: Vault researcher (vault and memory tools, cites sources) and STE editor (no tools, ASD-STE100 rules)
 - Short follow-up threads and a local, bounded recent-history menu
 - On-demand conversation transcript plus Copy Result and Paste Back actions
 - Adjustable 10-second quick-reopen window for the last result or draft
@@ -258,6 +259,15 @@ For a saved action, open **Settings → Prompts**. Set its name, fuzzy alias,
 prompt, output behavior, optional global hotkey, and optional provider and
 model. An unpinned action uses the overlay's current model. Use `{selection}`
 inside the prompt to control where selected or typed text is inserted.
+
+The **Assistant** card under it turns the action into an assistant. Fill in
+**Instructions** (an action with a command cannot be one, so the field is off).
+Once it is an assistant, choose **Tools** (Chat defaults, or pick Memory,
+Vault, Skills, and Web search one by one), and add **Context skills** from the
+folders in `~/.claude/skills`. A skill that is
+no longer there is marked and skipped. The skills are read once per chat and
+go into the system message after the instructions, ahead of the app's own
+instruction.
 
 `Command+,`, the menu-bar Settings item, and the overlay Settings action all
 open the same settings interface. The main launcher shortcut is editable in
