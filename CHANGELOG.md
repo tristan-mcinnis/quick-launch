@@ -109,6 +109,16 @@ Consistency fixes, group G1: chat lists, the ⋯ menu, palette labels, dead code
 - **AI Chat as a fallback command keeps what you typed.** Unmatched text sent to the AI Chat fallback opens the window on a new chat with the text in its composer, unsent. It used to clear the text first. Run from its own row, the command still opens the last chat with an empty composer.
 - **`⌘K` stops calling chat actions "Answer".** New Chat, Recent Chats, Rename, Pin, Delete, Copy Chat, and Previous and Next Chat each say what they do to the chat; an action with nothing to add reads "Chat". Answer actions keep "Answer".
 - **Dead code out.** The old conversation view's `isConversationHistoryPresented` and `toggleConversationHistory` and their observer are gone, and the code comments no longer describe an "overlay answer".
+
+Attachment model seam, package WP-0 (`docs/attachments-and-search-spec-20260911.md` sections 3 and 5). Nothing you can see yet; the attachment work builds on it.
+
+- **A question can carry attachments.** `QuickMessage.attachments` holds one `ChatAttachmentRef` per file, link, image, or selection, in the order added (`attachmentRefs` is the list, empty when there are none). `content` stays what was typed.
+- **History keeps a reference, never the text.** A reference holds the kind, the name, the size, the page and character counts, how it was cut, a SHA-256 of the source, and the file path or final URL. The extracted text is not in it, so it cannot reach `chat-history.json`.
+- **Images keep no source.** An image or screenshot reference keeps its name and pixel size only. The init and the decoder both drop any path, hash, or URL, so no reference points back to the pixels.
+- **One table of caps.** `AttachmentLimits` holds every number from the spec: 10 attachments and 6 images a message, 50 MB documents, 20 MB images, 5 MB text files, 200,000 characters an attachment and 400,000 a message, the page, slide, sheet, ZIP, link, time, budget, and cache caps.
+- **One wording for a cut.** `AttachmentTruncation` says what was kept ("first 200,000 of 612,000 characters, pages 1-120 of 300") for the chip, and the same facts as a `[Truncated: ...]` line for the model.
+- **Tests.** `QuickMessageCodingTests`: a history file written before attachments loads; a chat with attachments round-trips through the history file; a message without attachments writes no key; a chat with a 50,000-character attachment saves under 2 KB with no word of its text; image references drop their source on init and on load; the truncation lines and the caps are pinned.
+
 ## v1.4.1 — 2026-09-11
 
 - **DeepSeek runs on `deepseek-flash`.** The DeepSeek API now lists only `deepseek-flash` (DeepSeek V4.1 Flash) and `deepseek-v4-pro`; `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are aliases of the flash model. v1.4.0 moved Quick AI to the `deepseek-v4-flash` alias; this release uses the real id for text and for images (it reads them), the same id pi uses. Settings migrate at configuration version 24: the DeepSeek selection, the Quick AI default, the vision route, and any saved prompt on either alias move to `deepseek-flash`, and both aliases leave the provider's model list. Another explicit choice, such as `deepseek-v4-pro`, stays.
