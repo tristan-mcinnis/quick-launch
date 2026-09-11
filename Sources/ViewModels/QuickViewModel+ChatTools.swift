@@ -6,6 +6,16 @@ enum ActionPaletteSubmenu: Equatable, Sendable {
     case tools
     /// The answer's sources, each opened with Return.
     case sources
+    /// Every question and answer of the chat, newest first; Return copies
+    /// the row's message, or captures it to memory.
+    case messages(MessagePaletteAction)
+}
+
+/// What Return does to a message in `⌘K` › Copy Message or Capture Message
+/// to Memory.
+enum MessagePaletteAction: String, Equatable, Sendable {
+    case copy
+    case capture
 }
 
 /// Tools inside the chat: which ones a chat lets the model call, the lines
@@ -157,17 +167,87 @@ extension QuickViewModel {
         }
     }
 
+    // MARK: - Any message (⌘K › Copy Message, Capture Message to Memory)
+
+    /// The messages those two lists offer: every question and answer of the
+    /// open chat, newest first. A model's question card is not text to copy.
+    var paletteMessages: [QuickMessage] {
+        conversationMessages
+            .filter { $0.role != .system && $0.askUserQuestion == nil }
+            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .reversed()
+    }
+
+    /// Message rows in the palette, narrowed by its search field: every
+    /// word typed is in the message, case and accents ignored.
+    var paletteMessageRows: [QuickMessage] {
+        let words = FuzzyMatcher.fold(actionQuery).split(separator: " ")
+        guard !words.isEmpty else { return paletteMessages }
+        return paletteMessages.filter { message in
+            let text = FuzzyMatcher.fold(message.content)
+            return words.allSatisfy { text.contains($0) }
+        }
+    }
+
+    /// A message row's title: its first line of text, trimmed.
+    static func messagePreview(_ message: QuickMessage) -> String {
+        let line = message.content
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        return line.count > 120 ? String(line.prefix(119)) + "…" : line
+    }
+
+    /// A message row's second line: whose it is.
+    func messageDetail(_ message: QuickMessage) -> String {
+        message.role == .user ? "Question" : "Answer"
+    }
+
+    /// Return on a message row.
+    func performMessageAction(_ action: MessagePaletteAction, on message: QuickMessage) async {
+        isActionPalettePresented = false
+        actionPaletteSubmenu = nil
+        actionQuery = ""
+        switch action {
+        case .copy:
+            copyMessage(message)
+        case .capture:
+            await captureToMemory(message.content, answerID: message.role == .assistant ? message.id : nil)
+        }
+    }
+
+    /// Copies one message of the chat. An answer is marked transient, as
+    /// every copy of an AI answer is; a question is the user's own text.
+    func copyMessage(_ message: QuickMessage) {
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if message.role == .user {
+            pasteboard.writeString(text)
+        } else {
+            pasteboard.writeTransientString(text)
+        }
+        markJustCopied()
+        confirmInComposer("Copied")
+        requestInputFocus()
+    }
+
     // MARK: - Capture to Memory
 
     /// Sends the answer on screen to `recall remember`. Only ever run by the
     /// user from `⌘K` or `⌥⌘M`; the model has no way to call it. A thread
     /// answer gets a checkmark line under it that stays with the chat.
     func captureAnswerToMemory() async {
-        let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let memoryCapture else { return }
         // The answer is named before the wait, so a chat changed meanwhile
         // never gets the line.
         let answerID = answerMessageIndex.flatMap { currentConversation?.messages[$0].id }
+        await captureToMemory(output, answerID: answerID)
+    }
+
+    /// Sends `content` to `recall remember`. An answer of the thread
+    /// (`answerID`) gets the checkmark line; a question does not.
+    func captureToMemory(_ content: String, answerID: UUID?) async {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let memoryCapture else { return }
         do {
             try await memoryCapture.remember(text)
         } catch {

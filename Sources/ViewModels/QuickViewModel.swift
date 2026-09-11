@@ -82,14 +82,25 @@ import Observation
     /// The tools chosen on the empty surface, before a chat exists. The chat
     /// the next question starts takes them; nil means the defaults.
     var pendingChatTools: Set<ChatToolKind>?
+    /// Change Model on the empty surface, before a chat exists: the chat the
+    /// next question starts takes it. Nil means the Quick AI default. Per
+    /// view: the other window never sees it.
+    var pendingModelChoice: ChatModelChoice?
     /// A second list inside the `⌘K` palette: the chat's tools, or the
     /// answer's sources. Escape returns to the full list.
     var actionPaletteSubmenu: ActionPaletteSubmenu?
     /// The thread's closing line after Continue in pi ("Opened in pi ·
-    /// tmux session ql-3fa9c1"). Like the search line it belongs to the
-    /// chat on screen: the next question, another chat, and a new chat
+    /// tmux session ql-3fa9c1"), or what happened to the chat on screen
+    /// ("This chat was deleted…", an answer stopped by a hand-off, a chat
+    /// that moved to the other view). Like the search line it belongs to
+    /// the chat on screen: the next question, another chat, and a new chat
     /// clear it, and it is never written to history.
     var threadNotice: String?
+    /// The glyph `threadNotice` is drawn with: the terminal for a pi
+    /// hand-off, an info mark for what happened to the chat.
+    var threadNoticeSymbol = QuickViewModel.piNoticeSymbol
+    static let piNoticeSymbol = "terminal"
+    static let chatNoticeSymbol = "info.circle"
     /// True while Continue in pi runs, so a second press waits for it.
     private(set) var isHandingOffToPi = false
     /// Short progress note from the service while streaming ("Searching
@@ -104,9 +115,14 @@ import Observation
         set { store.settings = newValue }
     }
     var updateState: UpdateState = .idle
+    /// Every write tells the other view on the store (`QuickStore`), so its
+    /// open chat follows at once.
     var history: [QuickConversation] {
         get { store.history }
-        set { store.history = newValue }
+        set {
+            store.history = newValue
+            store.historyDidChange(by: self)
+        }
     }
     /// Where chat history is kept on disk. The app passes the real
     /// `chat-history.json`; nil (the default, and every test) keeps history
@@ -313,6 +329,12 @@ import Observation
     /// not here.
     @ObservationIgnored weak var chatWindowHost: (any AIChatWindowHosting)?
     var isAIChatWindow: Bool { chatWindowHost != nil }
+    /// Set once the AI Chat window has opened. Its first open lands on the
+    /// most recent chat; after that it keeps what it holds.
+    @ObservationIgnored var hasOpenedAIChatWindow = false
+    /// VoiceOver announcements the view model makes itself ("Answer ready"
+    /// in AI Chat). Tests record them instead.
+    @ObservationIgnored var announce: (String) -> Void = { QuickAIAnnouncement.post($0, priority: .medium) }
     /// Screen History lives behind this one hook; the core only knows the
     /// catalog scope, the ⌘K form, and the pause/resume command.
     let screenHistory: ScreenHistoryController
@@ -512,6 +534,7 @@ import Observation
             // rankings so text hits appear without waiting for a keystroke.
             self?.invalidateLauncherRanking()
         }
+        self.store.register(self)
     }
 
     // MARK: - Submit
@@ -2237,6 +2260,7 @@ import Observation
     var quickAIEmptyStateHints: [String] {
         guard conversationMessages.isEmpty,
               !isStreaming,
+              threadNotice == nil,
               output.isEmpty,
               pendingQuestion == nil,
               lastQuestion == nil,
@@ -2319,14 +2343,44 @@ import Observation
         )
     }
 
-    var activeProvider: InferenceProvider? { settings.quickAIProvider }
+    /// The provider that answers the next text message: the open chat's
+    /// own, a pick made before the chat began, then the Quick AI default.
+    var activeProvider: InferenceProvider? {
+        if let choice = chatModelChoice,
+           let provider = settings.providers.first(where: { $0.id == choice.providerID }) {
+            return provider
+        }
+        return settings.quickAIProvider
+    }
 
     /// The id of the model that answers the next text message, or `nil`
     /// with no provider. What the chooser compares against; the header
     /// shows `activeModelDisplay`.
     var activeModelID: String? {
         guard let provider = activeProvider else { return nil }
-        return settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
+        return chatModelOverride(for: provider) ?? provider.selectedModel
+    }
+
+    /// The model is per chat. The open chat answers on the model it keeps
+    /// while that model is still offered (a chat written on a model since
+    /// turned off, the sunset vision id for one, falls back); before a chat
+    /// exists, a Change Model made on the empty surface. Nil leaves the
+    /// Quick AI default in Settings.
+    var chatModelChoice: ChatModelChoice? {
+        if let conversation = currentConversation,
+           !conversation.model.isEmpty,
+           settings.providers.contains(where: { $0.id == conversation.providerID }),
+           modelPreferences.isEnabled(providerID: conversation.providerID, model: conversation.model) {
+            return ChatModelChoice(providerID: conversation.providerID, model: conversation.model)
+        }
+        return pendingModelChoice
+    }
+
+    /// The model the next text message uses on `provider`: the chat's own
+    /// when it is on that provider, else the Quick AI default's override.
+    func chatModelOverride(for provider: InferenceProvider) -> String? {
+        if let choice = chatModelChoice, choice.providerID == provider.id { return choice.model }
+        return settings.quickAIModelOverride(for: provider.id)
     }
 
     /// The header's second line: the display name of the model that will
@@ -3163,7 +3217,7 @@ import Observation
             }
             if item.value == "awareness.area" {
                 if await attachScreenArea() {
-                    overlayPresenter.presentOverlay()
+                    overlayPresenter.restoreAfterExternalAction()
                 }
                 return
             }
@@ -3436,7 +3490,11 @@ import Observation
 
     /// Actions available on the answer on screen.
     var resultActions: [ResultAction] {
-        guard !isStreaming else { return [] }
+        // While an answer streams, Continue in pi is the one action: it stops
+        // the answer, keeps it, and hands the chat over.
+        guard !isStreaming else {
+            return piHandoff != nil && !conversationMessages.isEmpty ? [.continueInPi] : []
+        }
         let hasAnswer = !output.isEmpty
         // A question the thread holds without an answer (stopped before any
         // text, or a provider error) still offers ⌘R, and the chat actions.
@@ -3512,7 +3570,7 @@ import Observation
         case .tools:
             chatToolsSummary
         case .continueInPi:
-            "New tmux session in Ghostty"
+            isStreaming ? "Stop the answer, then open pi" : "New tmux session in Ghostty"
         case .continueInAIChat:
             "Open this chat in its own window"
         // Chat actions say what they do to the chat; one with nothing to
@@ -3713,16 +3771,19 @@ import Observation
         }
     }
 
-    /// Change Model, and the model half of `⇧⌘R`: the Quick AI surface
-    /// answers with this provider and model from here on, and the open
-    /// conversation records it. Nothing is sent.
+    /// Change Model, and the model half of `⇧⌘R`: the open chat answers
+    /// with this provider and model from here on, and keeps them in history.
+    /// Before a chat exists the pick waits for the chat the next question
+    /// starts. The Quick AI default in Settings, and the other window, are
+    /// left alone. Nothing is sent.
     func setActiveModel(providerID: UUID, model: String) {
-        settings.select(providerID: providerID, model: model)
-        settings.quickAIProviderID = providerID
-        settings.quickAIModel = model
-        settings.save()
-        currentConversation?.providerID = providerID
-        currentConversation?.model = model
+        if currentConversation != nil {
+            currentConversation?.providerID = providerID
+            currentConversation?.model = model
+            if !conversationMessages.isEmpty { persistCurrentConversation() }
+        } else {
+            pendingModelChoice = ChatModelChoice(providerID: providerID, model: model)
+        }
         modelRefreshMessage = nil
         NotificationCenter.default.post(name: .providerChanged, object: nil)
         noteInteraction()
@@ -3737,8 +3798,14 @@ import Observation
     }
     var addContextIndex = 0
 
-    /// The four capture paths, in the order the menu lists them.
-    var addContextOptions: [AddContextEntry] { AddContextEntry.allCases }
+    /// The four capture paths, in the order the menu lists them. The AI
+    /// Chat window has no app behind it: Focused Window and Selected Text
+    /// read the app that was in front before the window became key, and
+    /// leave the menu while no such app is known.
+    var addContextOptions: [AddContextEntry] {
+        guard isAIChatWindow, selectionTarget == nil else { return AddContextEntry.allCases }
+        return AddContextEntry.allCases.filter { !$0.needsPreviousApp }
+    }
 
     func openAddContextMenu() {
         guard !isStreaming else { return }
@@ -3795,7 +3862,9 @@ import Observation
         case .selectedText:
             _ = attachSelectedText()
         case .selectedArea:
-            await attachScreenArea()
+            // The capture hid the window; a good one brings it back, as a
+            // failed one already did.
+            if await attachScreenArea() { overlayPresenter.restoreAfterExternalAction() }
         case .entireScreen:
             await attachScreenshot(.display, clearingInput: false)
         }
@@ -5023,9 +5092,16 @@ import Observation
     var quickAISurfaceActions: [QuickAISurfaceAction] {
         // The AI Chat window offers its own: the chat list, find, and
         // Keep on Top.
-        if let chatWindowHost { return chatWindowHost.windowSurfaceActions }
-        guard isQuickAIPresented, !settings.quickAISize.isStandard else { return [] }
-        return [.resetSize]
+        if let chatWindowHost { return chatWindowHost.windowSurfaceActions + messageSurfaceActions }
+        guard isQuickAIPresented else { return [] }
+        return (settings.quickAISize.isStandard ? [] : [.resetSize]) + messageSurfaceActions
+    }
+
+    /// Copy Message and Capture Message to Memory, while the chat has a
+    /// message to act on: every question and answer, not only the newest.
+    var messageSurfaceActions: [QuickAISurfaceAction] {
+        guard isQuickAIPresented, !paletteMessages.isEmpty else { return [] }
+        return memoryCapture == nil ? [.copyMessage] : [.copyMessage, .captureMessage]
     }
 
     /// Surface actions after the palette's search filter, best match first.
@@ -5035,11 +5111,19 @@ import Observation
     }
 
     func performQuickAISurfaceAction(_ action: QuickAISurfaceAction) {
+        // Copy Message and Capture Message keep the palette, on its list of
+        // the chat's messages.
+        if action == .copyMessage || action == .captureMessage {
+            openActionPaletteSubmenu(.messages(action == .copyMessage ? .copy : .capture))
+            return
+        }
         isActionPalettePresented = false
         actionQuery = ""
         switch action {
         case .resetSize:
             resetQuickAISize()
+        case .copyMessage, .captureMessage:
+            return
         case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop:
             chatWindowHost?.performWindowSurfaceAction(action)
             // Find and the chat list take the focus themselves.
@@ -5104,6 +5188,7 @@ import Observation
         switch actionPaletteSubmenu {
         case .tools: paletteToolRows.count
         case .sources: paletteSourceRows.count
+        case .messages: paletteMessageRows.count
         case nil:
             paletteResultActions.count + paletteSurfaceActions.count
                 + paletteCommandMatches.count + actionMatches.count
@@ -5708,6 +5793,8 @@ import Observation
 
     func continueConversation(itemID: String) {
         guard let id = UUID(uuidString: itemID) else { return }
+        // One chat, one view: a chat the other view has open moves here.
+        takeChatFromOtherViews(id)
         closeItemActionPane()
         catalogScope = nil
         inputMode = nil
@@ -6678,7 +6765,7 @@ import Observation
                 for: provider,
                 override: submittedImage != nil
                     ? (settings.visionModel.isEmpty ? nil : settings.visionModel)
-                    : (action?.model ?? settings.quickAIModelOverride(for: provider.id))
+                    : (action?.model ?? chatModelOverride(for: provider))
               )
         else {
             restoreEnrichmentInput()
@@ -6726,6 +6813,7 @@ import Observation
                 assistantID: requestAssistant?.id
             )
             pendingChatTools = nil
+            pendingModelChoice = nil
         }
         currentConversation?.providerID = provider.id
         currentConversation?.model = model
@@ -6840,10 +6928,13 @@ import Observation
                         )
                     )
                     currentConversation?.updatedAt = Date()
-                    persistCurrentConversation()
+                    persistAnsweredConversation()
                     // The lines live on the answer now.
                     liveToolRecords = []
                     if usedWebSearch { webSearchNote = nil }
+                    // AI Chat is a window you read beside other work: a
+                    // VoiceOver user hears that the answer is in.
+                    if isAIChatWindow { announce(Self.answerReadyAnnouncement) }
                 }
                 recordJournal(
                     kind: output.isEmpty ? .aiFailed : .aiSucceeded,
@@ -6959,9 +7050,12 @@ import Observation
             QuickMessage(role: .assistant, content: output, toolRecords: records.isEmpty ? nil : records)
         )
         currentConversation?.updatedAt = Date()
-        persistCurrentConversation()
+        persistAnsweredConversation()
         liveToolRecords = []
     }
+
+    /// What VoiceOver says when an answer finishes in AI Chat.
+    static let answerReadyAnnouncement = "Answer ready"
 
     /// Return while an answer streams: queue what is typed. It stays in the
     /// composer ("Queued ↩") and is sent when the stream ends.
@@ -7257,7 +7351,7 @@ import Observation
     /// The model the Quick AI surface would send to for this provider.
     private func modelInUse(for provider: InferenceProvider) -> String? {
         guard activeProvider?.id == provider.id else { return provider.selectedModel }
-        return settings.quickAIModelOverride(for: provider.id) ?? provider.selectedModel
+        return chatModelOverride(for: provider) ?? provider.selectedModel
     }
 
     /// Whether this provider and model are the pair the surface would use
@@ -7371,11 +7465,11 @@ import Observation
            let provider = settings.providers.first(where: { $0.id == overrideID }) {
             return provider
         }
-        // A default model for the Quick AI surface only answers when nothing
-        // more specific applies: a saved action's own provider and an
-        // attachment's vision provider both win.
-        if overrideID == nil, settings.quickAIProviderID != nil {
-            return settings.quickAIProvider
+        // The open chat's model, then the Quick AI default, only answer when
+        // nothing more specific applies: a saved action's own provider and
+        // an attachment's vision provider both win.
+        if overrideID == nil {
+            return activeProvider
         }
         return settings.selectedProvider
     }
@@ -7599,18 +7693,31 @@ import Observation
 
     // MARK: - Continue in pi
 
+    /// The start of the pi line when the hand-off stopped an answer.
+    static let piStoppedAnswerPrefix = "Answer stopped. "
+
     /// Continue in pi (`⌥⌘P`): the thread goes to a new pi session in its
     /// own tmux session, and Ghostty opens on it (`PiHandoffService`). The
     /// surface stays open and the thread ends with a line naming the
     /// session. When Ghostty does not open, the session still runs and the
-    /// attach command is copied instead.
+    /// attach command is copied instead. An answer still streaming stops
+    /// first and keeps what arrived, as Escape does; pi gets it, and the
+    /// line says the answer was stopped.
     func continueInPi() async {
         isActionPalettePresented = false
+        guard piHandoff != nil,
+              currentConversation?.messages.isEmpty == false,
+              !isHandingOffToPi
+        else { return }
+        let stoppedAnswer = isStreaming
+        if stoppedAnswer {
+            cancel()
+            // The question too, when no text arrived to save it with.
+            persistCurrentConversation()
+        }
         guard let piHandoff,
               let conversation = currentConversation,
-              !conversation.messages.isEmpty,
-              !isStreaming,
-              !isHandingOffToPi
+              !conversation.messages.isEmpty
         else { return }
         isHandingOffToPi = true
         defer { isHandingOffToPi = false }
@@ -7624,13 +7731,20 @@ import Observation
             let result = try await piHandoff.handOff(request)
             // The line belongs to the chat that was handed off.
             if currentConversation?.id == conversation.id {
+                let stopped = stoppedAnswer ? Self.piStoppedAnswerPrefix : ""
                 if result.openedGhostty {
-                    threadNotice = "Opened in pi · tmux session \(result.sessionName)"
+                    setThreadNotice(
+                        stopped + "Opened in pi · tmux session \(result.sessionName)",
+                        symbol: Self.piNoticeSymbol
+                    )
                 } else {
                     // Plumbing the app wrote, not a copy the user keeps.
                     pasteboard.writeTransientString(result.attachCommand)
-                    threadNotice = "Started pi in tmux session \(result.sessionName) · "
-                        + "Ghostty did not open, attach command copied"
+                    setThreadNotice(
+                        stopped + "Started pi in tmux session \(result.sessionName) · "
+                            + "Ghostty did not open, attach command copied",
+                        symbol: Self.piNoticeSymbol
+                    )
                 }
             }
         } catch {
@@ -7965,6 +8079,7 @@ import Observation
             webSearchNote = nil
             liveToolRecords = []
             pendingChatTools = nil
+            pendingModelChoice = nil
             threadNotice = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
@@ -8316,9 +8431,10 @@ import Observation
 
     /// Whether the next question starts a fresh chat. "Always" and "Never"
     /// are not windows: one starts a new chat every time, the other keeps the
-    /// thread until the user starts a new chat by hand.
+    /// thread until the user starts a new chat by hand. The AI Chat window
+    /// is a chat you come back to: a follow-up there always stays in it.
     var shouldStartNewConversation: Bool {
-        guard let conversation = currentConversation else { return false }
+        guard !isAIChatWindow, let conversation = currentConversation else { return false }
         // A picked assistant with nothing asked yet is the chat the next
         // question starts, however long ago it was picked.
         if conversation.messages.isEmpty, conversation.assistantID != nil { return false }
@@ -8370,15 +8486,9 @@ import Observation
         openChatBase = history.first { $0.id == conversation.id }.map(StoredChatStamp.init)
         expandedTranscriptMessageIDs.removeAll()
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
-        // The chat's model carries over only while it is still offered; a
-        // chat written on a model since turned off (the sunset vision id)
-        // keeps the provider's current selection, so the header names the
-        // model that will answer and the migration is not undone.
-        let model = modelPreferences.isEnabled(providerID: conversation.providerID, model: conversation.model)
-            ? conversation.model
-            : nil
-        settings.select(providerID: conversation.providerID, model: model)
-        settings.save()
+        // The chat answers on its own model (`chatModelChoice`); opening it
+        // leaves the Quick AI default and the other window alone.
+        pendingModelChoice = nil
         errorMessage = nil
         threadError = nil
         answerSource = .model

@@ -999,6 +999,8 @@ struct QuickActionPalette: View {
         case tool(ChatToolKind)
         /// `⌘K` › Open Source: one of the answer's sources.
         case source(ChatSource)
+        /// `⌘K` › Copy Message or Capture Message to Memory: one message.
+        case message(QuickMessage)
 
         var id: String {
             switch self {
@@ -1008,6 +1010,7 @@ struct QuickActionPalette: View {
             case .prompt(let prompt): "prompt:" + prompt.id.uuidString
             case .tool(let kind): "tool:" + kind.rawValue
             case .source(let source): "source:" + source.id
+            case .message(let message): "message:" + message.id.uuidString
             }
         }
     }
@@ -1018,6 +1021,8 @@ struct QuickActionPalette: View {
             return viewModel.paletteToolRows.map(Entry.tool)
         case .sources:
             return viewModel.paletteSourceRows.map(Entry.source)
+        case .messages:
+            return viewModel.paletteMessageRows.map(Entry.message)
         case nil:
             return viewModel.paletteResultActions.map(Entry.result)
                 + viewModel.paletteSurfaceActions.map(Entry.surface)
@@ -1030,6 +1035,7 @@ struct QuickActionPalette: View {
         switch viewModel.actionPaletteSubmenu {
         case .tools: "Search tools"
         case .sources: "Search sources"
+        case .messages: "Search messages"
         case nil: "Search actions"
         }
     }
@@ -1077,6 +1083,8 @@ struct QuickActionPalette: View {
                     Text("For this chat")
                 case .sources:
                     Text("↩ Open")
+                case .messages(let action):
+                    Text(action == .copy ? "↩ Copy" : "↩ Capture")
                 case nil:
                     Text("↩ Run")
                     Text("Tab completes aliases")
@@ -1165,6 +1173,14 @@ struct QuickActionPalette: View {
             ) {
                 EmptyView()
             }
+        case .message(let message):
+            paletteRow(
+                symbol: message.role == .user ? "text.bubble" : "sparkles",
+                title: QuickViewModel.messagePreview(message),
+                detail: viewModel.messageDetail(message)
+            ) {
+                EmptyView()
+            }
         }
     }
 
@@ -1220,6 +1236,8 @@ struct QuickActionPalette: View {
         case .tool(let kind):
             title = "\(kind.displayName), \(viewModel.chatTools.contains(kind) ? "on" : "off")"
         case .source(let source): title = "Source \(source.title)"
+        case .message(let message):
+            title = "\(viewModel.messageDetail(message)), \(QuickViewModel.messagePreview(message))"
         }
         NSAccessibility.post(
             element: NSApplication.shared,
@@ -1253,6 +1271,9 @@ struct QuickActionPalette: View {
             announceSelected()
         case .source(let source):
             viewModel.requestOpenSource(source)
+        case .message(let message):
+            guard case .messages(let action) = viewModel.actionPaletteSubmenu else { return }
+            Task { await viewModel.performMessageAction(action, on: message) }
         }
     }
 }

@@ -111,7 +111,8 @@ struct AIChatWindowView: View {
                 help: "\(ResultAction.newChat.title) (\(ResultAction.newChat.shortcut.keyCaps.joined()))"
             ) {
                 model.closeFind()
-                chat.startNewConversation()
+                // Live while an answer streams: it stops first and keeps it.
+                chat.startNewChatKeepingAnswer()
             }
         }
         // The traffic lights share this row while the rail is in.

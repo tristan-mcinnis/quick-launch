@@ -448,12 +448,14 @@ struct QuickAISettingsTests {
         #expect(vm.activeModelID == InferenceProvider.deepSeekDefaultModel, "the header names the model that answers next")
 
         vm.loadConversation(id: kept.id)
-        #expect(vm.settings.selectedModel == "deepseek-v4-pro", "a chat on a model still offered carries it over")
+        #expect(vm.activeModelID == "deepseek-v4-pro", "a chat on a model still offered answers on it")
+        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekDefaultModel, "opening a chat leaves the default alone")
 
         // Switched back on in Manage Models, the id carries over again.
         vm.modelPreferences.setEnabled(true, providerID: InferenceProvider.deepSeekID, model: InferenceProvider.deepSeekVisionModel)
         vm.loadConversation(id: sunset.id)
-        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekVisionModel)
+        #expect(vm.activeModelID == InferenceProvider.deepSeekVisionModel)
+        #expect(vm.settings.selectedModel == InferenceProvider.deepSeekDefaultModel)
     }
 
     @Test func theQuickAIModelAnswersAndTheSelectionIsTheFallback() async {
