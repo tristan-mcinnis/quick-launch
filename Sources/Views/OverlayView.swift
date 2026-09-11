@@ -3,18 +3,28 @@ import Combine
 
 struct OverlayView: View {
     @Bindable var viewModel: QuickViewModel
+    /// The composer's attachment tray. Passed down through the environment,
+    /// so the Quick AI composer and Add Context pane find it.
+    var tray: AttachmentTray? = nil
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.attachmentTray) private var inheritedTray
+
+    private var activeTray: AttachmentTray? { tray ?? inheritedTray }
+
     var body: some View {
         Group {
             if viewModel.isQuickAIPresented {
                 // Quick AI replaces the launcher in place: its own header,
-                // thread, and bottom composer, and no footer well.
+                // thread, and bottom composer, and no footer well. The whole
+                // surface takes a drop.
                 QuickAIView(viewModel: viewModel)
+                    .attachmentDropTarget(activeTray)
             } else {
                 rootSurface
             }
         }
+        .environment(\.attachmentTray, activeTray)
         // Root search is exactly its measured width. Quick AI fills the
         // window, which the user can drag larger than 750 × 475: a fixed
         // width would pin the hosting view and stop the drag.
@@ -143,9 +153,10 @@ struct OverlayView: View {
                 AddContextPane(viewModel: viewModel)
             }
 
-            if viewModel.hasPendingAttachment {
+            if ComposerAttachmentStrip.hasChips(viewModel: viewModel, tray: activeTray)
+                || activeTray?.notice != nil {
                 HouseDivider()
-                AttachmentStrip(viewModel: viewModel)
+                ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray, sideInset: AQDesign.Space.panel)
             }
 
             if !viewModel.isTransformChooserPresented,
@@ -1549,54 +1560,6 @@ struct LaunchSelectionStrip: View {
     }
 }
 
-/// The attachments riding on the next question: up to four thumbnails, the
-/// attachment title and detail, and a clear button.
-struct AttachmentStrip: View {
-    @Bindable var viewModel: QuickViewModel
-
-    var body: some View {
-        HStack(spacing: AQDesign.Space.standard) {
-            HStack(spacing: AQDesign.Space.compact) {
-                ForEach(Array(viewModel.pendingImages.suffix(4).enumerated()), id: \.offset) { _, image in
-                    if let preview = NSImage(data: image.data) {
-                        Image(nsImage: preview)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
-                            .clipShape(RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous))
-                            .accessibilityLabel(
-                                "Attached screenshot, \(image.pixelWidth) by \(image.pixelHeight) pixels"
-                            )
-                    }
-                }
-            }
-            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
-                Text(viewModel.attachmentTitle)
-                    .font(AQDesign.TypeToken.label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(viewModel.attachmentSubtitle)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            Button {
-                viewModel.clearAttachments()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove attachments")
-            .help("Remove all attachments (⌫ removes the newest)")
-        }
-        .padding(.horizontal, AQDesign.Space.panel)
-        .padding(.vertical, AQDesign.Space.standard)
-    }
-}
-
 /// Keyboard-first Transform chooser: ↑↓ move, Return runs, Esc closes.
 /// Opened by the Transform chip or ⌘⌥T. Every row is a saved rewrite action
 /// (or the Translator) acting on the captured selection snapshot. Inline
@@ -1712,13 +1675,43 @@ struct ModelChooserPane: View {
     }
 }
 
-/// Add Context: Focused Window, Selected Text, Selected Area, Entire Screen.
-/// Opened by the control left of the composer or by typing `@`.
+/// Add Context: the four captures, then, with an attachment tray, File…,
+/// Link…, and Finder Selection (only when Finder is behind the overlay).
+/// Opened by the control left of the composer or by typing `@`. Link…
+/// turns the pane into a one-line field: `↩` attaches, `esc` goes back.
 struct AddContextPane: View {
     @Bindable var viewModel: QuickViewModel
+    /// Nil falls back to the environment's; with neither, the pane lists
+    /// the four captures only.
+    var tray: AttachmentTray? = nil
+    @Environment(\.attachmentTray) private var environmentTray
+    @FocusState private var linkFocused: Bool
+
+    private var activeTray: AttachmentTray? { tray ?? environmentTray }
+
+    /// The rows in order: the view model's captures, or the whole menu
+    /// when files and links can be attached.
+    static func rows(captures: [AddContextEntry], tray: AttachmentTray?) -> [AddContextRow] {
+        guard let tray else { return captures.map(AddContextRow.capture) }
+        return AddContextRow.menu(finderIsBehind: tray.finderIsBehind)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        Group {
+            if let tray = activeTray, tray.isEnteringLink {
+                linkEntry(tray)
+            } else {
+                rowList
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Add Context")
+        .onDisappear { activeTray?.cancelLinkEntry() }
+    }
+
+    private var rowList: some View {
+        let rows = Self.rows(captures: viewModel.addContextOptions, tray: activeTray)
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: AQDesign.Space.row) {
                 Text("Add Context")
                     .font(AQDesign.TypeToken.section)
@@ -1732,25 +1725,23 @@ struct AddContextPane: View {
             .padding(.top, AQDesign.Space.standard)
 
             SelectableListPane(
-                items: viewModel.addContextOptions,
+                items: rows,
                 selectedIndex: $viewModel.addContextIndex,
                 rowHeight: AQDesign.rowHeight,
                 scrollsToSelection: true,
-                onActivate: { entry in
-                    Task { await viewModel.addContext(entry) }
-                }
-            ) { _, entry, _ in
+                onActivate: { row in activate(row) }
+            ) { _, row, _ in
                 HStack(spacing: AQDesign.Space.row) {
                     IconTile {
-                        Image(systemName: entry.systemImage)
+                        Image(systemName: row.systemImage)
                             .font(AQDesign.TypeToken.caption)
                             .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     }
-                    Text(entry.title)
+                    Text(row.title)
                         .font(AQDesign.TypeToken.label)
                         .foregroundStyle(AQDesign.ColorToken.textPrimary)
                         .lineLimit(1)
-                    Text(entry.detail)
+                    Text(row.detail)
                         .font(AQDesign.TypeToken.metadata)
                         .foregroundStyle(AQDesign.ColorToken.textTertiary)
                         .lineLimit(1)
@@ -1759,17 +1750,102 @@ struct AddContextPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .frame(
-                height: PanelSizing.actionListHeight(
-                    rows: viewModel.addContextOptions.count,
-                    padded: false
-                )
-            )
+            .frame(height: PanelSizing.addContextListHeight(rows: rows.count))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Add Context")
+    }
+
+    private func activate(_ row: AddContextRow) {
+        if let entry = row.capture {
+            Task { await viewModel.addContext(entry) }
+            return
+        }
+        guard let tray = activeTray else { return }
+        tray.run(row, clipboard: NSPasteboard.general.string(forType: .string))
+        // File… and Finder Selection hand over to their owner; the menu's
+        // work is done. Link… stays open as its field.
+        if row != .link { viewModel.closeAddContextMenu() }
+    }
+
+    // MARK: - Link…
+
+    private func linkEntry(_ tray: AttachmentTray) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Add Link")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Spacer()
+                KeyHint(label: "Attach", keys: ["↩"])
+                KeyHint(label: "Back", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            HStack(spacing: AQDesign.Space.standard) {
+                Image(systemName: "link")
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .accessibilityHidden(true)
+                TextField(
+                    text: Binding(
+                        get: { tray.linkDraft ?? "" },
+                        set: { tray.linkDraft = $0 }
+                    ),
+                    prompt: Text("")
+                ) {
+                    Text("Link")
+                }
+                .textFieldStyle(.plain)
+                .labelsHidden()
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .focused($linkFocused)
+                // A styled prompt takes the field's ink on macOS; the
+                // placeholder is drawn over the empty field instead.
+                .overlay(alignment: .leading) {
+                    if (tray.linkDraft ?? "").isEmpty {
+                        Text("Paste a link")
+                            .font(AQDesign.TypeToken.body)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .onSubmit {
+                    if tray.submitLinkEntry() { viewModel.closeAddContextMenu() }
+                }
+                .onExitCommand { goBack(tray) }
+                .accessibilityLabel("Link")
+            }
+            .padding(.horizontal, House.Spacing.sm)
+            .frame(height: House.Control.pill)
+            .overlay(
+                RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous)
+                    .strokeBorder(
+                        linkFocused ? AQDesign.ColorToken.panelStrokeStrong : AQDesign.ColorToken.panelStroke,
+                        lineWidth: AQDesign.hairline
+                    )
+            )
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.top, AQDesign.Space.standard)
+
+            if let notice = tray.notice {
+                Text(notice)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, AQDesign.Space.panel)
+                    .padding(.top, AQDesign.Space.standard)
+            }
+        }
+        .padding(.bottom, AQDesign.Space.standard)
+        .onAppear { FocusRequest.apply($linkFocused) }
+    }
+
+    private func goBack(_ tray: AttachmentTray) {
+        tray.cancelLinkEntry()
+        viewModel.requestInputFocus()
     }
 }
-

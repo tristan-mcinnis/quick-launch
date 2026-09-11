@@ -27,7 +27,14 @@ enum PanelSizing {
     /// scrolls inside it. The user can drag it taller (`QuickAISize`).
     static let quickAIHeight = House.Layout.quickAIHeight
     static let errorBannerHeight = House.Control.footer
-    static let attachmentHeight = House.Control.input
+    /// The attachment strip over a composer: one row of chips with
+    /// `Spacing.xs` above and below.
+    static let attachmentStripHeight = House.Control.chip + House.Spacing.xs * 2
+    /// The strip at root: its divider plus the row.
+    static let attachmentHeight = House.hairline + attachmentStripHeight
+    /// The longest an attachment chip's name grows before it truncates in
+    /// the middle (spec 3.10).
+    static let attachmentNameMaxWidth: CGFloat = 180
     /// One row in the launcher list.
     static let launcherRowHeight = House.Control.row
     /// One row in the ⌘K pane and the prompt palette.
@@ -88,6 +95,16 @@ enum PanelSizing {
     /// replaces the launcher list while open).
     static func chooserBlockHeight(rows: Int) -> CGFloat {
         chooserChrome + actionListHeight(rows: rows, padded: false)
+    }
+    /// Add Context lists every row (seven at most, with Finder behind the
+    /// overlay) instead of scrolling after six; four rows measure as the
+    /// other choosers do.
+    static func addContextListHeight(rows: Int) -> CGFloat {
+        let count = max(1, rows)
+        return CGFloat(count) * actionRowHeight + CGFloat(count - 1) * actionRowSpacing
+    }
+    static func addContextBlockHeight(rows: Int) -> CGFloat {
+        chooserChrome + addContextListHeight(rows: rows)
     }
     /// The search row and footer stay pinned while long result sets scroll.
     /// Twelve whole rows plus the section block: the list scrolls rather
