@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 
 /// Its own window: source text above, translation below, the target language
-/// on the right, the keys in the footer. Same tokens as the launcher.
+/// on the right, the keys in the footer. Same tokens as the launcher, and the
+/// launcher footer's strip: status dot and context, then `KeyHint`s. Every
+/// key it names comes from `TranslatorKey`.
 struct TranslatorView: View {
     @Bindable var model: TranslatorModel
     @FocusState private var sourceFocused: Bool
@@ -57,7 +59,7 @@ struct TranslatorView: View {
                     Text("to \(model.target.title)")
                         .font(AQDesign.TypeToken.label)
                         .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    KeyCapGroup(keys: ["⌘", "P"])
+                    KeyCapGroup(keys: TranslatorKey.target.shortcut.keyCaps)
                 }
                 .padding(.horizontal, AQDesign.Space.standard)
                 .frame(height: House.Control.chip)
@@ -71,7 +73,7 @@ struct TranslatorView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Change target language (⌘P)")
+            .help(TranslatorKey.targetHelp)
         }
     }
 
@@ -106,7 +108,7 @@ struct TranslatorView: View {
                     .onChange(of: model.source) { _, _ in model.sourceChanged() }
                     .overlay(alignment: .topLeading) {
                         if model.source.isEmpty {
-                            Text("Type or paste text. ⌘⇧V uses the clipboard.")
+                            Text(TranslatorKey.sourcePlaceholder)
                                 .font(AQDesign.TypeToken.prose)
                                 .foregroundStyle(AQDesign.ColorToken.textTertiary)
                                 // Not spacing: these two match NSTextView's own
@@ -214,26 +216,26 @@ struct TranslatorView: View {
         }
     }
 
+    /// The launcher footer's strip, token for token: the status dot and its
+    /// context on the left, the shared `KeyHint`s on the right.
     private var footer: some View {
         HStack(spacing: AQDesign.Space.row) {
             StatusDot(color: model.isTranslating
                 ? AQDesign.ColorToken.warning
                 : AQDesign.ColorToken.success)
-            Text(model.isTargetPickerPresented ? "Target Language" : "Translator")
+            Text(model.footerContext)
                 .font(AQDesign.TypeToken.metadata)
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: AQDesign.Space.row)
-            if model.isTargetPickerPresented {
-                FooterHintView(label: "Choose", keys: ["↩"])
-                FooterHintView(label: "Back", keys: ["esc"])
-            } else {
-                FooterHintView(label: "Copy", keys: ["⌘", "↩"])
-                FooterHintView(label: "Paste back", keys: ["⇧", "⌘", "↩"])
-                FooterHintView(label: "Swap", keys: ["⌘", "S"])
-                FooterHintView(label: "Target", keys: ["⌘", "P"])
-                FooterHintView(label: "Close", keys: ["esc"])
+            HStack(spacing: AQDesign.Space.row) {
+                ForEach(model.footerHints, id: \.label) { hint in
+                    KeyHint(label: hint.label, keys: hint.keys)
+                }
             }
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func move(_ delta: Int) {
@@ -257,23 +259,13 @@ struct TranslatorView: View {
     }
 }
 
-/// One "Label ⌘K" pair for footers outside the launcher: the house `KeyHint`,
-/// under the name this window and its tests already use.
-struct FooterHintView: View {
-    let label: String
-    let keys: [String]
-
-    var body: some View {
-        KeyHint(label: label, keys: keys)
-    }
-}
-
 /// The translator's window: borderless, key-able, routes its shortcuts.
 final class TranslatorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    /// ⌘↩ copy, ⇧⌘↩ paste back, ⌘S swap, ⌘P target, ⇧⌘V clipboard, esc.
+    /// The `TranslatorKey` table (⌘↩ copy, ⇧⌘↩ paste back, ⌘S swap, ⌘T
+    /// target, ⇧⌘V clipboard, ⌘W close) and esc.
     var shortcutHandler: ((String?, UInt16, NSEvent.ModifierFlags) -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

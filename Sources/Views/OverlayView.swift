@@ -1282,7 +1282,7 @@ private struct LauncherFooter: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AQDesign.Space.row) {
             StatusDot(color: viewModel.isStreaming
                 ? AQDesign.ColorToken.warning
                 : AQDesign.ColorToken.success)
@@ -1292,7 +1292,7 @@ private struct LauncherFooter: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: AQDesign.Space.row)
-            HStack(spacing: 10) {
+            HStack(spacing: AQDesign.Space.row) {
                 ForEach(visibleHints, id: \.label) { hint in
                     KeyHint(label: hint.label, keys: hint.keys)
                 }
