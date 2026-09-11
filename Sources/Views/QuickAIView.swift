@@ -86,15 +86,30 @@ struct QuickAIView: View {
             // Raycast's expand glyph is a boxed up-right arrow; this is the
             // nearest SF Symbol. As in Raycast it continues the chat in the
             // AI Chat window (`⌘J`).
-            QuickAIGlyphButton(
-                symbol: "arrow.up.right.square",
-                font: AQDesign.TypeToken.glyphMedium,
-                color: AQDesign.ColorToken.textPrimary,
-                label: ResultAction.continueInAIChat.title,
-                help: "\(ResultAction.continueInAIChat.title) (\(ResultAction.continueInAIChat.shortcut.keyCaps.joined()))"
-            ) {
+            // Open in Chat: a labelled button with its key, so moving a
+            // longer conversation to the AI Chat window is one obvious click.
+            Button {
                 viewModel.continueInAIChat()
+            } label: {
+                HStack(spacing: House.Spacing.xs) {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(AQDesign.TypeToken.label)
+                    Text("Open in Chat")
+                        .font(AQDesign.TypeToken.label)
+                    KeyCapGroup(keys: ResultAction.continueInAIChat.shortcut.keyCaps)
+                }
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .padding(.horizontal, House.Spacing.sm)
+                .frame(height: House.Control.chip)
+                .background(
+                    RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous)
+                        .fill(AQDesign.ColorToken.chipFill)
+                )
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(ResultAction.continueInAIChat.title)
+            .help("\(ResultAction.continueInAIChat.title) (\(ResultAction.continueInAIChat.shortcut.keyCaps.joined()))")
         }
         // A tighter left inset than right: with the compact button and the
         // row gap, the title starts where Raycast's does.

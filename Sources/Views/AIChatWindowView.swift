@@ -65,6 +65,9 @@ struct AIChatWindowView: View {
             }
             QuickAIThread(viewModel: chat, highlightedMessageID: model.currentMatchID)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The scroll view would otherwise draw up under the header
+                // and the transparent title bar.
+                .clipped()
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }
@@ -115,6 +118,10 @@ struct AIChatWindowView: View {
         .padding(.leading, model.isRailVisible ? House.Spacing.sm : Self.trafficLightInset)
         .padding(.trailing, House.Spacing.lg)
         .frame(height: Self.titleBarHeight)
+        .background(AQDesign.ColorToken.windowSurface)
+        // The title-bar row drags the window, as a normal title bar does.
+        .gesture(WindowDragGesture())
+        .zIndex(1)
     }
 
     // MARK: - ⌘K
@@ -261,6 +268,7 @@ struct AIChatRail: View {
             }
         }
         .background(AQDesign.ColorToken.sidebarSurface)
+        .clipped()
         .onAppear { if model.focus == .rail { FocusRequest.apply($searchFocused) } }
         .onChange(of: model.railFocusRequest) { _, _ in FocusRequest.apply($searchFocused) }
         .onChange(of: model.renameFocusRequest) { _, _ in FocusRequest.apply($renameFocused) }

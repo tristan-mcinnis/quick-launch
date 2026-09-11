@@ -75,6 +75,10 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     /// The app's own presenter (Settings, the Translator, Type to Click).
     private weak var app: (any OverlayPresenting)?
     private var window: AIChatWindow?
+    /// The window itself, for the menu bar's window items.
+    var chatWindow: NSWindow? { window }
+    /// The menu bar shown while the window is open.
+    private lazy var menu = AIChatMenu(controller: self)
 
     init(model: AIChatWindowModel, app: any OverlayPresenting) {
         self.model = model
@@ -95,8 +99,10 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         window.appearance = model.chat.settings.appearance.nsAppearance
         applyLevel(model.isAlwaysOnTop, to: window)
         // A normal window: in ⌘Tab, the Dock, and Mission Control while open.
-        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
-        AppActivation.bringToFront(window)
+        // A normal window gets a normal menu bar: Edit for the composer,
+        // Window for minimise and close, and Quit.
+        if NSApp.mainMenu == nil { NSApp.mainMenu = menu.makeMenu() }
+        AppActivation.becomeRegularApp(showing: window)
     }
 
     func hideWindowForCapture() {
@@ -145,7 +151,9 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
         window.toolbarStyle = .unified
-        window.isMovableByWindowBackground = true
+        // A normal window moves by its title-bar row only; selecting text in
+        // the thread must not drag it (the header carries the drag).
+        window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.collectionBehavior = [.managed, .participatesInCycle, .fullScreenPrimary]
@@ -185,7 +193,9 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         // arrived, as Escape does. The chat stays in the window for next time.
         if model.chat.isStreaming { model.chat.cancel() }
         model.closeFind()
-        // Back to a menu-bar app once no normal window is open.
+        // Back to a menu-bar app once no normal window is open, with no menu
+        // bar of its own (the launcher panel keeps its keys).
+        NSApp.mainMenu = nil
         NSApp.setActivationPolicy(.accessory)
     }
 }
