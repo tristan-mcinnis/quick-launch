@@ -185,7 +185,7 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     func windowDidBecomeKey(_ notification: Notification) {
         // Back from the launcher: the chat as the store has it now (a
         // follow-up asked there, a rename, a pin, a delete).
-        model.chat.refreshOpenChatFromStore()
+        model.chat.aiChatWindowDidBecomeKey()
     }
 
     func windowWillClose(_ notification: Notification) {

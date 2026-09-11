@@ -105,13 +105,16 @@ struct AIChatWindowTests {
 
     // MARK: - One store, two views: no stale copies
 
-    /// Both views on one chat: the window asks first, the launcher opens the
-    /// same chat from its list.
+    /// Both views on one chat: the window asks first, then the launcher
+    /// loads the same chat. Opening a chat from a list hands it over
+    /// (`continueConversation`), so only a race leaves both views on one
+    /// chat; the merge is the net under that race.
     private func bothOnOneChat(_ rig: Rig) async throws -> UUID {
         await ask(rig.chat, rig.service, "first", reply: "One.")
         let id = try #require(rig.chat.currentConversation?.id)
-        rig.launcher.continueConversation(itemID: id.uuidString)
+        rig.launcher.loadConversation(id: id)
         #expect(rig.launcher.currentConversation?.id == id)
+        #expect(rig.chat.currentConversation?.id == id)
         return id
     }
 
@@ -228,12 +231,16 @@ struct AIChatWindowTests {
         #expect(rig.fake.shows == 2)
     }
 
-    @Test func aStaleChatStartsANewOneOnOpen() {
+    @Test func aStaleChatStaysOpenInTheWindow() async {
         let rig = makeRig { $0.newChatInterval = .fifteenMinutes }
-        rig.launcher.history = [conversation("Yesterday", answer: "Old.", age: 86_400)]
+        let yesterday = conversation("Yesterday", answer: "Old.", age: 86_400)
+        rig.launcher.history = [yesterday]
         rig.window.open(handoff: nil)
-        #expect(rig.chat.currentConversation == nil, "past the Start New Chat interval the window opens on a new chat")
-        #expect(rig.chat.conversationMessages.isEmpty)
+        #expect(rig.chat.currentConversation?.id == yesterday.id, "the Start New Chat interval never applies in AI Chat")
+        #expect(rig.chat.quickAIComposerPlaceholder == QuickViewModel.quickAIFollowUpPlaceholder)
+        await ask(rig.chat, rig.service, "and after that?", reply: "New.")
+        #expect(rig.chat.currentConversation?.id == yesterday.id, "a follow-up stays in the chat")
+        #expect(rig.chat.conversationMessages.map(\.content) == ["Yesterday", "Old.", "and after that?", "New."])
     }
 
     @Test func theRootCommandOpensTheWindowAndClosesTheLauncher() async throws {
@@ -285,8 +292,9 @@ struct AIChatWindowTests {
         rig.launcher.openQuickAI()
         await ask(rig.launcher, rig.service, "question", reply: "Answer.")
         let provider = try #require(rig.launcher.activeProvider)
-        rig.launcher.selectModel(providerID: provider.id, model: "another-model")
+        rig.launcher.setActiveModel(providerID: provider.id, model: "another-model")
         let chosen = rig.launcher.activeModelID
+        #expect(chosen == "another-model")
         rig.launcher.continueInAIChat()
         #expect(rig.chat.activeModelID == chosen)
     }
@@ -321,7 +329,7 @@ struct AIChatWindowTests {
         #expect(actions.contains(.copy))
         #expect(rig.chat.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
         #expect(rig.launcher.primaryAnswerAction == .pasteToActiveApp, "the launcher keeps its setting")
-        #expect(rig.chat.paletteSurfaceActions == [.showChatList, .findInChat, .keepOnTop])
+        #expect(rig.chat.paletteSurfaceActions == [.showChatList, .findInChat, .keepOnTop, .copyMessage])
     }
 
     @Test func renameFromThePaletteGoesToTheChatList() async throws {

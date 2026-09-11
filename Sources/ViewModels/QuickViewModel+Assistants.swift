@@ -53,16 +53,19 @@ extension QuickViewModel {
         isActionPalettePresented = false
         actionQuery = ""
         if isStreaming { cancel() }
+        if shouldStartNewConversation {
+            let typed = input
+            startNewConversation()
+            input = typed
+        }
+        // The model is per chat: the assistant's goes on the chat it runs in
+        // (or on the one the next question starts), never on a stale chat
+        // the line above replaced.
         if let assistant,
            let providerID = assistant.providerID,
            let provider = settings.providers.first(where: { $0.id == providerID }) {
             let model = assistant.model.flatMap { $0.isEmpty ? nil : $0 } ?? provider.selectedModel
             if !model.isEmpty { setActiveModel(providerID: provider.id, model: model) }
-        }
-        if shouldStartNewConversation {
-            let typed = input
-            startNewConversation()
-            input = typed
         }
         if currentConversation == nil {
             guard let provider = activeProvider, let model = activeModelID, !model.isEmpty else {
@@ -71,6 +74,7 @@ extension QuickViewModel {
                 return
             }
             currentConversation = QuickConversation(providerID: provider.id, model: model)
+            pendingModelChoice = nil
         }
         currentConversation?.assistantID = assistant?.id
         currentConversation?.enabledTools = assistant?.enabledTools

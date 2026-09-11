@@ -2,7 +2,8 @@
 /// on an answer. They sit in the `⌘K` palette while the surface is up,
 /// after the answer actions. Each window offers its own: Quick AI offers
 /// Reset Quick AI Size; AI Chat offers the chat list, find, and Keep on Top
-/// (`AIChatWindowModel.windowSurfaceActions`).
+/// (`AIChatWindowModel.windowSurfaceActions`). Both offer Copy Message and
+/// Capture Message to Memory, which act on any message of the chat.
 enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     /// Back to the standard 750 × 475 after the user dragged the window
     /// larger. Offered only when the size is not the standard one.
@@ -17,6 +18,10 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     case keepOnTop
     /// AI Chat: back to a normal window level.
     case stopKeepingOnTop
+    /// Copy any question or answer of the chat: a list in the palette.
+    case copyMessage
+    /// Send any question or answer of the chat to `recall remember`.
+    case captureMessage
 
     var id: String { rawValue }
 
@@ -28,6 +33,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         case .findInChat: "Find in Chat"
         case .keepOnTop: "Keep on Top"
         case .stopKeepingOnTop: "Stop Keeping on Top"
+        case .copyMessage: "Copy Message…"
+        case .captureMessage: "Capture Message to Memory…"
         }
     }
 
@@ -43,6 +50,10 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
             "Stay above other windows"
         case .stopKeepingOnTop:
             "Back to a normal window"
+        case .copyMessage:
+            "Any question or answer in this chat"
+        case .captureMessage:
+            "Send any question or answer to recall"
         }
     }
 
@@ -59,13 +70,15 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         // marks a pinned chat.
         case .keepOnTop: Self.keepOnTopSymbol
         case .stopKeepingOnTop: "square.3.layers.3d.slash"
+        case .copyMessage: ResultAction.copy.systemImage
+        case .captureMessage: ResultAction.captureToMemory.systemImage
         }
     }
 
     /// The key that does the same, drawn as caps in the palette row.
     var shortcut: KeyShortcut? {
         switch self {
-        case .resetSize, .keepOnTop, .stopKeepingOnTop: nil
+        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage: nil
         case .showChatList, .hideChatList: AIChatWindowModel.chatListShortcut
         case .findInChat: AIChatWindowModel.findShortcut
         }

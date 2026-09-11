@@ -23,11 +23,17 @@ enum AddContextEntry: String, CaseIterable, Identifiable, Sendable {
     /// What the entry attaches, in the reader's words.
     var detail: String {
         switch self {
-        case .focusedWindow: "The window behind the overlay, as an image"
-        case .selectedText: "The text selected behind the overlay"
+        case .focusedWindow: "The front window of the app you were in, as an image"
+        case .selectedText: "The text selected in the app you were in"
         case .selectedArea: "Draw a rectangle over the screen"
         case .entireScreen: "Every display, as one image"
         }
+    }
+
+    /// Reads the app that was in front before Quick Launch. The AI Chat
+    /// window leaves these out while it knows no such app.
+    var needsPreviousApp: Bool {
+        self == .focusedWindow || self == .selectedText
     }
 
     var systemImage: String {

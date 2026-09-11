@@ -141,9 +141,10 @@ struct QuickAIThread: View {
                     answerProse(answer, isStreaming: false, instanceID: "answer")
                         .id(Self.detachedAnswerID)
                 }
-                // Where the thread went after Continue in pi.
+                // Where the thread went after Continue in pi, or what
+                // happened to the chat (stopped, moved, deleted).
                 if let notice = viewModel.threadNotice {
-                    toolLine(notice, symbol: "terminal")
+                    toolLine(notice, symbol: viewModel.threadNoticeSymbol)
                         .id(Self.threadNoticeID)
                 }
             }

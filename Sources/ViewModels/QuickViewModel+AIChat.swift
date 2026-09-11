@@ -12,6 +12,22 @@ struct AIChatHandoff {
     var pendingImages: [QuickImageAttachment]
     var pendingContext: CaptureContext?
     var conversationImages: [QuickImageAttachment]
+    /// A Change Model on the empty surface, before a chat exists: the model
+    /// the next chat starts on. A chat carries its own.
+    var pendingModel: ChatModelChoice? = nil
+
+    /// Whether the hand-off brings anything for the composer: text or an
+    /// attachment. One that brings none leaves the window's own draft.
+    var bringsDraft: Bool {
+        !input.isEmpty || !pendingImages.isEmpty || pendingContext != nil
+    }
+}
+
+/// A provider and a model, as a chat keeps them. The model is per chat: the
+/// chooser writes the open chat's, and the next message uses it.
+struct ChatModelChoice: Equatable, Sendable {
+    let providerID: UUID
+    let model: String
 }
 
 /// The store's copy of a chat at one moment: when it was last written and
@@ -30,7 +46,8 @@ struct StoredChatStamp: Equatable {
 }
 
 /// The AI Chat window as its view model sees it: the window's own `⌘K`
-/// actions, and the chat list's rename. `AIChatWindowModel` conforms.
+/// actions, and the chat list's rename. `AIChatWindowModel` conforms. The
+/// window itself (its controller) is the view model's `overlayPresenter`.
 @MainActor
 protocol AIChatWindowHosting: AnyObject {
     var windowSurfaceActions: [QuickAISurfaceAction] { get }
@@ -177,72 +194,190 @@ extension QuickViewModel {
             input: input,
             pendingImages: pendingImages,
             pendingContext: pendingContext,
-            conversationImages: conversationImages
+            conversationImages: conversationImages,
+            pendingModel: pendingModelChoice
         )
     }
 
     // MARK: - Window side
 
     /// The AI Chat window takes the chat Quick AI handed over, with its
-    /// model, tools, typed text, and attachments.
+    /// model (the chat's own, or a pick made before it began), tools, typed
+    /// text, and attachments. A hand-off that brings nothing to type keeps
+    /// the window's own draft. An answer still streaming in the window stops
+    /// and keeps what arrived, saved with its chat, and the thread says so.
     func adoptAIChatHandoff(_ handoff: AIChatHandoff) {
-        if isStreaming { cancel() }
+        hasOpenedAIChatWindow = true
+        if let id = handoff.conversation?.id, id == currentConversation?.id, !handoff.bringsDraft {
+            // The window already has this chat: it stays as it is, a stream
+            // and the draft included, brought up to the store.
+            isQuickAIPresented = true
+            refreshOpenChatFromStore()
+            requestInputFocus()
+            return
+        }
+        var stoppedChatTitle: String?
+        if isStreaming {
+            let streamingChat = currentConversation
+            cancel()
+            // The question too, when no text arrived to save it with.
+            persistCurrentConversation()
+            if let streamingChat, handoff.conversation?.id != streamingChat.id {
+                stoppedChatTitle = title(of: streamingChat)
+            }
+        }
+        let draft = (input: input, images: pendingImages, context: pendingContext)
         reset([.layers, .thread, .attachments, .input])
         isQuickAIPresented = true
-        // The model rides in the shared settings. Loading a chat selects the
-        // model it last answered with; the hand-off keeps the one Quick AI
-        // would have used next (a Change Model after the last answer).
-        let modelChoice = settings
         if let conversation = handoff.conversation {
             // The stored copy when history keeps one; the carried one when
             // history is off.
             let stored = history.first { $0.id == conversation.id }
             loadConversation(stored ?? conversation)
             lastQuestion = conversationMessages.last { $0.role == .user }?.content
-            settings = modelChoice
-            settings.save()
         }
         pendingChatTools = handoff.pendingChatTools
+        pendingModelChoice = handoff.pendingModel
         conversationImages = handoff.conversationImages
-        pendingImages = handoff.pendingImages
-        pendingContext = handoff.pendingContext
-        input = handoff.input
+        if handoff.bringsDraft {
+            pendingImages = handoff.pendingImages
+            pendingContext = handoff.pendingContext
+            input = handoff.input
+        } else {
+            pendingImages = draft.images
+            pendingContext = draft.context
+            input = draft.input
+        }
+        if let stoppedChatTitle {
+            setThreadNotice(Self.stoppedForHandoffNotice(chatTitle: stoppedChatTitle), symbol: Self.chatNoticeSymbol)
+        }
         requestInputFocus()
     }
 
-    /// The root "AI Chat" command and a reopened window: the chat the
-    /// window already holds (as the store has it now), or the most recently
-    /// updated chat, unless the Start New Chat interval says the next
-    /// question starts a fresh one.
+    /// The thread's line when a hand-off stopped the window's answer.
+    static func stoppedForHandoffNotice(chatTitle: String) -> String {
+        "Stopped the answer in “\(chatTitle)”. What arrived is saved."
+    }
+
+    /// The root "AI Chat" command and a reopened window. The first open
+    /// lands on the most recently updated chat. After that the window keeps
+    /// what it holds, as the store has it now: its chat, a new chat, and
+    /// whatever is typed. The Start New Chat interval never applies here.
     func openLatestChat() {
         isQuickAIPresented = true
         refreshOpenChatFromStore()
-        if currentConversation == nil,
+        if !hasOpenedAIChatWindow, currentConversation == nil,
            let latest = history.max(by: { $0.updatedAt < $1.updatedAt }) {
             continueConversation(itemID: latest.id.uuidString)
         }
-        if shouldStartNewConversation {
-            if isStreaming { return }
-            startNewConversation()
-        }
+        hasOpenedAIChatWindow = true
         requestInputFocus()
+    }
+
+    /// The AI Chat window became key. What the user was in before is what
+    /// Focused Window and Selected Text read, and the open chat is brought
+    /// up to the store (a follow-up asked in the launcher, a rename, a pin,
+    /// a delete).
+    func aiChatWindowDidBecomeKey() {
+        rememberSelectionTarget(selectedTextService?.currentExternalTarget())
+        refreshOpenChatFromStore()
+    }
+
+    /// New Chat from the AI Chat header, which is live while an answer
+    /// streams: the answer stops first and keeps what arrived, as Escape
+    /// does, and the chat stays saved; then the thread starts over.
+    func startNewChatKeepingAnswer() {
+        if isStreaming {
+            cancel()
+            persistCurrentConversation()
+        }
+        startNewConversation()
     }
 }
 
 // MARK: - One store, two views
 
 extension QuickViewModel {
+    /// The other view wrote the history: this view's open chat follows now,
+    /// not only when its window comes back.
+    func storeHistoryDidChange() {
+        refreshOpenChatFromStore()
+    }
+
+    /// What a view is called in the line the other view shows when a chat
+    /// moves to it.
+    var viewName: String { isAIChatWindow ? "AI Chat" : "Quick AI" }
+
+    /// One chat, one view: this view is opening chat `id`, so a view that
+    /// has it open lets it go (`letChatGo`), and the two never write it in
+    /// turn.
+    func takeChatFromOtherViews(_ id: UUID) {
+        for view in store.views(besides: self) where view.currentConversation?.id == id {
+            view.letChatGo(to: viewName)
+        }
+    }
+
+    /// The other view opened the chat on this one's thread. A stream still
+    /// running stops and keeps what arrived, and the chat is saved; the
+    /// thread empties, what is typed stays, and the thread says where the
+    /// chat went.
+    func letChatGo(to destination: String) {
+        if isStreaming { cancel() }
+        persistCurrentConversation()
+        expandedTranscriptMessageIDs.removeAll()
+        reset([.thread])
+        setThreadNotice(Self.movedChatNotice(to: destination), symbol: Self.chatNoticeSymbol)
+    }
+
+    static func movedChatNotice(to destination: String) -> String {
+        "This chat is open in \(destination) now."
+    }
+
+    /// Sets the thread's closing line and its glyph.
+    func setThreadNotice(_ notice: String, symbol: String) {
+        threadNotice = notice
+        threadNoticeSymbol = symbol
+    }
+
+    /// The line a chat deleted while it streamed leaves under its answer.
+    static let deletedWhileAnsweringNotice = "This chat was deleted, so this answer is not saved."
+    /// The line a chat deleted in the other view leaves on this one's thread.
+    static let deletedChatNotice = "This chat was deleted."
+
+    /// Saves the chat an answer just joined (a finished stream, or Stop). A
+    /// chat deleted in the other view while it streamed is never brought
+    /// back: the question and the answer stay on screen, not saved, as an
+    /// answer with no chat behind it, and the thread says so. The next
+    /// question starts a new chat.
+    func persistAnsweredConversation() {
+        guard settings.historyEnabled,
+              let local = currentConversation,
+              !history.contains(where: { $0.id == local.id }),
+              store.deletedChatIDs.contains(local.id)
+        else {
+            persistCurrentConversation()
+            return
+        }
+        currentConversation = nil
+        openChatBase = nil
+        setThreadNotice(Self.deletedWhileAnsweringNotice, symbol: Self.chatNoticeSymbol)
+    }
+
     /// Brings the open chat up to the store: the other view's turns since
     /// this view last read it, its rename and pin, or its delete (the chat
-    /// leaves this thread; what is typed stays). Called before a question,
-    /// when the window or the launcher comes back, and on opening the
-    /// window. A running stream is left alone; its save merges instead.
+    /// leaves this thread with a line saying so; what is typed stays).
+    /// Called whenever the other view writes the history, before a
+    /// question, when the window or the launcher comes back, and on opening
+    /// the window. A running stream is left alone; its save merges instead,
+    /// and a chat deleted meanwhile keeps its answer on screen, unsaved
+    /// (`persistAnsweredConversation`).
     func refreshOpenChatFromStore() {
         guard settings.historyEnabled, !isStreaming, let local = currentConversation else { return }
         guard let stored = history.first(where: { $0.id == local.id }) else {
             if store.deletedChatIDs.contains(local.id) {
                 expandedTranscriptMessageIDs.removeAll()
                 reset([.thread])
+                setThreadNotice(Self.deletedChatNotice, symbol: Self.chatNoticeSymbol)
             }
             return
         }

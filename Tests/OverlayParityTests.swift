@@ -156,8 +156,10 @@ struct OverlayParityTests {
 
         #expect(!vm.isModelChooserPresented)
         #expect(vm.output == "Second answer")
-        #expect(vm.settings.quickAIProviderID == other.providerID)
-        #expect(vm.settings.quickAIModel == other.model)
+        // The model is the chat's: the Quick AI default in Settings stays.
+        #expect(vm.settings.quickAIProviderID == nil)
+        #expect(vm.settings.quickAIModel.isEmpty)
+        #expect(vm.currentConversation?.providerID == other.providerID)
         #expect(vm.currentConversation?.model == other.model)
         // The last question was asked again, not a new one.
         #expect(vm.conversationMessages.filter { $0.role == .user }.map(\.content) == ["who won"])

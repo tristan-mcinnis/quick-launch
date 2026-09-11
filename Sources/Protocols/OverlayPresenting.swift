@@ -15,9 +15,21 @@ protocol OverlayPresenting: AnyObject {
     /// launch-scoped selection).
     func openTranslator(retainedSelection: String?)
     func openTypeToClick()
+    /// A capture that hid the view's window for a moment (Selected Area)
+    /// succeeded: the window comes back, as `recoverFromExternalActionFailure`
+    /// brings it back after a failure. The AI Chat window's controller shows
+    /// its window.
+    func restoreAfterExternalAction()
 }
 
 extension OverlayPresenting {
+    /// Default: present the overlay again, which is what the launcher panel
+    /// and the AI Chat window (its `presentOverlay` shows the window) both
+    /// need after a capture.
+    func restoreAfterExternalAction() {
+        presentOverlay()
+    }
+
     /// Default: ignore the handed-over text and forward to `openTranslator()`.
     /// The app presenter overrides it to seed the Translator's retained
     /// selection.
