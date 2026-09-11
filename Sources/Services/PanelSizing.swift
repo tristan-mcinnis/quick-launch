@@ -50,6 +50,29 @@ enum PanelSizing {
     /// height of content. Inline content, so the window must include it.
     static let selectionChipHeight = House.hairline + House.Spacing.xs * 2 + House.Control.row
 
+    // MARK: - Local answer in root search
+
+    /// The question chip over a local answer, as v1.3.0 drew it.
+    static let rootAnswerChipHeight = House.Control.chip
+    /// Space above the chip, between chip and answer, and below the answer.
+    static let rootAnswerTopInset = House.Spacing.md
+    static let rootAnswerGap = House.Spacing.xs
+    static let rootAnswerBottomInset = House.Spacing.lg
+    /// The answer's side inset, both sides.
+    static let rootAnswerSideInset = House.Spacing.lg
+
+    /// The width the local answer's text wraps at in a panel this wide.
+    static func rootAnswerTextWidth(panelWidth: CGFloat) -> CGFloat {
+        min(House.Layout.answerMaxWidth, panelWidth - rootAnswerSideInset * 2)
+    }
+
+    /// The local answer block under the input row: divider, chip, gap, the
+    /// measured answer, and the insets around them.
+    static func rootAnswerBlockHeight(answerHeight: CGFloat) -> CGFloat {
+        House.hairline + rootAnswerTopInset + rootAnswerChipHeight + rootAnswerGap
+            + answerHeight + rootAnswerBottomInset
+    }
+
     /// Chrome around the chooser's row list: header row plus top/bottom padding.
     static let chooserChrome: CGFloat = House.Control.chip + House.Spacing.xs * 2
 

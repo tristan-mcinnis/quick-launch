@@ -352,33 +352,31 @@ struct QuickAISurfaceTests {
 
     // MARK: - Detached answers
 
-    @Test func aLocalAnswerWithAChatKeptIsDrawnAfterTheThread() async {
+    @Test func aLocalAnswerAskedOnTheSurfaceStaysInTheChat() async {
         let mock = MockQuickService()
         let vm = make(service: mock)
         await ask(vm, mock, "first", reply: "One.")
         #expect(vm.quickAIDetachedAnswer == nil, "the last turn is the thread's own")
 
+        // v1.5.0 (Phase A2): math asked in a chat stays in it, as its own
+        // answer under its own pill; only root search answers inline.
         vm.input = "2+2"
         await vm.submit()
-        #expect(vm.currentConversation != nil, "the chat is kept")
+        #expect(vm.isQuickAIPresented, "the reader stays in the chat")
+        #expect(vm.rootAnswer == nil, "root search's inline answer is for root search")
+        #expect(vm.currentConversation?.messages.count == 2, "2+2 is not a turn")
         #expect(vm.output == "4")
-        #expect(vm.quickAIDetachedAnswer == "4", "a local answer is not a turn, so it draws on its own")
-        #expect(vm.lastQuestion == "2+2")
-        #expect(vm.pendingQuestion == "2+2", "the answer draws under its own question pill")
+        #expect(vm.quickAIDetachedAnswer == "4", "drawn after the thread, not as a turn")
+        #expect(vm.pendingQuestion == "2+2", "under its own pill")
+        #expect(vm.quickAIHeaderSubtitle == QuickViewModel.localAnswerSourceTitle)
         #expect(vm.input.isEmpty, "the field empties as it does for a model answer")
-        #expect(vm.quickAIComposerAction.label == "Paste Response")
+        #expect(vm.topLayer == .answer)
         #expect(await mock.sendCallCount == 1)
 
-        vm.isStreaming = true
-        #expect(vm.quickAIDetachedAnswer == nil, "a streaming answer draws live instead")
-        vm.isStreaming = false
-        vm.output = ""
-        #expect(vm.quickAIDetachedAnswer == nil)
-
-        // The next model answer makes the pill a turn of the thread.
+        // The next question is a turn of the same chat again.
         await ask(vm, mock, "and then", reply: "Two.")
-        #expect(vm.pendingQuestion == nil)
-        #expect(vm.conversationMessages.last { $0.role == .user }?.content == "and then")
+        #expect(vm.conversationMessages.map(\.content) == ["first", "One.", "and then", "Two."])
+        #expect(vm.quickAIHeaderSubtitle == vm.activeModelDisplay)
     }
 
     // MARK: - Recent Chats
@@ -447,7 +445,8 @@ struct QuickAISurfaceTests {
         #expect(rows.map(\.itemID) == vm.conversationItems.map(\.itemID), "the launcher's own chat rows")
         #expect(rows.first?.itemID == pinned.id.uuidString, "pinned first, as in the Chats catalog")
         #expect(rows.first?.kind == .conversation)
-        #expect(rows.first?.detail.hasPrefix("Pinned · 1 question") == true, "count and time in the detail column")
+        #expect(rows.first?.detail.hasPrefix("1 question · ") == true, "count and time in the detail column")
+        #expect(rows.first?.isPinned == true, "the row draws the pin glyph, not a Pinned prefix")
         #expect(vm.recentChatsIndex == 1, "the current chat is the highlighted row")
 
         vm.moveRecentChatsSelection(-1)

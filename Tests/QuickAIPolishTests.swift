@@ -407,19 +407,23 @@ struct QuickAIPolishTests {
         #expect(vm.quickAITitle == "/etc/hosts is not updating", "/etc is not a saved prompt")
     }
 
-    @Test func aFirstQuestionThatFailedIsNotTheTitle() async throws {
+    @Test func aFirstQuestionThatFailedStaysTheTitleWhenRetried() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
         await mock.setShouldThrow(true)
         vm.input = "first try"
         await vm.submit()
-        #expect(vm.input == "first try", "the failed question is back in the composer")
-        #expect(vm.currentConversation?.messages.isEmpty == true)
+        // v1.5.0 (Phase A2): a provider error keeps the question as a turn,
+        // with the error under it, instead of putting it back in the field.
+        #expect(vm.input.isEmpty)
+        #expect(vm.conversationMessages.map(\.content) == ["first try"])
+        #expect(vm.currentConversation?.titleSource == "first try")
 
         await mock.setShouldThrow(false)
-        await ask(vm, mock, "second try", reply: "Hi.")
-        #expect(vm.currentConversation?.titleSource == "second try")
-        #expect(vm.quickAITitle == "Second try")
+        await mock.setResponses([StreamDelta(text: "Hi.", finishReason: "stop")])
+        await vm.regenerateLastAnswer()
+        #expect(vm.conversationMessages.map(\.content) == ["first try", "Hi."])
+        #expect(vm.quickAITitle == "First try")
     }
 
     @Test func aChatSavedBeforeTitleSourceStillDecodes() throws {
@@ -461,7 +465,7 @@ struct QuickAIPolishTests {
         vm.closeRecentChats()
 
         vm.isStreaming = true
-        #expect(vm.quickAIComposerPlaceholder == "Waiting for the answer… esc stops")
+        #expect(vm.quickAIComposerPlaceholder == "Type a follow-up; it sends when this answer ends")
         vm.isStreaming = false
 
         vm.startNewConversation()
@@ -478,7 +482,7 @@ struct QuickAIPolishTests {
         )
         #expect(vm.quickAIComposerPlaceholder == "Pick an option above… esc stops")
         vm.pendingAskQuestion = nil
-        #expect(vm.quickAIComposerPlaceholder == "Waiting for the answer… esc stops")
+        #expect(vm.quickAIComposerPlaceholder == "Type a follow-up; it sends when this answer ends")
     }
 
     @Test func aFollowUpThatStartsANewChatIsNotCalledOne() async {

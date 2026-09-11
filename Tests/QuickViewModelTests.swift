@@ -177,7 +177,11 @@ struct QuickViewModelTests {
         vm.input = "This will fail"
         await vm.submit()
 
-        #expect(vm.errorMessage != nil)
+        // A provider error belongs to the turn it failed, not the bottom line.
+        let question = try #require(vm.conversationMessages.last)
+        #expect(vm.threadError?.messageID == question.id)
+        #expect(vm.threadError?.message.isEmpty == false)
+        #expect(vm.errorMessage == nil)
         #expect(vm.isStreaming == false)
     }
 
@@ -426,7 +430,9 @@ struct QuickViewModelTests {
         vm.settings.autoCopy = false
         vm.input = "2+2"
         await vm.submit()
-        #expect(vm.output == "4")
+        #expect(vm.rootAnswer?.answer == "4")
+        #expect(vm.output.isEmpty, "a local answer is not a Quick AI answer")
+        #expect(!vm.isQuickAIPresented)
         #expect(vm.errorMessage == nil)
     }
 
@@ -437,7 +443,9 @@ struct QuickViewModelTests {
         vm.settings.autoCopy = false
         vm.input = "3*7"
         await vm.submit()
-        #expect(vm.output == "21")
+        #expect(vm.rootAnswer?.answer == "21")
+        #expect(vm.output.isEmpty, "a local answer is not a Quick AI answer")
+        #expect(!vm.isQuickAIPresented)
         #expect(vm.errorMessage == nil)
     }
 
@@ -447,7 +455,9 @@ struct QuickViewModelTests {
         vm.settings.autoCopy = true
         vm.input = "10/2"
         await vm.submit()
-        #expect(vm.output == "5")
+        #expect(vm.rootAnswer?.answer == "5")
+        #expect(vm.output.isEmpty, "a local answer is not a Quick AI answer")
+        #expect(!vm.isQuickAIPresented)
         #expect(pasteboard.string == "5")
     }
 
@@ -457,7 +467,9 @@ struct QuickViewModelTests {
         vm.settings.autoCopy = false
         vm.input = "4+4"
         await vm.submit()
-        #expect(vm.output == "8")
+        #expect(vm.rootAnswer?.answer == "8")
+        #expect(vm.output.isEmpty, "a local answer is not a Quick AI answer")
+        #expect(!vm.isQuickAIPresented)
         // Clipboard must NOT have changed
         #expect(pasteboard.string == "before")
         #expect(pasteboard.writeCount == 0)
@@ -477,7 +489,9 @@ struct QuickViewModelTests {
         vm.input = "54,34*6"
         await vm.submit()
         // 54.34 * 6 = 326.04
-        #expect(vm.output == "326.04")
+        #expect(vm.rootAnswer?.answer == "326.04")
+        #expect(vm.output.isEmpty, "a local answer is not a Quick AI answer")
+        #expect(!vm.isQuickAIPresented)
         #expect(vm.errorMessage == nil)
     }
 
@@ -492,7 +506,8 @@ struct QuickViewModelTests {
 
         await vm.submit()
 
-        #expect(vm.output.contains(String(Calendar.current.component(.year, from: Date()))))
+        #expect(vm.rootAnswer?.answer.contains(String(Calendar.current.component(.year, from: Date()))) == true)
+        #expect(!vm.isQuickAIPresented)
         #expect(vm.errorMessage == nil)
         #expect(await service.sendCallCount == 0)
     }

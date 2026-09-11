@@ -39,8 +39,10 @@ struct OverlayView: View {
     }
 
     /// Root search: the input row, the launcher list, the catalogs, and the
-    /// footer well. Answers never draw here; they live on the Quick AI
+    /// footer well. Model answers never draw here; they live on the Quick AI
     /// surface, and a thread kept behind root search stays out of sight.
+    /// The one answer root draws is a local one (math, a conversion, a date,
+    /// a system fact), under the input row as v1.3.0 drew it.
     private var rootSurface: some View {
         VStack(spacing: 0) {
             // Input row: the Add Context control, a leading glyph, the field,
@@ -86,6 +88,7 @@ struct OverlayView: View {
                     .onChange(of: viewModel.input) { _, newValue in
                         viewModel.resetApplicationSelection()
                         viewModel.noteInteraction()
+                        viewModel.rootInputDidChange(newValue)
                         viewModel.screenHistory.inputDidChange()
                         // Typing `@` opens the same Add Context menu the
                         // control left of the field does.
@@ -188,6 +191,11 @@ struct OverlayView: View {
                         .buttonStyle(.plain)
                     }
                 }
+            }
+
+            if let answer = viewModel.rootAnswer {
+                HouseDivider()
+                RootAnswerBlock(answer: answer)
             }
 
             // Error message
@@ -1260,8 +1268,9 @@ struct ComposerKeyRouting: ViewModifier {
             .onKeyPress(.tab) {
                 viewModel.handleTab() ? .handled : .ignored
             }
-            .onKeyPress(.downArrow) { move(1) }
-            .onKeyPress(.upArrow) { move(-1) }
+            .onKeyPress(keys: [.upArrow, .downArrow, .pageUp, .pageDown], phases: [.down, .repeat]) { press in
+                arrow(press)
+            }
             .onKeyPress(.rightArrow) {
                 guard viewModel.isGridCatalog, !viewModel.launcherMatches.isEmpty else { return .ignored }
                 viewModel.moveApplicationSelection(1)
@@ -1272,6 +1281,30 @@ struct ComposerKeyRouting: ViewModifier {
                 viewModel.moveApplicationSelection(-1)
                 return .handled
             }
+    }
+
+    /// ↑ ↓ PageUp PageDown. On the Quick AI thread, PageUp and PageDown,
+    /// ⌥↑ ⌥↓, and ⌘↑ ⌘↓ scroll it (the panel's shortcut path usually takes
+    /// the modified arrows first; this is the same rule for the field).
+    /// Plain ↑ ↓ move whatever list is up.
+    private func arrow(_ press: KeyPress) -> KeyPress.Result {
+        let command = press.modifiers == .command
+        let option = press.modifiers == .option
+        let key: QuickViewModel.ThreadKey
+        switch press.key {
+        case .pageUp: key = .pageUp
+        case .pageDown: key = .pageDown
+        case .upArrow: key = .up
+        default: key = .down
+        }
+        let pages = key == .pageUp || key == .pageDown
+        if pages || command || option {
+            if viewModel.handleThreadKey(key, command: command, option: option) { return .handled }
+            // Off the thread PageUp and PageDown are the field's; a modified
+            // arrow moves a list as a plain one does.
+            if pages { return .ignored }
+        }
+        return move(key == .up ? -1 : 1)
     }
 
     private func move(_ delta: Int) -> KeyPress.Result {
@@ -1295,13 +1328,45 @@ struct ComposerKeyRouting: ViewModifier {
             viewModel.moveRecentChatsSelection(delta)
             return .handled
         }
-        if viewModel.isAnswerActive, viewModel.input.isEmpty {
-            viewModel.browseConversations(delta)
-            return .handled
+        // On the Quick AI surface ↑ on an empty composer recalls the last
+        // question and ↓ does nothing; with text the keys are the field's.
+        if viewModel.isQuickAIPresented {
+            return viewModel.handleComposerArrow(delta) ? .handled : .ignored
         }
         guard !viewModel.launcherMatches.isEmpty else { return .ignored }
         viewModel.moveSelectionVertically(delta)
         return .handled
+    }
+}
+
+/// A local answer in root search, as v1.3.0 drew an answer under the input
+/// row: the question as a chip, the answer as prose under it. Math, a
+/// conversion, a date, or a system fact; never a model answer.
+struct RootAnswerBlock: View {
+    let answer: QuickViewModel.RootAnswer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PanelSizing.rootAnswerGap) {
+            HouseChip(text: answer.question)
+                .frame(height: PanelSizing.rootAnswerChipHeight)
+                .accessibilityLabel("Question: \(answer.question)")
+            MarkdownTextView(
+                markdown: answer.answer,
+                isStreaming: false,
+                scrolls: false,
+                instanceID: "local-answer"
+            )
+            .frame(
+                maxWidth: PanelSizing.rootAnswerTextWidth(panelWidth: PanelSizing.panelWidth),
+                alignment: .leading
+            )
+            .accessibilityLabel("Answer: \(answer.answer)")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, PanelSizing.rootAnswerSideInset)
+        .padding(.top, PanelSizing.rootAnswerTopInset)
+        .padding(.bottom, PanelSizing.rootAnswerBottomInset)
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -8,6 +8,8 @@ enum VirtualKey: UInt16, Sendable {
     case delete = 51
     case escape = 53
     case keypadEnter = 76
+    case pageUp = 116
+    case pageDown = 121
     case leftArrow = 123
     case rightArrow = 124
     case downArrow = 125

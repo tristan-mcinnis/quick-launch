@@ -669,16 +669,17 @@ struct InteractionJournalTests {
     }
 
     /// A request that failed or was cancelled was still a submission. Closing
-    /// the overlay afterwards must not also file it as an abandoned search:
-    /// every failure path restores the typed text into `input` first.
+    /// the overlay afterwards must not also file it as an abandoned search,
+    /// whether the question stayed in the thread (a provider error) or came
+    /// back into `input` (a search that failed).
     @Test func aFailedRequestIsNotAlsoAnAbandonedSearch() async {
         let failing = MockQuickService()
         await failing.setShouldThrow(true)
         let (vm, journal) = makeViewModel(service: failing)
         vm.input = "summarize this text"
         await vm.submit()
-        #expect(vm.errorMessage != nil)
-        #expect(vm.input == "summarize this text", "the failure restores the typed text")
+        #expect(vm.threadError != nil)
+        #expect(vm.conversationMessages.last?.content == "summarize this text", "the question stays a turn")
 
         vm.endInteractionSession()
         #expect(journal.count(of: .aiFailed) == 1)

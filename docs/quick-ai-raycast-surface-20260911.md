@@ -56,7 +56,10 @@ surface is fixed and never measures its content. A catalog with a detail pane
 - Beside it, two lines: the conversation title in `TypeToken.subheading`
   (13 semibold; Raycast is ~15 semibold and 13 is the nearest house style),
   and the model display name under it in `TypeToken.metadata`
-  `textSecondary`. Title falls back to the first user
+  `textSecondary` (v1.5.0, Phase A2: while a command action's output or a
+  Vault Search is on screen, that line names the source instead, the
+  command's name or "Vault Search · <mode>", as plain text rather than the
+  model button). Title falls back to the first user
   message, truncated middle, one line. Before the first answer the title is
   "Quick AI".
 - Right: an `arrow.up.right.square` (expand) glyph button, same size, inset
@@ -87,14 +90,25 @@ surface is fixed and never measures its content. A catalog with a detail pane
   text), reached by adding only the difference over SF's own line height
   (`TypeToken.proseLineSpacing`, about 5 pt), never 0.55 × 14 on top of it.
   Code blocks keep the v1.3.0 block (language, Copy, wrap).
-- A finished answer that is not a conversation turn (a local answer such as
-  `2+2`, a command action's result, a Vault Search, the partial text a failed
-  stream left) draws as prose after the thread, whether or not a chat is kept.
+- A finished answer that is not a conversation turn (a command action's
+  result, a Vault Search, the partial text a failed stream left) draws as
+  prose after the thread, whether or not a chat is kept.
+
+  > Changed in v1.5.0 (Phase A2): a local answer (math, a conversion, a
+  > date, a system fact) is no longer drawn here. It shows in root search
+  > under the input row, a question chip over the answer, as v1.3.0 drew it
+  > and as Raycast's calculator does; Tab and the Ask AI row answer it there
+  > without opening the surface. Asked from the composer, it stays here
+  > with the chat: its own answer under its own pill, "Local answer" on the
+  > header's second line, never a turn of the chat. Command output and
+  > Vault Search stay here too, under their own pill, name their source in
+  > the header, and are never written to chat history (v1.3.0 did not write
+  > them either).
 - An answer never draws without its question. The typed question is a pill
   from the moment it is submitted: while the web search or page read runs it
   draws as its own pill with the search line under it (the user message joins
-  the thread only when the model is called), and a local answer draws under
-  its own pill. The previous answer leaves the screen when the next ask
+  the thread only when the model is called), and a command's output or a
+  Vault Search draws under its own pill. The previous answer leaves the screen when the next ask
   starts; nothing is drawn live until the model's text lands.
 - Ask User Question card, when the model genuinely asks, sits in the thread at
   the assistant position and keeps its current look.
@@ -109,6 +123,30 @@ surface is fixed and never measures its content. A catalog with a detail pane
 - Vertical rhythm: `Spacing.md` (16) between turns, `Spacing.xl` (24) above the
   first turn.
 - The thread auto-scrolls to the newest turn while streaming.
+
+  > Changed in v1.5.0 (Phase A2): it follows the newest text only while the
+  > reader is within about 40 pt (`Control.row`) of the bottom, and on every
+  > new question. Scrolled further up, streaming text lands below without
+  > moving the view, and a small "↓ Latest" chip (the house chip on a raised
+  > card) floats above the composer; clicking it or `⌘↓` goes back to the
+  > bottom and follows again. A scroll the thread animates is judged where
+  > it lands, not on its first frame.
+- A stopped answer (v1.5.0, Phase A2): Escape during the model's answer
+  keeps the question as a turn and the text that arrived as its answer,
+  drawn as any answer is (the message model has no "stopped" field, so it
+  carries no mark). `⌘R` asks that same turn again. A stop during the web
+  search or page read still takes the question back to the composer; a
+  stop or a provider error once the search is done keeps the turn, as
+  here. `⌘R` stays in the chat it asks again, with its earlier turns, even
+  past the Start New Chat interval, and never touches the composer.
+- A provider error (v1.5.0, Phase A2) keeps the question as a turn and
+  draws the error under it in the tool line's place: an
+  `exclamationmark.triangle` and the message in `danger` ink, then "Retry"
+  with its `⌘R` caps on the right. `⌘R` or the control asks it again. A
+  question left without an answer (an error, or a stop before any text)
+  stays in the thread but is left out of what the model is sent, so the
+  request alternates. Errors that belong to no turn (permissions, no
+  provider or key) keep the line above the composer.
 
 ### Composer row (bottom)
 
@@ -150,6 +188,23 @@ surface is fixed and never measures its content. A catalog with a detail pane
 - The field has focus the whole time the surface is open, including while a
   question streams (typing a follow-up during streaming queues nothing; Return is
   ignored until the stream ends).
+
+  > Changed in v1.5.0 (Phase A2): Return while an answer streams queues one
+  > follow-up. It stays in the field, the action reads "Queued ↩", and it is
+  > sent when the answer ends. The streaming placeholder reads "Type a
+  > follow-up; it sends when this answer ends". Escape stops the answer and
+  > leaves the queued text in the field, unsent; an error does the same.
+  > Clearing the field unqueues it. A layer still open over the composer
+  > when the answer ends (a chooser, Add Context, Recent Chats, the `⌘K`
+  > pane or palette) holds the follow-up until it closes; the stream's end
+  > never picks in it.
+- `↑` on an empty composer puts the last question back in it to edit and
+  send again, as Raycast does; `↓` on an empty composer does nothing. With
+  text in the field both keys are the field's. PageUp and PageDown, or
+  `⌥↑` and `⌥↓`, scroll the thread by a page; `⌘↑` and `⌘↓` jump to its top
+  and bottom. `⌘[` and `⌘]` switch chats. The question card, the choosers,
+  and Recent Chats keep `↑↓` for their own rows. (v1.5.0, Phase A2; before
+  it, `↑↓` on an empty composer switched chats.)
 - `↩` sends; with an answer and an empty field it runs the primary action.
 - `esc` while streaming stops, the search phase included: a stopped ask never
   reaches the model, and the search line it started leaves with it. Otherwise
@@ -168,9 +223,18 @@ surface is fixed and never measures its content. A catalog with a detail pane
   > Changed in v1.5.0: the composer searches the list (title and message
   > text) and opens empty; Return opens the highlighted match and clears the
   > text; `esc` clears a search before it returns to the thread.
-- While an answer streams, Return still picks in the model chooser, Add
-  Context, and the Transform chooser; only the ask itself waits for the
-  stream to end.
+  >
+  > Changed in v1.5.0 (Phase A2): `⌘K` opens the highlighted row's own
+  > actions (Continue Chat, Copy Last Answer, Rename Chat, Pin or Unpin,
+  > Delete Chat) floating above the composer, and the row keys (`⌘E`,
+  > `⇧⌘P`, `⌃X` twice, `⌘↩`) act on the highlighted chat too, never on the
+  > chat that is open; with a search that matches no chat they, and `⌘K`,
+  > do nothing. A rename started here comes back here. A pinned row shows
+  > the pin glyph instead of a "Pinned · " prefix in its detail.
+- While an answer streams, Return still picks in the model chooser and Add
+  Context; only the ask itself waits for the stream to end. The Transform
+  chooser does not open during a stream (a transform is its own ask), and
+  a transform started another way stops the answer first.
 
 ## Entering Quick AI
 
@@ -236,7 +300,11 @@ surface is fixed and never measures its content. A catalog with a detail pane
   of an ask through the real submit path (question pill, search line, nothing
   else drawn), an answered thread with a user pill and prose, the `⌘K`
   palette above the composer, a local answer under its own pill, Recent
-  Chats.
+  Chats. (v1.5.0, Phase A2, both appearances: a stopped answer, an error
+  under its question with Retry, a queued follow-up, the "↓ Latest" chip, a
+  command's output with the command in the header, `2+2` inline in root
+  search, Recent Chats with a pinned row and with that row's `⌘K` actions.
+  The local answer proof on the surface is retired with the behaviour.)
 - Driven check on the installed app: `⌘Space`, type, `Tab`, screenshot; wait,
   screenshot; `⌘J`, screenshot; `esc` ×3. Compare against `mac-ai-quickai.png`.
 - `swift test` green, `design-lint --strict` zero hits on touched files.

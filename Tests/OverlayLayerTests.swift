@@ -151,6 +151,7 @@ struct OverlayLayerTests {
         // With no row highlighted (direct submit) the same resolver answers.
         vm.input = "2+2"
         await vm.submit()
-        #expect(vm.output == "4")
+        #expect(vm.rootAnswer == QuickViewModel.RootAnswer(question: "2+2", answer: "4"))
+        #expect(vm.output.isEmpty, "a local answer stays in root search")
     }
 }

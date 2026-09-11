@@ -701,6 +701,83 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.isModelChooserPresented, "the key the empty surface names works before the first answer")
         #expect(viewModel.modelChooserPurpose == .change)
     }
+
+    // MARK: - 6. Phase A2: the thread's keys, Stop and ⌘R, Recent Chats rows
+
+    @Test func commandAndOptionArrowsScrollTheThreadNotTheChats() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        let chat = try #require(viewModel.currentConversation)
+        viewModel.history = [chat, QuickConversation(
+            providerID: InferenceProvider.deepSeekID,
+            model: "older-model",
+            messages: [QuickMessage(role: .user, content: "older"), QuickMessage(role: .assistant, content: "Older.")]
+        )]
+
+        #expect(try overlay.press("\u{F700}", keyCode: VirtualKey.upArrow.rawValue, [.command]))
+        #expect(viewModel.threadScrollRequest?.target == .top, "⌘↑ jumps to the top")
+        #expect(try overlay.press("\u{F701}", keyCode: VirtualKey.downArrow.rawValue, [.command]))
+        #expect(viewModel.threadScrollRequest?.target == .bottom, "⌘↓ jumps to the bottom")
+        #expect(try overlay.press("\u{F700}", keyCode: VirtualKey.upArrow.rawValue, [.option]))
+        #expect(viewModel.threadScrollRequest?.target == .pageUp, "⌥↑ pages up")
+        #expect(try overlay.press("\u{F701}", keyCode: VirtualKey.downArrow.rawValue, [.option]))
+        #expect(viewModel.threadScrollRequest?.target == .pageDown, "⌥↓ pages down")
+        #expect(try overlay.press("\u{F72D}", keyCode: VirtualKey.pageDown.rawValue, [.function]) == false,
+                "an unmodified PageDown reaches the composer's own key handler")
+        #expect(viewModel.currentConversation?.id == chat.id, "no arrow switched the chat")
+    }
+
+    @Test func commandRAfterStopAsksTheStoppedQuestionAgain() async throws {
+        let gated = GatedQuickService(head: "Half an", tail: " answer.")
+        let overlay = KeyboardOverlay(settings: settings(), service: gated)
+        let viewModel = overlay.viewModel
+        viewModel.openQuickAI()
+        viewModel.input = "explain the plan"
+        let submit = Task { await viewModel.submit() }
+        await gated.waitUntilHolding()
+        #expect(await waitFor { viewModel.output == "Half an" })
+
+        try overlay.pressEscape()
+        await submit.value
+        #expect(viewModel.conversationMessages.map(\.content) == ["explain the plan", "Half an"],
+                "Escape stopped and kept the question with what arrived")
+
+        #expect(try overlay.press("r", keyCode: 15, [.command]))
+        #expect(await waitFor { gated.sendCallCount == 2 })
+        #expect(await waitFor { viewModel.output == "The follow-up answer." })
+        #expect(viewModel.conversationMessages.map(\.content) == ["explain the plan", "The follow-up answer."])
+        #expect(gated.sentMessages.last?.last?.content == "explain the plan", "the same turn went out again")
+    }
+
+    @Test func commandKAndShiftCommandPInRecentChatsActOnTheHighlightedRow() async throws {
+        let (overlay, _) = try await answered()
+        let viewModel = overlay.viewModel
+        let open = try #require(viewModel.currentConversation)
+        let other = QuickConversation(
+            updatedAt: open.updatedAt.addingTimeInterval(-120),
+            providerID: InferenceProvider.deepSeekID,
+            model: "older-model",
+            messages: [QuickMessage(role: .user, content: "other chat"), QuickMessage(role: .assistant, content: "Other.")]
+        )
+        viewModel.history = [open, other]
+        #expect(try overlay.press("j", keyCode: 38, [.command]))
+        viewModel.moveRecentChatsSelection(1)
+        #expect(viewModel.recentChatItems[viewModel.recentChatsIndex].itemID == other.id.uuidString)
+
+        #expect(try overlay.press("p", keyCode: 35, [.command, .shift]))
+        #expect(viewModel.history.first { $0.id == other.id }?.isPinned == true, "⇧⌘P pinned the highlighted chat")
+        #expect(viewModel.history.first { $0.id == open.id }?.isPinned == false, "not the open one")
+        #expect(viewModel.recentChatItems[viewModel.recentChatsIndex].itemID == other.id.uuidString,
+                "the highlight followed the chat to the top")
+
+        #expect(try overlay.press("k", keyCode: 40, [.command]))
+        #expect(viewModel.isCatalogActionPanePresented, "⌘K opens the row's pane")
+        #expect(!viewModel.isActionPalettePresented, "not the open chat's answer palette")
+        #expect(viewModel.focusedItemActions.contains { $0.title == "Unpin" }, "the pane is the pinned row's")
+        try overlay.pressEscape()
+        #expect(!viewModel.isCatalogActionPanePresented)
+        #expect(viewModel.isRecentChatsPresented, "Escape closed the pane and nothing else")
+    }
 }
 
 // MARK: - Harness

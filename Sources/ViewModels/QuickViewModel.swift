@@ -7,11 +7,53 @@ import Observation
     // MARK: - Published state
 
     var input: String = ""
-    /// The answer on screen. Any answer, from any lane, lives on the Quick AI
-    /// surface, so a non-empty answer presents it.
+    /// The answer on screen. Every lane but a local answer asked in root
+    /// search (math, conversions, dates, system facts, drawn inline there as
+    /// `rootAnswer`) lives on the Quick AI surface, so a non-empty answer
+    /// presents it.
     var output: String = "" {
         didSet { if !output.isEmpty { isQuickAIPresented = true } }
     }
+    /// Where the answer on screen came from. A model answer is a turn of the
+    /// thread and the header names the model; a command action's output and
+    /// a Vault Search are not turns, and the header names them instead.
+    enum AnswerSource: Equatable, Sendable {
+        case model
+        /// A command action or a system command, by its name.
+        case command(String)
+        case vaultSearch(VaultSearchMode)
+        /// Math, a conversion, a date, or a system fact asked from the
+        /// Quick AI composer: answered here, never by the model.
+        case local
+    }
+    var answerSource: AnswerSource = .model
+    /// A local answer shown inline in root search under its question, as
+    /// v1.3.0 drew it: math, a conversion, a date, or a system fact. It
+    /// never opens the Quick AI surface and never joins a chat.
+    struct RootAnswer: Equatable, Sendable {
+        let question: String
+        let answer: String
+    }
+    var rootAnswer: RootAnswer?
+    /// A provider error on a turn of the thread, drawn under that question
+    /// with Retry. The turn stays; `⌘R` asks it again. Errors that belong to
+    /// no turn (permissions, no provider or key) use `errorMessage`.
+    struct ThreadError: Equatable, Sendable {
+        let messageID: UUID
+        let message: String
+    }
+    var threadError: ThreadError?
+    /// Whether the thread keeps the newest text in view. True while the
+    /// reader is within `threadFollowThreshold` of the bottom, and again on
+    /// every new question; false once they scroll up, which shows the
+    /// "Latest" chip.
+    var isThreadFollowingBottom = true
+    /// How close to the bottom counts as reading the newest text.
+    static let threadFollowThreshold = House.Control.row
+    /// Return while an answer streams queues the typed follow-up: it stays
+    /// in the composer and is sent when the stream ends. Escape stops the
+    /// stream and keeps the text, unsent.
+    var isFollowUpQueued = false
     var isStreaming: Bool = false {
         didSet { if isStreaming { isQuickAIPresented = true } }
     }
@@ -24,7 +66,9 @@ import Observation
     /// kept, so the surface and the thread are separate state.
     var isQuickAIPresented = false
     /// `⌘J`: Recent Chats replaces the thread inside the Quick AI surface.
-    var isRecentChatsPresented = false
+    var isRecentChatsPresented = false {
+        didSet { if !isRecentChatsPresented { resumeQueuedFollowUp() } }
+    }
     /// Highlighted row of the Recent Chats list.
     var recentChatsIndex = 0
     /// "Search web: …" for the current answer, drawn as the tool line above
@@ -56,7 +100,9 @@ import Observation
         case applicationPane
         case catalogPane
     }
-    var presentedLayer: PresentedLayer?
+    var presentedLayer: PresentedLayer? {
+        didSet { if presentedLayer == nil { resumeQueuedFollowUp() } }
+    }
     var isActionPalettePresented: Bool {
         get { presentedLayer == .actionPalette }
         set { presentedLayer = newValue ? .actionPalette : (presentedLayer == .actionPalette ? nil : presentedLayer) }
@@ -87,12 +133,35 @@ import Observation
     /// or Copy Chat ("Copied"), drawn with a checkmark in place of the
     /// primary action. Nil the rest of the time.
     var composerConfirmation: String?
-    /// Which thread message to bring to the top of the view, and a revision
-    /// so asking twice for the same message scrolls twice. Set by Show more
-    /// and Collapse; the thread observes it.
+    /// Where the thread should scroll, and a revision so asking twice for
+    /// the same place scrolls twice. Set by Show more and Collapse (the
+    /// message's head to the top), by PageUp/PageDown and ⌥↑/⌥↓ (a page),
+    /// by ⌘↑/⌘↓ (the ends), and by the "Latest" chip; the thread observes it.
     struct ThreadScrollRequest: Equatable, Sendable {
-        let messageID: UUID
+        enum Target: Equatable, Sendable {
+            case messageTop(UUID)
+            case pageUp
+            case pageDown
+            case top
+            case bottom
+        }
+        let target: Target
         let revision: Int
+
+        init(target: Target, revision: Int) {
+            self.target = target
+            self.revision = revision
+        }
+
+        /// Show more and Collapse: the message's head at the top.
+        init(messageID: UUID, revision: Int) {
+            self.init(target: .messageTop(messageID), revision: revision)
+        }
+
+        var messageID: UUID? {
+            if case .messageTop(let id) = target { return id }
+            return nil
+        }
     }
     var threadScrollRequest: ThreadScrollRequest?
     /// Screenshots waiting to travel with the next question, oldest first.
@@ -232,11 +301,24 @@ import Observation
     // MARK: - Private
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
-    /// True once `cancel()` stopped the model request on screen. The stream
-    /// task can end without a `CancellationError` (a service that finishes its
-    /// continuation instead of throwing), so the outcome record is suppressed
-    /// explicitly rather than inferred. Never persisted.
-    @ObservationIgnored private var streamWasCancelled = false
+    /// Bumped by every model request and by `cancel()` and a thread reset.
+    /// A stream task writes state only while its generation is current, so
+    /// a stopped stream that ends late (by a `CancellationError`, or by a
+    /// service that finishes its continuation instead) never touches the
+    /// next ask, and its outcome is never recorded twice. Never persisted.
+    @ObservationIgnored private var streamGeneration = 0
+    /// The chat and the user turn of the model request in flight, so Stop
+    /// can give that turn the text that arrived.
+    @ObservationIgnored private var inFlightTurn: (conversationID: UUID, messageID: UUID)?
+    /// Return while a stream runs (a pick in a chooser, or a queued
+    /// follow-up). The submit that started the stream is still in flight,
+    /// so this one never waits on it.
+    @ObservationIgnored var streamingReturnTask: Task<Void, Never>?
+    /// The Retry control under a failed turn, kept so a test can await it.
+    @ObservationIgnored var retryTask: Task<Void, Never>?
+    /// Rename Chat started from Recent Chats returns there, not to the
+    /// Chats catalog.
+    @ObservationIgnored private var renameReturnsToRecentChats = false
     /// The folded query the user actually submitted or acted on in this overlay
     /// session, set where the submission happens — not inferred from whatever
     /// `input` happens to hold when the outcome is recorded. That is what stops
@@ -1047,7 +1129,8 @@ import Observation
             kind: .conversation,
             itemID: conversation.id.uuidString,
             title: title(of: conversation),
-            detail: (conversation.isPinned ? "Pinned · " : "") + "\(count) · \(stamp)",
+            // A pinned row carries the pin glyph; the detail stays the facts.
+            detail: "\(count) · \(stamp)",
             value: conversation.lastAnswer ?? "",
             keywords: conversation.isPinned ? "pinned" : "",
             isPinned: conversation.isPinned
@@ -1207,6 +1290,14 @@ import Observation
         // treated as a `max(base, pane)` overlay, which left the inline
         // chip + chooser taller than the window and cut off the bottom.
         var total = base
+        if let rootAnswer {
+            total += PanelSizing.rootAnswerBlockHeight(
+                answerHeight: MarkdownRenderer.measuredHeight(
+                    markdown: rootAnswer.answer,
+                    width: PanelSizing.rootAnswerTextWidth(panelWidth: currentPanelWidth)
+                )
+            )
+        }
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
         if showsChooser { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
         if isModelChooserPresented {
@@ -1377,6 +1468,7 @@ import Observation
         parts.append(pendingQuickLinkID ?? "")
         parts.append(hasPendingAttachment ? "1" : "0")
         parts.append(isAnswerActive ? "1" : "0")
+        parts.append(rootAnswer == nil ? "" : "local")
         parts.append(inputMode == nil ? "" : "mode")
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
@@ -1408,7 +1500,9 @@ import Observation
     var isAnswerActive: Bool { isQuickAIPresented }
 
     private func rankLauncherMatches() -> [LauncherSearchResult] {
-        guard !hasPendingAttachment, !isAnswerActive, inputMode == nil else { return [] }
+        // A local answer under the input row stands in for the rows until
+        // the next keystroke, as v1.3.0's answer block did.
+        guard !hasPendingAttachment, !isAnswerActive, inputMode == nil, rootAnswer == nil else { return [] }
         if catalogScope != nil {
             return catalogMatches.map(LauncherSearchResult.item)
         }
@@ -1472,15 +1566,7 @@ import Observation
         }
         // Math, conversions, dates, and system facts answer inline, above everything.
         if let answer = localAnswer(for: query) {
-            let item = LauncherCatalogItem(
-                kind: .answer,
-                itemID: "answer",
-                title: answer,
-                detail: query,
-                value: answer,
-                keywords: "answer result"
-            )
-            scored.append((.item(item), 14_000))
+            scored.append((.item(Self.answerItem(RootAnswer(question: query, answer: answer))), 14_000))
         }
         var ranked = scored
             .sorted { lhs, rhs in
@@ -1506,6 +1592,22 @@ import Observation
         }
         return ranked
     }
+
+    /// The inline answer row, and what Return on a root answer does: the
+    /// answer as the title, the question as the detail; Return copies.
+    static func answerItem(_ answer: RootAnswer) -> LauncherCatalogItem {
+        LauncherCatalogItem(
+            kind: .answer,
+            itemID: "answer",
+            title: answer.answer,
+            detail: answer.question,
+            value: answer.answer,
+            keywords: "answer result"
+        )
+    }
+
+    /// The footer's context while a local answer is on root search.
+    static let rootAnswerContext = "Local answer"
 
     /// Deterministic answers computed as you type. None of these touch a model.
     func localAnswer(for query: String, allowConversions: Bool = true) -> String? {
@@ -1598,6 +1700,7 @@ import Observation
         if let pendingQuickLink { return pendingQuickLink.title }
         if let catalogScope { return catalogScope.title }
         if pendingImage != nil { return activeModelDisplay }
+        if rootAnswer != nil { return Self.rootAnswerContext }
         if !launcherMatches.isEmpty, !input.trimmingCharacters(in: .whitespaces).isEmpty {
             return "Quick Launch"
         }
@@ -1637,6 +1740,13 @@ import Observation
             return [
                 FooterHint(label: "Open", keys: ["↩"]),
                 FooterHint(label: "Back", keys: ["⌫"]),
+            ]
+        }
+        if let rootAnswer {
+            // Return does what the inline answer row does.
+            return [
+                FooterHint(label: Self.answerItem(rootAnswer).defaultActionTitle, keys: ["↩"]),
+                FooterHint(label: "Clear", keys: ["esc"]),
             ]
         }
         let matches = launcherMatches
@@ -1973,8 +2083,9 @@ import Observation
     static let quickAIFollowUpPlaceholder = "Ask a follow-up…"
     /// While Recent Chats is up the composer filters the list.
     static let recentChatsPlaceholder = "Search chats…"
-    /// While an answer streams Return waits and Escape stops it.
-    static let streamingPlaceholder = "Waiting for the answer… esc stops"
+    /// While an answer streams, Return queues what is typed and sends it
+    /// when the answer ends; Escape stops the answer.
+    static let streamingPlaceholder = "Type a follow-up; it sends when this answer ends"
     /// While the model waits on its question card, the wait is the user's.
     static let askQuestionPlaceholder = "Pick an option above… esc stops"
 
@@ -2018,6 +2129,8 @@ import Observation
     static let transformChooserConfirmTitle = "Run"
     /// What Return does in Add Context, in its header and in the composer.
     static let addContextConfirmTitle = "Add"
+    /// The composer's label while a follow-up waits for the stream to end.
+    static let queuedActionLabel = "Queued"
 
     var quickAIComposerAction: ComposerAction {
         if isAskQuestionActive { return ComposerAction(label: "Pick", keys: ["↩"]) }
@@ -2036,7 +2149,12 @@ import Observation
         // In Recent Chats, Return opens the highlighted chat; ↩ means one
         // thing on the screen.
         if isRecentChatsPresented { return ComposerAction(label: "Open", keys: ["↩"]) }
-        if isStreaming { return ComposerAction(label: "Stop", keys: ["esc"]) }
+        if isStreaming {
+            // A follow-up queued with Return waits in the field for the
+            // stream to end; the label says so until it goes.
+            if isFollowUpQueued { return ComposerAction(label: Self.queuedActionLabel, keys: ["↩"]) }
+            return ComposerAction(label: "Stop", keys: ["esc"])
+        }
         if !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch settings.quickAIPrimaryAction {
             case .pasteToActiveApp: return ComposerAction(label: "Paste Response", keys: ["↩"])
@@ -2082,6 +2200,27 @@ import Observation
         if pendingImage != nil { return visionDisplayName }
         guard let provider = activeProvider, let model = activeModelID else { return "No model" }
         return model.isEmpty ? provider.name : ModelProfile.displayName(forModelID: model)
+    }
+
+    /// The answer on screen (or running) came from a command action or a
+    /// Vault Search, not from the model: the header names that source.
+    var answerSourceTitle: String? {
+        guard isStreaming || !output.isEmpty else { return nil }
+        switch answerSource {
+        case .model: return nil
+        case .command(let name): return name
+        case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
+        case .local: return Self.localAnswerSourceTitle
+        }
+    }
+
+    /// The header's second line under a local answer asked in a chat.
+    static let localAnswerSourceTitle = "Local answer"
+
+    /// The Quick AI header's second line: the source of a command or Vault
+    /// Search answer, otherwise the model that answers the next message.
+    var quickAIHeaderSubtitle: String {
+        answerSourceTitle ?? activeModelDisplay
     }
 
     /// Whether the ⇥ hint is drawn in root search. The key itself is not
@@ -2138,6 +2277,9 @@ import Observation
         case vaultFollowUp(VaultSearchMode)
         /// Answer on screen, nothing typed: Return is a no-op.
         case answerIdle
+        /// A local answer inline in root search, nothing typed: Return does
+        /// what the answer row does (copy it).
+        case rootAnswerIdle
         /// A Quick Link that takes typed input.
         case quickLinkInput
         /// A highlighted launcher row (application, catalog, item, or the
@@ -2161,6 +2303,7 @@ import Observation
             if let mode = activeVaultSearchMode, !trimmed.isEmpty { return .vaultFollowUp(mode) }
             if trimmed.isEmpty { return .answerIdle }
         }
+        if rootAnswer != nil, trimmed.isEmpty { return .rootAnswerIdle }
         if pendingQuickLink != nil { return .quickLinkInput }
         let matches = launcherMatches
         if !matches.isEmpty {
@@ -2235,10 +2378,23 @@ import Observation
             openSelectedRecentChat()
             return
         }
-        // The composer keeps focus while an answer streams; Return waits for
-        // the stream to end rather than queueing a second question. A
-        // chooser above still takes Return while the stream runs.
-        if isStreaming { return }
+        // The composer keeps focus while an answer streams; Return queues
+        // what is typed and it is sent when the stream ends. A chooser
+        // above still takes Return while the stream runs.
+        if isStreaming {
+            queueFollowUp()
+            return
+        }
+        await submitTypedText()
+    }
+
+    /// Return on typed text with no layer above the composer: what
+    /// `classifySubmit` says it means. A queued follow-up is sent this way
+    /// too, never through the layers above, which would pick in an open
+    /// chooser instead of sending it.
+    private func submitTypedText() async {
+        // Whatever is typed goes now; a follow-up queued before is this one.
+        isFollowUpQueued = false
         switch classifySubmit() {
         case .attachment, .commandAlias, .prompt:
             await submit()
@@ -2251,6 +2407,8 @@ import Observation
             // paste into the app behind the overlay, or copy. ⌘↩ stays the
             // explicit paste, exactly as every other result action.
             await runPrimaryAnswerAction()
+        case .rootAnswerIdle:
+            if let rootAnswer { await performLauncherItem(Self.answerItem(rootAnswer)) }
         case .fallbackCommand(let identifier):
             await runRootFallback(identifier)
         case .quickLinkInput:
@@ -2355,6 +2513,8 @@ import Observation
         // aside; the thread is kept behind it.
         isQuickAIPresented = false
         isRecentChatsPresented = false
+        rootAnswer = nil
+        renameReturnsToRecentChats = false
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         inputMode = mode
@@ -2393,7 +2553,11 @@ import Observation
         isRecentChatsPresented = false
         input = preserved
         errorMessage = nil
+        // A local answer belongs to root search; it does not follow.
+        rootAnswer = nil
         applicationSelectionIndex = 0
+        // The surface opens on the thread's newest text.
+        followThreadBottom()
         isQuickAIPresented = true
         requestInputFocus()
     }
@@ -2403,6 +2567,9 @@ import Observation
     func closeQuickAI() {
         guard isQuickAIPresented else { return }
         if isStreaming { cancel() }
+        // Back in root search the typed text is a search, not a follow-up:
+        // closing the layers below must not send it.
+        isFollowUpQueued = false
         // Recent Chats' search text belongs to the list, not to root search.
         if isRecentChatsPresented { input = "" }
         isRecentChatsPresented = false
@@ -2424,9 +2591,19 @@ import Observation
     /// can await it and a second Return cannot race the first.
     @ObservationIgnored var composerSubmitTask: Task<Void, Never>?
 
-    /// Return in the Quick AI composer. One submit runs at a time: Return
-    /// while one is in flight is dropped, as it is while a stream runs.
+    /// Return in the Quick AI composer. One submit runs at a time. While a
+    /// stream runs, the submit that started it is still in flight, so
+    /// Return goes its own way: it picks in the question card or a chooser,
+    /// or queues the typed follow-up (`queueFollowUp`), and never waits.
     func submitFromComposer() {
+        if isStreaming {
+            guard streamingReturnTask == nil else { return }
+            streamingReturnTask = Task { @MainActor [weak self] in
+                await self?.submitResolvingFuzzyAlias()
+                self?.streamingReturnTask = nil
+            }
+            return
+        }
         guard composerSubmitTask == nil else { return }
         composerSubmitTask = Task { @MainActor [weak self] in
             await self?.submitResolvingFuzzyAlias()
@@ -2448,6 +2625,9 @@ import Observation
         }
         guard !isStreaming, !isItemActionPanePresented,
               !isActionPalettePresented, inputMode == nil, !isQuickAIPresented else { return false }
+        // Math and the other local answers stay in root search: the
+        // surface never opens for them.
+        if answerTypedTextLocally() { return true }
         openQuickAI()
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
         learn(.item(askAIItem(query: input)))
@@ -2457,13 +2637,24 @@ import Observation
         return true
     }
 
-    func leaveInputMode() {
+    /// Leaves the typing mode for root search, or, for a rename started in
+    /// Recent Chats, back to that list with the chat highlighted. Returns
+    /// true when it went back to Recent Chats.
+    @discardableResult
+    func leaveInputMode() -> Bool {
+        var renamedChatID: UUID?
+        if renameReturnsToRecentChats, case .renameChat(let id) = inputMode { renamedChatID = id }
+        renameReturnsToRecentChats = false
         inputMode = nil
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         input = ""
         errorMessage = nil
         requestInputFocus()
+        guard let renamedChatID else { return false }
+        openRecentChats()
+        recentChatsIndex = recentChatItems.firstIndex { $0.itemID == renamedChatID.uuidString } ?? recentChatsIndex
+        return true
     }
 
     /// Return in a mode. Returns `false` when no mode is active.
@@ -2474,8 +2665,7 @@ import Observation
             await submitVaultSearch(mode: mode, followUp: false)
         case .renameChat(let id):
             renameConversation(id: id, title: input)
-            leaveInputMode()
-            enterCatalog(.chats)
+            if !leaveInputMode() { enterCatalog(.chats) }
         case .caffeinateUntil:
             let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
             do {
@@ -2518,9 +2708,15 @@ import Observation
         }
         inputMode = nil
         input = ""
+        // Not a turn of the chat and not the model: the question is its own
+        // pill, and the header names Vault Search and its mode.
         lastQuestion = question
+        pendingQuestion = question
+        answerSource = .vaultSearch(mode)
+        threadError = nil
         output = ""
         errorMessage = nil
+        followThreadBottom()
         isStreaming = true
         do {
             output = try await vaultSearchService.search(mode: mode, query: effectiveQuery)
@@ -2528,9 +2724,12 @@ import Observation
             vaultSearchAnchor = effectiveQuery
         } catch {
             errorMessage = error.localizedDescription
+            pendingQuestion = nil
+            isFollowUpQueued = false
         }
         isStreaming = false
         requestInputFocus()
+        await sendQueuedFollowUp()
     }
 
     func enterCatalog(_ scope: LauncherCatalogScope) {
@@ -2546,6 +2745,7 @@ import Observation
         // A catalog is a root-search surface: Quick AI steps aside.
         isQuickAIPresented = false
         isRecentChatsPresented = false
+        rootAnswer = nil
         catalogScope = scope
         pendingQuickLinkID = nil
         self.input = ""
@@ -2746,7 +2946,13 @@ import Observation
                 overlayPresenter.dismissOverlay()
             }
         case .conversation:
-            continueConversation(itemID: item.itemID)
+            if isRecentChatsPresented {
+                // Continue Chat from the row's ⌘K pane: as Return on the row.
+                recentChatsIndex = recentChatItems.firstIndex { $0.itemID == item.itemID } ?? recentChatsIndex
+                openSelectedRecentChat()
+            } else {
+                continueConversation(itemID: item.itemID)
+            }
         case .folder:
             guard let location = folderLocation(for: item) else {
                 errorMessage = "That folder is no longer available."
@@ -2765,6 +2971,7 @@ import Observation
         case .answer:
             _ = await copyLauncherItem(item)
             input = ""
+            rootAnswer = nil
             overlayPresenter.dismissOverlay()
         case .screenHistory:
             guard let frame = screenHistory.frame(for: item) else {
@@ -2780,8 +2987,10 @@ import Observation
                 overlayPresenter.presentOverlay()
             } else {
                 // The row carries the query: open Quick AI and send it in
-                // the same gesture, exactly as Tab does.
+                // the same gesture, exactly as Tab does. A local answer
+                // stays in root search, as it does for Tab.
                 input = item.value
+                if answerTypedTextLocally() { return }
                 openQuickAI()
                 await submit()
             }
@@ -3072,19 +3281,23 @@ import Observation
 
     /// Actions available on the answer on screen.
     var resultActions: [ResultAction] {
-        guard !output.isEmpty, !isStreaming else { return [] }
+        guard !isStreaming else { return [] }
+        let hasAnswer = !output.isEmpty
+        // A question the thread holds without an answer (stopped before any
+        // text, or a provider error) still offers ⌘R, and the chat actions.
+        guard hasAnswer || hasUnansweredTurn else { return [] }
         // Replace Selection is the precise action after a selection transform:
         // it writes back to the originally captured selection (retained across
         // the request). Paste into Previous App is the broader fallback. Both
         // fail safe to Copy with a truthful error when the target is gone.
         var actions: [ResultAction] = []
-        if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
-        actions.append(contentsOf: [.pasteBack, .copy])
+        if hasAnswer {
+            if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
+            actions.append(contentsOf: [.pasteBack, .copy])
+        }
         if !conversationMessages.isEmpty { actions.append(.copyChat) }
-        actions.append(contentsOf: [
-            .readAloud, .saveSnippet, .searchWeb,
-            .regenerate, .regenerateWithModel, .changeModel, .newChat,
-        ])
+        if hasAnswer { actions.append(contentsOf: [.readAloud, .saveSnippet, .searchWeb]) }
+        actions.append(contentsOf: [.regenerate, .regenerateWithModel, .changeModel, .newChat])
         if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
@@ -3172,7 +3385,9 @@ import Observation
 
     /// True while the keyboard model chooser is open. ↑↓ move, Return picks,
     /// Escape closes. Opened by `⇧⌘R` and by Change Model.
-    var isModelChooserPresented = false
+    var isModelChooserPresented = false {
+        didSet { if !isModelChooserPresented { resumeQueuedFollowUp() } }
+    }
     var modelChooserPurpose: ModelChooserPurpose = .change
     var modelChooserIndex = 0
     var modelChooserOptions: [ModelChooserOption] = []
@@ -3267,7 +3482,9 @@ import Observation
 
     /// True while the Add Context menu is open. The same menu opens from the
     /// control left of the composer and from typing `@` in it.
-    var isAddContextMenuPresented = false
+    var isAddContextMenuPresented = false {
+        didSet { if !isAddContextMenuPresented { resumeQueuedFollowUp() } }
+    }
     var addContextIndex = 0
 
     /// The four capture paths, in the order the menu lists them.
@@ -3810,6 +4027,7 @@ import Observation
             }
             pasteboard.writeString(cleaned)
             markJustCopied()
+            answerSource = .command(item.title)
             output = cleaned
             lastQuestion = cleaned == text.trimmingCharacters(in: .whitespacesAndNewlines)
                 ? "Link had no tracking parameters"
@@ -3870,6 +4088,7 @@ import Observation
         }
 
         if item.value == "caffeinate.status" {
+            answerSource = .command(item.title)
             output = caffeinateManager?.statusSummary ?? "Decaffeinated. Normal Mac sleep is enabled."
             lastQuestion = "Caffeinate status"
             errorMessage = nil
@@ -3985,6 +4204,7 @@ import Observation
         pasteboard.writeString(text)
         markJustCopied()
         overlayPresenter.presentOverlay()
+        answerSource = .command("Text from Screen")
         output = text
         lastQuestion = thenPaste ? "Text from screen" : "Text from screen, copied"
         errorMessage = nil
@@ -4342,6 +4562,10 @@ import Observation
             requestInputFocus()
             return
         }
+        // One answer at a time: an answer still streaming stops first and
+        // keeps what arrived, as Stop does, so the transform never runs a
+        // second model request beside it.
+        if isStreaming { cancel() }
         pendingActionSource = snapshot
         isActionPalettePresented = false
         actionQuery = ""
@@ -4360,11 +4584,15 @@ import Observation
     /// True while the Transform chooser is open (opened by the Transform chip
     /// or its shortcut). ↑↓ move, Return runs, Esc closes. Keyboard-first:
     /// no mouse is needed to reach any transform.
-    var isTransformChooserPresented = false
+    var isTransformChooserPresented = false {
+        didSet { if !isTransformChooserPresented { resumeQueuedFollowUp() } }
+    }
     var transformChooserIndex = 0
 
     func openTransformChooser() {
-        guard !chipTransformOptions.isEmpty else { return }
+        // A transform is its own model request; it waits for the answer on
+        // screen to end, as Add Context does.
+        guard !isStreaming, !chipTransformOptions.isEmpty else { return }
         isTransformChooserPresented = true
         transformChooserIndex = 0
         isActionPalettePresented = false
@@ -4432,6 +4660,12 @@ import Observation
         if isCatalogActionPanePresented, let item = contextualCatalogItem { return .item(item) }
         if isApplicationActionPanePresented, let application = contextualApplication {
             return .application(application)
+        }
+        // In Recent Chats the highlighted chat is the focused row: `⌘K` and
+        // the row keys act on it, not on the chat that is open.
+        if isRecentChatsPresented {
+            let items = recentChatItems
+            return items.indices.contains(recentChatsIndex) ? .item(items[recentChatsIndex]) : nil
         }
         let matches = launcherMatches
         guard !matches.isEmpty else { return nil }
@@ -4616,6 +4850,8 @@ import Observation
         case attachment
         case typedText
         case answer
+        /// A local answer inline in root search.
+        case localAnswer
         case inputMode
         case catalog
         case quickLinkInput
@@ -4635,6 +4871,7 @@ import Observation
         if !input.isEmpty { return .typedText }
         if hasPendingAttachment { return .attachment }
         if isAnswerActive { return .answer }
+        if rootAnswer != nil { return .localAnswer }
         if inputMode != nil { return .inputMode }
         if pendingQuickLinkID != nil { return .quickLinkInput }
         if catalogScope != nil { return .catalog }
@@ -4669,6 +4906,9 @@ import Observation
         case .answer:
             // Back to root search; the thread is kept behind it.
             closeQuickAI()
+        case .localAnswer:
+            rootAnswer = nil
+            requestInputFocus()
         case .inputMode:
             leaveInputMode()
         case .quickLinkInput, .catalog:
@@ -4735,8 +4975,17 @@ import Observation
             openActionPane(for: result)
             return
         }
+        // Recent Chats with no row highlighted (the search matches nothing):
+        // `⌘K` acts on rows here, never on the chat that is open.
+        if isRecentChatsPresented { return }
         toggleActionPalette()
     }
+
+    /// The keys a Recent Chats row answers to: Copy Last Answer (⌘↩),
+    /// Rename (⌘E), Pin (⇧⌘P), and Delete (⌃X). With no row highlighted
+    /// they do nothing, never act on the chat that is open.
+    private static let recentChatsRowShortcuts: [KeyShortcut] =
+        [.commandReturn] + [ResultAction.renameChat, .pinChat, .deleteChat].map(\.shortcut)
 
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
@@ -4763,6 +5012,29 @@ import Observation
             toggleTranscriptMessage(id)
             return true
         }
+        // ⌘↑ ⌘↓ ⌥↑ ⌥↓ and a modified PageUp or PageDown move the thread; the
+        // field editor would take them otherwise.
+        if let key = Self.threadKey(keyCode: keyCode),
+           modifiers == [.command] || modifiers == [.option] || key == .pageUp || key == .pageDown,
+           handleThreadKey(key, command: modifiers == [.command], option: modifiers == [.option]) {
+            return true
+        }
+        // In Recent Chats a row's own keys (rename, pin, delete, copy) act on
+        // the highlighted chat, before the open chat's answer actions.
+        if isRecentChatsPresented, performFocusedItemShortcut(
+            characters: characters,
+            keyCode: keyCode,
+            modifiers: modifiers
+        ) {
+            return true
+        }
+        // No row took it (the search matches nothing): a row key is
+        // swallowed rather than passed to the open chat's answer actions.
+        if isRecentChatsPresented, Self.recentChatsRowShortcuts.contains(where: {
+            $0.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
+        }) {
+            return true
+        }
         // Change Model works on the Quick AI surface before the first answer
         // too: the empty surface names this key, and so does the header's
         // model line.
@@ -4782,6 +5054,27 @@ import Observation
             Task { await performResultAction(action) }
             return true
         }
+        return performFocusedItemShortcut(characters: characters, keyCode: keyCode, modifiers: modifiers)
+    }
+
+    /// The thread key a virtual key code names, if any.
+    static func threadKey(keyCode: UInt16) -> ThreadKey? {
+        switch VirtualKey(rawValue: keyCode) {
+        case .upArrow: .up
+        case .downArrow: .down
+        case .pageUp: .pageUp
+        case .pageDown: .pageDown
+        default: nil
+        }
+    }
+
+    /// A shortcut of the focused row's `⌘K` actions (the launcher row, or
+    /// the highlighted Recent Chats row). Returns `false` when none matched.
+    private func performFocusedItemShortcut(
+        characters: String?,
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
         guard pendingImage == nil,
               !isActionPalettePresented,
               activeItemActionForm == nil,
@@ -4908,6 +5201,12 @@ import Observation
             case .conversation:
                 guard let id = UUID(uuidString: item.itemID) else { return true }
                 togglePinConversation(id: id)
+                // Pinned chats sort first: the highlight follows the chat.
+                if isRecentChatsPresented {
+                    closeItemActionPane()
+                    recentChatsIndex = recentChatItems.firstIndex { $0.itemID == item.itemID } ?? 0
+                    return true
+                }
             case .clipboard:
                 clipboardHistory?.togglePin(item)
             case .color:
@@ -4943,7 +5242,9 @@ import Observation
             ScreenshotLibrary.quickLook(URL(fileURLWithPath: item.value))
         case .edit:
             if case .item(let item) = result, item.kind == .conversation, let id = UUID(uuidString: item.itemID) {
+                let fromRecentChats = isRecentChatsPresented
                 enterInputMode(.renameChat(id))
+                renameReturnsToRecentChats = fromRecentChats
                 return true
             }
             openActionPane(for: result, form: .edit)
@@ -4991,6 +5292,9 @@ import Observation
                 case .conversation:
                     if let id = UUID(uuidString: item.itemID) { deleteConversation(id: id) }
                     closeItemActionPane()
+                    if isRecentChatsPresented {
+                        recentChatsIndex = min(recentChatsIndex, max(recentChatItems.count - 1, 0))
+                    }
                 case .folder:
                     removeCustomFolder(item)
                     closeItemActionPane()
@@ -5062,7 +5366,7 @@ import Observation
         QuickHistoryStore.save(history, limit: settings.historyLimit, to: historyFileURL)
     }
 
-    /// ⌘[ / ⌘] or ↑↓ on an answer: move through recent chats, pinned first.
+    /// ⌘[ / ⌘]: move through recent chats, pinned first.
     func browseConversations(_ delta: Int) {
         let ordered = QuickHistoryStore.ordered(history)
         guard !ordered.isEmpty else { return }
@@ -5074,17 +5378,50 @@ import Observation
         continueConversation(itemID: ordered[next].id.uuidString)
     }
 
-    /// ⌘R: send the last question again and replace the answer.
+    /// The thread ends on a question with no answer after it: stopped
+    /// before any text arrived, or a provider error.
+    var hasUnansweredTurn: Bool { conversationMessages.last?.role == .user }
+
+    /// ⌘R: ask the last question again and replace its answer: the answer
+    /// that finished, the partial one a Stop kept, or the error a failure
+    /// left. Whatever is typed in the composer stays there.
     func regenerateLastAnswer() async {
-        guard var conversation = currentConversation,
+        guard !isStreaming,
+              var conversation = currentConversation,
               let lastUser = conversation.messages.lastIndex(where: { $0.role == .user })
         else { return }
         let question = conversation.messages[lastUser].content
+        let replaced = Array(conversation.messages[lastUser...])
+        let previousOutput = output
+        let previousError = threadError
         conversation.messages.removeSubrange(lastUser...)
         currentConversation = conversation
         output = ""
-        input = question
-        await submit()
+        threadError = nil
+        // A first question asked with a screenshot is asked with it again;
+        // a follow-up already carries the thread's images.
+        let reattachesImages = conversation.messages.isEmpty && pendingImages.isEmpty
+            && !conversationImages.isEmpty
+        if reattachesImages { pendingImages = conversationImages }
+        await submit(text: question)
+        // The ask never went out (no provider, no key): the thread is left
+        // as it was, and the bottom line says why.
+        if currentConversation?.id == conversation.id,
+           currentConversation?.messages.count == conversation.messages.count {
+            currentConversation?.messages.append(contentsOf: replaced)
+            output = previousOutput
+            threadError = previousError
+            if reattachesImages { pendingImages.removeAll() }
+        }
+    }
+
+    /// Retry under a failed turn: `⌘R`, from the control.
+    func retryFailedTurn() {
+        guard retryTask == nil, !isStreaming else { return }
+        retryTask = Task { @MainActor [weak self] in
+            await self?.regenerateLastAnswer()
+            self?.retryTask = nil
+        }
     }
 
     /// Turn a clipboard entry into a snippet or a Quick Link, then open the
@@ -5442,6 +5779,14 @@ import Observation
     /// plus everything the stream and its rollback need.
     struct PreparedRequest {
         let submittedInput: String
+        /// True when the question came from the composer, so it leaves the
+        /// field as it becomes a pill; false for ⌘R, which asks a turn of
+        /// the thread again and leaves whatever is typed alone.
+        var takesComposerText = true
+        /// True for ⌘R and Retry: a turn of the open chat asked again. It
+        /// stays in that chat, with its earlier turns and images, even past
+        /// the Start New Chat interval.
+        var reasksTurn = false
         let submittedImages: [QuickImageAttachment]
         let action: SavedPromptResolver.Resolution?
         let actionDefinition: SavedPrompt?
@@ -5457,7 +5802,13 @@ import Observation
     /// request itself: `prepareRequest` (aliases, `{selection}`, local
     /// answers), `enrich` (web search, page reading), `stream` (provider).
     func submit() async {
-        guard var request = await prepareRequest() else { return }
+        await submit(text: nil)
+    }
+
+    /// `text` asks that question instead of the composer's (⌘R asking a
+    /// turn again); the composer then keeps what is typed in it.
+    private func submit(text: String?) async {
+        guard var request = await prepareRequest(text: text) else { return }
         guard await enrich(&request) else { return }
         await stream(request)
     }
@@ -5465,23 +5816,28 @@ import Observation
     /// Resolves saved-prompt aliases, runs command actions, expands
     /// `{selection}`, and answers locally (math, conversions, facts). Returns
     /// `nil` when the request was handled here or could not proceed.
-    func prepareRequest() async -> PreparedRequest? {
-        guard !input.isEmpty || pendingImage != nil else { return nil }
+    func prepareRequest(text: String? = nil) async -> PreparedRequest? {
+        let takesComposerText = text == nil
+        let reasksTurn = text != nil
+        let submittedInput = text ?? input
+        guard !submittedInput.isEmpty || pendingImage != nil else { return nil }
         // A new request supersedes any prior answer's replaceable selection.
         replaceableSelectionContext = nil
         isConversationHistoryPresented = false
         webSearchNote = nil
-        let submittedInput = input
+        // A turn asked again stays in its chat, so it keeps the chat's
+        // images even past the Start New Chat interval.
+        let keepsThread = reasksTurn || !shouldStartNewConversation
         let submittedImages = !pendingImages.isEmpty
             ? pendingImages
-            : ((isFollowUp && !shouldStartNewConversation) ? conversationImages : [])
+            : ((isFollowUp && keepsThread) ? conversationImages : [])
         let submittedImage = submittedImages.last
 
         // Expand saved-prompt aliases before anything else. Non-matches
         // (including inputs that look like `/foo` but reference an unknown
         // alias) fall through to the regular path below.
         let action = SavedPromptResolver.resolveAction(
-            input: input,
+            input: submittedInput,
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
@@ -5507,7 +5863,9 @@ import Observation
             await runCommandAction(
                 definition: definition,
                 executable: executable,
-                context: source
+                context: source,
+                submittedInput: submittedInput,
+                takesComposerText: takesComposerText
             )
             return nil
         }
@@ -5553,63 +5911,19 @@ import Observation
                 effectivePrompt = preamble + "\n\n" + effectivePrompt
             }
         } else {
-            effectivePrompt = input
-            if effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               submittedImage != nil {
-                effectivePrompt = "Describe this screenshot and answer the most likely useful question about it."
-            }
-            // Screen Awareness context plus the launch-scoped background
-            // selection become context for this question.
-            var preambleParts: [String] = []
-            if let submittedContext = pendingContext {
-                let preamble = submittedContext.promptPreamble()
-                if !preamble.isEmpty { preambleParts.append(preamble) }
-            }
-            if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                var context = CaptureContext(
-                    appName: launchSelection?.appName ?? "the background"
-                )
-                context.selectedText = launchText
-                let preamble = context.promptPreamble()
-                if !preamble.isEmpty { preambleParts.append(preamble) }
-            }
-            let preamble = preambleParts.joined(separator: "\n\n")
-            if !preamble.isEmpty {
-                effectivePrompt = preamble + "\n\nQuestion: " + effectivePrompt
-            }
+            effectivePrompt = plainPrompt(submittedInput, hasImage: submittedImage != nil, launchText: launchText)
         }
 
         // Math, conversions, dates, system facts: the same deterministic
         // resolver the live ranking uses, so Return and the inline row agree.
         // Unit conversions only apply to raw typed input, never to an
         // expanded saved prompt.
-        if MathExpressionDetector.isMathExpression(effectivePrompt),
-           (try? MathCalculator.evaluate(effectivePrompt)) == nil {
-            // Math-shaped but not computable (1/0): say so instead of
-            // handing an arithmetic slip to a model.
-            do {
-                _ = try MathCalculator.evaluate(effectivePrompt)
-            } catch {
-                errorMessage = "Math error: \(error)"
-            }
-            requestInputFocus()
-            return nil
-        }
-        if let result = localAnswer(for: effectivePrompt, allowConversions: action == nil) {
-            errorMessage = nil
-            output = result
-            // Not a turn, but still a question with an answer: the surface
-            // pairs the pill with the prose, and the field empties as it
-            // does for a model answer.
-            let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            lastQuestion = question
-            pendingQuestion = question
-            input = ""
-            if settings.autoCopy {
-                copyOutput()
-                markJustCopied()
-            }
-            requestInputFocus()
+        if answerLocally(
+            prompt: effectivePrompt,
+            question: submittedInput,
+            allowConversions: action == nil,
+            takesComposerText: takesComposerText
+        ) {
             return nil
         }
 
@@ -5624,6 +5938,8 @@ import Observation
 
         return PreparedRequest(
             submittedInput: submittedInput,
+            takesComposerText: takesComposerText,
+            reasksTurn: reasksTurn,
             submittedImages: submittedImages,
             action: action,
             actionDefinition: actionDefinition,
@@ -5631,17 +5947,124 @@ import Observation
         )
     }
 
+    /// What the model gets for typed text that names no saved prompt: the
+    /// text (or, for a bare attachment, a stock question), after any Add
+    /// Context and launch-selection preamble.
+    private func plainPrompt(_ text: String, hasImage: Bool, launchText: String?) -> String {
+        var prompt = text
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, hasImage {
+            prompt = "Describe this screenshot and answer the most likely useful question about it."
+        }
+        // Screen Awareness context plus the launch-scoped background
+        // selection become context for this question.
+        var preambleParts: [String] = []
+        if let submittedContext = pendingContext {
+            let preamble = submittedContext.promptPreamble()
+            if !preamble.isEmpty { preambleParts.append(preamble) }
+        }
+        if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var context = CaptureContext(
+                appName: launchSelection?.appName ?? "the background"
+            )
+            context.selectedText = launchText
+            let preamble = context.promptPreamble()
+            if !preamble.isEmpty { preambleParts.append(preamble) }
+        }
+        let preamble = preambleParts.joined(separator: "\n\n")
+        return preamble.isEmpty ? prompt : preamble + "\n\nQuestion: " + prompt
+    }
+
+    /// The local lane: math, conversions, dates, and system facts, which
+    /// never reach a model. Asked from root search (the field, Tab, or the
+    /// Ask AI row), the answer shows inline under its question
+    /// (`rootAnswer`), as v1.3.0 drew it and as Raycast's calculator does,
+    /// and Quick AI never opens. Asked from the Quick AI composer, it stays
+    /// on the surface as its own answer under its own pill ("Local answer"
+    /// in the header), like a command's output: never a turn of the chat.
+    /// Math that cannot be computed (1/0) is reported, not handed to a
+    /// model. Returns true when the lane took the question.
+    private func answerLocally(
+        prompt: String,
+        question: String,
+        allowConversions: Bool,
+        takesComposerText: Bool
+    ) -> Bool {
+        if MathExpressionDetector.isMathExpression(prompt),
+           (try? MathCalculator.evaluate(prompt)) == nil {
+            do {
+                _ = try MathCalculator.evaluate(prompt)
+            } catch {
+                errorMessage = "Math error: \(error)"
+            }
+            requestInputFocus()
+            return true
+        }
+        guard let result = localAnswer(for: prompt, allowConversions: allowConversions) else { return false }
+        errorMessage = nil
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isQuickAIPresented {
+            // Asked in a chat: the reader stays in it. The question is its
+            // own pill and the answer draws under it, after the thread.
+            lastQuestion = trimmedQuestion
+            pendingQuestion = trimmedQuestion
+            answerSource = .local
+            threadError = nil
+            webSearchNote = nil
+            output = result
+            if takesComposerText { input = "" }
+            followThreadBottom()
+            if settings.autoCopy {
+                pasteboard.writeString(result)
+                markJustCopied()
+            }
+            requestInputFocus()
+            return true
+        }
+        isQuickAIPresented = false
+        isRecentChatsPresented = false
+        rootAnswer = RootAnswer(question: trimmedQuestion, answer: result)
+        if takesComposerText { input = "" }
+        applicationSelectionIndex = 0
+        if settings.autoCopy {
+            pasteboard.writeString(result)
+            markJustCopied()
+        }
+        requestInputFocus()
+        return true
+    }
+
+    /// Tab and the Ask AI row on typed text: when it is a local answer, show
+    /// it in root search and do not open Quick AI. The same rule
+    /// `prepareRequest` applies, decided before the surface opens so it
+    /// never opens for math.
+    private func answerTypedTextLocally() -> Bool {
+        let text = input
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              pendingImage == nil,
+              SavedPromptResolver.resolveAction(
+                  input: text,
+                  prefix: settings.savedPromptPrefix,
+                  savedPrompts: settings.savedPrompts
+              ) == nil
+        else { return false }
+        let prompt = plainPrompt(text, hasImage: false, launchText: launchSelection?.text)
+        return answerLocally(prompt: prompt, question: text, allowConversions: true, takesComposerText: true)
+    }
+
     /// Marks the ask in flight: the typed question is on screen as its own
     /// pill from the first moment of a search or page read, and it leaves
     /// the composer, which now reads the streaming placeholder. The text is
     /// kept until the model call makes it a turn, so a failed or stopped
     /// ask can put it back (`restoreEnrichmentInput`).
-    private func beginPendingQuestion(_ submittedInput: String) {
-        let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func beginPendingQuestion(_ request: PreparedRequest) {
+        let question = request.submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
         lastQuestion = question
         pendingQuestion = question
-        if enrichmentSubmittedInput == nil {
-            enrichmentSubmittedInput = submittedInput
+        answerSource = .model
+        threadError = nil
+        followThreadBottom()
+        if request.takesComposerText, enrichmentSubmittedInput == nil {
+            enrichmentSubmittedInput = request.submittedInput
             input = ""
         }
     }
@@ -5689,7 +6112,7 @@ import Observation
             // the question being asked is on screen from the first moment,
             // as its own pill until the model call makes it a turn.
             output = ""
-            beginPendingQuestion(request.submittedInput)
+            beginPendingQuestion(request)
             isStreaming = true
             do {
                 let searchBundle = try await webSearchService.search(query)
@@ -5713,6 +6136,7 @@ import Observation
                 output = ""
                 isStreaming = false
                 errorMessage = error.localizedDescription
+                isFollowUpQueued = false
                 restoreEnrichmentInput()
                 requestInputFocus()
                 return false
@@ -5730,7 +6154,7 @@ import Observation
                 ? "Reading \(promptPageURLs[0].host ?? "page")\u{2026}"
                 : "Reading \(promptPageURLs.count) pages\u{2026}"
             output = ""
-            beginPendingQuestion(request.submittedInput)
+            beginPendingQuestion(request)
             isStreaming = true
             var sections: [String] = []
             for url in promptPageURLs {
@@ -5812,7 +6236,9 @@ import Observation
             return
         }
 
-        if shouldStartNewConversation || (action != nil && isFollowUp) {
+        // ⌘R asks a turn of this chat again: it stays in this chat whatever
+        // the Start New Chat interval says, and the composer keeps its text.
+        if !request.reasksTurn, shouldStartNewConversation || (action != nil && isFollowUp) {
             startNewConversation()
         }
         if currentConversation == nil {
@@ -5836,14 +6262,17 @@ import Observation
         }
         currentConversation?.messages.append(submittedMessage)
         currentConversation?.updatedAt = Date()
-        var requestMessages = currentConversation?.messages ?? [
+        // A question left without an answer (stopped before any text, or a
+        // provider error) stays in the thread, but the model gets the chat
+        // as alternating turns: an unanswered question is left out.
+        var requestMessages = Self.answeredTurns(currentConversation?.messages ?? [
             QuickMessage(role: .user, content: effectivePrompt)
-        ]
+        ])
         if (usedWebSearch || usedPageRead), !requestMessages.isEmpty {
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
-        input = ""
-        // The question is a turn now; a stream failure rolls it back itself.
+        if request.takesComposerText { input = "" }
+        // The question is a turn now; a stream failure keeps it there.
         enrichmentSubmittedInput = nil
         pendingImages.removeAll()
         pendingContext = nil
@@ -5853,28 +6282,48 @@ import Observation
         if !submittedImages.isEmpty { conversationImages = submittedImages }
 
         errorMessage = nil
+        threadError = nil
+        answerSource = .model
         output = ""
+        // A new question brings the reader back to the newest text.
+        followThreadBottom()
         isStreaming = true
         guard let service = makeService(provider: provider, model: model) else {
             isStreaming = false
-            rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
-            pendingImages = submittedImages
+            // Only a question that came from the composer goes back there,
+            // with its attachments; ⌘R leaves what is typed alone.
+            rollbackSubmission(
+                messageID: submittedMessage.id,
+                restoring: request.takesComposerText ? submittedInput : nil
+            )
+            if request.takesComposerText { pendingImages = submittedImages }
             errorMessage = "\(provider.name) is not available. Check its model, endpoint, or installed command."
             recordJournal(kind: .aiFailed, scope: learningScope, detail: "service-unavailable")
+            isFollowUpQueued = false
             requestInputFocus()
             return
         }
 
+        // One model request at a time: a request still live is stopped here,
+        // and text it buffered but never drew is dropped, so none of it
+        // lands in this answer.
+        streamTask?.cancel()
+        streamTask = nil
+        discardStreamBuffer()
         let stream = service.send(messages: requestMessages, images: submittedImages)
-        streamWasCancelled = false
+        streamGeneration &+= 1
+        let generation = streamGeneration
+        inFlightTurn = currentConversation.map { ($0.id, submittedMessage.id) }
 
         streamTask = Task {
             // A stream that ends for any reason cannot still be waiting on a
-            // question: resume it with no answer and take the card down.
-            defer { clearAskQuestion(with: nil) }
+            // question: resume it with no answer and take the card down. A
+            // stopped stream (`cancel()` moved the generation on) leaves
+            // everything to `cancel()`, which already did this.
+            defer { if generation == streamGeneration { clearAskQuestion(with: nil) } }
             do {
                 for try await delta in stream {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || generation != streamGeneration { break }
                     if let status = delta.status {
                         streamingStatus = status
                     }
@@ -5883,10 +6332,13 @@ import Observation
                         appendStreamText(text)
                     }
                 }
+                // Stopped: `cancel()` kept the turn and the text that arrived.
+                guard generation == streamGeneration else { return }
                 flushStreamBuffer()
                 // Stream completed normally
                 streamingStatus = nil
                 isStreaming = false
+                inFlightTurn = nil
                 if !output.isEmpty {
                     currentConversation?.messages.append(
                         QuickMessage(role: .assistant, content: output)
@@ -5894,14 +6346,11 @@ import Observation
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
                 }
-                if !streamWasCancelled {
-                    recordJournal(
-                        kind: output.isEmpty ? .aiFailed : .aiSucceeded,
-                        scope: learningScope,
-                        detail: output.isEmpty ? "empty-answer" : (action == nil ? "prompt" : "action")
-                    )
-                }
-                streamWasCancelled = false
+                recordJournal(
+                    kind: output.isEmpty ? .aiFailed : .aiSucceeded,
+                    scope: learningScope,
+                    detail: output.isEmpty ? "empty-answer" : (action == nil ? "prompt" : "action")
+                )
                 var didAutoWrite = false
                 if action?.outputBehavior == .replaceSelection, !output.isEmpty {
                     didAutoWrite = true
@@ -5932,27 +6381,29 @@ import Observation
                 }
                 requestInputFocus()
             } catch is CancellationError {
-                // Cancelled — do not set errorMessage
-                discardStreamBuffer()
+                // Stopped by `cancel()`: it already kept the turn.
+                guard generation == streamGeneration else { return }
+                // Cancelled by the web answer's time limit instead: the turn
+                // stays with the text that arrived, as Stop leaves it, and
+                // `waitForWebAnswer` shows the search results if none did.
+                keepStoppedAnswer()
                 streamingStatus = nil
                 isStreaming = false
-                output = ""
-                if !streamWasCancelled {
-                    recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
-                }
-                streamWasCancelled = false
-                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
+                isFollowUpQueued = false
+                recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
                 requestInputFocus()
             } catch {
-                discardStreamBuffer()
+                guard generation == streamGeneration else { return }
+                // A provider error keeps the question in the thread with the
+                // error under it; ⌘R asks it again. Text that arrived before
+                // the error stays on screen, not as a turn.
+                flushStreamBuffer()
                 streamingStatus = nil
-                errorMessage = error.localizedDescription
                 isStreaming = false
-                if !streamWasCancelled {
-                    recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
-                }
-                streamWasCancelled = false
-                rollbackSubmission(messageID: submittedMessage.id, restoring: submittedInput, image: submittedImage)
+                inFlightTurn = nil
+                threadError = ThreadError(messageID: submittedMessage.id, message: error.localizedDescription)
+                isFollowUpQueued = false
+                recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
                 requestInputFocus()
             }
         }
@@ -5964,7 +6415,8 @@ import Observation
             await waitForWebAnswer(
                 task,
                 fallback: webSearchFallback,
-                submittedMessageID: submittedMessage.id
+                submittedMessageID: submittedMessage.id,
+                generation: generation
             )
         } else {
             await task?.value
@@ -5972,6 +6424,85 @@ import Observation
         // A finished stream leaves no handle behind, so `cancel()` can tell
         // a live model request from an ask still in its search phase.
         if streamTask == task { streamTask = nil }
+        // A follow-up queued while this answer streamed goes now, unless the
+        // stream was stopped or failed (both drop the queue).
+        if generation == streamGeneration { await sendQueuedFollowUp() }
+    }
+
+    /// The chat as the model gets it: every turn except a question that has
+    /// no answer after it (stopped before any text, or a provider error),
+    /// so the request alternates as the providers expect.
+    static func answeredTurns(_ messages: [QuickMessage]) -> [QuickMessage] {
+        messages.enumerated().compactMap { index, message in
+            let next = messages.indices.contains(index + 1) ? messages[index + 1] : nil
+            if message.role == .user, next?.role == .user { return nil }
+            return message
+        }
+    }
+
+    /// Stop (or the web answer's time limit) on a model request: the
+    /// question stays a turn and the text that arrived becomes its answer,
+    /// so `⌘R` asks that same turn again. Written to history only when some
+    /// text arrived. Only for the chat the request belongs to; a chat opened
+    /// since is left alone.
+    private func keepStoppedAnswer() {
+        flushStreamBuffer()
+        guard let turn = inFlightTurn else { return }
+        inFlightTurn = nil
+        guard currentConversation?.id == turn.conversationID,
+              currentConversation?.messages.contains(where: { $0.id == turn.messageID }) == true,
+              !output.isEmpty
+        else { return }
+        currentConversation?.messages.append(QuickMessage(role: .assistant, content: output))
+        currentConversation?.updatedAt = Date()
+        persistCurrentConversation()
+    }
+
+    /// Return while an answer streams: queue what is typed. It stays in the
+    /// composer ("Queued ↩") and is sent when the stream ends.
+    private func queueFollowUp() {
+        guard isStreaming, !isAskQuestionActive,
+              !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        isFollowUpQueued = true
+    }
+
+    /// The stream (or command, or Vault Search) ended with an answer: send
+    /// the queued follow-up as typed text. While a layer above the composer
+    /// is open it keeps Return, so the follow-up stays queued and goes when
+    /// that layer closes (`resumeQueuedFollowUp`).
+    private func sendQueuedFollowUp() async {
+        guard isFollowUpQueued, !isStreaming, !holdsQueuedFollowUp else { return }
+        isFollowUpQueued = false
+        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        await submitTypedText()
+    }
+
+    /// A layer above the composer is open: the question card, a chooser,
+    /// Recent Chats, or the `⌘K` pane or palette. A queued follow-up waits
+    /// for it to close.
+    private var holdsQueuedFollowUp: Bool {
+        isAskQuestionActive || isTransformChooserPresented || isModelChooserPresented
+            || isAddContextMenuPresented || isRecentChatsPresented || presentedLayer != nil
+    }
+
+    /// The send a closed layer started for a held follow-up, kept so a test
+    /// can await it and `cancel()` can stop it.
+    @ObservationIgnored var queuedFollowUpTask: Task<Void, Never>?
+
+    /// A layer above the composer closed: a follow-up that waited behind it
+    /// after its stream ended goes now.
+    private func resumeQueuedFollowUp() {
+        guard isFollowUpQueued, isQuickAIPresented, !isStreaming, !holdsQueuedFollowUp,
+              queuedFollowUpTask == nil
+        else { return }
+        queuedFollowUpTask = Task { @MainActor [weak self] in
+            await self?.sendQueuedFollowUp()
+            // `cancel()` drops the handle itself; a cancelled send must not
+            // clear a newer one.
+            guard !Task.isCancelled else { return }
+            self?.queuedFollowUpTask = nil
+        }
     }
 
     /// Run a command-lane saved action: execute the configured binary with
@@ -5981,12 +6512,23 @@ import Observation
     private func runCommandAction(
         definition: SavedPrompt,
         executable: String,
-        context: String
+        context: String,
+        submittedInput: String,
+        takesComposerText: Bool
     ) async {
-        let submittedInput = input
         errorMessage = nil
         output = ""
-        input = ""
+        if takesComposerText { input = "" }
+        // Not a turn of the chat and not the model: the typed alias is its
+        // own pill, and the header names the command.
+        let question = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastQuestion = question
+        pendingQuestion = question
+        answerSource = .command(definition.name)
+        threadError = nil
+        webSearchNote = nil
+        streamingStatus = "Running \(definition.name)…"
+        followThreadBottom()
         isStreaming = true
         // The user submitted this alias, whatever the command does next: a
         // failure or a cancellation must not read as an abandoned search.
@@ -6005,6 +6547,7 @@ import Observation
         defer { if commandTask == task { commandTask = nil } }
         do {
             let result = try await task.value
+            streamingStatus = nil
             isStreaming = false
             output = result
             recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
@@ -6031,21 +6574,30 @@ import Observation
             if !didAutoWrite, let selectionContext = selectedTextContext {
                 replaceableSelectionContext = selectionContext
             }
+            requestInputFocus()
+            await sendQueuedFollowUp()
+            return
         } catch is CancellationError {
             // The process was actually terminated: `ProcessRunner` rethrows
             // `CancellationError` only after its cancellation handler ran. No
             // late output can reappear, because the result is never assigned.
+            streamingStatus = nil
             isStreaming = false
             output = ""
-            input = submittedInput
+            // The typed alias comes back, unless a follow-up was typed since.
+            if takesComposerText, input.isEmpty { input = submittedInput }
+            pendingQuestion = nil
             recordJournal(kind: .actionCancelled, scope: learningScope, detail: "command")
         } catch {
+            streamingStatus = nil
             isStreaming = false
             output = ""
-            input = submittedInput
+            if takesComposerText, input.isEmpty { input = submittedInput }
+            pendingQuestion = nil
             errorMessage = error.localizedDescription
             recordJournal(kind: .actionFailed, scope: learningScope, detail: "command-error")
         }
+        isFollowUpQueued = false
         requestInputFocus()
     }
 
@@ -6137,10 +6689,16 @@ import Observation
         return "Search results:\n\n" + rows.joined(separator: "\n")
     }
 
+    /// The web answer's model call ended. Only a call that timed out, or
+    /// finished with no text, gives way to the search results: a Stop
+    /// (`cancel()` moved the generation on) keeps the turn as Stop leaves
+    /// it, and a provider error keeps the turn with its error and Retry.
+    /// Either way `⌘R` asks that same question again.
     private func waitForWebAnswer(
         _ task: Task<Void, Never>,
         fallback: String,
-        submittedMessageID: UUID
+        submittedMessageID: UUID,
+        generation: Int
     ) async {
         let timeoutTask = Task { @MainActor [timeout = webAnswerTimeout] in
             do {
@@ -6154,11 +6712,16 @@ import Observation
         await task.value
         timeoutTask.cancel()
         let timedOut = await timeoutTask.value
-        guard output.isEmpty else { return }
+        guard generation == streamGeneration,
+              threadError?.messageID != submittedMessageID,
+              output.isEmpty
+        else { return }
 
         currentConversation?.messages.removeAll { $0.id == submittedMessageID }
         currentConversation?.updatedAt = Date()
-        input = ""
+        // The question left the thread; the results and the bottom line say
+        // what happened. A queued follow-up stays unsent.
+        isFollowUpQueued = false
         output = fallback
         isStreaming = false
         errorMessage = timedOut
@@ -6372,17 +6935,27 @@ import Observation
     func cancel() {
         // A running command action has no `streamTask`; a model request does.
         // Only claim a cancellation that really happened: the model lane
-        // records through its stream, and the command lane records from
-        // `runCommandAction` once `ProcessRunner` confirms the child was
-        // terminated.
+        // records here, and the command lane records from `runCommandAction`
+        // once `ProcessRunner` confirms the child was terminated.
         let wasStreaming = isStreaming
         let cancelledModelRequest = wasStreaming && streamTask != nil
-        // Streaming with the question still pending is the enrichment
-        // phase (a web search or page read): the submit itself is what is
-        // in flight, and the question was never a turn.
-        let cancelledEnrichment = wasStreaming && pendingQuestion != nil
-        if cancelledModelRequest { streamWasCancelled = true }
+        // Streaming with the question still pending and nothing else running
+        // is the enrichment phase (a web search or page read): the submit
+        // itself is what is in flight, and the question was never a turn.
+        let cancelledEnrichment = wasStreaming && streamTask == nil && commandTask == nil
+            && pendingQuestion != nil
         clearAskQuestion(with: nil)
+        if cancelledModelRequest {
+            // Stop keeps the question and what the model said so far, as the
+            // turn's answer; `⌘R` asks the same turn again.
+            keepStoppedAnswer()
+        } else {
+            discardStreamBuffer()
+            output = ""
+        }
+        // The stopped stream may still end later; from here it writes nothing.
+        streamGeneration &+= 1
+        inFlightTurn = nil
         streamTask?.cancel()
         streamTask = nil
         commandTask?.cancel()
@@ -6394,10 +6967,12 @@ import Observation
         tabSubmitTask = nil
         composerSubmitTask?.cancel()
         composerSubmitTask = nil
-        discardStreamBuffer()
+        queuedFollowUpTask?.cancel()
+        queuedFollowUpTask = nil
         isStreaming = false
         streamingStatus = nil
-        output = ""
+        // A queued follow-up stays in the composer, unsent.
+        isFollowUpQueued = false
         if cancelledEnrichment {
             pendingQuestion = nil
             // The search line was made for an answer that will not come.
@@ -6407,8 +6982,9 @@ import Observation
             // it), not when the cancelled search returns later.
             restoreEnrichmentInput()
         }
-        guard wasStreaming, cancelledModelRequest else { return }
+        guard cancelledModelRequest else { return }
         recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
+        requestInputFocus()
     }
 
     // MARK: - Stream buffering
@@ -6724,6 +7300,9 @@ import Observation
     }
 
     func reset(_ scope: ResetScope) {
+        // Leaving the surface or clearing the field: a follow-up held behind
+        // a layer is not sent when the layers below close.
+        if !scope.isDisjoint(with: [.mode, .input]) { isFollowUpQueued = false }
         if scope.contains(.layers) {
             presentedLayer = nil
             contextualApplicationID = nil
@@ -6750,12 +7329,19 @@ import Observation
             clearLaunchScopedState()
         }
         if scope.contains(.thread) {
+            // A stream still running belongs to the thread being cleared.
+            streamGeneration &+= 1
+            inFlightTurn = nil
             streamTask?.cancel()
             streamTask = nil
             discardStreamBuffer()
             isStreaming = false
             streamingStatus = nil
             output = ""
+            answerSource = .model
+            threadError = nil
+            isFollowUpQueued = false
+            isThreadFollowingBottom = true
             errorMessage = nil
             lastQuestion = nil
             pendingQuestion = nil
@@ -6771,6 +7357,8 @@ import Observation
         }
         if scope.contains(.input) {
             input = ""
+            // A local answer is what was typed, answered; it goes with it.
+            rootAnswer = nil
             errorMessage = nil
             applicationSelectionIndex = 0
         }
@@ -6834,6 +7422,8 @@ import Observation
         isAddContextMenuPresented = false
         // The composer is the list's search field now; a half-typed
         // follow-up would filter the list, so the list opens on all chats.
+        // A queued follow-up leaves the field with it, so it is not queued.
+        isFollowUpQueued = false
         input = ""
         recentChatsIndex = currentConversation
             .flatMap { conversation in
@@ -6893,12 +7483,22 @@ import Observation
             .map(conversationItem)
     }
 
+    /// Root search's field changed: a keystroke replaces a local answer
+    /// with the rows for what is typed.
+    func rootInputDidChange(_ newValue: String) {
+        if rootAnswer != nil, !newValue.isEmpty { rootAnswer = nil }
+    }
+
     /// The composer's text changed on the Quick AI surface. In Recent Chats
     /// it is the search, so typing moves the highlight to the first match
     /// (a search cleared by opening or Escape keeps the highlight it set);
     /// elsewhere a typed `@` opens Add Context.
     func quickAIComposerDidChange(_ newValue: String) {
         noteInteraction()
+        // A queued follow-up cleared from the field is no longer queued.
+        if isFollowUpQueued, newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isFollowUpQueued = false
+        }
         if isRecentChatsPresented {
             if !newValue.isEmpty { recentChatsIndex = 0 }
         } else {
@@ -6981,12 +7581,113 @@ import Observation
         } else {
             expandedTranscriptMessageIDs.insert(id)
         }
-        threadScrollRequest = ThreadScrollRequest(
-            messageID: id,
-            revision: (threadScrollRequest?.revision ?? 0) + 1
-        )
+        scrollThread(.messageTop(id))
         noteInteraction()
         return true
+    }
+
+    // MARK: - Thread scrolling
+
+    /// Asks the thread to scroll. Moving up (a page, the top, a message's
+    /// head) stops following the newest text at once, so a streaming
+    /// answer does not pull the reader back before the view has moved;
+    /// the bottom starts following again.
+    func scrollThread(_ target: ThreadScrollRequest.Target) {
+        switch target {
+        case .bottom: isThreadFollowingBottom = true
+        case .top, .pageUp, .messageTop: isThreadFollowingBottom = false
+        case .pageDown: break
+        }
+        threadScrollRequest = ThreadScrollRequest(
+            target: target,
+            revision: (threadScrollRequest?.revision ?? 0) + 1
+        )
+    }
+
+    /// How far the thread's view last sat from the bottom, as the view
+    /// reported it. What the follow rule was decided on; tests read it.
+    @ObservationIgnored private(set) var lastThreadDistanceFromBottom: CGFloat?
+
+    /// A new question, or another chat: the thread follows the newest text
+    /// again, wherever the reader had scrolled.
+    func followThreadBottom() {
+        if !isThreadFollowingBottom { isThreadFollowingBottom = true }
+    }
+
+    /// The thread's view reported where it sits. When the view moved (the
+    /// reader scrolled, or a scroll the thread made landed), within
+    /// `threadFollowThreshold` of the bottom it follows the newest text and
+    /// further up it stays where the reader is. Text landing under a still
+    /// view (`moved` false) changes the distance, never the choice.
+    func threadDidScroll(distanceFromBottom: CGFloat, moved: Bool = true) {
+        lastThreadDistanceFromBottom = distanceFromBottom
+        guard moved else { return }
+        let follows = distanceFromBottom <= Self.threadFollowThreshold
+        if isThreadFollowingBottom != follows { isThreadFollowingBottom = follows }
+    }
+
+    /// The "Latest" chip: the reader scrolled up from a thread with
+    /// something below. Clicking it, or `⌘↓`, goes back to the newest text.
+    var showsJumpToLatest: Bool {
+        guard isQuickAIPresented, !isRecentChatsPresented, !isThreadFollowingBottom else { return false }
+        return !conversationMessages.isEmpty || isStreaming || !output.isEmpty
+    }
+
+    /// The keys that move the thread from the composer: PageUp and
+    /// PageDown, or `⌥↑` and `⌥↓`, by a page; `⌘↑` and `⌘↓` to the top and
+    /// the bottom. Only on the thread, with no chooser, card, list, or pane
+    /// over it; elsewhere the keys keep their meaning.
+    enum ThreadKey: Sendable {
+        case up
+        case down
+        case pageUp
+        case pageDown
+    }
+
+    @discardableResult
+    func handleThreadKey(_ key: ThreadKey, command: Bool, option: Bool) -> Bool {
+        guard isQuickAIPresented, !isRecentChatsPresented, !isAskQuestionActive,
+              !isTransformChooserPresented, !isModelChooserPresented, !isAddContextMenuPresented,
+              !isActionPalettePresented, !isItemActionPanePresented
+        else { return false }
+        let target: ThreadScrollRequest.Target
+        switch key {
+        case .pageUp: target = .pageUp
+        case .pageDown: target = .pageDown
+        case .up where command: target = .top
+        case .down where command: target = .bottom
+        case .up where option: target = .pageUp
+        case .down where option: target = .pageDown
+        case .up, .down: return false
+        }
+        scrollThread(target)
+        return true
+    }
+
+    /// Plain `↑` or `↓` in the Quick AI composer, once the question card,
+    /// the choosers, and Recent Chats have had their turn. On an empty
+    /// composer `↑` puts the last question back in it to edit and send
+    /// again, as in Raycast, and `↓` does nothing; with text in the field
+    /// both keys are the field's. Chats switch with `⌘[` and `⌘]`.
+    @discardableResult
+    func handleComposerArrow(_ delta: Int) -> Bool {
+        guard isQuickAIPresented, input.isEmpty else { return false }
+        if delta < 0 { recallLastQuestion() }
+        return true
+    }
+
+    /// The last question asked on the surface, as it was typed when this
+    /// session knows it, else as the thread holds it.
+    var lastAskedQuestion: String? {
+        if let lastQuestion, !lastQuestion.isEmpty { return lastQuestion }
+        let question = conversationMessages.last { $0.role == .user }?.content
+        return question?.isEmpty == false ? question : nil
+    }
+
+    private func recallLastQuestion() {
+        guard let question = lastAskedQuestion else { return }
+        input = question
+        requestInputFocus()
     }
 
     /// The header's model line: opens the model chooser to change the model
@@ -7057,11 +7758,15 @@ import Observation
         settings.select(providerID: conversation.providerID, model: model)
         settings.save()
         errorMessage = nil
+        threadError = nil
+        answerSource = .model
         // The finished-search line belongs to the answer it was made for,
         // as does a question that never became a turn.
         webSearchNote = nil
         pendingQuestion = nil
         input = ""
+        // Another chat opens on its newest turn.
+        followThreadBottom()
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
     }
@@ -7097,15 +7802,13 @@ import Observation
         saveHistory()
     }
 
-    private func rollbackSubmission(
-        messageID: UUID,
-        restoring submittedInput: String,
-        image: QuickImageAttachment? = nil
-    ) {
+    /// A question that became a turn but could not go out leaves the
+    /// thread. `submittedInput` goes back in the composer when given and
+    /// the field is empty; `nil` (⌘R) leaves the composer alone.
+    private func rollbackSubmission(messageID: UUID, restoring submittedInput: String?) {
         currentConversation?.messages.removeAll { $0.id == messageID }
         currentConversation?.updatedAt = Date()
-        input = submittedInput
-        pendingImage = image
+        if let submittedInput, input.isEmpty { input = submittedInput }
     }
 
     // MARK: - Launch at login

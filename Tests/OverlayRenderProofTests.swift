@@ -429,8 +429,9 @@ struct OverlayRenderProofTests {
     /// The Quick AI surface, after Raycast's: empty, the search phase of an
     /// ask (the question pill and the search line, through the real submit
     /// path), an answered thread with a user pill and prose, the `⌘K`
-    /// palette over it, a local answer under its own pill, and Recent
-    /// Chats, in both appearances. Output: quick-ai-{state}-{dark,light}.png.
+    /// palette over it, and Recent Chats, in both appearances. (A local
+    /// answer is root search's since v1.5.0; `rendersQuickAIThreadSet` draws
+    /// it there.) Output: quick-ai-{state}-{dark,light}.png.
     @Test func rendersQuickAISurfaceSet() async throws {
         for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
             let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
@@ -515,25 +516,6 @@ struct OverlayRenderProofTests {
                 "the palette sits inside the thread area, above the composer"
             )
             answered.closeActionPalette()
-
-            // A local answer on a kept chat: not a turn, still drawn.
-            let local = Self.makeViewModel(appearance: preference)
-            local.input = ""
-            local.service = MockQuickService()
-            local.settings.autoCopy = false
-            local.currentConversation = answered.currentConversation
-            local.openQuickAI()
-            local.input = "2+2"
-            await local.submit()
-            #expect(local.output == "4")
-            #expect(local.quickAIDetachedAnswer == "4")
-            #expect(local.pendingQuestion == "2+2", "the answer draws under its own question pill")
-            #expect(local.input.isEmpty)
-            #expect(local.quickAIComposerAction.label == "Paste Response")
-            try Self.save(
-                try Self.renderQuickAI(local, appearance: appearance),
-                name: "quick-ai-local-answer-\(suffix).png"
-            )
 
             let recent = answered
             recent.history = [
@@ -729,6 +711,226 @@ struct OverlayRenderProofTests {
                 try Self.renderQuickAI(recent, appearance: appearance),
                 name: "quick-ai-copied-\(suffix).png"
             )
+        }
+    }
+
+    /// The v1.5.0 Phase A2 states, in both appearances: a stopped answer
+    /// kept as the turn's answer, a provider error under its question with
+    /// Retry, a follow-up queued while an answer streams, the "Latest" chip
+    /// over a thread the reader scrolled up, a command's output with the
+    /// command named in the header, 2+2 answered inline in root search, and
+    /// Recent Chats with a pinned row. Output: quick-ai-{state}-{dark,light}.png
+    /// and root-local-answer-{dark,light}.png.
+    @Test func rendersQuickAIThreadSet() async throws {
+        try? FileManager.default.removeItem(at: Self.outputDir.appendingPathComponent("quick-ai-local-answer-dark.png"))
+        try? FileManager.default.removeItem(at: Self.outputDir.appendingPathComponent("quick-ai-local-answer-light.png"))
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
+
+            // Stop: the question stays, and what arrived is its answer.
+            let stopped = Self.makeViewModel(appearance: preference)
+            let stoppedModel = GatedQuickService(
+                head: "The plan has three parts. First, ship the build to the team on Friday so they can",
+                tail: " test it."
+            )
+            stopped.service = stoppedModel
+            stopped.settings.autoCopy = false
+            stopped.input = ""
+            stopped.openQuickAI()
+            stopped.input = "walk me through the release plan"
+            let stoppedSubmit = Task { await stopped.submit() }
+            await stoppedModel.waitUntilHolding()
+            try await Self.waitUntil { stopped.output == stoppedModel.head }
+            stopped.cancel()
+            await stoppedSubmit.value
+            #expect(stopped.conversationMessages.map(\.content) == ["walk me through the release plan", stoppedModel.head])
+            try Self.save(try Self.renderQuickAI(stopped, appearance: appearance), name: "quick-ai-stopped-\(suffix).png")
+
+            // A provider error: under its question, in danger ink, with Retry.
+            let failed = Self.makeViewModel(appearance: preference)
+            let answeredFirst = MockQuickService()
+            await answeredFirst.setResponses([StreamDelta(text: "Lima.", finishReason: "stop")])
+            failed.service = answeredFirst
+            failed.settings.autoCopy = false
+            failed.input = ""
+            failed.openQuickAI()
+            failed.input = "what is the capital of Peru"
+            await failed.submit()
+            failed.service = ProofFailingService()
+            failed.input = "and its population"
+            await failed.submit()
+            #expect(failed.threadError != nil)
+            #expect(failed.errorMessage == nil)
+            try Self.save(try Self.renderQuickAI(failed, appearance: appearance), name: "quick-ai-error-retry-\(suffix).png")
+
+            // Return while the answer streams: the follow-up waits, "Queued ↩".
+            let queued = Self.makeViewModel(appearance: preference)
+            let queuedModel = GatedQuickService(head: "Lima is the capital of Peru, on the Pacific coast.")
+            queued.service = queuedModel
+            queued.settings.autoCopy = false
+            queued.input = ""
+            queued.openQuickAI()
+            queued.input = "what is the capital of Peru"
+            let queuedSubmit = Task { await queued.submit() }
+            await queuedModel.waitUntilHolding()
+            try await Self.waitUntil { queued.output == queuedModel.head }
+            queued.input = "and its population?"
+            queued.submitFromComposer()
+            await queued.streamingReturnTask?.value
+            #expect(queued.quickAIComposerAction == .init(label: "Queued", keys: ["↩"]))
+            try Self.save(try Self.renderQuickAI(queued, appearance: appearance), name: "quick-ai-queued-\(suffix).png")
+            queued.cancel()
+            await queuedSubmit.value
+
+            // The reader scrolled up from a long answer: "↓ Latest".
+            let scrolled = Self.makeViewModel(appearance: preference)
+            let longModel = MockQuickService()
+            await longModel.setResponses([StreamDelta(
+                text: (1...24).map { "\($0). Step \($0) of the release plan: build, test, and write the note." }
+                    .joined(separator: "\n"),
+                finishReason: "stop"
+            )])
+            scrolled.service = longModel
+            scrolled.settings.autoCopy = false
+            scrolled.input = ""
+            scrolled.openQuickAI()
+            scrolled.input = "walk me through the release plan"
+            await scrolled.submit()
+            scrolled.threadDidScroll(distanceFromBottom: PanelSizing.quickAIHeight)
+            #expect(scrolled.showsJumpToLatest)
+            try Self.save(try Self.renderQuickAI(scrolled, appearance: appearance), name: "quick-ai-latest-chip-\(suffix).png")
+            #expect(scrolled.showsJumpToLatest, "drawing the thread did not pull it back to the bottom")
+
+            // A command's output: the header names the command, not the model.
+            let command = Self.makeViewModel(appearance: preference)
+            command.service = MockQuickService()
+            command.settings.autoCopy = false
+            command.settings.savedPrompts.append(SavedPrompt(
+                name: "Echo It",
+                alias: "echo-it",
+                prompt: "{input}",
+                commandExecutable: "/bin/echo",
+                commandArguments: ["{input}"]
+            ))
+            command.input = "/echo-it the build is green"
+            await command.submit()
+            #expect(command.quickAIHeaderSubtitle == "Echo It")
+            try Self.save(try Self.renderQuickAI(command, appearance: appearance), name: "quick-ai-command-source-\(suffix).png")
+
+            // 2+2 in root search: answered inline under the input row.
+            let root = Self.makeViewModel(appearance: preference)
+            root.settings.autoCopy = false
+            root.input = "2+2"
+            #expect(root.handleTab())
+            #expect(!root.isQuickAIPresented)
+            #expect(root.rootAnswer?.answer == "4")
+            let rootImage = try Self.renderFixedHeight(
+                viewModel: root,
+                appearance: appearance,
+                height: root.estimatedWindowHeight
+            )
+            try Self.save(rootImage, name: "root-local-answer-\(suffix).png")
+            let fitted = Self.fittingHeight(of: root, appearance: appearance)
+            // The measured answer carries the renderer's few points of slack
+            // for rounded line fragments, never less than what is drawn.
+            #expect(root.estimatedWindowHeight >= fitted && root.estimatedWindowHeight - fitted <= 5,
+                    "the window estimate (\(root.estimatedWindowHeight)) covers the drawn block (\(fitted))")
+
+            // Recent Chats with a pinned row: the pin glyph, no "Pinned" text.
+            let recent = Self.makeViewModel(appearance: preference)
+            recent.input = ""
+            recent.settings.autoCopy = false
+            let now = Date()
+            recent.history = [
+                QuickConversation(
+                    updatedAt: now,
+                    providerID: InferenceProvider.deepSeekID,
+                    model: InferenceProvider.deepSeekDefaultModel,
+                    messages: [
+                        QuickMessage(role: .user, content: "walk me through the release plan"),
+                        QuickMessage(role: .assistant, content: "Three parts."),
+                    ]
+                ),
+                QuickConversation(
+                    updatedAt: now.addingTimeInterval(-3_600),
+                    providerID: InferenceProvider.deepSeekID,
+                    model: "deepseek-v4-pro",
+                    messages: [
+                        QuickMessage(role: .user, content: "summarise the Q3 plan"),
+                        QuickMessage(role: .assistant, content: "Three priorities."),
+                    ],
+                    isPinned: true
+                ),
+                QuickConversation(
+                    updatedAt: now.addingTimeInterval(-7_200),
+                    providerID: InferenceProvider.deepSeekID,
+                    model: InferenceProvider.deepSeekDefaultModel,
+                    messages: [
+                        QuickMessage(role: .user, content: "what is the capital of Peru"),
+                        QuickMessage(role: .assistant, content: "Lima."),
+                    ]
+                ),
+            ]
+            recent.openRecentChats()
+            #expect(recent.recentChatItems.first?.isPinned == true)
+            #expect(recent.recentChatItems.allSatisfy { !$0.detail.contains("Pinned") })
+            try Self.save(try Self.renderQuickAI(recent, appearance: appearance), name: "quick-ai-recent-chats-pinned-\(suffix).png")
+
+            // ⌘K on the highlighted row: that chat's own actions.
+            recent.handleCommandK()
+            #expect(recent.isCatalogActionPanePresented)
+            #expect(recent.focusedItemActions.contains { $0.title == "Unpin" })
+            try Self.save(
+                try Self.renderQuickAI(recent, appearance: appearance),
+                name: "quick-ai-recent-chats-row-actions-\(suffix).png"
+            )
+        }
+    }
+
+    /// 2+2 asked from the Quick AI composer in a chat, in both appearances:
+    /// the chat stays on screen, the answer draws under its own pill after
+    /// the thread, and the header's second line reads "Local answer".
+    /// Output: quick-ai-chat-local-answer-{dark,light}.png.
+    @Test func rendersALocalAnswerAskedInAChat() async throws {
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
+            let vm = Self.makeViewModel(appearance: preference)
+            let model = MockQuickService()
+            await model.setResponses([StreamDelta(text: "Lima is the capital of Peru.", finishReason: "stop")])
+            vm.service = model
+            vm.settings.autoCopy = false
+            vm.input = ""
+            vm.openQuickAI()
+            vm.input = "what is the capital of Peru"
+            await vm.submit()
+            vm.input = "2+2"
+            await vm.submit()
+            #expect(vm.isQuickAIPresented, "the chat stays on screen")
+            #expect(vm.rootAnswer == nil)
+            #expect(vm.quickAIDetachedAnswer == "4")
+            #expect(vm.quickAIHeaderSubtitle == QuickViewModel.localAnswerSourceTitle)
+            #expect(vm.conversationMessages.count == 2, "2+2 is not a turn")
+            try Self.save(
+                try Self.renderQuickAI(vm, appearance: appearance),
+                name: "quick-ai-chat-local-answer-\(suffix).png"
+            )
+        }
+    }
+
+    /// The height the overlay wants at its width, unclamped.
+    private static func fittingHeight(of vm: QuickViewModel, appearance: NSAppearance.Name) -> CGFloat {
+        let host = NSHostingView(rootView: OverlayView(viewModel: vm).frame(width: vm.currentPanelWidth))
+        host.appearance = NSAppearance(named: appearance)
+        return host.fittingSize.height
+    }
+
+    /// Polls a condition the test cannot await directly (a stream landing on
+    /// the main actor), failing instead of hanging.
+    private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !condition() {
+            guard ContinuousClock.now < deadline else { throw ProofError.timedOut }
+            try await Task.sleep(for: .milliseconds(5))
         }
     }
 
@@ -1029,7 +1231,7 @@ struct OverlayRenderProofTests {
         return count
     }
 
-    enum ProofError: Error { case noBitmap }
+    enum ProofError: Error { case noBitmap, timedOut }
 }
 
 private final class ProofApplicationCatalog: ApplicationCatalogServicing {
@@ -1081,6 +1283,23 @@ private final class ProofLauncherCatalog: LauncherCatalogServicing {
     func reload() {}
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {}
     func deleteSnippet(_ item: LauncherCatalogItem) throws {}
+}
+
+/// A model that fails the way a busy provider does, with a readable error.
+private struct ProofFailingService: QuickService {
+    struct Busy: LocalizedError {
+        var errorDescription: String? { "DeepSeek API is busy (503). Try again in a moment." }
+    }
+
+    func send(messages: [QuickMessage]) -> AsyncThrowingStream<StreamDelta, Error> {
+        AsyncThrowingStream { $0.finish(throwing: Busy()) }
+    }
+
+    func send(messages: [QuickMessage], images: [QuickImageAttachment]) -> AsyncThrowingStream<StreamDelta, Error> {
+        send(messages: messages)
+    }
+
+    func healthCheck() async throws -> Bool { true }
 }
 
 @MainActor

@@ -63,8 +63,10 @@ The same key means the same thing on every layer.
 | `⇥` | Complete a `/alias`; otherwise switch the typed text to Ask AI |
 | `⌘⇧Q` / `⌘⌥Q` / `⌘⌥H` / `⌘⇧R` | Quit / force quit / hide / relaunch a running app |
 | `⌘⇧U` | Copy a link without its tracking parameters |
-| `⌘N` / `⌘R` | New chat / regenerate the last answer |
-| `⌘[` / `⌘]` or `↑ ↓` on an answer | Previous / next recent chat |
+| `⌘N` / `⌘R` | New chat / ask the last question again (after a finished answer, a stop, or an error) |
+| `⌘[` / `⌘]` | Previous / next recent chat |
+| `↑` on an empty Quick AI composer | Put the last question back in the composer; `↓` does nothing there |
+| `PageUp` `PageDown` / `⌥↑` `⌥↓` / `⌘↑` `⌘↓` | Scroll the Quick AI thread by a page / by a page / to the top or bottom |
 | `⌘⇧S` / `⌘⇧D` | Send the focused window / this screen to AI (screenshot plus context) |
 | double tap right `⌘` | Send the focused window to AI from anywhere |
 | `⌘E` | Edit |
@@ -94,10 +96,18 @@ overlay.
 - **Detail pane.** Catalogs of things worth previewing (Screenshots,
   Clipboard History, Screen History) show the list on the left and a preview plus an
   Information block on the right; the panel widens to fit.
-- **Answer.** Earlier turns compact and scrollable above, the latest question
-  and answer in full, footer hints. Copy and paste are keys, not buttons.
-  Recent chats are a catalog (Quick AI Chats): continue, copy last answer,
-  rename, pin, delete.
+- **Answer.** Model answers live on the Quick AI surface: the thread
+  scrolls, follows the newest text only while you are at the bottom, and
+  shows a "Latest" chip when you are not. A stopped answer stays as the
+  turn's answer; a provider error stays under its question with Retry.
+  Command output and Vault Search use the same surface with their source
+  named in the header, and never join a chat. A local answer (math, a
+  conversion, a date) asked in root search shows under the input row and
+  never opens the surface; asked in a chat, it stays there under its own
+  pill ("Local answer" in the header), never a turn. Copy and paste are
+  keys, not buttons. Recent chats are a
+  catalog (Quick AI Chats) and a list in Quick AI (`⌘J`): continue, copy
+  last answer, rename, pin, delete, on the highlighted row.
 - **Settings.** A top tab strip, no system tab view. One searchable table
   lists every configurable item with its alias and hotkey in place.
 

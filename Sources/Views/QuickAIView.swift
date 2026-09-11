@@ -17,6 +17,14 @@ struct QuickAIView: View {
     @Bindable var viewModel: QuickViewModel
     @FocusState private var composerFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Where the thread is scrolled. Every scroll the thread makes goes
+    /// through it: to a message's head, to an edge, or by a page.
+    @State private var threadPosition = ScrollPosition()
+    /// The thread's last reported geometry, for a page's size and bounds.
+    @State private var threadGeometry = ThreadGeometry()
+    /// Whether the thread is still, tracked by the reader, or animating a
+    /// scroll it was asked for.
+    @State private var scrollPhase = ScrollPhase.idle
 
     /// The composer row from the panel's bottom edge: the pill-high row plus
     /// its inset above and below. The floating `⌘K` pane and the choosers
@@ -27,7 +35,7 @@ struct QuickAIView: View {
     /// height is the input row.
     static let headerHeight = House.Control.input
 
-    private static let bottomID = "quick-ai-thread-end"
+    private static let threadErrorID = "quick-ai-thread-error"
     private static let liveAnswerID = "quick-ai-live-answer"
     private static let detachedQuestionID = "quick-ai-detached-question"
     private static let detachedAnswerID = "quick-ai-detached-answer"
@@ -62,6 +70,10 @@ struct QuickAIView: View {
         .overlay(alignment: .bottom) { floatingChooser }
         .onAppear { focusComposer() }
         .onChange(of: viewModel.inputFocusRequest) { _, _ in focusComposer() }
+        .onChange(of: viewModel.threadError) { _, error in
+            guard let error else { return }
+            announce("Error. \(error.message)", priority: .high)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Quick AI")
     }
@@ -87,23 +99,34 @@ struct QuickAIView: View {
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                // The model line is a button: it opens the model chooser
-                // to change the model for the next message.
-                Button {
-                    viewModel.toggleModelChooserFromHeader()
-                } label: {
-                    Text(viewModel.activeModelDisplay)
+                if let source = viewModel.answerSourceTitle {
+                    // A command's output or a Vault Search is not the
+                    // model's: the line names where the answer came from.
+                    Text(source)
                         .font(AQDesign.TypeToken.metadata)
                         .foregroundStyle(AQDesign.ColorToken.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .contentShape(Rectangle())
+                        .accessibilityLabel("Source: \(source)")
+                } else {
+                    // The model line is a button: it opens the model chooser
+                    // to change the model for the next message.
+                    Button {
+                        viewModel.toggleModelChooserFromHeader()
+                    } label: {
+                        Text(viewModel.activeModelDisplay)
+                            .font(AQDesign.TypeToken.metadata)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
+                    .accessibilityHint("Change the model")
+                    .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
+                    .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
-                .accessibilityHint("Change the model")
-                .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
-                .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
             }
             Spacer(minLength: House.Spacing.sm)
             // Raycast's expand glyph is a boxed up-right arrow; this is the
@@ -187,102 +210,165 @@ struct QuickAIView: View {
     }
 
     private var thread: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: House.Spacing.md) {
-                    let pendingQuestion = pendingQuestion
-                    ForEach(viewModel.conversationMessages) { message in
-                        turn(message)
-                            .id(message.id)
-                        // The search line belongs to the newest question;
-                        // while that question is still pending it hangs
-                        // under the pending pill instead.
-                        if pendingQuestion == nil,
-                           message.id == lastUserMessageID,
-                           let note = viewModel.webSearchNote {
-                            toolLine(note, symbol: "globe")
-                                .id(Self.webSearchNoteID)
-                        }
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: House.Spacing.md) {
+                let pendingQuestion = pendingQuestion
+                ForEach(viewModel.conversationMessages) { message in
+                    turn(message)
+                        .id(message.id)
+                    // The search line belongs to the newest question;
+                    // while that question is still pending it hangs
+                    // under the pending pill instead.
+                    if pendingQuestion == nil,
+                       message.id == lastUserMessageID,
+                       let note = viewModel.webSearchNote {
+                        toolLine(note, symbol: "globe")
+                            .id(Self.webSearchNoteID)
                     }
-                    // A question that is not a thread turn (the one being
-                    // searched for, the one a local answer belongs to, one
-                    // with no chat behind it) still reads as a turn: an
-                    // answer never draws without its question.
-                    if let question = pendingQuestion {
-                        userPill(MessageCollapseState(text: question, collapses: false), toggle: nil)
-                            .id(Self.detachedQuestionID)
-                        if let note = viewModel.webSearchNote {
-                            toolLine(note, symbol: "globe")
-                                .id(Self.webSearchNoteID)
-                        }
-                    }
-                    // The model paused to ask. The live card sits where the
-                    // answer will; once picked it joins the thread as the
-                    // record and the answer continues under it.
-                    if let ask = viewModel.pendingAskQuestion, !ask.isAnswered {
-                        AskUserQuestionCard(
-                            question: ask,
-                            selectedIndex: viewModel.askQuestionSelectionIndex,
-                            isInteractive: true,
-                            onMove: { viewModel.moveAskQuestionSelection($0) },
-                            onPick: { viewModel.answerAskQuestion(index: $0) }
-                        )
-                        .id(Self.liveQuestionID)
-                    }
-                    // While the search itself runs its note is the status,
-                    // already drawn above; the dots take over once the
-                    // model is thinking.
-                    if viewModel.isStreaming,
-                       viewModel.output.isEmpty,
-                       !viewModel.isAskQuestionActive,
-                       viewModel.streamingStatus == nil || viewModel.streamingStatus != viewModel.webSearchNote {
-                        statusLine
-                            .id(Self.statusLineID)
-                    }
-                    if viewModel.isStreaming, !viewModel.output.isEmpty {
-                        answerProse(viewModel.output, isStreaming: true, instanceID: "live-answer")
-                            .id(Self.liveAnswerID)
-                    }
-                    // A finished answer that is not the thread's last turn
-                    // (a local answer, a command result, a Vault Search, a
-                    // failed stream's partial text) draws after the thread,
-                    // whether or not a chat is kept.
-                    if let answer = viewModel.quickAIDetachedAnswer {
-                        answerProse(answer, isStreaming: false, instanceID: "answer")
-                            .id(Self.detachedAnswerID)
-                    }
-                    Color.clear
-                        .frame(height: House.hairline)
-                        .id(Self.bottomID)
-                }
-                .padding(.top, House.Spacing.xl)
-                .padding(.horizontal, House.Spacing.lg)
-                .padding(.bottom, House.Spacing.md)
-            }
-            .overlay {
-                let hints = viewModel.quickAIEmptyStateHints
-                if !hints.isEmpty { emptyStateHints(hints) }
-            }
-            .onAppear { scrollToEnd(proxy) }
-            .onChange(of: viewModel.conversationMessages.count) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: viewModel.output) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: viewModel.isStreaming) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: viewModel.streamingStatus) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in scrollToEnd(proxy) }
-            // Show more and Collapse bring the message's head to the top.
-            .onChange(of: viewModel.threadScrollRequest) { _, request in
-                guard let request else { return }
-                if reduceMotion {
-                    proxy.scrollTo(request.messageID, anchor: .top)
-                } else {
-                    withAnimation(.easeOut(duration: AQDesign.Motion.select)) {
-                        proxy.scrollTo(request.messageID, anchor: .top)
+                    // A provider error stays with the question it failed,
+                    // in the tool line's place, with Retry.
+                    if let error = viewModel.threadError, error.messageID == message.id {
+                        threadErrorLine(error.message)
+                            .id(Self.threadErrorID)
                     }
                 }
+                // A question that is not a thread turn (the one being
+                // searched for, the one a command's output or a Vault Search
+                // belongs to, one with no chat behind it) still reads as a
+                // turn: an answer never draws without its question.
+                if let question = pendingQuestion {
+                    userPill(MessageCollapseState(text: question, collapses: false), toggle: nil)
+                        .id(Self.detachedQuestionID)
+                    if let note = viewModel.webSearchNote {
+                        toolLine(note, symbol: "globe")
+                            .id(Self.webSearchNoteID)
+                    }
+                }
+                // The model paused to ask. The live card sits where the
+                // answer will; once picked it joins the thread as the
+                // record and the answer continues under it.
+                if let ask = viewModel.pendingAskQuestion, !ask.isAnswered {
+                    AskUserQuestionCard(
+                        question: ask,
+                        selectedIndex: viewModel.askQuestionSelectionIndex,
+                        isInteractive: true,
+                        onMove: { viewModel.moveAskQuestionSelection($0) },
+                        onPick: { viewModel.answerAskQuestion(index: $0) }
+                    )
+                    .id(Self.liveQuestionID)
+                }
+                // While the search itself runs its note is the status,
+                // already drawn above; the dots take over once the model is
+                // thinking.
+                if viewModel.isStreaming,
+                   viewModel.output.isEmpty,
+                   !viewModel.isAskQuestionActive,
+                   viewModel.streamingStatus == nil || viewModel.streamingStatus != viewModel.webSearchNote {
+                    statusLine
+                        .id(Self.statusLineID)
+                }
+                if viewModel.isStreaming, !viewModel.output.isEmpty {
+                    answerProse(viewModel.output, isStreaming: true, instanceID: "live-answer")
+                        .id(Self.liveAnswerID)
+                }
+                // A finished answer that is not the thread's last turn (a
+                // command's output, a Vault Search, a failed stream's
+                // partial text) draws after the thread, whether or not a
+                // chat is kept.
+                if let answer = viewModel.quickAIDetachedAnswer {
+                    answerProse(answer, isStreaming: false, instanceID: "answer")
+                        .id(Self.detachedAnswerID)
+                }
             }
+            .padding(.top, House.Spacing.xl)
+            .padding(.horizontal, House.Spacing.lg)
+            .padding(.bottom, House.Spacing.md)
+        }
+        .scrollPosition($threadPosition)
+        .onScrollGeometryChange(for: ThreadGeometry.self) { geometry in
+            ThreadGeometry(
+                top: geometry.visibleRect.minY,
+                visibleHeight: geometry.visibleRect.height,
+                contentHeight: geometry.contentSize.height
+            )
+        } action: { old, new in
+            threadGeometry = new
+            // Only a move of the view (the reader's scroll, or one the
+            // thread made) decides whether it follows the bottom; text
+            // landing under a still view does not. A scroll the thread
+            // animates is judged where it lands, not on its first frame.
+            viewModel.threadDidScroll(
+                distanceFromBottom: new.distanceFromBottom,
+                moved: old.top != new.top && scrollPhase != .animating
+            )
+        }
+        .onScrollPhaseChange { previous, phase in
+            scrollPhase = phase
+            // A scroll that just came to rest (the reader's, or an animated
+            // one the thread made) is judged where it landed.
+            if phase == .idle, previous != .idle {
+                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom)
+            }
+        }
+        .overlay {
+            let hints = viewModel.quickAIEmptyStateHints
+            if !hints.isEmpty { emptyStateHints(hints) }
+        }
+        .overlay(alignment: .bottom) {
+            if viewModel.showsJumpToLatest { latestChip }
+        }
+        .onAppear { followBottom() }
+        .onChange(of: viewModel.conversationMessages.count) { _, _ in followBottom() }
+        .onChange(of: viewModel.output) { _, _ in followBottom() }
+        .onChange(of: viewModel.isStreaming) { _, _ in followBottom() }
+        .onChange(of: viewModel.streamingStatus) { _, _ in followBottom() }
+        .onChange(of: viewModel.threadError) { _, _ in followBottom() }
+        .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in followBottom() }
+        // A new question (or another chat) follows the bottom again.
+        .onChange(of: viewModel.isThreadFollowingBottom) { _, follows in
+            if follows { scrollToEnd() }
+        }
+        // Show more and Collapse, the page keys, ⌘↑ ⌘↓, and the chip.
+        .onChange(of: viewModel.threadScrollRequest) { _, request in
+            guard let request else { return }
+            scroll(to: request.target)
         }
         .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
     }
+
+    /// What the thread's scroll view reports: where its view is, how tall
+    /// the view is, and how tall the content.
+    struct ThreadGeometry: Equatable {
+        var top: CGFloat = 0
+        var visibleHeight: CGFloat = 0
+        var contentHeight: CGFloat = 0
+
+        var distanceFromBottom: CGFloat { contentHeight - (top + visibleHeight) }
+        /// The furthest down the view can go.
+        var maximumTop: CGFloat { max(0, contentHeight - visibleHeight) }
+        /// One page: the view's height less a line of overlap to keep place.
+        var page: CGFloat { max(visibleHeight - House.Spacing.xxxl, House.Spacing.xxxl) }
+    }
+
+    /// "↓ Latest": the reader scrolled up from newer text. Clicking it, or
+    /// `⌘↓`, goes back to the bottom and follows it again.
+    private var latestChip: some View {
+        Button {
+            viewModel.scrollThread(.bottom)
+        } label: {
+            HouseChip(text: "Latest", icon: "arrow.down")
+                .raisedCard(radius: AQDesign.fieldCornerRadius, fill: AQDesign.ColorToken.raisedSurface)
+                .houseShadow(AQDesign.Shadow.card)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, House.Spacing.xs)
+        .accessibilityLabel("Jump to latest")
+        .help("Jump to latest (\(Self.jumpToLatestKeys.joined()))")
+    }
+
+    /// The key the chip names: ⌘↓.
+    static let jumpToLatestKeys = ["⌘", "↓"]
 
     @ViewBuilder
     private func turn(_ message: QuickMessage) -> some View {
@@ -379,8 +465,65 @@ struct QuickAIView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func scrollToEnd(_ proxy: ScrollViewProxy) {
-        proxy.scrollTo(Self.bottomID, anchor: .bottom)
+    private func scrollToEnd() {
+        threadPosition.scrollTo(edge: .bottom)
+    }
+
+    /// New text keeps the newest line in view only while the reader is at
+    /// the bottom; scrolled up, the view stays where they are.
+    private func followBottom() {
+        guard viewModel.isThreadFollowingBottom else { return }
+        scrollToEnd()
+    }
+
+    private func scroll(to target: QuickViewModel.ThreadScrollRequest.Target) {
+        let geometry = threadGeometry
+        let move = {
+            switch target {
+            case .messageTop(let id): threadPosition.scrollTo(id: id, anchor: .top)
+            case .top: threadPosition.scrollTo(edge: .top)
+            case .bottom: threadPosition.scrollTo(edge: .bottom)
+            case .pageUp: threadPosition.scrollTo(y: max(0, geometry.top - geometry.page))
+            case .pageDown: threadPosition.scrollTo(y: min(geometry.maximumTop, geometry.top + geometry.page))
+            }
+        }
+        if reduceMotion {
+            move()
+        } else {
+            withAnimation(.easeOut(duration: AQDesign.Motion.select)) { move() }
+        }
+    }
+
+    // MARK: - Thread error
+
+    /// A provider error under the question it failed, in the tool line's
+    /// style: the warning glyph and the message in danger ink, then Retry
+    /// with its key.
+    private func threadErrorLine(_ message: String) -> some View {
+        HStack(spacing: House.Spacing.xs) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.danger)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.danger)
+                .lineLimit(2)
+                .truncationMode(.tail)
+            Spacer(minLength: House.Spacing.xs)
+            Button {
+                viewModel.retryFailedTurn()
+            } label: {
+                KeyHint(label: "Retry", keys: ResultAction.regenerate.shortcut.keyCaps)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retry")
+            .help("Ask this question again (\(ResultAction.regenerate.shortcut.keyCaps.joined()))")
+        }
+        .frame(minHeight: House.Control.keyCap)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Error: \(message)")
     }
 
     // MARK: - Error
@@ -502,14 +645,7 @@ struct QuickAIView: View {
             )
             .onChange(of: viewModel.composerConfirmation) { _, confirmation in
                 guard let confirmation else { return }
-                NSAccessibility.post(
-                    element: NSApplication.shared,
-                    notification: .announcementRequested,
-                    userInfo: [
-                        .announcement: confirmation,
-                        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
-                    ]
-                )
+                announce(confirmation, priority: .medium)
             }
 
             Button {
@@ -547,6 +683,17 @@ struct QuickAIView: View {
 
     private func focusComposer() {
         FocusRequest.apply($composerFocused)
+    }
+
+    private func announce(_ text: String, priority: NSAccessibilityPriorityLevel) {
+        NSAccessibility.post(
+            element: NSApplication.shared,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: text,
+                .priority: priority.rawValue,
+            ]
+        )
     }
 
     // MARK: - Floating choosers
