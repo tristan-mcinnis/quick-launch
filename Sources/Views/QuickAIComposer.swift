@@ -6,15 +6,44 @@ import SwiftUI
 /// (the Add Context circle, the pill field with the primary action inside
 /// it, and the `⌘K` circle). One view for the Quick AI surface and the AI
 /// Chat window. The window's field is multi-line: it grows with what is
-/// typed, `↩` sends and `⇧↩` starts a new line.
+/// typed, `↩` sends and `⇧↩` starts a new line, and Tab moves on to the
+/// window's other controls.
+///
+/// With an attachment tray, `⌘V` of files, an image, or a lone link into an
+/// empty field attaches them (`⌘Z` turns the link back into text), `⇧Tab`
+/// moves into the chip strip, and in AI Chat the composer is a drop target.
 struct QuickAIComposer: View {
     @Bindable var viewModel: QuickViewModel
+    /// The tray the chips come from. Nil falls back to the environment's
+    /// (`\.attachmentTray`); with neither, only the view model's own
+    /// screenshots and context show as chips.
+    var tray: AttachmentTray? = nil
     /// The AI Chat window's field grows to `AIChatWindowModel.composerLineLimit`
     /// lines; the Quick AI surface's stays one line.
     var multiline = false
     /// Tells the AI Chat window where the keyboard is.
     var onFocusChange: ((Bool) -> Void)? = nil
     @FocusState private var composerFocused: Bool
+    @Environment(\.attachmentTray) private var environmentTray
+
+    private var activeTray: AttachmentTray? { tray ?? environmentTray }
+
+    /// The field's name. In the AI Chat window it is a message field, not
+    /// "Ask Quick AI"; in Recent Chats it searches.
+    static func fieldName(multiline: Bool, searchingChats: Bool) -> String {
+        if searchingChats { return "Search chats" }
+        return multiline ? "Message" : "Ask Quick AI"
+    }
+
+    /// Tab once the routing (an alias completing) passed on it. The single
+    /// line surface has nothing to move to, so the key stays in the field;
+    /// the AI Chat window's header, rail, and thread controls take it.
+    static func tabResult(multiline: Bool) -> KeyPress.Result {
+        multiline ? .ignored : .handled
+    }
+
+    /// Shift-Tab as AppKit reports it (backtab).
+    static let backTab = KeyEquivalent("\u{19}")
 
     // MARK: - Error
 
@@ -47,11 +76,13 @@ struct QuickAIComposer: View {
             if viewModel.launchSelection != nil {
                 LaunchSelectionStrip(viewModel: viewModel)
             }
-            if viewModel.hasPendingAttachment {
-                AttachmentStrip(viewModel: viewModel)
-            }
+            ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray)
             composerRow
         }
+        .background { pasteShortcuts }
+        // Quick AI's whole surface is the drop target (OverlayView); in the
+        // AI Chat window it is the composer.
+        .attachmentDropTarget(multiline ? activeTray : nil, coversContent: true)
         .onAppear { focusComposer() }
         .onChange(of: viewModel.inputFocusRequest) { _, _ in focusComposer() }
         .onChange(of: composerFocused) { _, focused in onFocusChange?(focused) }
@@ -77,7 +108,11 @@ struct QuickAIComposer: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Add Context")
             .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
-            .help("Add context: a window, a selection, an area, or a screen (or type @)")
+            .help(
+                activeTray == nil
+                    ? "Add context: a window, a selection, an area, or a screen (or type @)"
+                    : "Add context: a window, a selection, a screen, a file, or a link (or type @)"
+            )
 
             HStack(spacing: House.Spacing.xs) {
                 // The placeholder is drawn as an overlay, not as the field's
@@ -89,7 +124,7 @@ struct QuickAIComposer: View {
                     prompt: Text(""),
                     axis: multiline ? .vertical : .horizontal
                 ) {
-                    Text("Ask Quick AI")
+                    Text(Self.fieldName(multiline: multiline, searchingChats: false))
                 }
                 .lineLimit(multiline ? 1...AIChatWindowModel.composerLineLimit : 1...1)
                 .textFieldStyle(.plain)
@@ -113,16 +148,25 @@ struct QuickAIComposer: View {
                 .submitLabel(.send)
                 .onSubmit { viewModel.submitFromComposer() }
                 .modifier(ComposerKeyRouting(viewModel: viewModel))
-                // Tab has nothing to move to on this surface: an alias
-                // completes through the routing above, and otherwise the key
-                // stays in the field instead of walking focus away.
-                .onKeyPress(.tab) { .handled }
+                // An alias completes through the routing above. Otherwise
+                // `⇧Tab` moves into the chip strip, and Tab stays in the
+                // one-line field (nothing to move to) or, in the AI Chat
+                // window, moves on to the window's other controls.
+                .onKeyPress(keys: [.tab, Self.backTab], phases: .down) { press in
+                    tabKey(press)
+                }
+                .onKeyPress(keys: [.leftArrow, .rightArrow, .delete, .space, .escape], phases: [.down, .repeat]) { press in
+                    stripKey(press)
+                }
                 .onChange(of: viewModel.input) { _, newValue in
                     // Recent Chats filters on it; elsewhere a typed `@`
                     // opens the same Add Context menu the circle does.
                     viewModel.quickAIComposerDidChange(newValue)
+                    activeTray?.composerTextDidChange(newValue)
                 }
-                .accessibilityLabel(viewModel.isRecentChatsPresented ? "Search chats" : "Ask Quick AI")
+                .accessibilityLabel(
+                    Self.fieldName(multiline: multiline, searchingChats: viewModel.isRecentChatsPresented)
+                )
                 if let confirmation = viewModel.composerConfirmation {
                     // A copy just landed: a checkmark in place of the action
                     // for a moment, then the action comes back.
@@ -211,5 +255,73 @@ struct QuickAIComposer: View {
         FocusRequest.apply($composerFocused)
     }
 
+    // MARK: - Keys
 
+    private func tabKey(_ press: KeyPress) -> KeyPress.Result {
+        let isBackTab = press.key == Self.backTab || press.modifiers.contains(.shift)
+        if isBackTab, let tray = activeTray, tray.enterStrip() { return .handled }
+        return Self.tabResult(multiline: multiline)
+    }
+
+    /// `←` `→` Backspace Space `esc` while a chip in the strip has the keys.
+    private func stripKey(_ press: KeyPress) -> KeyPress.Result {
+        guard let tray = activeTray, tray.isStripFocused else { return .ignored }
+        switch press.key {
+        case .leftArrow: tray.moveFocus(-1)
+        case .rightArrow: tray.moveFocus(1)
+        case .delete: tray.handleBackspace(composerIsEmpty: viewModel.input.isEmpty)
+        case .space:
+            if let url = tray.focusedFileURL { AttachmentQuickLook.shared.preview(url) }
+        default: tray.leaveStrip()
+        }
+        return .handled
+    }
+
+    // MARK: - Paste
+
+    /// `⌘V` and the link paste's `⌘Z`, as window shortcuts, so they are
+    /// seen before the field pastes. A paste that is not an attachment, or
+    /// one while another field has the keys, goes on to the field as text.
+    @ViewBuilder
+    private var pasteShortcuts: some View {
+        if let tray = activeTray {
+            ZStack {
+                Button("Paste") { paste(into: tray) }
+                    .keyboardShortcut("v", modifiers: .command)
+                Button("Undo Link") { undoLinkPaste(tray) }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!tray.canUndoPastedLink || !composerFocused)
+            }
+            .buttonStyle(.plain)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// `⌘V` attaches only while the field asks a question: in Recent
+    /// Chats it searches, and while a chat is renamed it holds the name.
+    static func pasteAttaches(composerFocused: Bool, searchingChats: Bool, typingMode: Bool) -> Bool {
+        composerFocused && !searchingChats && !typingMode
+    }
+
+    private func paste(into tray: AttachmentTray) {
+        guard Self.pasteAttaches(
+                composerFocused: composerFocused,
+                searchingChats: viewModel.isRecentChatsPresented,
+                typingMode: viewModel.inputMode != nil
+              ),
+              tray.paste(AttachmentPasteboardReader.read(), composerText: viewModel.input)
+        else {
+            NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+            return
+        }
+        viewModel.requestInputFocus()
+    }
+
+    private func undoLinkPaste(_ tray: AttachmentTray) {
+        guard let text = tray.undoPastedLink() else { return }
+        viewModel.input = text
+    }
 }
