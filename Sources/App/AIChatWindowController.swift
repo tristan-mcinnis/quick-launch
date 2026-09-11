@@ -96,8 +96,7 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         applyLevel(model.isAlwaysOnTop, to: window)
         // A normal window: in ⌘Tab, the Dock, and Mission Control while open.
         if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        AppActivation.bringToFront(window)
     }
 
     func hideWindowForCapture() {
@@ -139,6 +138,13 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         window.title = "AI Chat"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // An empty unified toolbar makes the title-bar row as tall as the
+        // header, so the traffic lights centre on the header's row; the
+        // content runs up under it (`ignoresSafeArea` in the view).
+        let toolbar = NSToolbar(identifier: "AIChatWindow")
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed

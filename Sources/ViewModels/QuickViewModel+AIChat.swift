@@ -61,20 +61,24 @@ extension QuickViewModel {
     func continueInAIChat() {
         guard let aiChatOpener, !isAIChatWindow else { return }
         if isStreaming { cancel() }
-        let handoff = makeAIChatHandoff()
+        var handoff = makeAIChatHandoff()
+        // Text typed into Recent Chats is a search, not a draft.
+        if isRecentChatsPresented { handoff.input = "" }
         // One chat, one window: the launcher lets it go (it stays in
         // Recent Chats), so the two view models never write it in turn.
         reset([.layers, .thread, .attachments, .input])
-        aiChatOpener(handoff)
+        // The panel goes first, so hiding it cannot take the keyboard back
+        // from the window that opens next.
         overlayPresenter.dismissOverlay()
+        aiChatOpener(handoff)
     }
 
     /// The root "AI Chat" command: the window on a new or the last chat.
     func openAIChatWindow() {
         guard let aiChatOpener else { return }
         input = ""
-        aiChatOpener(nil)
         overlayPresenter.dismissOverlay()
+        aiChatOpener(nil)
     }
 
     /// The chat on the surface, saved first so the stored copy is current.

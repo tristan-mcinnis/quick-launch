@@ -18,7 +18,9 @@ struct AIChatWindowView: View {
 
     /// Room for the traffic lights at the window's top-left, which sit in
     /// the header row (or the rail's top row while the rail is out).
-    static let trafficLightInset = House.Spacing.xxxxl + House.Spacing.sm
+    static let trafficLightInset = House.Spacing.xxxxl + House.Spacing.xl
+    /// The unified toolbar's title-bar row, which the header shares.
+    static let titleBarHeight = House.Control.composer
 
     private var chat: QuickViewModel { model.chat }
 
@@ -42,6 +44,8 @@ struct AIChatWindowView: View {
             maxHeight: .infinity
         )
         .background(AQDesign.ColorToken.windowSurface)
+        // The header shares the title-bar row with the traffic lights.
+        .ignoresSafeArea(.container, edges: .top)
         .animation(reduceMotion ? nil : .easeOut(duration: AQDesign.Motion.select), value: model.isRailVisible)
         .preferredColorScheme(chat.settings.appearance.swiftUIColorScheme)
         .onChange(of: chat.threadError) { _, error in
@@ -110,7 +114,7 @@ struct AIChatWindowView: View {
         // The traffic lights share this row while the rail is in.
         .padding(.leading, model.isRailVisible ? House.Spacing.sm : Self.trafficLightInset)
         .padding(.trailing, House.Spacing.lg)
-        .frame(height: QuickAIView.headerHeight)
+        .frame(height: Self.titleBarHeight)
     }
 
     // MARK: - ⌘K
@@ -226,7 +230,7 @@ struct AIChatRail: View {
         let recent = model.recentRailItems
         VStack(alignment: .leading, spacing: 0) {
             // The traffic lights' row.
-            Color.clear.frame(height: QuickAIView.headerHeight)
+            Color.clear.frame(height: AIChatWindowView.titleBarHeight)
             searchField
             ScrollViewReader { proxy in
                 ScrollView {

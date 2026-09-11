@@ -1601,8 +1601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Settings is a different job. Get the launcher out of the way.
         if panel?.isVisible == true { hideOverlay() }
         if let existing = settingsPanel, existing.isVisible {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            AppActivation.bringToFront(existing)
             return
         }
         guard let vm = viewModel else { return }
@@ -1634,8 +1633,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         panel.contentViewController = hostingController
         self.settingsPanel = panel
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.bringToFront(panel)
     }
 
     // MARK: - AI Chat window
