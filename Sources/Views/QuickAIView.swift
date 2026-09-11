@@ -1,8 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Quick AI, after Raycast's: one fixed `panelWidth` × `quickAIHeight`
-/// surface that replaces the launcher in place. A header (back chevron,
+/// Quick AI, after Raycast's: a `panelWidth` × `quickAIHeight` surface
+/// that replaces the launcher in place. The user can drag the window larger
+/// (the size is remembered, `QuickAISize`); the header and composer span
+/// the window, and the thread stays one centred column as wide as the
+/// standard surface's, so lines stay readable. A header (back chevron,
 /// conversation title over the model, expand glyph), the scrolling thread
 /// (user turns as pills on the right, answers as prose on the left, one
 /// tool or status line, the question card when the model asks), and the
@@ -35,6 +38,13 @@ struct QuickAIView: View {
     /// height is the input row.
     static let headerHeight = House.Control.input
 
+    /// The thread's column: the width it has on the standard 750-wide
+    /// surface, inside the `Spacing.lg` gutters. A window dragged wider
+    /// centres this column instead of stretching it, so answer lines stay
+    /// at `quickAIAnswerMaxWidth` and user pills end at the column's right
+    /// edge, exactly as at 750.
+    static let threadColumnWidth = PanelSizing.panelWidth - House.Spacing.lg * 2
+
     private static let threadErrorID = "quick-ai-thread-error"
     private static let liveAnswerID = "quick-ai-live-answer"
     private static let detachedQuestionID = "quick-ai-detached-question"
@@ -66,7 +76,15 @@ struct QuickAIView: View {
             }
             composer
         }
-        .frame(width: PanelSizing.panelWidth, height: PanelSizing.quickAIHeight)
+        // Fills the window: 750 × 475 at the least, as large as the user
+        // drags it. A fixed frame would pin the hosting view's size and
+        // stop the drag.
+        .frame(
+            minWidth: PanelSizing.panelWidth,
+            maxWidth: .infinity,
+            minHeight: PanelSizing.quickAIHeight,
+            maxHeight: .infinity
+        )
         .overlay(alignment: .bottom) { floatingChooser }
         .onAppear { focusComposer() }
         .onChange(of: viewModel.inputFocusRequest) { _, _ in focusComposer() }
@@ -280,9 +298,12 @@ struct QuickAIView: View {
                         .id(Self.detachedAnswerID)
                 }
             }
+            .frame(maxWidth: Self.threadColumnWidth)
             .padding(.top, House.Spacing.xl)
             .padding(.horizontal, House.Spacing.lg)
             .padding(.bottom, House.Spacing.md)
+            // Centred in a window wider than the standard surface.
+            .frame(maxWidth: .infinity)
         }
         .scrollPosition($threadPosition)
         .onScrollGeometryChange(for: ThreadGeometry.self) { geometry in
@@ -714,9 +735,11 @@ struct QuickAIView: View {
                     AddContextPane(viewModel: viewModel)
                 }
             }
-            .frame(width: PanelSizing.panelWidth - House.Spacing.xs * 2)
+            // The window's full inner width, at any size.
+            .frame(maxWidth: .infinity)
             .panelGlass(radius: AQDesign.cardCornerRadius)
             .panelShadows()
+            .padding(.horizontal, House.Spacing.xs)
             .padding(.bottom, Self.composerRowHeight)
         }
     }

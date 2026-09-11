@@ -31,6 +31,16 @@ surface is fixed and never measures its content. A catalog with a detail pane
 (960 wide) is the one root state wider than the surface; Tab from it jumps to
 750 in the same frame as the height.
 
+> Changed in v1.5.0 (Phase B1): 750 × 475 is the surface's standard and
+> minimum size, not a fixed one. While Quick AI or Recent Chats is up the
+> user can drag the window's edges, up to the display's visible frame less
+> the 12 pt placement margin; the size is remembered (`quickAISize`) across
+> opens and relaunches, and `⌘K` › Reset Quick AI Size returns to 750 × 475.
+> The header and composer span the window; the thread stays one centred
+> column as wide as at 750 (answers capped at 690, pills ending at the
+> column's right edge). A surface taller than the room under the launcher's
+> anchored top edge rises just enough to fit. Root search is not resizable.
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  ‹   Raycast Founder                                     ⤢    │  header, 60 high
@@ -287,6 +297,22 @@ surface is fixed and never measures its content. A catalog with a detail pane
   Chats; `estimatedWindowHeight` returns `quickAIHeight` for both. No measured
   markdown height on this surface; the thread scrolls.
 - Root search keeps its measured height. Its width is now 750 from the token.
+
+> Changed in v1.5.0 (Phase B1): on the Quick AI surface both return the
+> remembered size (`QuickViewModel.quickAISize`, never below 750 × 475).
+> The panel is resizable only while Quick AI is up (`minSize` and `maxSize`
+> from `PanelSizing.userResizeLimits`, and `windowWillResize` clamps the
+> drag); `windowDidEndLiveResize` stores the size, and no frame pass runs
+> while a drag is live, so the content never fights the user. The drag's
+> moving edges stop at the display's margin (`ScreenPlacement.dragRoom`,
+> read at `windowWillStartLiveResize`), and the end of the drag fits the
+> frame back inside the display as a backstop. The resize pass compares the
+> window with `PanelSizing.quickAIPlacedSize` (the remembered size held to
+> the display), so a size stored on a larger display is not re-applied on
+> every tick. The anchor keeps the launcher's centre as well as its top
+> (`ScreenPlacement.PanelAnchor`): root search and Quick AI back at
+> 750 × 475 centre on it; only Quick AI at a dragged size keeps the centre
+> the drag left it at.
 
 ## Not built
 

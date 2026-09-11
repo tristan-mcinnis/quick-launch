@@ -964,8 +964,8 @@ struct OverlayRenderProofTests {
         return nil
     }
 
-    /// The Quick AI surface at its one fixed size, exactly as the window
-    /// draws it.
+    /// The Quick AI surface at its standard size (never dragged), exactly
+    /// as the window draws it.
     private static func renderQuickAI(
         _ vm: QuickViewModel,
         appearance: NSAppearance.Name

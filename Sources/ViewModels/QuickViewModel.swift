@@ -1254,7 +1254,7 @@ import Observation
     }
 
     var currentPanelWidth: CGFloat {
-        if isQuickAIPresented { return PanelSizing.panelWidth }
+        if isQuickAIPresented { return quickAISize.width }
         if showsDetailPane { return PanelSizing.panelWidthWithDetail }
         return PanelSizing.panelWidth
     }
@@ -1263,10 +1263,11 @@ import Observation
     /// and the pane render-proof tests assert against the same math, so the
     /// drawn view and the window cannot drift apart.
     var estimatedWindowHeight: CGFloat {
-        // The Quick AI surface, Recent Chats included, is one fixed window:
-        // the thread scrolls inside it, and every chooser and pane floats
-        // over it, so nothing on it is measured.
-        if isQuickAIPresented { return PanelSizing.quickAIHeight }
+        // The Quick AI surface, Recent Chats included, is the size the user
+        // left it at (750 × 475 until the first drag): the thread scrolls
+        // inside it, and every chooser and pane floats over it, so nothing
+        // on it is measured.
+        if isQuickAIPresented { return quickAISize.height }
         let showsChooser = isTransformChooserPresented
         let base = PanelSizing.panelHeight(
             errorMessage: errorMessage,
@@ -1323,6 +1324,45 @@ import Observation
             total = max(total, floor)
         }
         return total
+    }
+
+    // MARK: - Quick AI size
+
+    /// The Quick AI surface's size: the one the user dragged it to, never
+    /// below the standard 750 × 475. The AppDelegate clamps it to the
+    /// display (`PanelSizing.quickAIPlacedSize`) before it compares or
+    /// applies the frame; the stored value keeps the user's choice for a
+    /// larger display.
+    var quickAISize: CGSize { settings.quickAISize.atLeastStandard.cgSize }
+
+    /// True while Quick AI is up at a size the user dragged: a programmatic
+    /// resize then keeps the window's centre where the drag left it. Root
+    /// search, and Quick AI back at 750 × 475 (Reset), centre on the
+    /// launcher's anchor, so a one-edge drag never moves the search field.
+    var keepsUserSizedFrame: Bool {
+        isQuickAIPresented && !settings.quickAISize.isStandard
+    }
+
+    /// Remembers the size the user dragged the panel to, once the drag
+    /// ends. Only while the Quick AI surface is up: root search is never
+    /// user-sized. Returns true when a new size was stored.
+    @discardableResult
+    func rememberQuickAISize(_ size: CGSize) -> Bool {
+        guard isQuickAIPresented else { return false }
+        let remembered = QuickAISize(size).atLeastStandard
+        let current = settings.quickAISize.atLeastStandard
+        guard abs(remembered.width - current.width) >= 1
+            || abs(remembered.height - current.height) >= 1
+        else { return false }
+        updateSettings { $0.quickAISize = remembered }
+        return true
+    }
+
+    /// ⌘K › Reset Quick AI Size: back to 750 × 475. The window follows on
+    /// the next resize pass.
+    func resetQuickAISize() {
+        guard !settings.quickAISize.isStandard else { return }
+        updateSettings { $0.quickAISize = .standard }
     }
 
     struct GridSection: Equatable {
@@ -4741,6 +4781,29 @@ import Observation
         return Self.rankByQuery(resultActions, query: actionQuery, title: \.title)
     }
 
+    /// Actions on the Quick AI window itself, while the surface is up:
+    /// Reset Quick AI Size once the user has dragged it off 750 × 475.
+    var quickAISurfaceActions: [QuickAISurfaceAction] {
+        guard isQuickAIPresented, !settings.quickAISize.isStandard else { return [] }
+        return [.resetSize]
+    }
+
+    /// Surface actions after the palette's search filter, best match first.
+    var paletteSurfaceActions: [QuickAISurfaceAction] {
+        guard !actionQuery.isEmpty else { return quickAISurfaceActions }
+        return Self.rankByQuery(quickAISurfaceActions, query: actionQuery, title: \.title)
+    }
+
+    func performQuickAISurfaceAction(_ action: QuickAISurfaceAction) {
+        isActionPalettePresented = false
+        actionQuery = ""
+        switch action {
+        case .resetSize:
+            resetQuickAISize()
+        }
+        requestInputFocus()
+    }
+
     /// Attach commands offered in the ⌘K palette, at the root and on an
     /// answer alike, so a screenshot or a selection can join the question
     /// without abandoning the typed text to reach the root search.
@@ -4794,7 +4857,8 @@ import Observation
 
     /// Row count the prompt palette will render, for window sizing.
     var actionPaletteEntryCount: Int {
-        paletteResultActions.count + paletteCommandMatches.count + actionMatches.count
+        paletteResultActions.count + paletteSurfaceActions.count
+            + paletteCommandMatches.count + actionMatches.count
     }
 
     func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
