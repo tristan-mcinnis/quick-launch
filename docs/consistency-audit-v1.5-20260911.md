@@ -81,6 +81,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - In Translator, ⌘P is Target language (`translator-dark.png`; `README.md:33`). In Quick AI and AI Chat, ⌘P opens the chat list.
 - The v1.5 check that "⌘P is free in every key table" missed Translator. `docs/primitives.md` says the Translator uses the same key meanings.
 - Fix: move the Translator key, or document the exception.
+- Fixed in v1.5.0 (group G4): Target language moved to ⌘T (free in every key table); ⌘P does nothing in the Translator, and the chip, tooltip and footer read one `TranslatorKey` table.
 
 **14. The ⌘K palette labels chat actions "Answer". (S)**
 - `Sources/Views/OverlayView.swift:1113` falls back to "Answer" for every result action. New Chat, Tools, Delete Chat and Continue in AI Chat all show it.
@@ -93,6 +94,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - Uppercase labels (SOURCE, CHINESE (SIMPLIFIED)), a footer well with a status dot, and its own `FooterHintView` (`Sources/Views/TranslatorView.swift:82,129,262`).
 - Quick AI now has a header and composer and no footer. `overlay-answer-dark.png` does not use the old look.
 - The labels are defensible for a two-pane tool. At least reuse the launcher's hint component.
+- Fixed in v1.5.0 (group G4): `FooterHintView` removed; the footer is the launcher footer's strip (status dot, `meta` context, shared `KeyHint`s, launcher `FooterHint` type, `Space.row` gaps); layout and section labels kept.
 
 **17. Dead code from the old conversation view. (S)**
 - `isConversationHistoryPresented` and `toggleConversationHistory` have no view and no caller (`QuickViewModel.swift:156, 8276`). `AppDelegate.swift:1366` still observes the flag.

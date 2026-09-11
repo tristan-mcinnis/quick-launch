@@ -1006,7 +1006,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         panel.shortcutHandler = { [weak self, weak model] characters, keyCode, modifiers in
             guard let self, let model else { return false }
-            let isReturn = VirtualKey.isReturn(keyCode: keyCode)
             if VirtualKey(rawValue: keyCode) == .escape, modifiers.isEmpty {
                 if model.isTargetPickerPresented {
                     model.isTargetPickerPresented = false
@@ -1017,32 +1016,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
                 return true
             }
-            if isReturn, modifiers == [.command] {
+            // The window's own table; ⌘P is not in it (it is the chat list
+            // elsewhere), the target language is ⌘T.
+            switch TranslatorKey.matching(characters: characters, keyCode: keyCode, modifiers: modifiers) {
+            case .copy:
                 model.copyTranslation()
                 self.hideTranslator()
-                return true
-            }
-            if isReturn, modifiers == [.command, .shift] {
+            case .pasteBack:
                 self.hideTranslator()
                 Task { @MainActor in _ = await model.pasteBack() }
-                return true
-            }
-            switch (characters?.lowercased(), modifiers) {
-            case ("s", [.command]):
+            case .swap:
                 model.swap()
-                return true
-            case ("p", [.command]):
+            case .target:
                 model.isTargetPickerPresented.toggle()
-                return true
-            case ("v", [.command, .shift]):
+            case .useClipboard:
                 model.useClipboardAsSource()
-                return true
-            case ("w", [.command]):
+            case .close:
                 self.hideTranslator()
-                return true
-            default:
+            case nil:
                 return false
             }
+            return true
         }
         return panel
     }
