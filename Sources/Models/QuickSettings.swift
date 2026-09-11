@@ -253,6 +253,10 @@ struct QuickSettings: Codable, Sendable {
     /// default: the model answers instead of asking which kind of help is
     /// wanted. On, the inline multiple-choice card is back.
     var quickAIClarifyingQuestionsEnabled: Bool = false
+    /// The size the user dragged the Quick AI surface to. The standard
+    /// 750 × 475 until the first drag; never smaller than that. Root search
+    /// is not user-sized and has no stored size.
+    var quickAISize: QuickAISize = .standard
 
     // Persistence key
     static let defaultsKey = "QuickSettings"
@@ -403,6 +407,11 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .modelWebSearchEnabled
         ) ?? true
+        // A blob from before the surface was resizable has no size: the
+        // standard one. A malformed size is dropped on its own rather than
+        // failing the whole decode, which would reset every other setting.
+        quickAISize = ((try? c.decodeIfPresent(QuickAISize.self, forKey: .quickAISize)) ?? nil)?
+            .atLeastStandard ?? .standard
         if decodedConfigurationVersion < 1,
            !savedPrompts.contains(where: { $0.alias == "search" }),
            let search = SavedPrompt.defaults.first(where: { $0.alias == "search" }) {

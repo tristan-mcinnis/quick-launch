@@ -15,7 +15,13 @@ struct OverlayView: View {
                 rootSurface
             }
         }
-        .frame(width: viewModel.currentPanelWidth)
+        // Root search is exactly its measured width. Quick AI fills the
+        // window, which the user can drag larger than 750 × 475: a fixed
+        // width would pin the hosting view and stop the drag.
+        .frame(
+            minWidth: viewModel.isQuickAIPresented ? PanelSizing.panelWidth : viewModel.currentPanelWidth,
+            maxWidth: viewModel.isQuickAIPresented ? .infinity : viewModel.currentPanelWidth
+        )
         .panelGlass()
         .overlay(alignment: viewModel.isQuickAIPresented ? .bottomTrailing : .topTrailing) {
             actionPopover
@@ -978,12 +984,14 @@ private struct QuickActionPalette: View {
 
     enum Entry: Identifiable {
         case result(ResultAction)
+        case surface(QuickAISurfaceAction)
         case command(LauncherCatalogItem)
         case prompt(SavedPrompt)
 
         var id: String {
             switch self {
             case .result(let action): "result:" + action.id
+            case .surface(let action): "surface:" + action.id
             case .command(let item): "command:" + item.itemID
             case .prompt(let prompt): "prompt:" + prompt.id.uuidString
             }
@@ -992,6 +1000,7 @@ private struct QuickActionPalette: View {
 
     private var entries: [Entry] {
         viewModel.paletteResultActions.map(Entry.result)
+            + viewModel.paletteSurfaceActions.map(Entry.surface)
             + viewModel.paletteCommandMatches.map(Entry.command)
             + viewModel.actionMatches.map(Entry.prompt)
     }
@@ -1060,6 +1069,10 @@ private struct QuickActionPalette: View {
             paletteRow(symbol: action.systemImage, title: action.title, detail: viewModel.resultActionDetail(action) ?? "Answer") {
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
+        case .surface(let action):
+            paletteRow(symbol: action.systemImage, title: action.title, detail: action.detail) {
+                EmptyView()
+            }
         case .command(let item):
             paletteRow(symbol: item.systemImage, title: item.title, detail: item.detail) {
                 EmptyView()
@@ -1123,6 +1136,7 @@ private struct QuickActionPalette: View {
         let title: String
         switch current[selectedIndex] {
         case .result(let action): title = action.title
+        case .surface(let action): title = action.title
         case .command(let item): title = item.title
         case .prompt(let prompt): title = prompt.name
         }
@@ -1146,6 +1160,8 @@ private struct QuickActionPalette: View {
         switch entry {
         case .result(let action):
             Task { await viewModel.performResultAction(action) }
+        case .surface(let action):
+            viewModel.performQuickAISurfaceAction(action)
         case .command(let item):
             Task { await viewModel.runPaletteCommand(item) }
         case .prompt(let action):

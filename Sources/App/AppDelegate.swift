@@ -26,6 +26,31 @@ final class KeyablePanel: NSPanel {
     /// Plain submit, used when a modified Return has no special meaning.
     var returnHandler: (() -> Void)?
 
+    /// Applies the drag limits for the surface on screen. With limits (the
+    /// Quick AI surface) the panel is resizable between them; without
+    /// (root search, which is measured) it is not resizable at all, and
+    /// the frame follows the content alone. Touches the style mask only
+    /// when resizability actually changes.
+    func applyUserResizeLimits(_ limits: PanelSizing.ResizeLimits?) {
+        if let limits {
+            if !styleMask.contains(.resizable) { styleMask.insert(.resizable) }
+            if minSize != limits.minimum { minSize = limits.minimum }
+            if maxSize != limits.maximum { maxSize = limits.maximum }
+        } else {
+            if styleMask.contains(.resizable) { styleMask.remove(.resizable) }
+            // `setFrame(_:display:)` ignores these; clearing them keeps a
+            // stale Quick AI minimum from reaching any other resize path.
+            if minSize != .zero { minSize = .zero }
+            if maxSize != Self.unlimitedSize { maxSize = Self.unlimitedSize }
+        }
+    }
+
+    /// AppKit's own default `maxSize` (FLT_MAX in both dimensions).
+    static let unlimitedSize = CGSize(
+        width: CGFloat(Float.greatestFiniteMagnitude),
+        height: CGFloat(Float.greatestFiniteMagnitude)
+    )
+
     /// Unmodified keys never reach `performKeyEquivalent`; the field editor
     /// eats Backspace before SwiftUI sees it. `sendEvent` sees everything.
     override func sendEvent(_ event: NSEvent) {
@@ -90,12 +115,12 @@ extension Bundle {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: - Properties
 
     private(set) var viewModel: QuickViewModel?
-    private var panel: NSPanel?
+    private var panel: KeyablePanel?
     private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
     private var globalHotKey: GlobalHotKey?
@@ -113,9 +138,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayClearTask: Task<Void, Never>?
     /// Pending delayed shrink of the overlay panel; growth cancels it.
     private var panelShrinkTask: Task<Void, Never>?
-    /// The launcher's top edge and the display it was anchored on, fixed at
-    /// show time. Content growth hangs from here; the search field never moves.
-    private var panelAnchor: (top: CGFloat, visibleFrame: CGRect)?
+    /// The launcher's top edge, its horizontal centre, and the display it
+    /// was anchored on, fixed at show time. Content growth hangs from here;
+    /// the search field never moves.
+    private var panelAnchor: ScreenPlacement.PanelAnchor?
+    /// How far a live resize of the Quick AI surface may grow before its
+    /// moving edges leave the display, fixed when the drag starts.
+    private var liveResizeRoom: CGSize?
     private var overlayRetentionID: UUID?
 
     private let selectedTextService = SelectedTextService()
@@ -501,7 +530,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Panel construction
 
-    private func makePanel(viewModel: QuickViewModel) -> NSPanel {
+    private func makePanel(viewModel: QuickViewModel) -> KeyablePanel {
+        // Not resizable at root search; the Quick AI surface turns resizing
+        // on while it is up (`syncPanelResizeLimits`).
         let panel = KeyablePanel(
             contentRect: NSRect(
                 x: 0,
@@ -509,10 +540,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 width: PanelSizing.panelWidth,
                 height: PanelSizing.inputHeight
             ),
-            styleMask: [.borderless, .resizable, .fullSizeContentView],
+            styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        // The delegate hears the end of a user's drag on the Quick AI
+        // surface and remembers the size.
+        panel.delegate = self
         panel.commandKHandler = { [weak viewModel] in
             viewModel?.handleCommandK()
         }
@@ -614,10 +648,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel?.warmScreenshotCatalogIfStale()
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
+            let originWidth = viewModel?.currentPanelWidth ?? PanelSizing.panelWidth
             let origin = ScreenPlacement.panelOrigin(
                 screenFrame: screen.frame,
                 visibleFrame: screen.visibleFrame,
-                panelWidth: viewModel?.currentPanelWidth ?? PanelSizing.panelWidth,
+                panelWidth: originWidth,
                 inputHeight: PanelSizing.inputHeight
             )
             // Anchor the top edge once: the input row sits on the centre
@@ -628,16 +663,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 visibleFrame: screen.visibleFrame,
                 inputHeight: PanelSizing.inputHeight
             )
-            panelAnchor = (top: top, visibleFrame: screen.visibleFrame)
-            let frame = ScreenPlacement.frameHanging(
-                from: top,
-                height: panel.frame.height,
-                width: panel.frame.width,
-                centreX: origin.x + panel.frame.width / 2,
-                within: screen.visibleFrame
+            let anchor = ScreenPlacement.PanelAnchor(
+                top: top,
+                centreX: origin.x + originWidth / 2,
+                visibleFrame: screen.visibleFrame
+            )
+            panelAnchor = anchor
+            // A Quick AI surface kept from the last open (the retention
+            // window) comes back at its remembered size, held to this
+            // display and rising to fit if it is taller than the room under
+            // the anchor.
+            let quickAISize = viewModel.flatMap { vm in
+                vm.isQuickAIPresented
+                    ? PanelSizing.quickAIPlacedSize(vm.quickAISize, visibleFrame: screen.visibleFrame)
+                    : nil
+            }
+            let size = quickAISize ?? panel.frame.size
+            let frame = anchor.frame(
+                width: size.width,
+                height: size.height,
+                current: panel.frame,
+                keepsCurrentCentre: false,
+                risingToFit: quickAISize != nil
             )
             panel.setFrame(frame, display: false)
         }
+        syncPanelResizeLimits()
         panel.appearance = viewModel?.settings.appearance.nsAppearance
         // No fade. The panel appears on the same frame as the hotkey, like
         // Raycast; a fade only adds perceived latency.
@@ -1271,11 +1322,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = viewModel.isTransformChooserPresented
             // The model chooser and the Add Context menu are inline blocks on
             // the root surface: each one changes the window height. The Quick
-            // AI surface (and Recent Chats inside it) is a fixed window.
+            // AI surface (and Recent Chats inside it) is the size the user
+            // left it at; nothing on it is measured.
             _ = viewModel.isModelChooserPresented
             _ = viewModel.isAddContextMenuPresented
             _ = viewModel.isQuickAIPresented
             _ = viewModel.isRecentChatsPresented
+            // The remembered Quick AI size: a finished drag and Reset
+            // Quick AI Size both land here.
+            _ = viewModel.quickAISize
             _ = viewModel.modelChooserOptions.count
             _ = viewModel.addContextOptions.count
             _ = viewModel.isApplicationActionPanePresented
@@ -1309,8 +1364,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resizePanelForContent() {
         guard let panel, let vm = viewModel else { return }
-        let total = targetPanelHeight(vm)
-        let width = vm.currentPanelWidth
+        // The user is dragging the Quick AI surface's edges: the content
+        // must not fight the drag. The size lands when the drag ends
+        // (`windowDidEndLiveResize`), and the next pass agrees with it.
+        guard !panel.inLiveResize else { return }
+        syncPanelResizeLimits()
+        // The Quick AI size is held to the display first, so a stored size
+        // from a larger display compares equal to the frame the display
+        // already capped and is not re-applied on every tick.
+        let target = targetPanelSize(vm)
+        let total = target.height
+        let width = target.width
         let frame = panel.frame
         let needsWidthChange = abs(frame.width - width) > 1
         if total > frame.height + 1 || needsWidthChange {
@@ -1332,27 +1396,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .milliseconds(120))
                 guard !Task.isCancelled, let self, let vm = self.viewModel else { return }
                 self.panelShrinkTask = nil
-                self.applyPanelFrame(
-                    height: self.targetPanelHeight(vm),
-                    width: vm.currentPanelWidth
-                )
+                let target = self.targetPanelSize(vm)
+                self.applyPanelFrame(height: target.height, width: target.width)
             }
         }
     }
 
     private func applyPanelFrame(height: CGFloat, width: CGFloat) {
-        guard let panel else { return }
+        guard let panel, !panel.inLiveResize else { return }
         var frame = panel.frame
         guard abs(frame.height - height) > 1 || abs(frame.width - width) > 1 else { return }
         let centreX = frame.midX
         if let panelAnchor {
-            // Hang from the fixed top edge: only the bottom moves.
-            frame = ScreenPlacement.frameHanging(
-                from: panelAnchor.top,
-                height: height,
+            // Hang from the fixed top edge: only the bottom moves. A Quick
+            // AI surface the user sized taller than the room under the
+            // anchor rises to fit instead of being cut. Root search (and
+            // Quick AI back at 750 × 475) centres on the anchor: a drag of
+            // one edge moved the frame's centre, and root must not follow.
+            frame = panelAnchor.frame(
                 width: width,
-                centreX: centreX,
-                within: panelAnchor.visibleFrame
+                height: height,
+                current: frame,
+                keepsCurrentCentre: viewModel?.keepsUserSizedFrame == true,
+                risingToFit: viewModel?.isQuickAIPresented == true
             )
         } else {
             let delta = height - frame.height
@@ -1365,6 +1431,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         panel.setFrame(frame, display: true, animate: false)
+    }
+
+    /// The drag limits for the surface on screen, on the display the panel
+    /// hangs on: the Quick AI range while that surface is up, nil at root
+    /// search.
+    private var panelResizeLimits: PanelSizing.ResizeLimits? {
+        guard let vm = viewModel, let visibleFrame = panelVisibleFrame else { return nil }
+        return PanelSizing.userResizeLimits(
+            isQuickAIPresented: vm.isQuickAIPresented,
+            visibleFrame: visibleFrame
+        )
+    }
+
+    /// The display the panel hangs on: the anchor's, fixed at show time.
+    /// Every Quick AI size and frame decision reads this one display, so
+    /// the limits, the drag, and the frame pass never disagree.
+    private var panelVisibleFrame: CGRect? {
+        guard let panel else { return nil }
+        return panelAnchor?.visibleFrame
+            ?? (panel.screen ?? screenContainingMouse())?.visibleFrame
+    }
+
+    /// The display a live drag happens on: the one the panel is on now (the
+    /// user may have moved it there by its background), else the anchor's.
+    /// The drag limits stay the anchor's, so a size stored from the drag
+    /// always matches the frame the next resize pass would apply.
+    private var panelDragVisibleFrame: CGRect? {
+        panel?.screen?.visibleFrame ?? panelVisibleFrame
+    }
+
+    /// The window size for the surface on screen: the measured root size,
+    /// or the Quick AI size held to the display.
+    private func targetPanelSize(_ vm: QuickViewModel) -> CGSize {
+        let requested = CGSize(width: vm.currentPanelWidth, height: targetPanelHeight(vm))
+        guard vm.isQuickAIPresented, let visibleFrame = panelVisibleFrame else { return requested }
+        return PanelSizing.quickAIPlacedSize(requested, visibleFrame: visibleFrame)
+    }
+
+    /// Resizable between the Quick AI limits while that surface is up, not
+    /// resizable at root search.
+    private func syncPanelResizeLimits() {
+        panel?.applyUserResizeLimits(panelResizeLimits)
+    }
+
+    // MARK: - NSWindowDelegate (the launcher panel)
+
+    /// A drag on the Quick AI surface's edges starts: note which edges
+    /// move (from where the pointer is) and how far each may go before it
+    /// leaves the display. AppKit does not keep a borderless window's edges
+    /// off the Dock or the menu bar.
+    func windowWillStartLiveResize(_ notification: Notification) {
+        guard let panel, notification.object as? NSWindow === panel,
+              viewModel?.isQuickAIPresented == true,
+              let visibleFrame = panelDragVisibleFrame
+        else {
+            liveResizeRoom = nil
+            return
+        }
+        let edges = ScreenPlacement.DragEdges(pointer: NSEvent.mouseLocation, frame: panel.frame)
+        liveResizeRoom = ScreenPlacement.dragRoom(from: panel.frame, moving: edges, within: visibleFrame)
+    }
+
+    /// The drag's last word on size, beside `minSize` and `maxSize`: the
+    /// hosting view's own constraints must never carry the surface past
+    /// the display or under 750 × 475, and the moving edges stop at the
+    /// display's margin. Only a user's drag is clamped; every other resize
+    /// (the content's own, AppKit's) passes untouched.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard let panel, sender === panel, panel.inLiveResize,
+              let limits = panelResizeLimits
+        else { return frameSize }
+        return limits.clamp(frameSize, room: liveResizeRoom)
+    }
+
+    /// A drag on the Quick AI surface's edges ended: fit the frame inside
+    /// the display (a backstop for the drag clamp above), then remember the
+    /// size, so the next open and the next launch use it. Root search is
+    /// never resizable, and the view model ignores a size off the Quick AI
+    /// surface anyway.
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard let panel, notification.object as? NSWindow === panel else { return }
+        liveResizeRoom = nil
+        guard let vm = viewModel, vm.isQuickAIPresented else { return }
+        var frame = panel.frame
+        if let visibleFrame = panelDragVisibleFrame {
+            let fitted = ScreenPlacement.clamped(frame: frame, within: visibleFrame)
+            if fitted != frame {
+                panel.setFrame(fitted, display: true, animate: false)
+                frame = fitted
+            }
+        }
+        vm.rememberQuickAISize(frame.size)
     }
 
     private func targetPanelHeight(_ vm: QuickViewModel) -> CGFloat {

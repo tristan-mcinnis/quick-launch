@@ -14,8 +14,9 @@ struct PanelSizingTests {
         #expect(h == PanelSizing.inputHeight)
     }
 
-    // MARK: - Quick AI is one fixed window
+    // MARK: - Quick AI opens at the launcher width and its own height
 
+    /// The standard size; the user can drag it larger (QuickAIResizeTests).
     @Test func testQuickAISurfaceIsTheLauncherWidthAndAFixedHeight() {
         #expect(PanelSizing.panelWidth == House.Layout.panelWidth)
         #expect(PanelSizing.panelWidth == 750)
