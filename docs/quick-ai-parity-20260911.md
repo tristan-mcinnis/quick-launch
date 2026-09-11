@@ -11,7 +11,8 @@ manual is silent, the row is marked **undocumented** rather than guessed.
 **Status: delivered 2026-09-11 in v1.3.0.** Sections 1 and 2 are the
 reconnaissance as found, kept as the record of what was missing. Section 3
 lists the calls taken locally. Section 4 is the behaviour now shipped. Section
-7 is what was deliberately not built.
+7 is what was deliberately not built. Section 3's `⌘J` decision is superseded
+by v1.5.0 (AI Chat window); the note under it says what changed.
 
 ---
 
@@ -87,6 +88,14 @@ window. Quick Launch's contract says it is not a chat workspace, so `⌘J` opens
 a full-height conversation view of the same thread with the chat history list
 beside it. The history, model, and attachments carry over, as Raycast promises.
 
+> **Superseded in v1.5.0.** The contract changed: `CLAUDE.md` now says "AI Chat
+> is one conversation window over the same providers and tools. No autonomy, no
+> projects, no automations, no file changes; those belong to pi." `⌘J` is now
+> **Open in AI Chat**: it moves the chat, its model, tools, typed text, and
+> attachments to a separate AI Chat window, as Raycast does, and the launcher
+> closes. Recent Chats moved to `⌘P` inside Quick AI. See the v1.5.0 entries in
+> `CHANGELOG.md` and `docs/primitives.md`.
+
 **Dictation is not built here.** Raycast binds `⌃M` inside Quick AI. Tristan
 already owns `local-dictation` as a separate app in `~/Documents/code/house`
 that dictates into any focused field from its own global hotkey, so a second
@@ -127,7 +136,9 @@ rather than invented from nothing.
   minutes, 1 hour, always, never.
 - Manage Models sort options and order: Brand, Alphabetically, Speed,
   Intelligence, Context Window.
-- Ask User Question is always on, with no setting to disable it.
+- Ask User Question is always on, with no setting to disable it. (Superseded:
+  Quick Launch gained **Let the model ask clarifying questions** in Settings ›
+  General › Quick AI and AI Chat, off by default.)
 
 ## 6. Build waves
 
@@ -148,6 +159,12 @@ A general chat workspace, Memory, Projects, Agents, Automations, tool
 permissions, credits and usage display, the combined-versus-separate
 conversation history setting (it only means something when a second AI surface
 exists), and dictation (see section 3).
+
+> **Partly superseded in v1.5.0.** AI Chat is now a second AI surface: one
+> conversation window, not a workspace. Quick AI and AI Chat share one chat
+> history, with no setting to separate them. Chats can read your memory, vault,
+> and skills through read-only tools; Raycast's Memory, Projects, Agents, and
+> Automations are still not built.
 
 ## 8. Known, not fixed
 

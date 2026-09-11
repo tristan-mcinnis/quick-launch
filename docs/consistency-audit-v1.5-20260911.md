@@ -123,9 +123,11 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - `:167`: "Clipboard History stores text only".
 - `:168, 284`: "Settings → Catalogs". The tab is "Clipboard & Capture".
 - `:226, 259`: "Settings → Prompts". The tab is "AI Commands".
+- Fixed in v1.5.0 (group DOCS): the intro, Use steps, reopen and answer-key text, input row, chat history and auto-copy lines describe Quick AI and AI Chat; Clipboard History keeps text, images, rich text, and files; tab names are Clipboard & Capture, AI Commands, and Items; the Translator key is `⌘T`; screenshots go to the Vision model setting (DeepSeek by default), not only to local MLX; Clean Up and Translate show their result first (they never replace the selection on their own); chat history is its own owner-only file, not `UserDefaults`; the leftover "overlay" wording names the launcher or the ⋯ menu; the privacy list says what reaches the provider and what chat history keeps.
 
 **19. README contradicts itself on math. (S)**
 - `README.md:242` says math asked from the Quick AI composer shows in root search. `README.md:44` and the CHANGELOG say it stays in the chat as a "Local answer".
+- Fixed in v1.5.0 (group DOCS): the math paragraph now says root search answers in place and the Quick AI composer keeps a "Local answer" in the chat, never a turn and never sent to a model.
 
 **20. `docs/product-scope.md` is wrong on privacy and scope. (M)**
 - `:105` says "API actions send only the text used by that action". This is false: memory, vault and skill results and the chat history go to the provider.
@@ -134,6 +136,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - `:50`: "Escape closes the panel from anywhere".
 - `:94`: clipboard history "text-only".
 - The catalog table has no Chats and no AI Chat.
+- Fixed in v1.5.0 (group DOCS): the privacy section lists everything a question sends (the whole chat, instructions and skills, Add Context and selection text, web and page text, tool results) and what chat history keeps; the tool loop, the AI Chat boundary, Escape, the footer, and the clipboard kinds are correct; Chats and AI Chat are in the catalog table, and the Quick AI row names `Tab`; the Screenshots catalog and the Translator window are no longer called future work; one line points to the attachments spec.
 
 **21. `docs/primitives.md` has the wrong key contract and privacy text. (M)**
 - `:60`: ⎋ "Close the overlay from anywhere". False in both Quick AI and AI Chat.
@@ -142,8 +145,10 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - `:41`: "Tool window" lists only the Translator.
 - `:91`: "footer is the only place that explains keys". Quick AI has no footer, and Recent Chats shows key hints in the list.
 - `:146-147`: the same false privacy and "text" clipboard claims as item 20.
+- Fixed in v1.5.0 (group DOCS): the key table has `⌘P`, `⌘H`, `⌘J`, `⌘\`, `⌘F`, `⌘1…9` (AI Chat), `⌘O`, `⌥⌘K`, `⌥⌘M`, `⌥⌘A`, `⇧⌘O`/`⇧⌘R`, `⌘W`, `⌘T` (Translator), `⌥⌘T`, `⇧⌘M`, `⌘L`/`⇧⌘W`, and `⌥⌘P` and `⌥⌘C` for both chat views; Escape steps back one layer per view; the number-key note, the tool windows (Translator and AI Chat), the footer, Settings, and the privacy text (the chat, tool results, and saved Add Context text reach the provider) match the code.
 
 **22. `docs/quick-ai-parity-20260911.md:85-88` is superseded. (S)**
 - It still says ⌘J opens a conversation view because the contract forbids a chat workspace. It has no superseded note.
+- Fixed in v1.5.0 (group DOCS): a superseded note under the `⌘J` decision and a pointer in the status paragraph; sections 4 and 7 note the clarifying-questions setting and AI Chat as the second surface.
 
 Items 1 to 5 are the ones users will hit. Items 18 to 21 are docs, but items 20 and 21 make privacy claims the tools now break.
