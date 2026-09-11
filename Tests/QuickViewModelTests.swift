@@ -390,7 +390,13 @@ struct QuickViewModelTests {
         vm.justCopiedTimeout = .milliseconds(50)
         vm.markJustCopied()
         #expect(vm.justCopied == true)
-        try await Task.sleep(for: .milliseconds(120))
+        // Poll rather than sleep a fixed time: under a loaded machine the
+        // 50 ms timer can fire late, and the test is about "it clears".
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(2)
+        while vm.justCopied, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(vm.justCopied == false)
     }
 
