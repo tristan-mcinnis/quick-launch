@@ -498,9 +498,13 @@ private struct GeneralTab: View {
 
     private var behaviourCard: some View {
         SettingsCard("Behaviour") {
-            SettingsRow(title: "Copy result to clipboard automatically", isFirst: true) {
+            SettingsRow(
+                title: "Copy the first answer of each chat automatically",
+                detail: "Not follow-ups or AI Chat. Clipboard History skips it.",
+                isFirst: true
+            ) {
                 Toggle(
-                    "Copy result to clipboard automatically",
+                    "Copy the first answer of each chat automatically",
                     isOn: viewModel.settingsBinding(\.autoCopy)
                 )
                 .toggleStyle(InkToggleStyle())

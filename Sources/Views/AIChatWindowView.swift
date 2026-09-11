@@ -94,7 +94,7 @@ struct AIChatWindowView: View {
             Spacer(minLength: House.Spacing.sm)
             if model.isAlwaysOnTop {
                 QuickAIGlyphButton(
-                    symbol: "pin.fill",
+                    symbol: QuickAISurfaceAction.keepOnTopSymbol,
                     font: AQDesign.TypeToken.glyphSmall,
                     color: AQDesign.ColorToken.textSecondary,
                     label: "Kept on top",

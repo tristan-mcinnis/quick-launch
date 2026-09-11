@@ -315,12 +315,12 @@ struct CodeBlockView: View {
         Self.announceCopied()
     }
 
-    /// Writes a block's payload to the pasteboard. Tests pass a scratch
-    /// pasteboard so the general one is untouched.
+    /// Writes a block's payload to the pasteboard, marked transient like
+    /// every copy of an AI answer, so the Clipboard History skips it. Tests
+    /// pass a scratch pasteboard so the general one is untouched.
     @MainActor
     static func writeToPasteboard(_ payload: String, pasteboard: NSPasteboard = .general) {
-        pasteboard.clearContents()
-        pasteboard.setString(payload, forType: .string)
+        SystemPasteboard.writeTransient(payload, to: pasteboard)
     }
 
     /// The inline confirmation is visual; VoiceOver gets the announcement.

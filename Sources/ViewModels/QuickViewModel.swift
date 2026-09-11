@@ -1135,7 +1135,13 @@ import Observation
 
     /// What the Ask AI row says under its title. The ⇥ hint is drawn only
     /// while the Tab Shortcut setting is on; Tab itself is never conditional.
+    /// Text with a local answer (math, a conversion, a date, a fact) never
+    /// reaches the model: Tab and Return show the answer in root search, so
+    /// the row says so and draws no ⇥ hint.
     private func askAIDetail(for trimmed: String) -> String {
+        if typedTextHasLocalAnswer(trimmed) {
+            return "Answered here, not sent to \(activeModelDisplay)"
+        }
         let base = trimmed.isEmpty
             ? "Ask \(activeModelDisplay) anything"
             : "\u{201C}\(trimmed)\u{201D} to \(activeModelDisplay)"
@@ -2963,7 +2969,13 @@ import Observation
                 requestInputFocus()
                 return false
             }
+        } else if item.kind == .conversation || item.kind == .answer {
+            // Copy Last Answer on a chat row and Copy Answer on a root
+            // answer: an answer the app wrote, transient as `copyOutput`.
+            pasteboard.writeTransientString(item.value)
         } else {
+            // A snippet, a Quick Link, a clipboard entry: the user's own
+            // text, which the Clipboard History records as usual.
             pasteboard.writeString(item.value)
         }
         markJustCopied()
@@ -6108,6 +6120,10 @@ import Observation
         var usedWebSearch = false
         var webSearchFallback: String?
         var usedPageRead = false
+        /// Whether the open chat already showed an answer when this was
+        /// asked, before a web search clears it: auto-copy then leaves the
+        /// answer alone (`autoCopiesAnswer`).
+        var chatShowedAnswer = false
 
         var submittedImage: QuickImageAttachment? { submittedImages.last }
     }
@@ -6276,7 +6292,8 @@ import Observation
             submittedImages: submittedImages,
             action: action,
             actionDefinition: actionDefinition,
-            effectivePrompt: effectivePrompt
+            effectivePrompt: effectivePrompt,
+            chatShowedAnswer: chatShowsAnswer
         )
     }
 
@@ -6338,6 +6355,7 @@ import Observation
         if isQuickAIPresented {
             // Asked in a chat: the reader stays in it. The question is its
             // own pill and the answer draws under it, after the thread.
+            let chatHadAnswer = chatShowsAnswer
             lastQuestion = trimmedQuestion
             pendingQuestion = trimmedQuestion
             answerSource = .local
@@ -6346,8 +6364,8 @@ import Observation
             output = result
             if takesComposerText { input = "" }
             followThreadBottom()
-            if settings.autoCopy {
-                pasteboard.writeString(result)
+            if autoCopiesAnswer(chatHadAnswer: chatHadAnswer) {
+                pasteboard.writeTransientString(result)
                 markJustCopied()
             }
             requestInputFocus()
@@ -6358,8 +6376,9 @@ import Observation
         rootAnswer = RootAnswer(question: trimmedQuestion, answer: result)
         if takesComposerText { input = "" }
         applicationSelectionIndex = 0
-        if settings.autoCopy {
-            pasteboard.writeString(result)
+        // A root answer is a one-off, never a follow-up.
+        if autoCopiesAnswer(chatHadAnswer: false) {
+            pasteboard.writeTransientString(result)
             markJustCopied()
         }
         requestInputFocus()
@@ -6372,6 +6391,13 @@ import Observation
     /// never opens for math.
     private func answerTypedTextLocally() -> Bool {
         let text = input
+        guard let prompt = localAnswerPrompt(for: text) else { return false }
+        return answerLocally(prompt: prompt, question: text, allowConversions: true, takesComposerText: true)
+    }
+
+    /// The prompt `answerTypedTextLocally` checks for a local answer, or nil
+    /// when the text must go on (empty, an image attached, a saved prompt).
+    private func localAnswerPrompt(for text: String) -> String? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               pendingImage == nil,
               SavedPromptResolver.resolveAction(
@@ -6379,9 +6405,16 @@ import Observation
                   prefix: settings.savedPromptPrefix,
                   savedPrompts: settings.savedPrompts
               ) == nil
-        else { return false }
-        let prompt = plainPrompt(text, hasImage: false, launchText: launchSelection?.text)
-        return answerLocally(prompt: prompt, question: text, allowConversions: true, takesComposerText: true)
+        else { return nil }
+        return plainPrompt(text, hasImage: false, launchText: launchSelection?.text)
+    }
+
+    /// Whether Tab and the Ask AI row answer this text locally instead of
+    /// opening Quick AI: the same rule, so the row never promises the model
+    /// for math.
+    func typedTextHasLocalAnswer(_ text: String) -> Bool {
+        guard let prompt = localAnswerPrompt(for: text) else { return false }
+        return localAnswer(for: prompt, allowConversions: true) != nil
     }
 
     /// Marks the ask in flight: the typed question is on screen as its own
@@ -6537,6 +6570,9 @@ import Observation
         // the Start New Chat interval says, and the composer keeps its text.
         let startsNewChat = !request.reasksTurn && (shouldStartNewConversation
             || (action != nil && (isFollowUp || currentConversation?.assistantID != nil)))
+        // Auto-copy takes a chat's first answer only: in a chat that already
+        // showed one, this answer is a follow-up.
+        let chatHadAnswer = !startsNewChat && request.chatShowedAnswer
         // A question runs as the open chat's assistant, the one the header
         // names. When the new-chat interval moves it to a fresh chat, the
         // assistant goes along. A transform never runs as an assistant.
@@ -6751,7 +6787,7 @@ import Observation
                         markJustCopied()
                         errorMessage = "Could not replace the selection. The result was copied instead."
                     }
-                } else if settings.autoCopy && !output.isEmpty {
+                } else if autoCopiesAnswer(chatHadAnswer: chatHadAnswer), !output.isEmpty {
                     copyOutput()
                     markJustCopied()
                 }
@@ -6907,6 +6943,7 @@ import Observation
         submittedInput: String,
         takesComposerText: Bool
     ) async {
+        let chatHadAnswer = chatShowsAnswer
         errorMessage = nil
         output = ""
         if takesComposerText { input = "" }
@@ -6958,7 +6995,7 @@ import Observation
                     markJustCopied()
                     errorMessage = "Could not replace the selection. The result was copied instead."
                 }
-            } else if settings.autoCopy && !output.isEmpty {
+            } else if autoCopiesAnswer(chatHadAnswer: chatHadAnswer), !output.isEmpty {
                 copyOutput()
                 markJustCopied()
             }
@@ -7433,9 +7470,27 @@ import Observation
 
     // MARK: - Copy
 
+    /// Auto-copy ("Copy the first answer of each chat automatically") takes
+    /// only the first answer of a Quick AI chat. A follow-up never replaces
+    /// what the user copied since, and the AI Chat window, where a chat runs
+    /// long, never copies on its own. `chatHadAnswer` is whether the chat
+    /// already showed an answer when this one was asked.
+    func autoCopiesAnswer(chatHadAnswer: Bool) -> Bool {
+        settings.autoCopy && !isAIChatWindow && !chatHadAnswer
+    }
+
+    /// True while the open chat shows an answer: a saved answer turn, or a
+    /// local or command answer drawn under the thread.
+    var chatShowsAnswer: Bool {
+        !output.isEmpty || currentConversation?.messages.contains { $0.role == .assistant } == true
+    }
+
+    /// Copies the answer on screen. Every copy of an AI answer (auto-copy,
+    /// Copy Answer, the copy a failed paste falls back to) is transient, so
+    /// the Clipboard History and other clipboard managers skip it.
     func copyOutput() {
         guard !output.isEmpty else { return }
-        pasteboard.writeString(output)
+        pasteboard.writeTransientString(output)
     }
 
     func copyOutputAndMark() {
@@ -7457,7 +7512,8 @@ import Observation
     /// for each question and the model's display name for each answer.
     func copyChatTranscript() {
         guard let conversation = currentConversation, !conversation.messages.isEmpty else { return }
-        pasteboard.writeString(conversation.labelledTranscript)
+        // A chat is AI answers too: transient, as `copyOutput`.
+        pasteboard.writeTransientString(conversation.labelledTranscript)
         markJustCopied()
         confirmInComposer("Chat copied")
         requestInputFocus()
@@ -7493,7 +7549,8 @@ import Observation
                 if result.openedGhostty {
                     threadNotice = "Opened in pi · tmux session \(result.sessionName)"
                 } else {
-                    pasteboard.writeString(result.attachCommand)
+                    // Plumbing the app wrote, not a copy the user keeps.
+                    pasteboard.writeTransientString(result.attachCommand)
                     threadNotice = "Started pi in tmux session \(result.sessionName) · "
                         + "Ghostty did not open, attach command copied"
                 }
