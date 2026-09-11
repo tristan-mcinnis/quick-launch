@@ -27,9 +27,20 @@ import Observation
     var isRecentChatsPresented = false
     /// Highlighted row of the Recent Chats list.
     var recentChatsIndex = 0
-    /// "Search web: …" for the current answer, drawn as the tool line above
-    /// it while the search runs and after it finishes.
+    /// "Search web: …" for the ask in flight, drawn as the tool line above
+    /// its answer while the search runs and the answer streams. When the
+    /// answer lands the line moves onto it (`QuickMessage.toolRecords`), so
+    /// a reopened chat still shows it.
     var webSearchNote: String?
+    /// The tool lines of the answer streaming now, in the order the calls
+    /// finished. They join the answer's message when it lands.
+    var liveToolRecords: [ChatToolRecord] = []
+    /// The tools chosen on the empty surface, before a chat exists. The chat
+    /// the next question starts takes them; nil means the defaults.
+    var pendingChatTools: Set<ChatToolKind>?
+    /// A second list inside the `⌘K` palette: the chat's tools, or the
+    /// answer's sources. Escape returns to the full list.
+    var actionPaletteSubmenu: ActionPaletteSubmenu?
     /// Short progress note from the service while streaming ("Searching
     /// the web…"); shown in place of "Thinking…" until answer text lands.
     var streamingStatus: String?
@@ -180,6 +191,17 @@ import Observation
     var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
+    /// `recall_memory` and `recall_today`. Nil in tests that do not fake it.
+    var memoryService: (any MemoryRecalling)?
+    /// Capture to Memory (`recall remember`), a user action only.
+    var memoryCapture: (any MemoryCapturing)?
+    /// `read_skill`, over the canonical skills folder.
+    var skillLibrary: SkillLibrary?
+    /// Open Source: `/usr/bin/open` on a source's local path.
+    var fileOpener: (any LocalFileOpening)?
+    /// The folders Open Source may open from (the memory store and the
+    /// vault clone); tests point it at a temporary folder.
+    @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots
     /// Screen History lives behind this one hook; the core only knows the
     /// catalog scope, the ⌘K form, and the pause/resume command.
     let screenHistory: ScreenHistoryController
@@ -227,6 +249,9 @@ import Observation
     @ObservationIgnored var webAnswerTimeout: Duration = .seconds(15)
     @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
+    /// A source being opened from the thread or the palette; a second click
+    /// replaces it.
+    @ObservationIgnored var sourceOpenTask: Task<Void, Never>?
     @ObservationIgnored private var catalogIdleResetTask: Task<Void, Never>?
 
     // MARK: - Private
@@ -3081,10 +3106,15 @@ import Observation
         if replaceableSelectionContext != nil { actions.append(.replaceSelection) }
         actions.append(contentsOf: [.pasteBack, .copy])
         if !conversationMessages.isEmpty { actions.append(.copyChat) }
+        if fileOpener != nil, !answerSources.isEmpty { actions.append(.openSource) }
+        actions.append(contentsOf: [.readAloud, .saveSnippet])
+        if memoryCapture != nil { actions.append(.captureToMemory) }
         actions.append(contentsOf: [
-            .readAloud, .saveSnippet, .searchWeb,
-            .regenerate, .regenerateWithModel, .changeModel, .newChat,
+            .searchWeb,
+            .regenerate, .regenerateWithModel, .changeModel,
         ])
+        if isQuickAIPresented { actions.append(.tools) }
+        actions.append(.newChat)
         if !history.isEmpty { actions.append(.chatHistory) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
@@ -3105,6 +3135,14 @@ import Observation
             "Using \(activeModelDisplay)"
         case .regenerateWithModel:
             "Run this question again on another model"
+        case .openSource:
+            answerSources.count == 1
+                ? answerSources[0].title
+                : "\(answerSources.count) sources"
+        case .captureToMemory:
+            "Send this answer to recall"
+        case .tools:
+            chatToolsSummary
         default:
             nil
         }
@@ -3165,6 +3203,18 @@ import Observation
             guard let id = currentConversation?.id else { return }
             isActionPalettePresented = false
             deleteConversation(id: id)
+        case .openSource:
+            let sources = answerSources
+            if sources.count == 1 {
+                await openSource(sources[0])
+            } else {
+                openActionPaletteSubmenu(.sources)
+            }
+        case .captureToMemory:
+            isActionPalettePresented = false
+            await captureAnswerToMemory()
+        case .tools:
+            openActionPaletteSubmenu(.tools)
         }
     }
 
@@ -4416,6 +4466,7 @@ import Observation
         isCatalogActionPanePresented = false
         contextualCatalogItemID = nil
         isActionPalettePresented.toggle()
+        actionPaletteSubmenu = nil
         actionQuery = ""
         if !isActionPalettePresented { requestInputFocus() }
     }
@@ -4502,9 +4553,13 @@ import Observation
     }
 
     /// Result actions after the palette's search filter, best match first.
+    /// On the Quick AI surface Tools is offered before the first answer too,
+    /// so a chat's tools can be chosen before it starts.
     var paletteResultActions: [ResultAction] {
-        guard !actionQuery.isEmpty else { return resultActions }
-        return Self.rankByQuery(resultActions, query: actionQuery, title: \.title)
+        var actions = resultActions
+        if isQuickAIPresented, !actions.contains(.tools) { actions.append(.tools) }
+        guard !actionQuery.isEmpty else { return actions }
+        return Self.rankByQuery(actions, query: actionQuery, title: \.title)
     }
 
     /// Attach commands offered in the ⌘K palette, at the root and on an
@@ -4540,7 +4595,7 @@ import Observation
     }
 
     /// Fuzzy-filters and orders by match score; ties keep the list order.
-    private static func rankByQuery<T>(
+    static func rankByQuery<T>(
         _ items: [T],
         query: String,
         title: KeyPath<T, String>
@@ -4560,7 +4615,11 @@ import Observation
 
     /// Row count the prompt palette will render, for window sizing.
     var actionPaletteEntryCount: Int {
-        paletteResultActions.count + paletteCommandMatches.count + actionMatches.count
+        switch actionPaletteSubmenu {
+        case .tools: paletteToolRows.count
+        case .sources: paletteSourceRows.count
+        case nil: paletteResultActions.count + paletteCommandMatches.count + actionMatches.count
+        }
     }
 
     func openActionPane(for result: LauncherSearchResult, form: ItemActionForm? = nil) {
@@ -4649,7 +4708,13 @@ import Observation
         case .itemActionForm, .itemActionPane:
             dismissItemActionLayer()
         case .actionPalette:
-            closeActionPalette()
+            if actionPaletteSubmenu != nil {
+                // A second list goes back to the full one first.
+                actionPaletteSubmenu = nil
+                actionQuery = ""
+            } else {
+                closeActionPalette()
+            }
         case .transformChooser:
             closeTransformChooser()
         case .modelChooser:
@@ -4773,6 +4838,16 @@ import Observation
                modifiers: modifiers
            ) {
             openModelChooser(.change)
+            return true
+        }
+        // Tools opens on the surface before the first answer too.
+        if isQuickAIPresented, !isItemActionPanePresented, activeItemActionForm == nil,
+           ResultAction.tools.shortcut.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
+            openActionPaletteSubmenu(.tools)
             return true
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
@@ -5345,6 +5420,7 @@ import Observation
 
     func closeActionPalette() {
         isActionPalettePresented = false
+        actionPaletteSubmenu = nil
         actionQuery = ""
         requestInputFocus()
     }
@@ -5471,6 +5547,7 @@ import Observation
         replaceableSelectionContext = nil
         isConversationHistoryPresented = false
         webSearchNote = nil
+        liveToolRecords = []
         let submittedInput = input
         let submittedImages = !pendingImages.isEmpty
             ? pendingImages
@@ -5812,14 +5889,19 @@ import Observation
             return
         }
 
+        // The tools chosen for the open chat carry into a chat this question
+        // starts on its own (the new-chat interval, a saved-prompt follow-up).
+        let carriedTools = currentConversation?.enabledTools ?? pendingChatTools
         if shouldStartNewConversation || (action != nil && isFollowUp) {
             startNewConversation()
         }
         if currentConversation == nil {
             currentConversation = QuickConversation(
                 providerID: provider.id,
-                model: model
+                model: model,
+                enabledTools: carriedTools
             )
+            pendingChatTools = nil
         }
         currentConversation?.providerID = provider.id
         currentConversation?.model = model
@@ -5878,6 +5960,12 @@ import Observation
                     if let status = delta.status {
                         streamingStatus = status
                     }
+                    if let record = delta.toolRecord {
+                        noteLiveToolRecord(record)
+                        // The call is done and its line is drawn; the dots
+                        // cover the wait for the next round.
+                        streamingStatus = nil
+                    }
                     if let text = delta.text {
                         if !text.isEmpty { streamingStatus = nil }
                         appendStreamText(text)
@@ -5888,11 +5976,19 @@ import Observation
                 streamingStatus = nil
                 isStreaming = false
                 if !output.isEmpty {
+                    let records = answerToolRecords(usedWebSearch: usedWebSearch)
                     currentConversation?.messages.append(
-                        QuickMessage(role: .assistant, content: output)
+                        QuickMessage(
+                            role: .assistant,
+                            content: output,
+                            toolRecords: records.isEmpty ? nil : records
+                        )
                     )
                     currentConversation?.updatedAt = Date()
                     persistCurrentConversation()
+                    // The lines live on the answer now.
+                    liveToolRecords = []
+                    if usedWebSearch { webSearchNote = nil }
                 }
                 if !streamWasCancelled {
                     recordJournal(
@@ -5934,6 +6030,7 @@ import Observation
             } catch is CancellationError {
                 // Cancelled — do not set errorMessage
                 discardStreamBuffer()
+                liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
                 output = ""
@@ -5945,6 +6042,7 @@ import Observation
                 requestInputFocus()
             } catch {
                 discardStreamBuffer()
+                liveToolRecords = []
                 streamingStatus = nil
                 errorMessage = error.localizedDescription
                 isStreaming = false
@@ -6142,10 +6240,16 @@ import Observation
         fallback: String,
         submittedMessageID: UUID
     ) async {
-        let timeoutTask = Task { @MainActor [timeout = webAnswerTimeout] in
+        let timeoutTask = Task { @MainActor [weak self, timeout = webAnswerTimeout] in
             do {
                 try await Task.sleep(for: timeout)
             } catch {
+                return false
+            }
+            // Only a silent model is stopped. One that is writing, or is
+            // still running its tools (each line is progress, and the tool
+            // loop has its own clock), keeps going.
+            guard let self, output.isEmpty, streamBuffer.isEmpty, liveToolRecords.isEmpty else {
                 return false
             }
             task.cancel()
@@ -6320,23 +6424,30 @@ import Observation
            (apiKeyProvider(provider.id) ?? "").isEmpty {
             return nil
         }
-        return makeService(provider: provider, model: model)
+        return makeService(provider: provider, model: model, chatTools: false)
     }
 
+    /// `chatTools` offers the chat's memory, vault, and skill tools and lets
+    /// the chat's toggle decide web search. The Translator passes false: it
+    /// gets web search per the setting and nothing else.
     func makeService(
         provider: InferenceProvider,
-        model: String
+        model: String,
+        chatTools: Bool = true
     ) -> (any QuickService)? {
         if let service { return service }
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
+            let tools = self.chatTools
             // The model gets a search_web tool so it can look things up
             // mid-answer; SearXNG stays the single search backend.
             var webSearch: (@Sendable (String) async throws -> String)?
-            if settings.modelWebSearchEnabled, let webSearchService {
+            let webEnabled = chatTools ? tools.contains(.web) : settings.modelWebSearchEnabled
+            if webEnabled, let webSearchService {
                 webSearch = { query in try await webSearchService.search(query) }
             }
+            let profile = modelPreferences.profile(providerID: provider.id, model: model)
             // The question card is behind the Quick AI setting "Let the model
             // ask clarifying questions"; off, the tool is not offered at all.
             var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
@@ -6353,9 +6464,16 @@ import Observation
                 systemPrompt: settings.systemPrompt,
                 webSearch: webSearch,
                 askUserQuestion: askUserQuestion,
-                reasoningEffort: modelPreferences
-                    .profile(providerID: provider.id, model: model)
-                    .reasoningEffort
+                tools: chatTools
+                    ? ChatToolbox(
+                        enabled: tools,
+                        memory: memoryService,
+                        vault: vaultSearchService,
+                        skills: skillLibrary
+                    )
+                    : ChatToolbox(),
+                contextBudget: ContextBudget(contextWindow: profile.contextWindow),
+                reasoningEffort: profile.reasoningEffort
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
@@ -6397,6 +6515,7 @@ import Observation
         discardStreamBuffer()
         isStreaming = false
         streamingStatus = nil
+        liveToolRecords = []
         output = ""
         if cancelledEnrichment {
             pendingQuestion = nil
@@ -6726,6 +6845,7 @@ import Observation
     func reset(_ scope: ResetScope) {
         if scope.contains(.layers) {
             presentedLayer = nil
+            actionPaletteSubmenu = nil
             contextualApplicationID = nil
             contextualCatalogItemID = nil
             activeItemActionForm = nil
@@ -6761,6 +6881,8 @@ import Observation
             pendingQuestion = nil
             enrichmentSubmittedInput = nil
             webSearchNote = nil
+            liveToolRecords = []
+            pendingChatTools = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             currentConversation = nil
@@ -7060,6 +7182,7 @@ import Observation
         // The finished-search line belongs to the answer it was made for,
         // as does a question that never became a turn.
         webSearchNote = nil
+        liveToolRecords = []
         pendingQuestion = nil
         input = ""
         activeVaultSearchMode = nil
@@ -7087,7 +7210,7 @@ import Observation
         enterCatalog(.chats)
     }
 
-    private func persistCurrentConversation() {
+    func persistCurrentConversation() {
         guard settings.historyEnabled, let conversation = currentConversation else { return }
         history = QuickHistoryStore.upserting(
             conversation,

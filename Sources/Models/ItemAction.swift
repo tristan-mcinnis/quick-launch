@@ -395,6 +395,12 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case renameChat
     case pinChat
     case deleteChat
+    /// `⌘O`: open the answer's source, or pick one when there are several.
+    case openSource
+    /// `⌥⌘M`: send the answer to `recall remember`. User-triggered only.
+    case captureToMemory
+    /// `⌥⌘K`: the chat's tools, toggled in the palette.
+    case tools
 
     var id: String { rawValue }
 
@@ -417,6 +423,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: "Rename Chat"
         case .pinChat: "Pin Chat"
         case .deleteChat: "Delete Chat"
+        case .openSource: "Open Source"
+        case .captureToMemory: "Capture to Memory"
+        case .tools: "Tools"
         }
     }
 
@@ -439,6 +448,9 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: "pencil"
         case .pinChat: "pin"
         case .deleteChat: "trash"
+        case .openSource: "doc.text"
+        case .captureToMemory: "brain.head.profile"
+        case .tools: "wrench.and.screwdriver"
         }
     }
 
@@ -463,6 +475,11 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .renameChat: .command("e")
         case .pinChat: .commandShift("p")
         case .deleteChat: .control("x")
+        case .openSource: .command("o")
+        // `⇧⌘M` folds a long question, so memory takes the Option layer.
+        case .captureToMemory: .commandOption("m")
+        // `⌘K` opens the palette; `⌥⌘K` opens it on Tools.
+        case .tools: .commandOption("k")
         }
     }
 

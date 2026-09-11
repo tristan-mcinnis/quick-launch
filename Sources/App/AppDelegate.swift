@@ -126,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let colorSampler = ScreenColorSampler()
     private let webSearchService = SearXNGSearchService()
     private let vaultSearchService = SSHVaultSearchService()
+    /// `recall` over `~/memory`: the model's memory tools and Capture to Memory.
+    private let recall = RecallCLI()
     private let screenHistoryStore = try? SQLiteScreenHistoryStore()
     private let coastLegacyReader = CoastLegacyReader()
     private lazy var screenHistoryCoastImporter: ScreenHistoryCoastImportService? = {
@@ -223,6 +225,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.viewModel = vm
         vm.overlayPresenter = self
+        // Tools inside the chat: memory through `recall`, skills from
+        // ~/.claude/skills, and sources opened with /usr/bin/open.
+        vm.memoryService = recall
+        vm.memoryCapture = recall
+        vm.skillLibrary = SkillLibrary()
+        vm.fileOpener = OpenCommandFileOpener()
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)

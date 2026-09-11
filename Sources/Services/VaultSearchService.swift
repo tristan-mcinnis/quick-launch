@@ -68,25 +68,40 @@ actor SSHVaultSearchService: VaultSearchServicing {
     private let host: String
     private let remoteScript: String
     private let requestTimeout: Duration
+    private let localVaultRoot: URL
 
+    /// The vault checkout on vault-vps. Paths the search returns are
+    /// relative to it, or absolute under it.
+    static let remoteVaultRoot = "/home/ubuntu/vault-private/"
+
+    /// One attempt, `requestTimeout` long, then `VaultSearchError.timedOut`.
+    /// There is no retry. `localVaultRoot` is this Mac's clone of the same
+    /// vault, where a source opens.
     init(
         host: String = "vault-vps",
         remoteScript: String = "/home/ubuntu/vault-private/.claude/tools/state/vault-search.py",
-        requestTimeout: Duration = .seconds(8)
+        requestTimeout: Duration = .seconds(8),
+        localVaultRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "vault", directoryHint: .isDirectory)
     ) {
         self.host = host
         self.remoteScript = remoteScript
         self.requestTimeout = requestTimeout
+        self.localVaultRoot = localVaultRoot
     }
 
     func search(mode: VaultSearchMode, query: String) async throws -> String {
+        try await searchWithSources(mode: mode, query: query).text
+    }
+
+    func searchWithSources(mode: VaultSearchMode, query: String) async throws -> VaultSearchOutcome {
         let bounded = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2_000))
         guard !bounded.isEmpty else { throw VaultSearchError.empty }
 
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { [host, remoteScript] in
+        return try await withThrowingTaskGroup(of: VaultSearchOutcome.self) { group in
+            group.addTask { [host, remoteScript, localVaultRoot] in
                 let data = try await Self.run(host: host, remoteScript: remoteScript, mode: mode, query: bounded)
-                return try Self.formatResponse(data)
+                return try Self.outcome(from: data, localVaultRoot: localVaultRoot)
             }
             group.addTask { [requestTimeout] in
                 try await Task.sleep(for: requestTimeout)
@@ -124,6 +139,62 @@ actor SSHVaultSearchService: VaultSearchServicing {
     /// The remote argv after the host. Pure; tests pin it.
     nonisolated static func remoteArguments(remoteScript: String, mode: VaultSearchMode) -> [String] {
         ["python3", remoteScript, mode.rawValue, "--stdin", "--limit", "10", "--json"]
+    }
+
+    /// The rendered answer plus the rows behind it. Current and Reconcile
+    /// cite their `evidence`; History and Across Projects their `results`.
+    /// A row's `source_path` is mapped onto `localVaultRoot`; a row with no
+    /// path, or a path outside the vault, is listed without one.
+    nonisolated static func outcome(from data: Data, localVaultRoot: URL) throws -> VaultSearchOutcome {
+        let text = try formatResponse(data)
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        if payload["needs_scope"] as? Bool == true {
+            let candidates = payload["candidates"] as? [[String: Any]] ?? []
+            return VaultSearchOutcome(text: text, resultCount: candidates.count, sources: [], needsScope: true)
+        }
+        let rows = (payload["evidence"] as? [[String: Any]])
+            ?? (payload["results"] as? [[String: Any]])
+            ?? []
+        let sources = rows.compactMap { row -> ChatSource? in
+            let remotePath = Self.text(row["source_path"])
+            guard let title = Self.text(row["title"])
+                ?? remotePath.map({ URL(fileURLWithPath: $0).lastPathComponent })
+                ?? Self.text(row["slug"])
+            else { return nil }
+            let day = ["authored_at", "updated_at", "verified_at"]
+                .lazy
+                .compactMap { Self.text(row[$0]) }
+                .first
+                .map { String($0.prefix(10)) }
+            return ChatSource(
+                title: title,
+                day: day,
+                path: remotePath.flatMap { localPath(forVaultPath: $0, localVaultRoot: localVaultRoot) }
+            )
+        }
+        var seen = Set<String>()
+        return VaultSearchOutcome(
+            text: text,
+            resultCount: rows.count,
+            sources: Array(sources.filter { seen.insert($0.id).inserted }.prefix(10))
+        )
+    }
+
+    /// A vault path as a path on this Mac: `/home/ubuntu/vault-private/x`
+    /// and the relative `x` both become `<localVaultRoot>/x`. Any other
+    /// absolute path, or one that climbs out with `..`, has no local file.
+    nonisolated static func localPath(forVaultPath path: String, localVaultRoot: URL) -> String? {
+        let relative: String
+        if path.hasPrefix(remoteVaultRoot) {
+            relative = String(path.dropFirst(remoteVaultRoot.count))
+        } else if path.hasPrefix("/") {
+            return nil
+        } else {
+            relative = path
+        }
+        let components = relative.split(separator: "/")
+        guard !components.isEmpty, !components.contains("..") else { return nil }
+        return localVaultRoot.appending(path: relative, directoryHint: .notDirectory).path
     }
 
     nonisolated static func formatResponse(_ data: Data) throws -> String {

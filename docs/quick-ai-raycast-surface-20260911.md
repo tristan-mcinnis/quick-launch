@@ -270,6 +270,10 @@ written, this is what was built instead.
 - **The finished-search line is per answer.** "Search web: …" is kept on the
   view model for the answer it belongs to and cleared by the next question; it
   is not written into chat history, so a reloaded chat shows no tool line.
+  (Changed in v1.5.0: every tool line, this one included, is saved on its
+  answer as `QuickMessage.toolRecords`, so a reloaded chat shows the lines and
+  the answer's source list. Consecutive tool lines sit `Spacing.xs` apart, each
+  glyph in a fixed `Control.keyCap` column.)
 - **Recent Chats keeps the header** (title over model, chevron, expand glyph)
   and puts a "Recent Chats" section label with its key hints (`↑↓`, `↩`,
   `esc`) above the rows. The rows are the launcher's `LauncherResultRow`

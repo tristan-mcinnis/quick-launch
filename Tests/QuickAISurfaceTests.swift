@@ -276,7 +276,10 @@ struct QuickAISurfaceTests {
         #expect(vm.conversationMessages.count == 4)
         #expect(vm.conversationMessages[2].content == "search web raycast founder")
         #expect(vm.output == "Thomas Paul Mann.")
-        #expect(vm.webSearchNote?.hasPrefix("Search web: ") == true, "the finished line stays with its answer")
+        #expect(vm.webSearchNote == nil, "the finished line moved onto its answer")
+        let line = vm.conversationMessages[3].tools.first
+        #expect(line?.kind == .web)
+        #expect(line?.summary.hasPrefix("Search web: ") == true, "the finished line stays with its answer, saved")
     }
 
     @Test func returnWaitsForTheStreamToEnd() async {
