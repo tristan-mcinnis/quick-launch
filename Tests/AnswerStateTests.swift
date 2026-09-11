@@ -112,15 +112,16 @@ struct AnswerStateTests {
         )
     }
 
-    @Test func chatHistoryActionOpensTheChatsCatalog() async {
+    @Test func recentChatsActionOpensRecentChatsInsideQuickAI() async {
         let (vm, _) = await answered("hello", keepsHistory: true)
-        #expect(vm.resultActions.contains(.chatHistory), "a saved chat means history is browsable")
-        vm.openChatHistory()
-        #expect(vm.catalogScope == .chats)
-        #expect(!vm.isAnswerActive)
-        #expect(vm.output.isEmpty)
-        #expect(vm.currentConversation == nil)
-        #expect(vm.launcherMatches.count == 1, "the saved chat shows as a row")
+        #expect(vm.resultActions.contains(.recentChats), "a saved chat means history is browsable")
+        let open = vm.currentConversation?.id
+        await vm.performResultAction(.recentChats)
+        #expect(vm.isRecentChatsPresented, "Recent Chats, inside Quick AI")
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.catalogScope == nil, "never the root Chats catalog")
+        #expect(vm.currentConversation?.id == open, "the chat stays behind the list")
+        #expect(vm.recentChatItems.count == 1, "the saved chat shows as a row")
     }
 
     @Test func paletteOffersAttachCommandsEverywhere() async {

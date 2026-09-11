@@ -141,22 +141,9 @@ protocol AIChatWindowPresenting: AnyObject {
 
     // MARK: - Rail
 
-    /// The rail's rows: pinned first, then recent, narrowed by the search.
-    var railItems: [LauncherCatalogItem] {
-        let terms = FuzzyMatcher.fold(railQuery)
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-        let ordered = QuickHistoryStore.ordered(chat.history)
-        let kept = terms.isEmpty ? ordered : ordered.filter { conversation in
-            let haystack = FuzzyMatcher.fold(
-                ([chat.title(of: conversation)] + conversation.messages.map(\.content))
-                    .joined(separator: "\n")
-            )
-            return terms.allSatisfy { haystack.contains($0) }
-        }
-        let ids = Set(kept.map(\.id.uuidString))
-        return chat.conversationItems.filter { ids.contains($0.itemID) }
-    }
+    /// The rail's rows: pinned first, then recent, narrowed by the search
+    /// every chat list shares (title and message text).
+    var railItems: [LauncherCatalogItem] { chat.chatItems(matching: railQuery) }
 
     var pinnedRailItems: [LauncherCatalogItem] { railItems.filter(\.isPinned) }
 

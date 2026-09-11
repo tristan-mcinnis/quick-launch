@@ -153,7 +153,6 @@ import Observation
     var deleteArmedItemID: String?
     var catalogScope: LauncherCatalogScope?
     var pendingQuickLinkID: String?
-    var isConversationHistoryPresented: Bool = false
     var actionQuery: String = ""
     var applicationSelectionIndex: Int = 0
     var inputFocusRequest: Int = 0
@@ -1184,9 +1183,13 @@ import Observation
         }
     }
 
-    /// Recent Quick AI chats, pinned first, as launcher items.
-    var conversationItems: [LauncherCatalogItem] {
-        QuickHistoryStore.ordered(history).map(conversationItem)
+    /// Every chat, pinned first, newest next, as launcher items.
+    var conversationItems: [LauncherCatalogItem] { chatItems(matching: "") }
+
+    /// The rows of every chat list (the Chats catalog, Recent Chats, the AI
+    /// Chat rail): one order and one search, title and message text.
+    func chatItems(matching query: String) -> [LauncherCatalogItem] {
+        QuickHistoryStore.matching(history, query: query, title: title(of:)).map(conversationItem)
     }
 
     /// One chat as a launcher row: its title, question count, and time.
@@ -1472,6 +1475,10 @@ import Observation
     var catalogMatches: [LauncherCatalogItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if catalogScope == .screenHistory { return Array(screenHistory.items.prefix(Self.maxLauncherRows)) }
+        // The Chats catalog is Recent Chats' list: the same order (pinned,
+        // then newest), the same search (title and message text), every
+        // chat. Learned favourites never reorder it.
+        if catalogScope == .chats { return chatItems(matching: query) }
         let items = catalogItems
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
         let rows = Self.maxRows(for: catalogScope)
@@ -1587,6 +1594,11 @@ import Observation
         parts.append(String(history.count))
         let pinnedChats = history.filter { $0.isPinned }.count
         parts.append(String(pinnedChats))
+        // The Chats catalog follows every chat's time and name, which the
+        // other view can change without changing the count.
+        if catalogScope == .chats {
+            parts.append(history.map { "\($0.id)\($0.updatedAt.timeIntervalSinceReferenceDate)\($0.customTitle ?? "")" }.joined())
+        }
         parts.append(isCaffeinating ? "1" : "0")
         // The status row shows minutes left, so the cache turns over with them.
         parts.append(caffeinateEndsAt.map { String(Int($0.timeIntervalSince(now()) / 60)) } ?? "-")
@@ -3069,7 +3081,7 @@ import Observation
                 recentChatsIndex = recentChatItems.firstIndex { $0.itemID == item.itemID } ?? recentChatsIndex
                 openSelectedRecentChat()
             } else {
-                continueConversation(itemID: item.itemID)
+                continueChatInQuickAI(itemID: item.itemID)
             }
         case .folder:
             guard let location = folderLocation(for: item) else {
@@ -3192,6 +3204,13 @@ import Observation
         }
         if let itemID = FallbackCommandID.commandItemID(from: identifier),
            let item = fallbackCommandItems.first(where: { $0.itemID == itemID }) {
+            // AI Chat takes what was typed as the new chat's draft; run as a
+            // root row, the text is only the search that found the command.
+            if item.value == Self.aiChatCommandID {
+                inputMode = nil
+                openAIChatWindow(draft: text)
+                return
+            }
             input = text
             inputMode = nil
             await performLauncherItem(item)
@@ -3428,20 +3447,20 @@ import Observation
         if !assistants.isEmpty { actions.append(.changeAssistant) }
         if isQuickAIPresented { actions.append(.tools) }
         actions.append(.newChat)
-        if !history.isEmpty { actions.append(.chatHistory) }
+        if canOpenRecentChats { actions.append(.recentChats) }
         if currentConversation != nil {
             actions += [.renameChat, .pinChat, .deleteChat]
         }
         if history.count > 1 { actions += [.previousChat, .nextChat] }
         // The window reads and copies; it has no app behind it to paste
-        // into, and its chat list is the rail, not the Chats catalog.
+        // into, and its chat list is the rail, not Recent Chats.
         if isAIChatWindow { actions.removeAll { Self.launcherOnlyResultActions.contains($0) } }
         return actions
     }
 
     /// Answer actions the AI Chat window leaves out.
     static let launcherOnlyResultActions: Set<ResultAction> = [
-        .replaceSelection, .pasteBack, .chatHistory, .continueInAIChat,
+        .replaceSelection, .pasteBack, .recentChats, .continueInAIChat,
     ]
 
     /// `⌘J` hands the chat to the AI Chat window: on the Quick AI surface,
@@ -3450,8 +3469,10 @@ import Observation
         aiChatOpener != nil && !isAIChatWindow && isQuickAIPresented
     }
 
-    /// The app name a destination answer action targets, for the palette row's
-    /// detail so the user never guesses which app receives the output.
+    /// The palette row's second line: the app a destination answer action
+    /// targets (so the user never guesses which app receives the output),
+    /// the model or tools in use, or what a chat action does to the chat.
+    /// Nil falls back to the action's group, "Answer" or "Chat".
     func resultActionDetail(_ action: ResultAction) -> String? {
         switch action {
         case .replaceSelection:
@@ -3476,6 +3497,24 @@ import Observation
             "New tmux session in Ghostty"
         case .continueInAIChat:
             "Open this chat in its own window"
+        // Chat actions say what they do to the chat; one with nothing to
+        // add reads "Chat" (`paletteGroup`), never "Answer".
+        case .copyChat:
+            "The whole chat as text"
+        case .newChat:
+            "Start over on an empty chat"
+        case .recentChats:
+            "Pinned and recent chats"
+        case .previousChat:
+            "The chat before this one"
+        case .nextChat:
+            "The chat after this one"
+        case .renameChat:
+            "Give this chat a name"
+        case .pinChat:
+            currentConversation?.isPinned == true ? "Unpin this chat" : "Keep this chat at the top"
+        case .deleteChat:
+            "Remove this chat from history"
         default:
             nil
         }
@@ -3523,8 +3562,9 @@ import Observation
         case .newChat:
             isActionPalettePresented = false
             startNewConversation()
-        case .chatHistory:
-            openChatHistory()
+        case .recentChats:
+            isActionPalettePresented = false
+            openRecentChats()
         case .previousChat:
             // History is ordered newest first, so going back in time means
             // moving forward through the array.
@@ -4879,6 +4919,11 @@ import Observation
             isRunning = runningApplication(for: application) != nil
         }
         var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName, isRunning: isRunning)
+        // Open in AI Chat needs a window to open, and the window itself has
+        // no use for it.
+        if aiChatOpener == nil || isAIChatWindow {
+            actions.removeAll { $0.kind == .openInAIChat }
+        }
         if case .item(let item) = result, item.kind == .screenHistory {
             if screenHistory.showsTimeline {
                 actions.removeAll { $0.kind == .showTimeline }
@@ -4945,6 +4990,11 @@ import Observation
         // answer too: picking one is how an assistant chat starts.
         if isQuickAIPresented, !assistants.isEmpty, !actions.contains(.changeAssistant) {
             actions.append(.changeAssistant)
+        }
+        // Recent Chats (`⌘P`) is on the Quick AI surface before the first
+        // answer too, as its key is.
+        if isQuickAIPresented, !isAIChatWindow, canOpenRecentChats, !actions.contains(.recentChats) {
+            actions.append(.recentChats)
         }
         guard !actionQuery.isEmpty else { return actions }
         return Self.rankByQuery(actions, query: actionQuery, title: \.title)
@@ -5240,11 +5290,11 @@ import Observation
         toggleActionPalette()
     }
 
-    /// The keys a Recent Chats row answers to: Copy Last Answer (⌘↩),
-    /// Rename (⌘E), Pin (⇧⌘P), and Delete (⌃X). With no row highlighted
-    /// they do nothing, never act on the chat that is open.
+    /// The keys a Recent Chats row answers to: Open in AI Chat (⌘J), Copy
+    /// Last Answer (⌘↩), Rename (⌘E), Pin (⇧⌘P), and Delete (⌃X). With no
+    /// row highlighted they do nothing, never act on the chat that is open.
     private static let recentChatsRowShortcuts: [KeyShortcut] =
-        [.commandReturn] + [ResultAction.renameChat, .pinChat, .deleteChat].map(\.shortcut)
+        [.commandReturn] + [ResultAction.continueInAIChat, .renameChat, .pinChat, .deleteChat].map(\.shortcut)
 
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
@@ -5257,8 +5307,18 @@ import Observation
             toggleRecentChats()
             return true
         }
-        // ⌘J on the Quick AI surface: Continue in AI Chat, as in Raycast,
-        // before the first answer too.
+        // `⌘H`, the v1.4 Browse Chat History key, opens the same list on the
+        // Quick AI surface. The AI Chat window leaves it to Hide.
+        if isQuickAIPresented, !isAIChatWindow, Self.legacyRecentChatsShortcut.matches(
+            characters: characters,
+            keyCode: keyCode,
+            modifiers: modifiers
+        ) {
+            toggleRecentChats()
+            return true
+        }
+        // ⌘J on the Quick AI surface: Open in AI Chat, as in Raycast,
+        // before the first answer too; in Recent Chats, the highlighted chat.
         if offersContinueInAIChat, !isItemActionPanePresented,
            ResultAction.continueInAIChat.shortcut.matches(
                characters: characters,
@@ -5444,6 +5504,9 @@ import Observation
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
             controlRunningApplication(application, action: action.kind)
+        case .openInAIChat:
+            guard case .item(let item) = result, item.kind == .conversation else { return true }
+            openChatInAIChat(itemID: item.itemID)
         case .copyCleanLink:
             guard case .item(let item) = result, let cleaned = URLCleaner.clean(item.value) else { return true }
             pasteboard.writeString(cleaned)
@@ -5614,6 +5677,16 @@ import Observation
     }
 
     // MARK: - Quick AI chats
+
+    /// Return on a Chats catalog row: the chat on the Quick AI surface, as
+    /// Return in Recent Chats opens it. A stream still running belongs to
+    /// the chat being left.
+    func continueChatInQuickAI(itemID: String) {
+        guard let id = UUID(uuidString: itemID), history.contains(where: { $0.id == id }) else { return }
+        if isStreaming { cancel() }
+        continueConversation(itemID: itemID)
+        openQuickAI()
+    }
 
     func continueConversation(itemID: String) {
         guard let id = UUID(uuidString: itemID) else { return }
@@ -6139,7 +6212,6 @@ import Observation
         guard !submittedInput.isEmpty || pendingImage != nil else { return nil }
         // A new request supersedes any prior answer's replaceable selection.
         replaceableSelectionContext = nil
-        isConversationHistoryPresented = false
         webSearchNote = nil
         // A turn asked again stays in its chat, so it keeps the chat's
         // images even past the Start New Chat interval.
@@ -7835,7 +7907,6 @@ import Observation
             replaceableSelectionContext = nil
             currentConversation = nil
             conversationImages = []
-            isConversationHistoryPresented = false
             activeVaultSearchMode = nil
             vaultSearchAnchor = nil
         }
@@ -7854,7 +7925,6 @@ import Observation
     func clearTransientDisplay() {
         reset([.layers, .mode, .attachments, .input])
         clearOutput()
-        isConversationHistoryPresented = false
         lastQuestion = nil
     }
 
@@ -7885,17 +7955,24 @@ import Observation
 
     /// `⌘P`: the recent chat list in place of the thread, inside the same
     /// Quick AI window. One column; `↑↓` move, `↩` opens, `esc` returns to
-    /// the thread. P for past chats: `⌘J` became Continue in AI Chat
+    /// the thread. P for past chats: `⌘J` became Open in AI Chat
     /// (Raycast's key) in v1.5.0, and `⌘P` was free in every key table
     /// (`⇧⌘P` is Pin, `⌥⌘P` is Continue in pi). In the AI Chat window the
     /// same key opens the chat list.
-    static let recentChatsShortcut: KeyShortcut = .command("p")
+    static let recentChatsShortcut: KeyShortcut = ResultAction.recentChats.shortcut
+
+    /// `⌘H` was Browse Chat History, which opened the Chats catalog; it now
+    /// opens Recent Chats on the Quick AI surface, as `⌘P` does.
+    static let legacyRecentChatsShortcut: KeyShortcut = .command("h")
+
+    /// Recent Chats has something to list.
+    var canOpenRecentChats: Bool { !history.isEmpty || currentConversation != nil }
 
     /// Opens Recent Chats. The thread, the model, and any attachments are
     /// already in state, so they carry over untouched; this only changes
     /// what is drawn.
     func openRecentChats() {
-        guard !history.isEmpty || currentConversation != nil else {
+        guard canOpenRecentChats else {
             errorMessage = "No chats yet. Ask a question first."
             requestInputFocus()
             return
@@ -7904,7 +7981,6 @@ import Observation
         // input steps aside so the composer's Return asks.
         openQuickAI()
         isRecentChatsPresented = true
-        isConversationHistoryPresented = false
         isModelChooserPresented = false
         isAddContextMenuPresented = false
         // The composer is the list's search field now; a half-typed
@@ -7953,21 +8029,7 @@ import Observation
     /// while the list is up. `recentChatsIndex` indexes this list, so the
     /// keys and the drawn rows agree.
     var recentChatItems: [LauncherCatalogItem] {
-        let terms = FuzzyMatcher.fold(input)
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-        let ordered = QuickHistoryStore.ordered(history)
-        guard isRecentChatsPresented, !terms.isEmpty else { return ordered.map(conversationItem) }
-        return ordered
-            .filter { conversation in
-                let haystack = FuzzyMatcher.fold(
-                    ([title(of: conversation)]
-                        + conversation.messages.map(\.content))
-                        .joined(separator: "\n")
-                )
-                return terms.allSatisfy { haystack.contains($0) }
-            }
-            .map(conversationItem)
+        chatItems(matching: isRecentChatsPresented ? input : "")
     }
 
     /// Root search's field changed: a keystroke replaces a local answer
@@ -8226,7 +8288,6 @@ import Observation
         store.deletedChatIDs.formUnion(history.map(\.id))
         history = []
         currentConversation = nil
-        isConversationHistoryPresented = false
         if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
         output = ""
         errorMessage = nil
@@ -8245,7 +8306,6 @@ import Observation
         currentConversation = conversation
         openChatBase = history.first { $0.id == conversation.id }.map(StoredChatStamp.init)
         expandedTranscriptMessageIDs.removeAll()
-        isConversationHistoryPresented = false
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
         // The chat's model carries over only while it is still offered; a
         // chat written on a model since turned off (the sunset vision id)
@@ -8271,27 +8331,6 @@ import Observation
         followThreadBottom()
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
-    }
-
-    func toggleConversationHistory() {
-        guard !conversationMessages.isEmpty else { return }
-        isConversationHistoryPresented.toggle()
-        requestInputFocus()
-    }
-
-    /// ⌘H / ⌘K → Browse Chat History: leave the answer surface and open the
-    /// Quick AI Chats catalog. The conversation is already persisted; picking
-    /// a row continues it, Backspace returns to the root.
-    func openChatHistory() {
-        isActionPalettePresented = false
-        actionQuery = ""
-        currentConversation = nil
-        conversationImages = []
-        lastQuestion = nil
-        isConversationHistoryPresented = false
-        output = ""
-        errorMessage = nil
-        enterCatalog(.chats)
     }
 
     func persistCurrentConversation() {

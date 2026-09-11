@@ -570,12 +570,8 @@ struct QuickViewModelTests {
         vm.input = "First question"
         await vm.submit()
 
-        vm.toggleConversationHistory()
-
-        #expect(vm.isConversationHistoryPresented)
         #expect(vm.conversationMessages.map(\.content) == ["First question", "First answer"])
         vm.clearTransientDisplay()
-        #expect(!vm.isConversationHistoryPresented)
         #expect(vm.output.isEmpty)
         #expect(vm.currentConversation?.messages.count == 2)
     }

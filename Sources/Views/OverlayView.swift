@@ -378,7 +378,16 @@ struct OverlayView: View {
 
             Divider()
             modelSubmenu
-            historySubmenu
+
+            Divider()
+            ForEach(viewModel.chatMenuEntries) { entry in
+                Button {
+                    viewModel.performChatMenuEntry(entry)
+                } label: {
+                    Label(entry.menuTitle, systemImage: entry.systemImage)
+                }
+                .disabled(!viewModel.isChatMenuEntryEnabled(entry))
+            }
 
             Divider()
             Button {
@@ -411,7 +420,7 @@ struct OverlayView: View {
                 .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
         )
         .accessibilityLabel("More actions")
-        .help("Actions, model, history, and settings")
+        .help("Actions, model, chats, and settings")
     }
 
     private var modelSubmenu: some View {
@@ -452,22 +461,6 @@ struct OverlayView: View {
             Label("Model: \(viewModel.activeModelDisplay)", systemImage: "cpu")
                 .lineLimit(1)
                 .truncationMode(.middle)
-        }
-    }
-
-    private var historySubmenu: some View {
-        Menu {
-            Button("New AI Chat") { viewModel.startNewConversation() }
-            if !viewModel.history.isEmpty {
-                Divider()
-                ForEach(viewModel.history.prefix(10)) { conversation in
-                    Button(viewModel.title(of: conversation)) {
-                        viewModel.loadConversation(id: conversation.id)
-                    }
-                }
-            }
-        } label: {
-            Label("Recent AI Chats", systemImage: "clock.arrow.circlepath")
         }
     }
 }
@@ -588,7 +581,11 @@ struct LauncherResultRow: View {
         }
     }
 
-    private var resultType: String {
+    private var resultType: String { Self.typeLabel(for: result) }
+
+    /// The `meta` type label on a row's right edge. A chat row reads "Chat";
+    /// "AI Chat" names only the window.
+    static func typeLabel(for result: LauncherSearchResult) -> String {
         switch result {
         case .application: "Application"
         case .catalog: "Catalog"
@@ -600,7 +597,7 @@ struct LauncherResultRow: View {
             case .clipboard: "Clipboard"
             case .emoji: "Emoji"
             case .screenshot: "Screenshot"
-            case .conversation: "AI Chat"
+            case .conversation: "Chat"
             case .askAI: "AI Command"
             case .folder: "Folder"
             case .answer: "Answer"
@@ -1110,7 +1107,7 @@ struct QuickActionPalette: View {
     private func row(for entry: Entry, isSelected: Bool) -> some View {
         switch entry {
         case .result(let action):
-            paletteRow(symbol: action.systemImage, title: action.title, detail: viewModel.resultActionDetail(action) ?? "Answer") {
+            paletteRow(symbol: action.systemImage, title: action.title, detail: viewModel.resultActionDetail(action) ?? action.paletteGroup) {
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
         case .surface(let action):

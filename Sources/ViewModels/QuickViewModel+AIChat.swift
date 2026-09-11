@@ -1,6 +1,6 @@
 import Foundation
 
-/// What Continue in AI Chat (`⌘J`) carries from Quick AI to the AI Chat
+/// What Open in AI Chat (`⌘J`) carries from Quick AI to the AI Chat
 /// window: the chat (its history, model, and tools ride on it), what is
 /// typed, and the attachments. The launcher's view model makes it and the
 /// window's view model adopts it; the launcher then lets the chat go, so one
@@ -55,15 +55,59 @@ extension QuickViewModel {
 
     // MARK: - Launcher side
 
-    /// `⌘J`, `⌘K` › Continue in AI Chat, or the header's expand glyph: the
-    /// chat moves to the AI Chat window and the launcher closes. A stream
-    /// still running stops first and keeps what arrived, as Escape does.
+    /// `⌘J`, `⌘K` › Open in AI Chat, or the header's Open in AI Chat
+    /// button: the chat moves to the AI Chat window and the launcher closes.
+    /// In Recent Chats it is the highlighted chat, as `⌘K` and the row keys
+    /// act on it; with no row highlighted (a search that matches nothing)
+    /// nothing moves.
     func continueInAIChat() {
-        guard let aiChatOpener, !isAIChatWindow else { return }
+        guard aiChatOpener != nil, !isAIChatWindow else { return }
+        if isRecentChatsPresented {
+            if case .item(let item)? = focusedLauncherResult, item.kind == .conversation {
+                openChatInAIChat(itemID: item.itemID)
+            }
+            return
+        }
+        handOffOpenChat()
+    }
+
+    /// Open in AI Chat on a chat row (the Chats catalog, Recent Chats): that
+    /// chat moves to the window. The chat open here moves as `⌘J` moves it,
+    /// with its attachments; another chat leaves this thread as it is. The
+    /// list's search text is not a draft, so it goes nowhere.
+    func openChatInAIChat(itemID: String) {
+        guard let aiChatOpener, !isAIChatWindow,
+              let id = UUID(uuidString: itemID),
+              let conversation = history.first(where: { $0.id == id })
+        else { return }
+        closeItemActionPane()
+        isRecentChatsPresented = false
+        input = ""
+        if currentConversation?.id == id {
+            handOffOpenChat()
+            return
+        }
+        // A stream still running stops and keeps what arrived, as Escape
+        // does, and the chat it belongs to stays saved.
         if isStreaming { cancel() }
-        var handoff = makeAIChatHandoff()
-        // Text typed into Recent Chats is a search, not a draft.
-        if isRecentChatsPresented { handoff.input = "" }
+        persistCurrentConversation()
+        overlayPresenter.dismissOverlay()
+        aiChatOpener(AIChatHandoff(
+            conversation: conversation,
+            pendingChatTools: nil,
+            input: "",
+            pendingImages: [],
+            pendingContext: nil,
+            conversationImages: []
+        ))
+    }
+
+    /// The open chat to the window. A stream still running stops first and
+    /// keeps what arrived, as Escape does.
+    private func handOffOpenChat() {
+        guard let aiChatOpener else { return }
+        if isStreaming { cancel() }
+        let handoff = makeAIChatHandoff()
         // One chat, one window: the launcher lets it go (it stays in
         // Recent Chats), so the two view models never write it in turn.
         reset([.layers, .thread, .attachments, .input])
@@ -73,12 +117,55 @@ extension QuickViewModel {
         aiChatOpener(handoff)
     }
 
-    /// The root "AI Chat" command: the window on a new or the last chat.
-    func openAIChatWindow() {
+    /// The root "AI Chat" command and ⋯ › Open AI Chat: the window on a new
+    /// or the last chat. As a fallback command it gets what was typed: the
+    /// window opens a new chat with the text in its composer, unsent.
+    func openAIChatWindow(draft: String = "") {
         guard let aiChatOpener else { return }
         input = ""
         overlayPresenter.dismissOverlay()
-        aiChatOpener(nil)
+        guard !draft.isEmpty else {
+            aiChatOpener(nil)
+            return
+        }
+        aiChatOpener(AIChatHandoff(
+            conversation: nil,
+            pendingChatTools: nil,
+            input: draft,
+            pendingImages: [],
+            pendingContext: nil,
+            conversationImages: []
+        ))
+    }
+
+    /// ⋯ › New Chat: Quick AI on an empty chat. The chat on the surface is
+    /// saved first (a stream still running stops and keeps what arrived),
+    /// so it stays in Recent Chats; only the surface starts over.
+    func openNewChat() {
+        if isStreaming { cancel() }
+        persistCurrentConversation()
+        startNewConversation()
+        openQuickAI()
+    }
+
+    /// The ⋯ menu's chat entries: Open AI Chat only when there is a window
+    /// to open.
+    var chatMenuEntries: [ChatMenuEntry] {
+        ChatMenuEntry.allCases.filter { $0 != .openAIChat || aiChatOpener != nil }
+    }
+
+    /// Recent Chats is greyed out with nothing to list.
+    func isChatMenuEntryEnabled(_ entry: ChatMenuEntry) -> Bool {
+        entry == .recentChats ? canOpenRecentChats : true
+    }
+
+    /// One ⋯ chat entry, by the same path its key or command takes.
+    func performChatMenuEntry(_ entry: ChatMenuEntry) {
+        switch entry {
+        case .newChat: openNewChat()
+        case .recentChats: openRecentChats()
+        case .openAIChat: openAIChatWindow()
+        }
     }
 
     /// The chat on the surface, saved first so the stored copy is current.

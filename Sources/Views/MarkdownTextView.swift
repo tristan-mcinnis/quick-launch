@@ -5,17 +5,18 @@ import AppKit
 /// markdown runs draw as prose, and each fenced code block draws as its own
 /// block with a header strip, so code never reads as part of the prose.
 ///
-/// The same stack serves the overlay answer body and every message in the
-/// `⌘J` thread. `scrolls` says which of the two it is, so a surface that
-/// already owns a scroll view never nests a second one.
+/// The same stack serves every answer in the Quick AI and AI Chat thread
+/// and a local answer in root search. `scrolls` says whether the view owns
+/// its scrolling, so a surface that already owns a scroll view never nests
+/// a second one.
 struct MarkdownTextView: View {
     let markdown: String
     let isStreaming: Bool
-    /// True when this view owns its scrolling (the overlay answer body).
-    /// False when an outer scroll view hosts it (the thread).
+    /// True when this view owns its scrolling (an answer shown on its own).
+    /// False when an outer scroll view hosts it (the thread, root search).
     var scrolls = true
-    /// Scopes every control inside the answer, so the thread's Copy button
-    /// and the overlay's are not the same accessibility element.
+    /// Scopes every control inside the answer, so two answers' Copy buttons
+    /// are never the same accessibility element.
     var instanceID = "answer"
 
     /// Scroll target that keeps the newest streamed text at the bottom edge.

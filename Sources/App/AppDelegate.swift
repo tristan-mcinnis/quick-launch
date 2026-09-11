@@ -1363,7 +1363,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             _ = viewModel.isApplicationActionPanePresented
             _ = viewModel.isCatalogActionPanePresented
             _ = viewModel.catalogScope
-            _ = viewModel.isConversationHistoryPresented
             _ = viewModel.actionQuery
             _ = viewModel.input
             _ = viewModel.pendingImage

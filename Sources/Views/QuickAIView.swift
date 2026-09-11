@@ -84,17 +84,17 @@ struct QuickAIView: View {
             QuickAITitleBlock(viewModel: viewModel)
             Spacer(minLength: House.Spacing.sm)
             // Raycast's expand glyph is a boxed up-right arrow; this is the
-            // nearest SF Symbol. As in Raycast it continues the chat in the
-            // AI Chat window (`⌘J`).
-            // Open in Chat: a labelled button with its key, so moving a
-            // longer conversation to the AI Chat window is one obvious click.
+            // nearest SF Symbol. As in Raycast it moves the chat to the AI
+            // Chat window (`⌘J`), a labelled button with its key, so moving a
+            // longer conversation is one obvious click. In Recent Chats it
+            // moves the highlighted chat, as `⌘J` does.
             Button {
                 viewModel.continueInAIChat()
             } label: {
                 HStack(spacing: House.Spacing.xs) {
                     Image(systemName: "arrow.up.right.square")
                         .font(AQDesign.TypeToken.label)
-                    Text("Open in Chat")
+                    Text(ResultAction.continueInAIChat.title)
                         .font(AQDesign.TypeToken.label)
                     KeyCapGroup(keys: ResultAction.continueInAIChat.shortcut.keyCaps)
                 }

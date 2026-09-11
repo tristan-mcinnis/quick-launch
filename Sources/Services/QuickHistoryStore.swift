@@ -85,6 +85,29 @@ enum QuickHistoryStore {
         }
     }
 
+    /// The one chat search every chat list uses (the Chats catalog, Recent
+    /// Chats, the AI Chat rail): `ordered`, then kept when every typed word
+    /// is in the title or in a message, case and accents folded. An empty
+    /// query keeps every chat.
+    static func matching(
+        _ conversations: [QuickConversation],
+        query: String,
+        title: (QuickConversation) -> String
+    ) -> [QuickConversation] {
+        let terms = FuzzyMatcher.fold(query)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        let sorted = ordered(conversations)
+        guard !terms.isEmpty else { return sorted }
+        return sorted.filter { conversation in
+            let haystack = FuzzyMatcher.fold(
+                ([title(conversation)] + conversation.messages.map(\.content))
+                    .joined(separator: "\n")
+            )
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+    }
+
     /// Keeps every pinned chat and the newest `limit` unpinned ones.
     static func bounded(_ conversations: [QuickConversation], limit: Int) -> [QuickConversation] {
         let cap = max(1, limit)
