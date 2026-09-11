@@ -224,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             runMaintenanceCommand(maintenance)
             return
         }
+        // Whatever image is already on the clipboard at launch was copied
+        // before this run: it is not a fresh copy to offer. Without this,
+        // every relaunch attached the same old clipboard image once more.
+        ClipboardImageReader.suppressAutoOffer()
         let vm = QuickViewModel(
             selectedTextService: selectedTextService,
             applicationCatalog: applicationCatalog,
