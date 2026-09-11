@@ -98,7 +98,8 @@ extension QuickViewModel {
 
     /// The tools of an assistant in a few words, for the chooser row.
     static func toolSummary(_ tools: Set<ChatToolKind>?) -> String {
-        guard let tools else { return "Default tools" }
+        // Nil is Chat defaults, the name the editor and the Chat card use.
+        guard let tools else { return "Chat defaults" }
         let names = ChatToolKind.allCases.filter(tools.contains).map(\.displayName)
         return names.isEmpty ? "No tools" : names.joined(separator: ", ")
     }

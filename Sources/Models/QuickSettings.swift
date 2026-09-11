@@ -27,13 +27,14 @@ enum QuickAIPrimaryAction: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// One line on what Return will do, for the settings row's detail.
+    /// One line on what Return will do, for the settings row's detail. The
+    /// AI Chat window has no app behind it, so there Return always copies.
     var detail: String {
         switch self {
         case .pasteToActiveApp:
-            "Return pastes the answer into the app behind Quick Launch. Where there is no app to paste into, it says so and leaves the answer on screen."
+            "In Quick AI, Return pastes the answer into the app behind. AI Chat always copies."
         case .copyToClipboard:
-            "Return copies the answer. Paste it yourself wherever it is needed."
+            "Return copies the answer, in Quick AI and in AI Chat."
         }
     }
 }
@@ -224,9 +225,12 @@ struct QuickSettings: Codable, Sendable {
     var visionModel: String = InferenceProvider.deepSeekVisionModel
     var systemPrompt: String = QuickSettings.defaultSystemPrompt
 
-    // Lightweight follow-up history
+    // Chat history
     var historyEnabled: Bool = true
-    var historyLimit: Int = 20
+    /// Unpinned chats kept in history (Settings › History › Chats to keep).
+    /// A new install starts at `QuickHistoryStore.defaultLimit`; a stored
+    /// value, the old default 20 included, is kept.
+    var historyLimit: Int = QuickHistoryStore.defaultLimit
     /// When a new chat replaces the last one. Replaces the old
     /// `newConversationAfterMinutes` count; the migration maps it.
     var newChatInterval: NewChatInterval = .fiveMinutes
@@ -237,7 +241,8 @@ struct QuickSettings: Codable, Sendable {
     /// Automatic copy (`autoCopy`) is untouched by this: it still governs
     /// what happens the moment a result arrives.
     var quickAIPrimaryAction: QuickAIPrimaryAction = .pasteToActiveApp
-    /// Draw the ⇥ hint in root search. Tab opens Quick AI either way.
+    /// Draw the ⇥ hint in root search. Tab asks Quick AI either way (math
+    /// and conversions still answer in place).
     var tabShortcutHintVisible: Bool = true
     /// The provider and model the Quick AI surface answers with. Unset means
     /// the current selection, so the two can never disagree by accident.
@@ -249,6 +254,12 @@ struct QuickSettings: Codable, Sendable {
     /// Offer the model a `search_web` tool (backed by SearXNG) so it can
     /// look things up mid-answer instead of guessing from training data.
     var modelWebSearchEnabled: Bool = true
+    /// The tools a new chat starts with (Settings › General › Chat). Web
+    /// search is `modelWebSearchEnabled`, which the Translator reads too;
+    /// `newChatTools` joins the four.
+    var newChatMemoryEnabled: Bool = true
+    var newChatVaultEnabled: Bool = true
+    var newChatSkillsEnabled: Bool = true
     /// Whether Quick AI offers the model the `ask_user_question` tool. Off by
     /// default: the model answers instead of asking which kind of help is
     /// wanted. On, the inline multiple-choice card is back.
@@ -378,7 +389,8 @@ struct QuickSettings: Codable, Sendable {
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
             ?? Self.defaultSystemPrompt
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
-        historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 20
+        historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit)
+            ?? QuickHistoryStore.defaultLimit
         newChatInterval = try c.decodeIfPresent(NewChatInterval.self, forKey: .newChatInterval)
             ?? .fiveMinutes
         quickAIPrimaryAction = try c.decodeIfPresent(
@@ -407,6 +419,9 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .modelWebSearchEnabled
         ) ?? true
+        newChatMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatMemoryEnabled) ?? true
+        newChatVaultEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatVaultEnabled) ?? true
+        newChatSkillsEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatSkillsEnabled) ?? true
         // A blob from before the surface was resizable has no size: the
         // standard one. A malformed size is dropped on its own rather than
         // failing the whole decode, which would reset every other setting.

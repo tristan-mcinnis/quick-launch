@@ -33,10 +33,12 @@ struct FallbackCommandsView: View {
         }
     }
 
+    /// Tab never reads this list. It asks Quick AI, except for math and
+    /// conversions, which root search answers in place (`handleTab`).
     private var listNote: String {
         viewModel.fallbackCommandEntries.isEmpty
-            ? "Nothing is listed, so Return on text that matches no row does nothing at all. Tab still opens Quick AI. Add a command to give unmatched text something to run."
-            : "The first command runs. Tab opens Quick AI whatever this list holds."
+            ? "Nothing is listed, so Return on text that matches no row does nothing at all. Tab still asks Quick AI; math and conversions answer in place. Add a command to give unmatched text something to run."
+            : "The first command runs. Tab asks Quick AI whatever this list holds; math and conversions answer in place."
     }
 
     private var addMenu: some View {

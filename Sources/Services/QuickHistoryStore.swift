@@ -9,6 +9,11 @@ enum QuickHistoryStore {
     static let defaultsKey = "QuickConversationHistory"
     static let fileName = "chat-history.json"
     static let schemaVersion = 1
+    /// Settings › History › "Chats to keep": how many unpinned chats stay.
+    /// Pinned chats are never counted and never pruned.
+    static let limitOptions = [20, 50, 100, 200]
+    /// The limit a new install starts with. A stored limit is kept as it is.
+    static let defaultLimit = 100
 
     static func defaultFileURL() -> URL {
         AppPaths.file(fileName)

@@ -159,7 +159,7 @@ struct SettingsView: View {
         /// One plain line under the pane title.
         var subtitle: String {
             switch self {
-            case .general: "Hotkeys, launcher behaviour, and learning."
+            case .general: "Hotkeys, launcher behaviour, chats, and learning."
             case .items: "Aliases and hotkeys for apps, folders, and commands."
             case .models: "Providers, models, and the quick-action instruction."
             case .clipboard: "Clipboard history, colors, emoji, and Quicklinks."
@@ -396,9 +396,10 @@ private struct GeneralTab: View {
                 // High in the pane: these are behaviour settings, and the
                 // cards under them (Learning & Review especially) are long.
                 QuickAISettingsView(viewModel: viewModel)
+                ChatSettingsView(viewModel: viewModel)
                 FallbackCommandsView(viewModel: viewModel)
                 learningAndReviewCard
-                historyCard
+                HistorySettingsView(viewModel: viewModel)
                 appearanceCard
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
@@ -794,42 +795,6 @@ private struct GeneralTab: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             viewModel.writeInteractionJournal(as: format, to: url)
-        }
-    }
-
-    private var historyCard: some View {
-        SettingsCard("History") {
-            SettingsRow(title: "Keep quick-action history", isFirst: true) {
-                Toggle(
-                    "Keep quick-action history",
-                    isOn: viewModel.settingsBinding(\.historyEnabled) { enabled in
-                        if enabled {
-                            viewModel.loadHistory()
-                        } else {
-                            viewModel.history = []
-                        }
-                    }
-                )
-                .toggleStyle(InkToggleStyle())
-            }
-
-            SettingsRow(title: "Saved history") {
-                Button("Clear history", role: .destructive) {
-                    viewModel.clearHistory()
-                }
-            }
-
-            SettingsRow(title: "Keep my place after closing") {
-                Picker("Keep my place after closing", selection: viewModel.settingsBinding(\.reopenRetentionSeconds)) {
-                    Text("Do not keep").tag(0)
-                    Text("10 seconds").tag(10)
-                    Text("30 seconds").tag(30)
-                    Text("1 minute").tag(60)
-                    Text("5 minutes").tag(300)
-                }
-                .labelsHidden()
-                .frame(width: 140)
-            }
         }
     }
 

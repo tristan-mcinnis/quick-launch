@@ -16,12 +16,12 @@ extension QuickViewModel {
     // MARK: - The chat's tools
 
     /// The tools the next request offers: the open chat's own set, the set
-    /// chosen on the empty surface, or the defaults (memory, vault, and
-    /// skills on; web search per Settings).
+    /// chosen on the empty surface, or the chat defaults (Settings ›
+    /// General › Chat).
     var chatTools: Set<ChatToolKind> {
         currentConversation?.enabledTools
             ?? pendingChatTools
-            ?? ChatToolKind.defaults(webSearchEnabled: settings.modelWebSearchEnabled)
+            ?? settings.newChatTools
     }
 
     /// Whether this Mac has the backend a tool needs. A tool that is on but

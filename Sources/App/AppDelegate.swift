@@ -263,6 +263,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.skillLibrary = SkillLibrary()
         vm.fileOpener = OpenCommandFileOpener()
         vm.piHandoff = PiHandoffService()
+        // Settings › General › Chat asks it whether tmux, pi, Ghostty,
+        // recall, and the vault host are there.
+        vm.chatBackendProbe = ChatBackendProbe()
         // ⌘J in Quick AI and the "AI Chat" command open the chat window.
         vm.aiChatOpener = { [weak self] handoff in
             self?.showAIChat(handoff: handoff)

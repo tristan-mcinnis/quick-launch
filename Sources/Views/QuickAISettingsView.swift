@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The Quick AI card in the General pane: what Return does on a finished
-/// answer, the Tab hint, when a new chat starts, whether the model may ask
-/// clarifying questions, and the model Quick AI answers with.
+/// The "Quick AI and AI Chat" card in the General pane: what Return does on
+/// a finished answer, the Tab hint, when a new chat starts, whether the
+/// model may ask clarifying questions, and the model both answer with. The
+/// AI Chat window shares these settings with Quick AI (one store), so the
+/// card names both; only Primary Action differs, and its detail says how.
 ///
 /// Every row is a binding straight into `QuickSettings`, so a change applies
 /// immediately and survives a relaunch, the same as every other General row.
@@ -12,7 +14,7 @@ struct QuickAISettingsView: View {
     @Bindable var viewModel: QuickViewModel
 
     var body: some View {
-        SettingsCard("Quick AI") {
+        SettingsCard(Self.title) {
             SettingsRow(
                 title: "Primary Action",
                 detail: viewModel.settings.quickAIPrimaryAction.detail,
@@ -30,7 +32,7 @@ struct QuickAISettingsView: View {
 
             SettingsRow(
                 title: "Tab Shortcut",
-                detail: "Hide the \u{21E5} hint in root search. Tab opens Quick AI whether the hint is shown or not."
+                detail: Self.tabShortcutDetail
             ) {
                 Toggle("Hide the Tab hint in root search", isOn: tabHintHidden)
                     .toggleStyle(InkToggleStyle())
@@ -67,10 +69,15 @@ struct QuickAISettingsView: View {
                 }
                 .labelsHidden()
                 .frame(width: 240)
-                .accessibilityLabel("Quick AI model")
+                .accessibilityLabel("Model for Quick AI and AI Chat")
             }
         }
     }
+
+    static let title = "Quick AI and AI Chat"
+
+    /// Tab asks Quick AI, except for what root search answers itself.
+    static let tabShortcutDetail = "Hide the \u{21E5} hint in root search. Tab asks Quick AI either way; math and conversions answer in place."
 
     /// Stored the other way round: the setting says whether the hint is shown,
     /// the switch says whether it is hidden.
