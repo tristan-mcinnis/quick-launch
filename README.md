@@ -41,7 +41,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Screenshot attachments: `⌘⇧S` captures the app behind Quick Launch, `⌘⇧D` the display under the pointer, or run the two screenshot commands from any global hotkey; a clipboard image also attaches on open
 - One Vision model setting decides where screenshots go; DeepSeek `deepseek-flash` by default, the same model that answers text (the retired `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` aliases migrate to it), local MLX when chosen; follow-ups keep the screenshot in memory for the thread
 - `⌘K` on any row opens a Raycast-style action list with the shortcut beside each action: Return is the primary action, `⌘↩` the secondary (copy, show in Finder, copy link), `⌘⇧↩` copy and paste, `⌘E` edit, `⌘⇧A` alias, `⌘⇧H` hotkey, `⌃X` delete (press twice); the same keys work straight from the list
-- Quick AI, Raycast's surface: one fixed 750 × 475 panel replaces the launcher, with a header (back chevron, the chat title over the model that will answer next), the thread (your turns as pills on the right, answers as prose on the left, a web-search or thinking status line), and a bottom composer whose right edge names what Return does and whose placeholder says what typing will do ("Ask a follow-up…" once a thread exists). An empty surface shows three quiet hints: `@` for context, `⌘J` for recent chats, `⇧⌘O` for the model. Chat titles are the first question as you typed it, tidied up: no saved-prompt `/alias` or "search web" prefix, a capital first letter, cut at a word under 60 characters. Return on an answer pastes it into the previous app (or copies, per Settings › General › Quick AI), typing asks a follow-up; Escape stops a stream, otherwise returns to root search with the thread kept, and a second Escape closes the window; `⌘N` new chat, `⌘R` regenerate, `⇧⌘R` regenerate on another model, Change Model (`⌘⇧O`, or click the model name under the title) switches model mid-thread, Copy Answer (`⇧⌘C`) and Copy Chat (`⌥⌘C`, the whole thread labelled "You:" and the model) copy without closing the window, `⌘J` opens Recent Chats in the same window (one column, `↑↓`, Return opens, Escape back), `⌘[`/`⌘]` or `↑↓` flip between recent chats; the Quick AI Chats catalog lists them with continue, copy last answer, rename, pin, delete. **Let the model ask clarifying questions** (Settings › General › Quick AI, off by default) decides whether the model may pause with a multiple-choice card
+- Quick AI, Raycast's surface: one fixed 750 × 475 panel replaces the launcher, with a header (back chevron, the chat title over the model that will answer next), the thread (your turns as pills on the right, answers as prose on the left, a web-search or thinking status line), and a bottom composer whose right edge names what Return does and whose placeholder says what typing will do ("Ask a follow-up…" once a thread exists). An empty surface shows three quiet hints: `@` for context, `⌘J` for recent chats, `⇧⌘O` for the model. Chat titles are the first question as you typed it, tidied up: no saved-prompt `/alias` or "search web" prefix, a capital first letter, cut at a word under 60 characters. Return on an answer pastes it into the previous app (or copies, per Settings › General › Quick AI), typing asks a follow-up; Escape stops a stream, otherwise returns to root search with the thread kept, and a second Escape closes the window; `⌘N` new chat, `⌘R` regenerate, `⇧⌘R` regenerate on another model, Change Model (`⌘⇧O`, or click the model name under the title) switches model mid-thread, Copy Answer (`⇧⌘C`) and Copy Chat (`⌥⌘C`, the whole thread labelled "You:" and the model) copy without closing the window, Continue in pi (`⌥⌘P`) hands the thread to a new pi session in tmux and opens Ghostty on it, `⌘J` opens Recent Chats in the same window (one column, `↑↓`, Return opens, Escape back), `⌘[`/`⌘]` or `↑↓` flip between recent chats; the Quick AI Chats catalog lists them with continue, copy last answer, rename, pin, delete. **Let the model ask clarifying questions** (Settings › General › Quick AI, off by default) decides whether the model may pause with a multiple-choice card
 - Code blocks in an answer carry a header strip: the detected language, Copy, and a line-wrap toggle. Long lines scroll sideways by default and wrap only when you turn wrapping on, so pasted output keeps its shape
 - Long questions collapse: over ten lines (measured at the thread's width), a question you sent shows its opening lines with **Show more**, and **Collapse** folds it back; both scroll the message's first line to the top. Answers and shorter messages always show in full, and `⇧⌘M` toggles the newest long question (only its control shows the key)
 - Add Context: a control left of the composer, or typing `@`, offers Focused Window, Selected Text, Selected Area, and Entire Screen, reusing the Screen Awareness captures. What you attach rides with that message only
@@ -286,6 +286,17 @@ built-in raw file tools for the quick overlay.
 Pi can use the tools and skills in its own configuration. General
 OpenAI-compatible providers do not have a tool-calling loop.
 
+Continue in pi (`⌥⌘P`, or `⌘K` › Continue in pi on a Quick AI thread) moves a
+chat into a full pi session instead: the thread is written as Markdown to
+`~/Library/Application Support/Quick Launch/pi-handoff/`, a detached tmux
+session `ql-<id>` starts in your home folder running `pi @<file>` with a short
+instruction, and a new Ghostty window attaches to it (`open -n -b
+com.mitchellh.ghostty --args -e tmux attach-session -t ql-<id>`, the way
+Ghostty's own help names for macOS). Needs `tmux` and `pi` in `~/.local/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`, or `PATH`. If Ghostty does not open, the
+session still runs and `tmux attach -t ql-<id>` is copied. Quick Launch does
+not stop the session; close it in tmux as usual.
+
 ## Privacy boundary
 
 - Math and LM Studio stay local.
@@ -294,6 +305,10 @@ OpenAI-compatible providers do not have a tool-calling loop.
 - There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers can send prompts to their configured service.
 - Recent history is local, optional, and limited to 20 threads by default.
+- Continue in pi writes the thread's text (never its screenshots) to
+  `~/Library/Application Support/Quick Launch/pi-handoff/`, owner-only (folder
+  `0700`, files `0600`), keeping the 20 newest files. pi then sends it to pi's
+  configured model, like any pi session.
 - The clipboard history is local, optional, deduplicated, and bounded. It keeps
   the full copy (text, an image, rich text, or a file URL) so a later paste
   restores the original representation. It honours concealed/transient

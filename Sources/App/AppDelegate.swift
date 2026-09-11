@@ -223,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.viewModel = vm
         vm.overlayPresenter = self
+        vm.piHandoff = PiHandoffService()
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)

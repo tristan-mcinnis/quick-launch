@@ -37,14 +37,10 @@ enum LocalModelDiscovery {
 }
 
 enum ExecutableResolver {
-    static func resolve(_ executable: String) -> URL? {
-        if executable.contains("/") {
-            let url = URL(fileURLWithPath: executable)
-            return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
-        }
-
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let searchDirectories = [
+    /// Where CLIs live on this Mac, searched before `PATH`: an app started
+    /// from the Dock gets launchd's short `PATH`, which has none of them.
+    static func searchDirectories(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        [
             home.appendingPathComponent(".local/bin"),
             home.appendingPathComponent(".opencode/bin"),
             home.appendingPathComponent(".lmstudio/bin"),
@@ -52,7 +48,15 @@ enum ExecutableResolver {
             URL(fileURLWithPath: "/usr/local/bin"),
             URL(fileURLWithPath: "/usr/bin"),
         ]
-        for directory in searchDirectories {
+    }
+
+    static func resolve(_ executable: String) -> URL? {
+        if executable.contains("/") {
+            let url = URL(fileURLWithPath: executable)
+            return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+        }
+
+        for directory in searchDirectories() {
             let candidate = directory.appendingPathComponent(executable)
             if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate
