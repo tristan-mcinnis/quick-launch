@@ -115,7 +115,7 @@ struct AIChatWindowView: View {
             }
         }
         // The traffic lights share this row while the rail is in.
-        .padding(.leading, model.isRailVisible ? House.Spacing.sm : Self.trafficLightInset)
+        .padding(.leading, model.isRailVisible || model.isWindowFullScreen ? House.Spacing.sm : Self.trafficLightInset)
         .padding(.trailing, House.Spacing.lg)
         .frame(height: Self.titleBarHeight)
         .background(AQDesign.ColorToken.windowSurface)

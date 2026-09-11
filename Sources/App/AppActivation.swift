@@ -8,6 +8,10 @@ import AppKit
 /// Settings) appeared behind the keyboard: typing still went to the app
 /// behind. When a plain request is not enough, this asks LaunchServices to
 /// open this app, which the system honours the same way as `open -a`.
+///
+/// It also hands the menu bar back as normal windows close
+/// (`settleAfterClosing`): the app stays a normal app while any normal
+/// window is still up.
 @MainActor
 enum AppActivation {
     /// The menu-bar fix-up after the app turns into a normal app.
@@ -40,6 +44,26 @@ enum AppActivation {
         }
     }
 
+    /// A normal window is closing: back to a menu-bar app, with no menu bar
+    /// of its own (the launcher panel keeps its keys), once no other normal
+    /// window is shown. AI Chat and Settings each call this as they close,
+    /// so whichever closes last hands the menu bar back; Settings opened
+    /// from AI Chat keeps its Edit menu, ⌘Tab, and the Dock while it is up.
+    static func settleAfterClosing(_ closing: NSWindow) {
+        let others = NSApp.windows.filter { $0 !== closing }.map(WindowPresence.init)
+        guard !keepsRegularApp(otherWindows: others) else { return }
+        menuBarTask?.cancel()
+        menuBarTask = nil
+        NSApp.mainMenu = nil
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    /// Whether the app stays a normal app (Dock, ⌘Tab, menu bar) while
+    /// these other windows are open.
+    static func keepsRegularApp(otherWindows: [WindowPresence]) -> Bool {
+        otherWindows.contains { $0.isNormal && $0.isShown }
+    }
+
     static func bringToFront(_ window: NSWindow) {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -53,5 +77,27 @@ enum AppActivation {
             configuration: configuration,
             completionHandler: nil
         )
+    }
+}
+
+/// One of the app's windows, as the menu-bar decision sees it.
+struct WindowPresence: Equatable, Sendable {
+    /// A titled window: AI Chat, Settings, Welcome, or a system panel such
+    /// as About. The launcher, the Translator, and Type to Click are
+    /// borderless panels and never hold the menu bar.
+    var isNormal: Bool
+    /// On screen, or minimised to the Dock (its Dock tile needs the app to
+    /// stay a normal app).
+    var isShown: Bool
+
+    init(isNormal: Bool, isShown: Bool) {
+        self.isNormal = isNormal
+        self.isShown = isShown
+    }
+
+    @MainActor
+    init(_ window: NSWindow) {
+        isNormal = window.styleMask.contains(.titled)
+        isShown = window.isVisible || window.isMiniaturized
     }
 }
