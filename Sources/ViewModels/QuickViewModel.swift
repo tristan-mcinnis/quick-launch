@@ -297,6 +297,12 @@ import Observation
     /// that does not set one) leaves the action out of `⌘K`, so no test
     /// can start tmux or open Ghostty.
     @ObservationIgnored var piHandoff: (any PiHandoffServicing)?
+    /// Settings › General › Chat's status lines. The app sets
+    /// `ChatBackendProbe`; nil (every test that does not set one) runs no
+    /// lookups and the card leaves the lines out.
+    @ObservationIgnored var chatBackendProbe: (any ChatBackendProbing)?
+    /// The probe's last answer; nil until it answers.
+    var chatBackendStatus: ChatBackendStatus?
     /// Opens the AI Chat window: on a hand-off from Quick AI (`⌘J`), or on
     /// a new or the last chat (nil, the root "AI Chat" command). The app
     /// sets it; nil (every test that does not set one) leaves both out.

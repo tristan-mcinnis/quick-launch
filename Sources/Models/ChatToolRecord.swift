@@ -144,16 +144,35 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
-extension ChatToolKind {
-    /// A chat's tools when it has not chosen its own: memory, the vault, and
-    /// skills on; web search follows Settings › Models › "Let the model
-    /// search the web".
-    static func defaults(webSearchEnabled: Bool) -> Set<ChatToolKind> {
-        var tools: Set<ChatToolKind> = [.memory, .vault, .skills]
-        if webSearchEnabled { tools.insert(.web) }
-        return tools
+extension QuickSettings {
+    /// The chat defaults: a chat's tools when it has not chosen its own, set
+    /// by the four switches in Settings › General › Chat. Memory, Vault,
+    /// and Skills are on out of the box; Web search is the one
+    /// `modelWebSearchEnabled` switch, shared with the Translator.
+    var newChatTools: Set<ChatToolKind> {
+        Set(ChatToolKind.allCases.filter(isNewChatToolOn))
     }
 
+    func isNewChatToolOn(_ kind: ChatToolKind) -> Bool {
+        switch kind {
+        case .memory: newChatMemoryEnabled
+        case .vault: newChatVaultEnabled
+        case .skills: newChatSkillsEnabled
+        case .web: modelWebSearchEnabled
+        }
+    }
+
+    mutating func setNewChatTool(_ kind: ChatToolKind, on: Bool) {
+        switch kind {
+        case .memory: newChatMemoryEnabled = on
+        case .vault: newChatVaultEnabled = on
+        case .skills: newChatSkillsEnabled = on
+        case .web: modelWebSearchEnabled = on
+        }
+    }
+}
+
+extension ChatToolKind {
     /// The same glyphs the tool lines use.
     var systemImage: String {
         switch self {

@@ -1,10 +1,32 @@
 import SwiftUI
 
-/// The first-run card: the app mark, one paragraph, three bullets, and the
-/// key that starts the launcher. Monochrome glass, exactly like the launcher.
+/// The first-run card: the app mark, one line, the five keys and tools that
+/// make up today's app, and the key that starts the launcher. Monochrome
+/// glass, exactly like the launcher.
 struct WelcomeOverlayView: View {
     @Bindable var viewModel: QuickViewModel
     var onContinue: () -> Void
+
+    /// One line of the card: a glyph in a tile and a short sentence.
+    struct Line: Identifiable, Equatable {
+        let systemImage: String
+        let text: String
+        var id: String { text }
+    }
+
+    static let summary = "Search, ask, and chat without leaving the keyboard."
+
+    /// `hotkey` is the launcher key as Settings shows it (\u{2325}Space by
+    /// default), so the card names the key this Mac really uses.
+    static func lines(hotkey: String) -> [Line] {
+        [
+            Line(systemImage: "magnifyingglass", text: "\(hotkey) opens search"),
+            Line(systemImage: "sparkles", text: "Tab asks Quick AI"),
+            Line(systemImage: "bubble.left.and.bubble.right", text: "\u{2318}J opens AI Chat"),
+            Line(systemImage: "at", text: "@ adds context"),
+            Line(systemImage: "brain.head.profile", text: "Tools can read your memory and the vault"),
+        ]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,16 +47,16 @@ struct WelcomeOverlayView: View {
                     .font(AQDesign.TypeToken.title)
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
 
-                Text("Press Option+Space anywhere, choose a model, and run a quick action. The result streams in and copies to your clipboard automatically.")
+                Text(Self.summary)
                     .font(AQDesign.TypeToken.prose)
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
-                    featureBullet("arrow.triangle.2.circlepath", "Switch local, API, and CLI models")
-                    featureBullet("bolt", "Saved actions and short follow-ups")
-                    featureBullet("lock.shield", "API keys stay in macOS Keychain")
+                    ForEach(Self.lines(hotkey: viewModel.settings.hotkeyDisplayName)) { line in
+                        featureBullet(line.systemImage, line.text)
+                    }
                 }
                 .padding(.top, AQDesign.Space.compact)
 

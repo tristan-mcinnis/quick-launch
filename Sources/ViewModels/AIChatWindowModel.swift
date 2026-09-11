@@ -34,7 +34,9 @@ protocol AIChatWindowPresenting: AnyObject {
     /// `⌘G` and `⇧⌘G`: the next and the previous match, as in every Mac app.
     nonisolated static let findNextShortcut: KeyShortcut = .command("g")
     nonisolated static let findPreviousShortcut: KeyShortcut = .commandShift("g")
-    /// Keep on Top, remembered across launches.
+    /// Keep on Top, remembered across launches. The one place it is kept:
+    /// the window's `⌘K` and menu, and Settings › General › Chat › "Keep AI
+    /// Chat on top", all read and write this key.
     nonisolated static let alwaysOnTopDefaultsKey = "AIChatAlwaysOnTop"
     /// `⌘1`…`⌘9` open the chat list's first nine rows.
     nonisolated static let jumpRowCount = 9
@@ -47,6 +49,9 @@ protocol AIChatWindowPresenting: AnyObject {
     let chat: QuickViewModel
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored weak var window: (any AIChatWindowPresenting)?
+    /// Watches `defaults`, so a Keep on Top switched in Settings reaches
+    /// the open window.
+    @ObservationIgnored private var defaultsObserver: (any NSObjectProtocol)?
 
     /// Where the keyboard is, so Return, Escape, and the arrows go to the
     /// right field. The views report it as focus moves.
@@ -117,6 +122,25 @@ protocol AIChatWindowPresenting: AnyObject {
         self.isAlwaysOnTop = defaults.bool(forKey: Self.alwaysOnTopDefaultsKey)
         chat.chatWindowHost = self
         chat.isQuickAIPresented = true
+        // Any defaults change re-reads the one key; a write from this model
+        // reads back the value it already holds, so nothing loops.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncAlwaysOnTopFromDefaults() }
+        }
+    }
+
+    isolated deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+    }
+
+    /// Takes Keep on Top from `defaults`, where Settings writes it.
+    func syncAlwaysOnTopFromDefaults() {
+        let stored = defaults.bool(forKey: Self.alwaysOnTopDefaultsKey)
+        if stored != isAlwaysOnTop { isAlwaysOnTop = stored }
     }
 
     // MARK: - Opening

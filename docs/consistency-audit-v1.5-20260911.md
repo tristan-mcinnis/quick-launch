@@ -46,6 +46,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - Settings has no pi, tmux or Ghostty status and does not say whether `recall` or the vault lane can run.
 - Settings contains no mention of AI Chat or pi at all.
 - Fix: add a "Chat" card with the four default-tool switches, Keep AI Chat on top, and a status line for Continue in pi and the tool backends.
+- Fixed in v1.5.0 (group G3): Settings › General › Chat has the four chat-default switches (Web search is the one `modelWebSearchEnabled` setting), Keep AI Chat on top on the window's own key, and off-main status lines for Continue in pi and the tool backends.
 
 **7. The Quick AI settings card text is out of date. (S)**
 - Evidence: `Sources/Views/QuickAISettingsView.swift`.
@@ -53,12 +54,14 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 - Primary Action says "Return pastes the answer into the app behind". AI Chat always copies (`QuickViewModel.swift:7629`).
 - "Tab opens Quick AI whether…" (`:33`) and the same claim in `Sources/Views/FallbackCommandsView.swift:38-39` are false for math.
 - Fix: rename the card to "Quick AI and AI Chat", or add a note. Correct the Tab text.
+- Fixed in v1.5.0 (group G3): the card is "Quick AI and AI Chat", Primary Action says AI Chat always copies, and both Tab texts say math and conversions answer in place.
 
 **8. Chat history keeps only 20 unpinned chats, and Settings does not say so. (S)**
 - Evidence: `Sources/Models/QuickSettings.swift:229`; `Sources/Services/QuickHistoryStore.swift:88`.
 - The History card still says "Keep quick-action history" and has no limit control (`SettingsView.swift:797-812`).
 - Why it matters: 20 is tight for a window with a chat rail and ⌘1…⌘9.
 - Fix: rename the row "Keep chat history" and add a limit picker.
+- Fixed in v1.5.0 (group G3): "Keep chat history" plus a Chats to keep picker (20, 50, 100, 200; 100 for new installs, a stored limit kept); pinned chats are never pruned.
 
 **9. AI Chat as a fallback command drops the typed text. (S)**
 - AI Chat is in the fallback choices (`QuickViewModel.swift:899, 3264`). `runFallbackCommand` sets the input, then `openAIChatWindow()` clears it (`QuickViewModel+AIChat.swift:77-81`).
@@ -71,6 +74,7 @@ The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in
 **11. The Welcome text is stale. (S)**
 - Evidence: `Sources/Views/WelcomeOverlayView.swift:28-37`; `slate-welcome-dark.png`.
 - It says "run a quick action… copies to your clipboard automatically". It says nothing about Tab to Quick AI, ⌘J, or the tools.
+- Fixed in v1.5.0 (group G3): Welcome now reads: your hotkey opens search, Tab asks Quick AI, ⌘J opens AI Chat, @ adds context, tools can read your memory and the vault.
 
 **12. The menu-bar menu shows the wrong hotkey. (S)**
 - "Open Quick Launch" shows ⌃Space. The default is ⌥Space and it can be changed (`Sources/App/AppDelegate.swift:1236-1242`; `QuickSettings.swift:126-127`).

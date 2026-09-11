@@ -73,12 +73,14 @@ actor SSHVaultSearchService: VaultSearchServicing {
     /// The vault checkout on vault-vps. Paths the search returns are
     /// relative to it, or absolute under it.
     static let remoteVaultRoot = "/home/ubuntu/vault-private/"
+    /// The SSH host of the vault lane, as `~/.ssh/config` names it.
+    static let defaultHost = "vault-vps"
 
     /// One attempt, `requestTimeout` long, then `VaultSearchError.timedOut`.
     /// There is no retry. `localVaultRoot` is this Mac's clone of the same
     /// vault, where a source opens.
     init(
-        host: String = "vault-vps",
+        host: String = SSHVaultSearchService.defaultHost,
         remoteScript: String = "/home/ubuntu/vault-private/.claude/tools/state/vault-search.py",
         requestTimeout: Duration = .seconds(8),
         localVaultRoot: URL = FileManager.default.homeDirectoryForCurrentUser

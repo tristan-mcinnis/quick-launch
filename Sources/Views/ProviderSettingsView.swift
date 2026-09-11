@@ -196,17 +196,13 @@ struct ProviderSettingsView: View {
         }
     }
 
+    /// The switch itself lives in General › Chat with the other chat
+    /// defaults (one setting, `modelWebSearchEnabled`); this card only says
+    /// where, for anyone who looks for it beside the models.
     private var webSearchCard: some View {
         SettingsCard("Web search") {
-            SettingsRow(title: "Let the model search the web (SearXNG)", isFirst: true) {
-                Toggle(
-                    "Let the model search the web (SearXNG)",
-                    isOn: viewModel.settingsBinding(\.modelWebSearchEnabled)
-                )
-                .toggleStyle(InkToggleStyle())
-            }
-            CardNote {
-                CardText("The model gets a search_web tool and decides when to use it: news, scores, prices, anything after its training. Works in follow-ups too.")
+            CardNote(isFirst: true) {
+                CardText("Web search is one of the chat defaults. Turn it on or off in General › Chat. The Translator uses the same switch.")
             }
         }
     }
