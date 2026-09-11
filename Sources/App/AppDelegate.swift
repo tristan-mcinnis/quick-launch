@@ -268,7 +268,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.chatBackendProbe = ChatBackendProbe()
         // ⌘J in Quick AI and the "AI Chat" command open the chat window.
         vm.aiChatOpener = { [weak self] handoff in
-            self?.showAIChat(handoff: handoff)
+            guard let self else { return }
+            // On the launcher's display, where the keyboard was.
+            self.showAIChat(handoff: handoff, on: self.launcherScreen() ?? self.screenContainingMouse())
         }
 
         Task { @MainActor [weak self] in
@@ -333,6 +335,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // A stream in either view stops and keeps its question and what
+        // arrived; the history file is on disk before the process ends.
+        aiChatController?.prepareForTermination()
+        if let viewModel { AIChatWindowController.keepStreamForQuit(viewModel) }
+        QuickHistoryStore.waitForPendingWrites()
         overlayClearTask?.cancel()
         globalHotKey?.invalidate()
         clipboardHistoryHotKey?.invalidate()
@@ -1527,6 +1534,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: - Settings panel
 
+    /// Settings closing: back to a menu-bar app unless AI Chat is still up.
+    /// The launcher panel and the AI Chat window have their own closing.
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow, closing === settingsPanel else { return }
+        AppActivation.settleAfterClosing(closing)
+    }
+
     func showSettingsPanel() {
         // Settings is a different job. Get the launcher out of the way.
         if panel?.isVisible == true { hideOverlay() }
@@ -1557,6 +1571,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             panel.setContentSize(SettingsView.windowSize)
         }
         panel.center()
+        // Closing Settings last hands the menu bar back (`windowWillClose`).
+        panel.delegate = self
 
         let hostingController = NSHostingController(
             rootView: SettingsView(viewModel: vm)
@@ -1569,10 +1585,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - AI Chat window
 
     /// Opens the AI Chat window: on the chat Quick AI handed over, or on the
-    /// window's chat, the last chat, or a new one.
-    func showAIChat(handoff: AIChatHandoff? = nil) {
+    /// window's chat, the last chat, or a new one. On `screen` when given: a
+    /// frame saved on another display moves there, keeping its size.
+    func showAIChat(handoff: AIChatHandoff? = nil, on screen: NSScreen? = nil) {
         guard let controller = aiChatWindowController() else { return }
+        controller.openingScreen = screen.map(ScreenArea.init)
         controller.model.open(handoff: handoff)
+    }
+
+    /// The display the launcher panel was last on (it has just closed for a
+    /// hand-off), or nil before it was ever shown.
+    private func launcherScreen() -> NSScreen? {
+        guard let panel, panelAnchor != nil else { return nil }
+        let centre = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
+        return NSScreen.screens.first { $0.frame.contains(centre) }
     }
 
     /// The window's own view model shares the launcher's store (settings
@@ -1610,7 +1636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func showAIChatFromMenu() {
         if panel?.isVisible == true { hideOverlay() }
-        showAIChat()
+        showAIChat(on: screenContainingMouse())
     }
 
     // MARK: - Welcome panel
