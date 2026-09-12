@@ -745,6 +745,13 @@ struct QuickAIKeyboardTests {
         #expect(try overlay.press("r", keyCode: 15, [.command]))
         #expect(await waitFor { gated.sendCallCount == 2 })
         #expect(await waitFor { viewModel.output == "The follow-up answer." })
+        // Wait on the list this asserts, not only on `output`. The answer is
+        // appended to the thread after the streamed output settles, so checking
+        // the messages straight after the output check can land in the gap
+        // between the two and read a thread holding only the question.
+        #expect(await waitFor {
+            viewModel.conversationMessages.map(\.content) == ["explain the plan", "The follow-up answer."]
+        })
         #expect(viewModel.conversationMessages.map(\.content) == ["explain the plan", "The follow-up answer."])
         #expect(gated.sentMessages.last?.last?.content == "explain the plan", "the same turn went out again")
     }
