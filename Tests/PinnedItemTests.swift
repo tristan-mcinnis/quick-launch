@@ -15,9 +15,10 @@ struct PinnedItemTests {
         #expect(unpin?.title == "Unpin")
         #expect(unpin?.shortcut?.keyCaps == ["⇧", "⌘", "P"])
 
+        // A stored Quicklink carries the same Edit and Delete a snippet has.
         let link = LauncherCatalogItem(kind: .quickLink, itemID: "l", title: "Docs", detail: "", value: "https://x")
         #expect(ItemActionCatalog.actions(for: .item(link), pasteTarget: nil).map(\.title)
-            == ["Open Link", "Copy Link", "Pin to Top", "Set Alias…", "Set Hotkey…"])
+            == ["Open Link", "Copy Link", "Edit Quicklink", "Pin to Top", "Set Alias…", "Set Hotkey…", "Delete Quicklink"])
         let shot = LauncherCatalogItem(kind: .screenshot, itemID: "file-1", title: "Shot", detail: "", value: "/tmp/x.png")
         #expect(ItemActionCatalog.actions(for: .item(shot), pasteTarget: nil).map(\.title).contains("Pin to Top"))
         let command = LauncherCatalogItem(kind: .command, itemID: "w", title: "Left Half", detail: "", value: "window.leftHalf")

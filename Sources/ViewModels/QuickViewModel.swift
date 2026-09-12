@@ -271,6 +271,49 @@ import Observation
         case caffeinateUntil
         case renameChat(UUID)
         case vaultSearch(VaultSearchMode)
+        /// A snippet is asking for one `{argument}`; `pendingSnippetInsertion`
+        /// holds which, and what to do once every slot is answered.
+        case snippetArgument
+    }
+
+    /// How an expanded snippet reaches the user: the same three moves every
+    /// launcher row already offers.
+    enum SnippetInsertMode: Equatable, Sendable {
+        case paste
+        case copy
+        case copyAndPaste
+    }
+
+    /// A snippet waiting on its `{argument}` slots. Each Return fills the
+    /// next one, in the order the template names them; the insertion runs
+    /// when the last is answered.
+    struct PendingSnippetInsertion: Equatable, Sendable {
+        let item: LauncherCatalogItem
+        let arguments: [SnippetArgument]
+        var collected: [String]
+        let mode: SnippetInsertMode
+        /// The row's ⌘↩ closes the overlay once the text is out; ⌘C inside a
+        /// catalog leaves it open. Either way the prompt runs first.
+        var dismissesOverlay = false
+
+        var currentArgument: SnippetArgument? {
+            arguments.indices.contains(collected.count) ? arguments[collected.count] : nil
+        }
+    }
+
+    var pendingSnippetInsertion: PendingSnippetInsertion?
+
+    /// A snippet or Quicklink being written in the ⌘K editor before it
+    /// exists anywhere. It lives only while that form is open; Save writes
+    /// it to the store and the real item takes its place.
+    var draftCatalogItem: LauncherCatalogItem?
+
+    static let draftSnippetID = "draft.snippet"
+    static let draftQuickLinkID = "draft.quicklink"
+
+    /// True for the blank item the Create commands put in the editor.
+    func isDraftItem(_ item: LauncherCatalogItem) -> Bool {
+        item.itemID == Self.draftSnippetID || item.itemID == Self.draftQuickLinkID
     }
 
     /// A snapshot of selected text captured from the background app when the
@@ -822,6 +865,22 @@ import Observation
             )
         }
         let helpers = [
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "snippet.create",
+                title: "Create Snippet",
+                detail: "Write a new snippet: a name and the text it pastes",
+                value: "snippet.create",
+                keywords: "new snippet add text template placeholder expand"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "quicklink.create",
+                title: "Create Quicklink",
+                detail: "Save an address you open often; {query} asks for words first",
+                value: "quicklink.create",
+                keywords: "new quicklink quick link add url address bookmark search"
+            ),
             LauncherCatalogItem(
                 kind: .command,
                 itemID: "color.pick",
@@ -1892,6 +1951,8 @@ import Observation
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
         case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
+        case .snippetArgument:
+            return pendingSnippetInsertion.map { "Snippet · \($0.item.title)" } ?? "Snippet"
         case nil: break
         }
         if let pendingQuickLink { return pendingQuickLink.title }
@@ -1933,6 +1994,13 @@ import Observation
             case .vaultSearch:
                 return [
                     FooterHint(label: "Search", keys: ["↩"]),
+                    FooterHint(label: "Back", keys: ["⌫"]),
+                ]
+            case .snippetArgument:
+                let isLast = pendingSnippetInsertion?.arguments.count
+                    == (pendingSnippetInsertion?.collected.count ?? 0) + 1
+                return [
+                    FooterHint(label: isLast ? "Insert" : "Next", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
             }
@@ -2240,6 +2308,10 @@ import Observation
 
     private func resolveContextualCatalogItem() -> LauncherCatalogItem? {
         guard let contextualCatalogItemID else { return nil }
+        // A draft exists nowhere else yet, so it answers for itself.
+        if let draftCatalogItem, draftCatalogItem.id == contextualCatalogItemID {
+            return draftCatalogItem
+        }
         if contextualCatalogItemID.hasPrefix("emoji:") {
             return emojiItems.first { $0.id == contextualCatalogItemID }
         }
@@ -2270,6 +2342,11 @@ import Observation
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
         case .vaultSearch(let mode): return mode.placeholder
+        case .snippetArgument:
+            guard let argument = pendingSnippetInsertion?.currentArgument else { return "Value…" }
+            return argument.defaultValue.isEmpty
+                ? "\(argument.name)…"
+                : "\(argument.name) (\(argument.defaultValue))…"
         case nil: break
         }
         if let pendingQuickLink { return "Enter input for \(pendingQuickLink.title)…" }
@@ -2889,6 +2966,7 @@ import Observation
         inputMode = nil
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
+        pendingSnippetInsertion = nil
         input = ""
         errorMessage = nil
         requestInputFocus()
@@ -2902,6 +2980,30 @@ import Observation
     func submitInputMode() async -> Bool {
         guard let inputMode else { return false }
         switch inputMode {
+        case .snippetArgument:
+            guard var pending = pendingSnippetInsertion else {
+                leaveInputMode()
+                return true
+            }
+            pending.collected.append(input.trimmingCharacters(in: .whitespacesAndNewlines))
+            // More slots to fill: stay in the mode and ask for the next one.
+            if pending.currentArgument != nil {
+                pendingSnippetInsertion = pending
+                input = ""
+                errorMessage = nil
+                requestInputFocus()
+                noteInteraction()
+                return true
+            }
+            let finished = pending
+            pendingSnippetInsertion = nil
+            leaveInputMode()
+            await finishSnippetInsertion(
+                finished.item,
+                arguments: finished.collected,
+                mode: finished.mode,
+                dismissingOverlay: finished.dismissesOverlay
+            )
         case .vaultSearch(let mode):
             await submitVaultSearch(mode: mode, followUp: false)
         case .renameChat(let id):
@@ -3065,6 +3167,10 @@ import Observation
         guard !matches.isEmpty else { return }
         let index = min(applicationSelectionIndex, matches.count - 1)
         guard case .item(let item) = matches[index] else { return }
+        if item.kind == .snippet {
+            Task { @MainActor in await insertSnippet(item, mode: .copy) }
+            return
+        }
         Task { @MainActor in await copyLauncherItem(item) }
     }
 
@@ -3185,7 +3291,9 @@ import Observation
             } else {
                 openQuickLink(item, input: "")
             }
-        case .snippet, .clipboard, .emoji, .color:
+        case .snippet:
+            await insertSnippet(item, mode: .paste)
+        case .clipboard, .emoji, .color:
             _ = await pasteLauncherItem(item)
         case .screenshot:
             if await pasteImageFile(URL(fileURLWithPath: item.value)) {
@@ -4366,6 +4474,16 @@ import Observation
             return
         }
 
+        if item.value == "snippet.create" {
+            beginCreatingSnippet()
+            return
+        }
+
+        if item.value == "quicklink.create" {
+            beginCreatingQuicklink()
+            return
+        }
+
         if item.value == "ocr.area" {
             Task { await copyTextFromScreenArea() }
             return
@@ -4743,15 +4861,11 @@ import Observation
     }
 
     private func openQuickLink(_ item: LauncherCatalogItem, input: String) {
-        let allowed = CharacterSet.urlQueryAllowed.subtracting(
-            CharacterSet(charactersIn: "&=+#?")
+        let rendered = QuickLinkQuery.render(
+            item.value,
+            query: input,
+            clipboard: pasteboard.readString() ?? ""
         )
-        let encodedInput = input.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
-        let clipboard = pasteboard.readString() ?? ""
-        let encodedClipboard = clipboard.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
-        let rendered = item.value
-            .replacingOccurrences(of: "{{input}}", with: encodedInput)
-            .replacingOccurrences(of: "{{clipboard}}", with: encodedClipboard)
         guard let url = URL(string: rendered),
               ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
             errorMessage = "This Quick Link does not contain a valid web address."
@@ -5624,6 +5738,8 @@ import Observation
             closeItemActionPane()
             if item.kind == .screenshot {
                 attachScreenshotFile(item)
+            } else if item.kind == .snippet {
+                await insertSnippet(item, mode: .copyAndPaste)
             } else {
                 _ = await copyAndPasteLauncherItem(item)
             }
@@ -5714,6 +5830,13 @@ import Observation
             case .item(let item) where item.kind == .screenHistory:
                 Task { @MainActor in _ = await copyLauncherItem(item) }
                 closeItemActionPane()
+            case .item(let item) where item.kind == .snippet:
+                // Copy expands the snippet's placeholders too: what lands on
+                // the clipboard is what a paste would have typed.
+                closeItemActionPane()
+                Task { @MainActor in
+                    await insertSnippet(item, mode: .copy, dismissingOverlay: true)
+                }
             case .item(let item):
                 Task { @MainActor in _ = await copyLauncherItem(item) }
                 closeItemActionPane()
@@ -5822,6 +5945,8 @@ import Observation
                     if isRecentChatsPresented {
                         recentChatsIndex = min(recentChatsIndex, max(recentChatItems.count - 1, 0))
                     }
+                case .quickLink:
+                    _ = deleteQuickLink(item)
                 case .folder:
                     removeCustomFolder(item)
                     closeItemActionPane()
@@ -6008,6 +6133,157 @@ import Observation
 
     func closeCatalogActionPane() {
         closeItemActionPane()
+    }
+
+    // MARK: - Creating and editing snippets and Quicklinks
+
+    /// "Create Snippet": the ⌘K editor opens on a blank snippet. Nothing is
+    /// written until Save.
+    func beginCreatingSnippet() {
+        beginCreating(kind: .snippet)
+    }
+
+    /// "Create Quicklink": the same editor, with an address instead of text.
+    func beginCreatingQuicklink() {
+        beginCreating(kind: .quickLink)
+    }
+
+    private func beginCreating(kind: LauncherItemKind) {
+        let isSnippet = kind == .snippet
+        let draft = LauncherCatalogItem(
+            kind: isSnippet ? .snippet : .quickLink,
+            itemID: isSnippet ? Self.draftSnippetID : Self.draftQuickLinkID,
+            title: "",
+            detail: isSnippet ? "New snippet" : "New Quicklink",
+            value: ""
+        )
+        // A create starts from a clean surface, then lands in the catalog the
+        // new item belongs to, so Escape leaves the user among its siblings.
+        reset([.layers, .mode, .input])
+        draftCatalogItem = draft
+        catalogScope = isSnippet ? .snippets : .quickLinks
+        openActionPane(for: .item(draft), form: .edit)
+        errorMessage = nil
+    }
+
+    /// Save in the ⌘K editor. A draft is written to the store as a new item;
+    /// anything else is updated in place. The store owns validation, so an
+    /// empty name or an address that is not a web link reports its own
+    /// message and the form stays open.
+    @discardableResult
+    func commitItemEdit(_ item: LauncherCatalogItem, title: String, value: String) -> Bool {
+        guard let launcherCatalog else {
+            errorMessage = LauncherCatalogError.creationUnsupported.localizedDescription
+            requestInputFocus()
+            return false
+        }
+        do {
+            let saved: LauncherCatalogItem
+            if isDraftItem(item) {
+                saved = item.kind == .quickLink
+                    ? try launcherCatalog.createQuickLink(title: title, value: value)
+                    : try launcherCatalog.createSnippet(title: title, value: value)
+                draftCatalogItem = nil
+            } else if item.kind == .quickLink {
+                try launcherCatalog.updateQuickLink(item, title: title, value: value)
+                saved = launcherCatalog.quickLinks.first { $0.itemID == item.itemID } ?? item
+            } else {
+                try launcherCatalog.updateSnippet(item, title: title, value: value)
+                saved = launcherCatalog.snippets.first { $0.itemID == item.itemID } ?? item
+            }
+            errorMessage = nil
+            contextualCatalogItemID = saved.id
+            activeItemActionForm = nil
+            invalidateLauncherRanking()
+            noteInteraction()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
+    }
+
+    @discardableResult
+    func deleteQuickLink(_ item: LauncherCatalogItem) -> Bool {
+        do {
+            try launcherCatalog?.deleteQuickLink(item)
+            removeLauncherItemConfiguration(for: item)
+            closeCatalogActionPane()
+            applicationSelectionIndex = 0
+            errorMessage = nil
+            invalidateLauncherRanking()
+            noteInteraction()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
+    }
+
+    // MARK: - Snippet placeholders
+
+    /// Raycast-style placeholders live inside the snippet's own text, so an
+    /// insertion expands them here: `{clipboard}` through the pasteboard
+    /// seam, `{date}` and `{time}` from this view model's clock, and
+    /// `{argument}` from what the user types when asked. A snippet with no
+    /// placeholder takes the same path and comes out unchanged.
+    func insertSnippet(
+        _ item: LauncherCatalogItem,
+        mode: SnippetInsertMode,
+        dismissingOverlay: Bool = false
+    ) async {
+        let slots = SnippetPlaceholders.arguments(in: item.value)
+        guard slots.isEmpty else {
+            enterInputMode(.snippetArgument)
+            pendingSnippetInsertion = PendingSnippetInsertion(
+                item: item,
+                arguments: slots,
+                collected: [],
+                mode: mode,
+                dismissesOverlay: dismissingOverlay
+            )
+            return
+        }
+        await finishSnippetInsertion(
+            item,
+            arguments: [],
+            mode: mode,
+            dismissingOverlay: dismissingOverlay
+        )
+    }
+
+    private func finishSnippetInsertion(
+        _ item: LauncherCatalogItem,
+        arguments: [String],
+        mode: SnippetInsertMode,
+        dismissingOverlay: Bool
+    ) async {
+        var expanded = item
+        expanded.value = expandSnippet(item.value, arguments: arguments).text
+        switch mode {
+        case .paste:
+            _ = await pasteLauncherItem(expanded)
+        case .copy:
+            _ = await copyLauncherItem(expanded)
+        case .copyAndPaste:
+            _ = await copyAndPasteLauncherItem(expanded)
+        }
+        guard dismissingOverlay else { return }
+        input = ""
+        overlayPresenter.dismissOverlay()
+    }
+
+    /// The pure expansion with this view model's seams filled in: the
+    /// clipboard through `PasteboardWriting`, the time through `now`.
+    func expandSnippet(_ template: String, arguments: [String] = []) -> SnippetExpansion {
+        SnippetPlaceholders.expand(
+            template,
+            clipboard: pasteboard.readString(),
+            now: now(),
+            arguments: arguments
+        )
     }
 
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) -> Bool {
@@ -8241,6 +8517,8 @@ import Observation
             inputMode = nil
             activeVaultSearchMode = nil
             vaultSearchAnchor = nil
+            pendingSnippetInsertion = nil
+            draftCatalogItem = nil
         }
         if scope.contains(.attachments) {
             pendingImages.removeAll()

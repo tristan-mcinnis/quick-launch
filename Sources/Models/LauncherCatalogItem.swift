@@ -42,6 +42,15 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
+    /// A Quicklink Quick Launch may rename, repoint, or delete: one kept in
+    /// Tuna's own records. A Smart Link is defined in a config file this app
+    /// only reads, and a typed address is never stored at all.
+    var isEditableQuickLink: Bool {
+        kind == .quickLink
+            && !itemID.hasPrefix("tuna-smart-")
+            && !itemID.hasPrefix("typed:")
+    }
+
     /// Icons for the helper commands that are neither toggles nor panes.
     static let helperCommandIcons = [
         "color.pick": "eyedropper",
@@ -49,6 +58,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "ocr.area": "text.viewfinder",
         "ocr.areaPaste": "text.viewfinder",
         "paste.plain": "doc.on.clipboard",
+        "snippet.create": "text.badge.plus",
+        "quicklink.create": "link.badge.plus",
         "clipboard.cleanLink": "link.badge.plus",
         "screenshot.latest": "photo.badge.plus",
         "screenshot.pasteLatest": "photo.on.rectangle",
