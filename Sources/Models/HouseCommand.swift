@@ -56,12 +56,16 @@ struct HouseCommand: Sendable, Equatable, Identifiable {
     /// first argument to a CLI.
     let verb: String
     let needs: HouseCommandNeeds?
-    /// The options a `choice` command offers, in the order given.
-    let choices: [String]
+    /// Where a `choice` command's options come from. A list frozen into a
+    /// manifest at launch is stale by lunchtime, so the manifest names a
+    /// route and the caller fetches it when the user opens the command.
+    let choicesFrom: String?
     let unavailableWhen: HouseCommandCondition?
 
-    /// A command with no condition is always offered; the run reports any
-    /// failure plainly rather than the row lying about it beforehand.
+    /// Whether the row is worth showing. A **display hint only**: the app
+    /// still accepts the command at any time and answers idempotently, so a
+    /// hidden row is never a refused command. A command with no condition is
+    /// always shown.
     func isAvailable(given status: HouseCommandStatus?) -> Bool {
         guard let unavailableWhen else { return true }
         return unavailableWhen.isSatisfied(by: status)
@@ -85,11 +89,13 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
     let name: String
     let transport: HouseCommandTransport
     /// A socket path, a base URL, or an executable path, by transport.
-    /// A leading `~` is expanded when the manifest is read.
+    /// Always resolved and absolute: the reader takes it literally, expands
+    /// nothing, and assumes no path layout.
     let endpoint: String
-    /// The verb, route, or argument that answers with the status document.
-    /// Absent means this app reports no status, so nothing it publishes may
-    /// be gated on one.
+    /// Where the status document comes from: a verb for `socket`, a route
+    /// for `http`, and an absolute path to a JSON file for `exec`, which is
+    /// stateless and cannot answer for the app. Absent means this app
+    /// reports no status.
     let status: String?
     let commands: [HouseCommand]
 
@@ -123,7 +129,7 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
             app: app,
             name: name,
             transport: transport,
-            endpoint: expandTilde(endpoint),
+            endpoint: endpoint,
             status: status,
             commands: commands
         )
@@ -143,15 +149,17 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
             guard let parsed = HouseCommandNeeds(rawValue: rawNeeds) else { return nil }
             needs = parsed
         }
-        let choices = (object["choices"] as? [Any])?.compactMap(string) ?? []
-        if needs == .choice, choices.isEmpty { return nil }
+        let choicesFrom = string(object["choicesFrom"]).flatMap { $0.isEmpty ? nil : $0 }
+        // A command that asks for a choice without saying where the choices
+        // come from cannot be offered: there is no picker to draw.
+        if needs == .choice, choicesFrom == nil { return nil }
         let condition = string(object["unavailableWhen"]).flatMap(HouseCommandCondition.init(rawValue:))
         return HouseCommand(
             id: id,
             title: title,
             verb: verb,
             needs: needs,
-            choices: choices,
+            choicesFrom: choicesFrom,
             unavailableWhen: condition
         )
     }
@@ -170,16 +178,40 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
     private static func string(_ value: Any?) -> String? {
         value as? String
     }
+}
 
-    /// `~` and `~/…` against this user's home. The manifests name paths the
-    /// way a config file does; nothing else in the string is interpreted.
-    static func expandTilde(
-        _ path: String,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> String {
-        guard path == "~" || path.hasPrefix("~/") else { return path }
-        let rest = path == "~" ? "" : String(path.dropFirst(2))
-        return home.appendingPathComponent(rest).path
+/// One option a `choice` command offers. The chosen `id` is what goes back
+/// as the command's argument; the title and detail are for the row.
+struct HouseCommandChoice: Sendable, Equatable, Identifiable {
+    let id: String
+    let title: String
+    let detail: String?
+
+    /// `{"choices": [{"id", "title", "detail"}]}`. Total, like every other
+    /// parse here: anything unreadable is no choices at all, which the
+    /// caller reports rather than drawing a broken picker.
+    static func parse(_ text: String) -> [HouseCommandChoice] {
+        guard let data = text.data(using: .utf8) else { return [] }
+        return parse(data)
+    }
+
+    static func parse(_ data: Data) -> [HouseCommandChoice] {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let root = object as? [String: Any],
+              let raw = root["choices"] as? [[String: Any]]
+        else { return [] }
+        return raw.compactMap { entry in
+            guard let id = (entry["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !id.isEmpty
+            else { return nil }
+            let title = (entry["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = (entry["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return HouseCommandChoice(
+                id: id,
+                title: (title?.isEmpty ?? true) ? id : title!,
+                detail: (detail?.isEmpty ?? true) ? nil : detail
+            )
+        }
     }
 }
 
@@ -228,6 +260,7 @@ enum HouseCommandError: LocalizedError, Equatable {
     case timedOut(app: String)
     case refused(app: String, message: String)
     case notInstalled(app: String)
+    case noChoices(app: String, command: String)
 
     var errorDescription: String? {
         switch self {
@@ -235,6 +268,7 @@ enum HouseCommandError: LocalizedError, Equatable {
         case .timedOut(let app): "\(app) did not answer in time."
         case .refused(let app, let message): "\(app): \(message)"
         case .notInstalled(let app): "\(app) is not installed."
+        case .noChoices(let app, let command): "\(app) has nothing to offer for \(command)."
         }
     }
 }

@@ -321,9 +321,19 @@ import Observation
     /// A house command that needs one `text` argument, waiting for it.
     var pendingHouseCommandText: HouseCommandRow?
 
-    /// A house command that needs one `choice`, showing its options as
-    /// launcher rows. Return on one runs the command with that option.
-    var pendingHouseChoice: HouseCommandRow?
+    /// A house command that needs one `choice`, with the options fetched
+    /// when the user opened it. Return on one runs the command with that
+    /// option's id.
+    struct PendingHouseChoice: Equatable, Sendable {
+        let row: HouseCommandRow
+        let choices: [HouseCommandChoice]
+    }
+
+    var pendingHouseChoice: PendingHouseChoice?
+
+    /// Polls an app that started slow work, so the launcher reports the end
+    /// without ever waiting for it.
+    @ObservationIgnored private var houseCommandWaitTask: Task<Void, Never>?
 
     @ObservationIgnored private var houseCommandRefreshTask: Task<Void, Never>?
 
@@ -350,7 +360,7 @@ import Observation
         guard rows.map(\.id) != houseCommandRows.map(\.id) || rows != houseCommandRows else { return }
         houseCommandRows = rows
         // A row that has just gone away must not stay on screen as a prompt.
-        if let pendingHouseChoice, !rows.contains(where: { $0.id == pendingHouseChoice.id }) {
+        if let pendingHouseChoice, !rows.contains(where: { $0.id == pendingHouseChoice.row.id }) {
             self.pendingHouseChoice = nil
         }
         if let pendingHouseCommandText, !rows.contains(where: { $0.id == pendingHouseCommandText.id }) {
@@ -363,15 +373,20 @@ import Observation
     /// The choices of the command being asked about, as launcher rows,
     /// narrowed by what has been typed.
     var houseChoiceItems: [LauncherCatalogItem] {
-        guard let row = pendingHouseChoice else { return [] }
-        let items = row.command.choices.map { choice in
-            LauncherCatalogItem(
+        guard let pending = pendingHouseChoice else { return [] }
+        let row = pending.row
+        let items = pending.choices.enumerated().map { index, choice in
+            // The option is carried by position, never by its own id: an id
+            // is opaque and may hold any character, including the one that
+            // separates it from the command.
+            let value = HouseCommandCatalog.choiceValue(rowID: row.id, index: index)
+            return LauncherCatalogItem(
                 kind: .command,
-                itemID: HouseCommandCatalog.choiceValue(rowID: row.id, choice: choice),
-                title: choice,
-                detail: row.manifest.name + " · " + row.command.title,
-                value: HouseCommandCatalog.choiceValue(rowID: row.id, choice: choice),
-                keywords: row.command.title
+                itemID: value,
+                title: choice.title,
+                detail: choice.detail ?? (row.manifest.name + " · " + row.command.title),
+                value: value,
+                keywords: choice.id + " " + row.command.title
             )
         }
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -393,15 +408,21 @@ import Observation
     /// choices.
     func performHouseCommand(_ item: LauncherCatalogItem) async {
         guard let houseCommandCatalog else { return }
-        // A choice row carries the option in its own value.
+        // A choice row names its option by position in the list the user is
+        // looking at.
         if let picked = HouseCommandCatalog.choice(inValue: item.value) {
-            guard let row = await houseCommandCatalog.row(forValue: picked.rowID) else {
+            guard let pending = pendingHouseChoice,
+                  pending.row.id == picked.rowID,
+                  pending.choices.indices.contains(picked.index)
+            else {
                 errorMessage = "That command is no longer available."
                 requestInputFocus()
                 return
             }
+            let row = pending.row
+            let choice = pending.choices[picked.index]
             pendingHouseChoice = nil
-            await runHouseCommand(row, argument: picked.choice)
+            await runHouseCommand(row, argument: choice.id)
             return
         }
         guard let row = await houseCommandCatalog.row(forValue: item.value) else {
@@ -414,15 +435,24 @@ import Observation
             pendingHouseCommandText = row
             enterInputMode(.houseCommandArgument)
         case .choice:
-            pendingHouseChoice = row
-            inputMode = nil
-            catalogScope = nil
-            input = ""
-            errorMessage = nil
-            applicationSelectionIndex = 0
-            invalidateLauncherRanking()
-            requestInputFocus()
-            noteInteraction()
+            // The list is fetched now, not at launch: it changes under a
+            // running app. A fetch that fails says so instead of opening a
+            // picker with nothing in it.
+            do {
+                let choices = try await houseCommandCatalog.choices(for: row)
+                pendingHouseChoice = PendingHouseChoice(row: row, choices: choices)
+                inputMode = nil
+                catalogScope = nil
+                input = ""
+                errorMessage = nil
+                applicationSelectionIndex = 0
+                invalidateLauncherRanking()
+                requestInputFocus()
+                noteInteraction()
+            } catch {
+                errorMessage = error.localizedDescription
+                requestInputFocus()
+            }
         case nil:
             await runHouseCommand(row, argument: nil)
         }
@@ -434,18 +464,29 @@ import Observation
         guard let houseCommandCatalog else { return }
         errorMessage = nil
         do {
-            let reply = try await houseCommandCatalog.run(row, argument: argument)
+            let outcome = try await houseCommandCatalog.run(row, argument: argument)
             input = ""
-            // The app's own words when it sent any, so a command that
-            // answers something useful is not swallowed.
-            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty || text.lowercased() == "ok" {
-                overlayPresenter.dismissOverlay()
-            } else {
+            switch outcome {
+            case .completed(let reply):
+                // The app's own words when it sent any, so a command that
+                // answers something useful is not swallowed.
+                let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty || text.lowercased() == "ok" {
+                    overlayPresenter.dismissOverlay()
+                } else {
+                    answerSource = .command(row.command.title)
+                    output = text
+                    lastQuestion = row.command.title
+                    requestInputFocus()
+                }
+            case .started:
+                // The work is running. The launcher says so at once and
+                // watches for the end; it never waits for it.
                 answerSource = .command(row.command.title)
-                output = text
                 lastQuestion = row.command.title
+                output = "Started. \(row.manifest.name) is working."
                 requestInputFocus()
+                watchHouseCommand(row)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -453,6 +494,37 @@ import Observation
         }
         // What the app is doing has changed, so the rows must catch up.
         refreshHouseCommands()
+    }
+
+    /// Follows work that started, off the launcher's path, and reports how
+    /// it ended. A poll that never settles is a reported failure, not a
+    /// hang: the launcher stays usable throughout either way.
+    private func watchHouseCommand(_ row: HouseCommandRow) {
+        guard let houseCommandCatalog else { return }
+        houseCommandWaitTask?.cancel()
+        houseCommandWaitTask = Task { @MainActor [weak self] in
+            let status = await houseCommandCatalog.waitWhileBusy(row)
+            guard let self, !Task.isCancelled else { return }
+            // The user has moved on: their screen is not ours to take back.
+            guard self.lastQuestion == row.command.title else { return }
+            if let status {
+                if status.ok {
+                    self.output = status.detail ?? "Finished."
+                } else {
+                    self.errorMessage = status.detail ?? "\(row.manifest.name) could not finish."
+                }
+            } else {
+                self.errorMessage = "\(row.manifest.name) did not finish in time."
+            }
+            self.houseCommandWaitTask = nil
+            self.refreshHouseCommands()
+        }
+    }
+
+    /// Waits out a running watch, for tests.
+    func waitForHouseCommandWatchForTesting() async {
+        await houseCommandWaitTask?.value
+        houseCommandWaitTask = nil
     }
 
     /// A snippet or Quicklink being written in the ⌘K editor before it
@@ -1883,7 +1955,7 @@ import Observation
         parts.append(isAnswerActive ? "1" : "0")
         parts.append(rootAnswer == nil ? "" : "local")
         parts.append(inputMode == nil ? "" : "mode")
-        parts.append(pendingHouseChoice?.id ?? "")
+        parts.append(pendingHouseChoice?.row.id ?? "")
         parts.append(houseCommandRows.map(\.id).joined(separator: ","))
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
