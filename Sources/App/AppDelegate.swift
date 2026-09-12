@@ -680,6 +680,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Keep the Screenshots badge and first entry honest without ever
         // touching the disk on the keystroke path.
         viewModel?.warmScreenshotCatalogIfStale()
+        // What the other house apps can do right now, read off the main
+        // thread. A missing or dead app costs the launcher nothing.
+        viewModel?.refreshHouseCommands()
         // Re-center on the screen that currently has the mouse cursor.
         if let screen = screenContainingMouse() {
             let originWidth = viewModel?.currentPanelWidth ?? PanelSizing.panelWidth
