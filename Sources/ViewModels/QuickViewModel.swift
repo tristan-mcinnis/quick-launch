@@ -274,6 +274,9 @@ import Observation
         /// A snippet is asking for one `{argument}`; `pendingSnippetInsertion`
         /// holds which, and what to do once every slot is answered.
         case snippetArgument
+        /// A house command is asking for its one `text` argument;
+        /// `pendingHouseCommandText` holds which command is waiting.
+        case houseCommandArgument
     }
 
     /// How an expanded snippet reaches the user: the same three moves every
@@ -303,6 +306,155 @@ import Observation
 
     var pendingSnippetInsertion: PendingSnippetInsertion?
 
+    // MARK: - House commands
+
+    /// What every other house app can do right now, read from the manifests
+    /// in `~/Library/Application Support/House/commands`. Empty until
+    /// `refreshHouseCommands()` has run, so nothing reads the disk on the
+    /// keystroke path and no test depends on what is installed on this Mac.
+    private(set) var houseCommandRows: [HouseCommandRow] = []
+
+    /// The house commands as launcher rows: the effect as the title, the
+    /// owning app as the detail.
+    var houseCommandItems: [LauncherCatalogItem] { houseCommandRows.map(\.item) }
+
+    /// A house command that needs one `text` argument, waiting for it.
+    var pendingHouseCommandText: HouseCommandRow?
+
+    /// A house command that needs one `choice`, showing its options as
+    /// launcher rows. Return on one runs the command with that option.
+    var pendingHouseChoice: HouseCommandRow?
+
+    @ObservationIgnored private var houseCommandRefreshTask: Task<Void, Never>?
+
+    /// Re-reads every manifest and the statuses that gate rows, off the main
+    /// thread, and applies the result. Never throws and never blocks: an app
+    /// that is missing, dead, or slow simply offers nothing this time round.
+    func refreshHouseCommands() {
+        guard let houseCommandCatalog, houseCommandRefreshTask == nil else { return }
+        houseCommandRefreshTask = Task { @MainActor [weak self] in
+            let rows = await houseCommandCatalog.refresh()
+            guard let self else { return }
+            self.applyHouseCommands(rows)
+            self.houseCommandRefreshTask = nil
+        }
+    }
+
+    /// Waits out a running refresh, for tests.
+    func waitForHouseCommandRefreshForTesting() async {
+        await houseCommandRefreshTask?.value
+        houseCommandRefreshTask = nil
+    }
+
+    func applyHouseCommands(_ rows: [HouseCommandRow]) {
+        guard rows.map(\.id) != houseCommandRows.map(\.id) || rows != houseCommandRows else { return }
+        houseCommandRows = rows
+        // A row that has just gone away must not stay on screen as a prompt.
+        if let pendingHouseChoice, !rows.contains(where: { $0.id == pendingHouseChoice.id }) {
+            self.pendingHouseChoice = nil
+        }
+        if let pendingHouseCommandText, !rows.contains(where: { $0.id == pendingHouseCommandText.id }) {
+            self.pendingHouseCommandText = nil
+            if inputMode == .houseCommandArgument { inputMode = nil }
+        }
+        invalidateLauncherRanking()
+    }
+
+    /// The choices of the command being asked about, as launcher rows,
+    /// narrowed by what has been typed.
+    var houseChoiceItems: [LauncherCatalogItem] {
+        guard let row = pendingHouseChoice else { return [] }
+        let items = row.command.choices.map { choice in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: HouseCommandCatalog.choiceValue(rowID: row.id, choice: choice),
+                title: choice,
+                detail: row.manifest.name + " · " + row.command.title,
+                value: HouseCommandCatalog.choiceValue(rowID: row.id, choice: choice),
+                keywords: row.command.title
+            )
+        }
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return items }
+        let folded = FuzzyMatcher.fold(query)
+        return items
+            .compactMap { item -> (LauncherCatalogItem, Int)? in
+                guard let score = FuzzyMatcher.score(
+                    foldedQuery: folded,
+                    foldedCandidate: FuzzyMatcher.fold(item.title)
+                ) else { return nil }
+                return (item, score)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
+    /// Return on a house command row: run it, ask for its text, or show its
+    /// choices.
+    func performHouseCommand(_ item: LauncherCatalogItem) async {
+        guard let houseCommandCatalog else { return }
+        // A choice row carries the option in its own value.
+        if let picked = HouseCommandCatalog.choice(inValue: item.value) {
+            guard let row = await houseCommandCatalog.row(forValue: picked.rowID) else {
+                errorMessage = "That command is no longer available."
+                requestInputFocus()
+                return
+            }
+            pendingHouseChoice = nil
+            await runHouseCommand(row, argument: picked.choice)
+            return
+        }
+        guard let row = await houseCommandCatalog.row(forValue: item.value) else {
+            errorMessage = "That command is no longer available."
+            requestInputFocus()
+            return
+        }
+        switch row.command.needs {
+        case .text:
+            pendingHouseCommandText = row
+            enterInputMode(.houseCommandArgument)
+        case .choice:
+            pendingHouseChoice = row
+            inputMode = nil
+            catalogScope = nil
+            input = ""
+            errorMessage = nil
+            applicationSelectionIndex = 0
+            invalidateLauncherRanking()
+            requestInputFocus()
+            noteInteraction()
+        case nil:
+            await runHouseCommand(row, argument: nil)
+        }
+    }
+
+    /// Runs one house command and reports the outcome where every other
+    /// launcher failure is reported. A command that fails says so.
+    func runHouseCommand(_ row: HouseCommandRow, argument: String?) async {
+        guard let houseCommandCatalog else { return }
+        errorMessage = nil
+        do {
+            let reply = try await houseCommandCatalog.run(row, argument: argument)
+            input = ""
+            // The app's own words when it sent any, so a command that
+            // answers something useful is not swallowed.
+            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty || text.lowercased() == "ok" {
+                overlayPresenter.dismissOverlay()
+            } else {
+                answerSource = .command(row.command.title)
+                output = text
+                lastQuestion = row.command.title
+                requestInputFocus()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+        }
+        // What the app is doing has changed, so the rows must catch up.
+        refreshHouseCommands()
+    }
+
     /// A snippet or Quicklink being written in the ⌘K editor before it
     /// exists anywhere. It lives only while that form is open; Save writes
     /// it to the store and the real item takes its place.
@@ -326,6 +478,11 @@ import Observation
     }
 
     // MARK: - Dependencies
+
+    /// Reads the house manifests and talks to the other apps. Nil in every
+    /// test that does not ask for house commands, so no test touches the
+    /// real manifest folder or a live app.
+    @ObservationIgnored let houseCommandCatalog: HouseCommandCatalog?
 
     /// Test seam. When set, every provider resolves to this service.
     /// Production leaves it nil and builds a client per provider.
@@ -550,6 +707,7 @@ import Observation
         runningApplications: (any RunningApplicationsQuerying)? = nil,
         screenGeometry: (any ScreenGeometryProviding)? = nil,
         attachmentExtractor: (any AttachmentExtracting)? = nil,
+        houseCommandCatalog: HouseCommandCatalog? = nil,
         currentVersion: String = "1.0.0"
     ) {
         let reader = attachmentExtractor ?? Self.sharedAttachmentExtractor
@@ -595,6 +753,7 @@ import Observation
         self.workspace = workspace ?? SystemWorkspace()
         self.runningApplications = runningApplications ?? SystemRunningApplications()
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
+        self.houseCommandCatalog = houseCommandCatalog
         self.currentVersion = currentVersion
         self.colorHistory?.preferredFormat = settings.colorFormat
         self.screenHistory.host = self
@@ -1021,6 +1180,9 @@ import Observation
         if let screenHistoryControl { commands.append(screenHistoryControl) }
         commands.append(settings)
         commands.append(contentsOf: utilityCommands)
+        // Everything the other house apps publish, last: this app's own
+        // commands keep the order they have always had.
+        commands.append(contentsOf: houseCommandItems)
         return commands
     }
 
@@ -1721,6 +1883,8 @@ import Observation
         parts.append(isAnswerActive ? "1" : "0")
         parts.append(rootAnswer == nil ? "" : "local")
         parts.append(inputMode == nil ? "" : "mode")
+        parts.append(pendingHouseChoice?.id ?? "")
+        parts.append(houseCommandRows.map(\.id).joined(separator: ","))
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
         parts.append(String(clipboardEntries.count))
@@ -1758,6 +1922,9 @@ import Observation
     private func rankLauncherMatches() -> [LauncherSearchResult] {
         // A local answer under the input row stands in for the rows until
         // the next keystroke, as v1.3.0's answer block did.
+        if pendingHouseChoice != nil, !hasPendingAttachment, !isAnswerActive, inputMode == nil {
+            return houseChoiceItems.map(LauncherSearchResult.item)
+        }
         guard !hasPendingAttachment, !isAnswerActive, inputMode == nil, rootAnswer == nil else { return [] }
         if catalogScope != nil {
             return catalogMatches.map(LauncherSearchResult.item)
@@ -1953,6 +2120,9 @@ import Observation
         case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
         case .snippetArgument:
             return pendingSnippetInsertion.map { "Snippet · \($0.item.title)" } ?? "Snippet"
+        case .houseCommandArgument:
+            guard let row = pendingHouseCommandText else { return "Command" }
+            return "\(row.manifest.name) · \(row.command.title)"
         case nil: break
         }
         if let pendingQuickLink { return pendingQuickLink.title }
@@ -2011,6 +2181,11 @@ import Observation
             case .vaultSearch:
                 return [
                     FooterHint(label: "Search", keys: ["↩"]),
+                    FooterHint(label: "Back", keys: ["⌫"]),
+                ]
+            case .houseCommandArgument:
+                return [
+                    FooterHint(label: "Run", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
             case .snippetArgument:
@@ -2359,6 +2534,9 @@ import Observation
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
         case .vaultSearch(let mode): return mode.placeholder
+        case .houseCommandArgument:
+            guard let row = pendingHouseCommandText else { return "Value…" }
+            return "\(row.command.title)…"
         case .snippetArgument:
             guard let argument = pendingSnippetInsertion?.currentArgument else { return "Value…" }
             return argument.defaultValue.isEmpty
@@ -2997,6 +3175,16 @@ import Observation
     func submitInputMode() async -> Bool {
         guard let inputMode else { return false }
         switch inputMode {
+        case .houseCommandArgument:
+            guard let row = pendingHouseCommandText else {
+                leaveInputMode()
+                return true
+            }
+            let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return true }
+            pendingHouseCommandText = nil
+            leaveInputMode()
+            await runHouseCommand(row, argument: text)
         case .snippetArgument:
             guard var pending = pendingSnippetInsertion else {
                 leaveInputMode()
@@ -4468,6 +4656,10 @@ import Observation
     }
 
     func performSystemCommand(_ item: LauncherCatalogItem) {
+        if HouseCommandCatalog.isHouseCommand(item.value) {
+            Task { @MainActor [weak self] in await self?.performHouseCommand(item) }
+            return
+        }
         if item.value.hasPrefix("toggle."),
            let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count))) {
             input = ""
@@ -5449,6 +5641,8 @@ import Observation
         case inputMode
         case catalog
         case quickLinkInput
+        /// A house command's choices, shown as launcher rows.
+        case houseCommandChoice
         case root
     }
 
@@ -5468,6 +5662,7 @@ import Observation
         if isAnswerActive { return .answer }
         if rootAnswer != nil { return .localAnswer }
         if inputMode != nil { return .inputMode }
+        if pendingHouseChoice != nil { return .houseCommandChoice }
         if pendingQuickLinkID != nil { return .quickLinkInput }
         if catalogScope != nil { return .catalog }
         return .root
@@ -5519,6 +5714,12 @@ import Observation
             requestInputFocus()
         case .inputMode:
             leaveInputMode()
+        case .houseCommandChoice:
+            pendingHouseChoice = nil
+            input = ""
+            errorMessage = nil
+            invalidateLauncherRanking()
+            requestInputFocus()
         case .quickLinkInput, .catalog:
             leaveCatalog()
         case .root:
@@ -8535,6 +8736,8 @@ import Observation
             activeVaultSearchMode = nil
             vaultSearchAnchor = nil
             pendingSnippetInsertion = nil
+            pendingHouseCommandText = nil
+            pendingHouseChoice = nil
             draftCatalogItem = nil
         }
         if scope.contains(.attachments) {
