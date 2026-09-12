@@ -796,7 +796,11 @@ private final class SelectionPreservingTypeToClickService: TypeToClickServicing,
         }
         if scan == 1 {
             firstScanReturned.fulfill()
-        } else {
+        } else if scan == 2 {
+            // Exactly one refresh is gated: the one this test drives. A
+            // third scan must neither fulfil a one-shot expectation twice,
+            // which aborts the whole run, nor wait on a gate that is
+            // signalled only once, which would hang instead.
             refreshStarted.fulfill()
             refreshGate.wait()
         }
