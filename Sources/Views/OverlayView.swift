@@ -32,7 +32,9 @@ struct OverlayView: View {
         // width would pin the hosting view and stop the drag.
         .frame(
             minWidth: viewModel.isQuickAIPresented ? PanelSizing.panelWidth : viewModel.currentPanelWidth,
-            maxWidth: viewModel.isQuickAIPresented ? .infinity : viewModel.currentPanelWidth
+            maxWidth: viewModel.isQuickAIPresented ? .infinity : viewModel.currentPanelWidth,
+            minHeight: rootSurfaceMinimumHeight,
+            alignment: .top
         )
         .panelGlass()
         .overlay(alignment: viewModel.isQuickAIPresented ? .bottomTrailing : .topTrailing) {
@@ -54,6 +56,15 @@ struct OverlayView: View {
             guard let error, !error.isEmpty else { return }
             postAccessibilityAnnouncement("Error. \(error)", priority: .high)
         }
+    }
+
+    /// While a ⌘K pane floats over root search, the surface claims the whole
+    /// window the panel was sized to. Without it a short surface (an empty
+    /// catalog, one row) sits centred in a taller window and the pane, which
+    /// hangs from the surface's top edge, runs off the bottom of the glass.
+    private var rootSurfaceMinimumHeight: CGFloat? {
+        guard !viewModel.isQuickAIPresented, viewModel.isItemActionPanePresented else { return nil }
+        return viewModel.estimatedWindowHeight
     }
 
     /// Root search: the input row, the launcher list, the catalogs, and the
@@ -171,10 +182,17 @@ struct OverlayView: View {
                 } else {
                     HStack(alignment: .top, spacing: 0) {
                         launcherList
-                            .frame(width: viewModel.showsDetailPane ? 380 : nil)
+                            .frame(width: viewModel.showsDetailPane ? PanelSizing.detailListWidth : nil)
                         if viewModel.showsDetailPane, let item = viewModel.detailItem {
                             Rectangle().fill(AQDesign.ColorToken.divider).frame(width: AQDesign.hairline)
-                            CatalogDetailPane(viewModel: viewModel, item: item)
+                            // The ⌘K pane takes this column while it is open,
+                            // so the preview withdraws rather than being left
+                            // half-covered and cut mid-word behind the card.
+                            if viewModel.isItemActionPanePresented {
+                                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                CatalogDetailPane(viewModel: viewModel, item: item)
+                            }
                         }
                     }
                 }
@@ -236,6 +254,10 @@ struct OverlayView: View {
                 .padding(.vertical, 8)
             }
 
+            // Claimed height goes here, so the footer keeps the bottom edge
+            // and everything above it keeps its own place.
+            Spacer(minLength: 0)
+
             if viewModel.showsLauncherFooter {
                 FooterWell { LauncherFooter(viewModel: viewModel) }
             }
@@ -249,6 +271,13 @@ struct OverlayView: View {
         FocusRequest.apply($inputFocused)
     }
 
+    private var actionPaneWidth: CGFloat {
+        PanelSizing.itemActionPaneWidth(
+            panelWidth: viewModel.currentPanelWidth,
+            showsDetailPane: viewModel.showsDetailPane
+        )
+    }
+
     @ViewBuilder
     private var actionPopover: some View {
         Group {
@@ -259,7 +288,7 @@ struct OverlayView: View {
                 QuickActionPalette(viewModel: viewModel)
             }
         }
-        .frame(width: min(PanelSizing.actionPaletteWidth, viewModel.currentPanelWidth - PanelSizing.actionPaletteSideMargin))
+        .frame(width: actionPaneWidth)
         // Chrome hugs the content: a `.frame(maxHeight:)` adopts the window's
         // proposal, so background applied outside it stretched into an empty
         // dark sheet whenever the window was tall.
@@ -754,9 +783,11 @@ private struct ItemActionPane: View {
 
     /// The form is also where the placeholder grammar is taught, in one line.
     private var editFormHint: String {
+        // The keys are in the footer while the form is open, so the hint
+        // teaches the placeholders and nothing else: it has to fit whole.
         isEditingQuickLink
-            ? "{query} asks for words first · ⌘↩ saves"
-            : "{cursor} {clipboard} {date} {argument} expand on paste · ⌘↩ saves"
+            ? "{query} asks for words first"
+            : "{cursor} {clipboard} {date} {argument} expand on paste"
     }
 
     private var isCreatingItem: Bool {

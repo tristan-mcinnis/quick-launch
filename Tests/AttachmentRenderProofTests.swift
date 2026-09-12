@@ -171,8 +171,14 @@ struct AttachmentRenderProofTests {
         tray.add(file("Board pack.pdf"))
         tray.add(file("notes.md"))
         tray.routingLine = "Will be cut to fit Local Models"
-        while tray.items.filter(\.isReading).count > 1 {
+        // Bounded, and loud when it expires: an unbounded loop hangs the
+        // suite instead of naming what never finished.
+        let deadline = ContinuousClock.now + .seconds(15)
+        while tray.items.filter(\.isReading).count > 1, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(10))
+        }
+        if tray.items.filter(\.isReading).count > 1 {
+            Issue.record("the tray never settled to one reading chip")
         }
         // The keyboard on the cut chip, and a refused second copy's notice.
         tray.enterStrip()

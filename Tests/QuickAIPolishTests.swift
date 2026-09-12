@@ -513,23 +513,28 @@ struct QuickAIPolishTests {
         #expect(!vm.isActionPalettePresented)
         #expect(vm.composerConfirmation == "Copied")
 
-        try? await Task.sleep(for: .milliseconds(200))
+        await eventually("the checkmark to clear") { vm.composerConfirmation == nil }
         #expect(vm.composerConfirmation == nil, "the checkmark goes after its moment")
     }
 
     @Test func aSecondCopyRestartsTheCheckmark() async {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        vm.composerConfirmationDuration = .milliseconds(150)
+        // Wide durations on purpose. The check that proves the first timer
+        // was cancelled has to fall after the first copy's timer was due and
+        // before the second's; a 150 ms timer left that window 100 ms wide,
+        // which a loaded machine can step straight over. It is a second wide
+        // now: first due at 2 s, second at 3 s, checked at about 2.5 s.
+        vm.composerConfirmationDuration = .seconds(2)
         await ask(vm, mock, "hello", reply: "Bonjour")
 
         vm.copyAnswerOnSurface()
-        try? await Task.sleep(for: .milliseconds(100))
+        try? await Task.sleep(for: .seconds(1))
         vm.copyChatTranscript()
         #expect(vm.composerConfirmation == "Chat copied")
-        try? await Task.sleep(for: .milliseconds(100))
+        try? await Task.sleep(for: .milliseconds(1_500))
         #expect(vm.composerConfirmation == "Chat copied", "the first copy's timer was cancelled")
-        try? await Task.sleep(for: .milliseconds(250))
+        await eventually("the checkmark to clear") { vm.composerConfirmation == nil }
         #expect(vm.composerConfirmation == nil)
     }
 
@@ -888,4 +893,21 @@ private extension String {
         guard let first else { return self }
         return first.uppercased() + dropFirst()
     }
+}
+
+/// Polls `condition` instead of sleeping a fixed time, and records the
+/// timeout itself rather than leaving the next assertion to report it.
+@MainActor
+private func eventually(
+    _ description: String,
+    timeout: Duration = .seconds(15),
+    _ condition: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if condition() { return }
+    Issue.record("timed out waiting for \(description)")
 }

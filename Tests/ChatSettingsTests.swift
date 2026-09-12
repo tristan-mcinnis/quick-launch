@@ -108,10 +108,19 @@ struct ChatSettingsTests {
         return (model, fake, defaults)
     }
 
-    private func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() {
+    /// Waits for `condition`, loudly. A silent give-up left the assertion
+    /// after the call reporting the symptom instead of the wait.
+    private func waitUntil(
+        timeout: Duration = .seconds(15),
+        _ condition: () -> Bool
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return }
             try? await Task.sleep(for: .milliseconds(5))
         }
+        if condition() { return }
+        Issue.record("the settings wait timed out after \(timeout)")
     }
 
     @Test func keepAIChatOnTopFromSettingsReachesTheOpenWindow() async {

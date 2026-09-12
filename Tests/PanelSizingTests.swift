@@ -159,4 +159,24 @@ struct PanelSizingTests {
             paneHeight: PanelSizing.itemActionPaneHeight(rows: 2)
         ))
     }
+
+    /// The ⌘K pane beside a detail pane sits inside that column, with the
+    /// same margin each side. It used to float at a fixed 520, which cut
+    /// across the preview text behind it.
+    @Test func theItemActionPaneTakesTheDetailColumn() {
+        let pane = PanelSizing.itemActionPaneWidth(
+            panelWidth: PanelSizing.panelWidthWithDetail,
+            showsDetailPane: true
+        )
+        let column = PanelSizing.panelWidthWithDetail
+            - PanelSizing.detailListWidth - House.hairline
+        #expect(pane + House.Spacing.sm * 2 == column)
+        #expect(pane > PanelSizing.actionPaletteWidth, "the column is wider than the old fixed card")
+
+        let alone = PanelSizing.itemActionPaneWidth(
+            panelWidth: PanelSizing.panelWidth,
+            showsDetailPane: false
+        )
+        #expect(alone == PanelSizing.actionPaletteWidth, "a one-column panel keeps the palette width")
+    }
 }

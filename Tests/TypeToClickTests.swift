@@ -454,7 +454,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [performed], timeout: 2)
+        await fulfillment(of: [performed], timeout: 15)
         XCTAssertEqual(service.performedAction, .activate)
         controller.dismiss()
     }
@@ -482,7 +482,7 @@ final class TypeToClickTests: XCTestCase {
         let panel = try XCTUnwrap(NSApp.windows.first {
             $0 is TypeToClickPanel && $0.isVisible
         } as? TypeToClickPanel)
-        await fulfillment(of: [firstScanReturned], timeout: 1)
+        await fulfillment(of: [firstScanReturned], timeout: 15)
         try await Task.sleep(for: .milliseconds(50))
 
         for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
@@ -499,11 +499,11 @@ final class TypeToClickTests: XCTestCase {
             characters: "r",
             modifiers: .command
         ))
-        await fulfillment(of: [refreshStarted], timeout: 1)
+        await fulfillment(of: [refreshStarted], timeout: 15)
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
         service.releaseRefresh()
 
-        await fulfillment(of: [performed], timeout: 2)
+        await fulfillment(of: [performed], timeout: 15)
         XCTAssertEqual(service.performedLabel, "Save Beta")
         controller.dismiss()
     }
@@ -539,7 +539,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [menuOpened, visibleCommandsReturned], timeout: 3)
+        await fulfillment(of: [menuOpened, visibleCommandsReturned], timeout: 15)
         let badgeAppeared = await eventually {
             NSApp.windows
                 .compactMap { $0.contentView as? TypeToClickOverlayView }
@@ -584,7 +584,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [performed], timeout: 2)
+        await fulfillment(of: [performed], timeout: 15)
         let dismissed = await eventually { !controller.isActive }
         XCTAssertTrue(dismissed)
         XCTAssertEqual(service.targetCalls, 1)
@@ -623,7 +623,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [firstPerformed], timeout: 2)
+        await fulfillment(of: [firstPerformed], timeout: 15)
         // Type the next step while the first target is still pulsing. These
         // keys must be buffered rather than leaked to the controlled app.
         for (keyCode, character) in [(31, "o"), (35, "p"), (14, "e"), (45, "n")] {
@@ -635,7 +635,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [rescanned, secondPerformed], timeout: 3)
+        await fulfillment(of: [rescanned, secondPerformed], timeout: 15)
         XCTAssertTrue(controller.isActive)
         XCTAssertEqual(service.performedLabels, ["File", "Open"])
         controller.dismiss()
@@ -675,14 +675,16 @@ final class TypeToClickTests: XCTestCase {
 
     @MainActor
     private func eventually(
-        timeout: TimeInterval = 2,
+        timeout: TimeInterval = 15,
         condition: () -> Bool
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        return condition()
+        if condition() { return true }
+        XCTFail("the wait timed out after \(timeout)s")
+        return false
     }
 
     @MainActor

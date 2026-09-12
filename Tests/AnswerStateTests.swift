@@ -68,7 +68,9 @@ struct AnswerStateTests {
         let presenter = RecordingPresenter()
         vm.overlayPresenter = presenter
         #expect(vm.performShortcut(characters: "c", keyCode: 8, modifiers: [.command, .shift]))
-        try? await Task.sleep(for: .milliseconds(30))
+        await eventually("the answer to reach the clipboard") {
+            (vm.pasteboard as? FakePasteboard)?.string == "Bonjour"
+        }
         #expect((vm.pasteboard as? FakePasteboard)?.string == "Bonjour")
         #expect(vm.justCopied)
         #expect(presenter.dismissals == 0, "Copy Answer keeps the Quick AI surface open")
@@ -162,4 +164,21 @@ struct AnswerStateTests {
         #expect(vm.input == "what is in this shot", "the half-typed question survives the attach")
         #expect(!vm.isActionPalettePresented)
     }
+}
+
+/// Polls `condition` instead of sleeping a fixed time, and records the
+/// timeout itself rather than leaving the next assertion to report it.
+@MainActor
+private func eventually(
+    _ description: String,
+    timeout: Duration = .seconds(15),
+    _ condition: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if condition() { return }
+    Issue.record("timed out waiting for \(description)")
 }

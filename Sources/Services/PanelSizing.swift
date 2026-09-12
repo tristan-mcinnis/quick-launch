@@ -13,12 +13,28 @@ enum PanelSizing {
     static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
     static let panelWidthWithDetail: CGFloat = 960
+    /// The list column beside a detail pane. The floating ⌘K pane measures
+    /// the detail column from it, so the pane and the preview share one
+    /// number instead of two that can drift.
+    static let detailListWidth: CGFloat = 380
     /// The `⌘K` palette and item pane floating over a surface, and how far
     /// they keep from its sides.
     static let actionPaletteWidth: CGFloat = 520
     static let actionPaletteSideMargin = House.Spacing.lg + House.Spacing.xxs
     /// The tallest the floating palette or pane grows before it scrolls.
     static let actionPaletteMaxHeight: CGFloat = 460
+
+    /// How wide the floating ⌘K pane is drawn. Beside a detail pane it takes
+    /// that column, inset by the margin it keeps from the window edge: the
+    /// pane belongs to the pane it covers, instead of hanging across the list
+    /// and cutting the preview text in half. On a one-column panel it keeps
+    /// the palette width, as every floating pane always has.
+    static func itemActionPaneWidth(panelWidth: CGFloat, showsDetailPane: Bool) -> CGFloat {
+        guard showsDetailPane else {
+            return min(actionPaletteWidth, panelWidth - actionPaletteSideMargin)
+        }
+        return panelWidth - detailListWidth - House.hairline - House.Spacing.sm * 2
+    }
 
     // MARK: - Heights
 

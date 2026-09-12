@@ -228,14 +228,19 @@ struct AttachmentTrayTests {
         await extractor.hold("slow.pdf")
         tray.add(file("slow.pdf"))
         #expect(tray.isReading)
-        // Let the read start and wait inside the reader.
-        try? await Task.sleep(for: .milliseconds(30))
+        // Wait until the reader has actually been asked, rather than napping
+        // and hoping it started.
+        await eventuallyAsync("the held read to start") {
+            await extractor.requested.contains("slow.pdf")
+        }
 
         #expect(tray.cancelReading())
         #expect(tray.items.map(\.name) == ["done.md"])
         #expect(!tray.isReading)
         #expect(!tray.cancelReading(), "nothing is reading now")
-        try? await Task.sleep(for: .milliseconds(30))
+        await eventuallyAsync("the read to be cancelled") {
+            await extractor.cancelled.contains("slow.pdf")
+        }
         #expect(await extractor.cancelled.contains("slow.pdf"), "the reader was told to stop")
         await extractor.release("slow.pdf")
         #expect(tray.items.map(\.name) == ["done.md"], "a late result does not bring it back")
@@ -615,4 +620,21 @@ struct QuickAIComposerKeyTests {
         #expect(QuickAIComposer.fieldName(multiline: false, searchingChats: false) == "Ask Quick AI")
         #expect(QuickAIComposer.fieldName(multiline: true, searchingChats: true) == "Search chats")
     }
+}
+
+/// Polls an async condition instead of sleeping a fixed time, and records
+/// the timeout itself.
+@MainActor
+private func eventuallyAsync(
+    _ description: String,
+    timeout: Duration = .seconds(15),
+    _ condition: () async -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() { return }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if await condition() { return }
+    Issue.record("timed out waiting for \(description)")
 }

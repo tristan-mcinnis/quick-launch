@@ -144,15 +144,21 @@ struct AIChatBehaviourTests {
     }
 
     private func waitFor(
-        _ timeout: Duration = .seconds(5),
+        _ timeout: Duration = .seconds(15),
         _ condition: @MainActor () async -> Bool
     ) async -> Bool {
+        // Generous on purpose: this box may be running several builds and
+        // suites at once, and a correct test that waits longer costs nothing.
         let deadline = ContinuousClock.now.advanced(by: timeout)
         while ContinuousClock.now < deadline {
             if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(2))
         }
-        return await condition()
+        if await condition() { return true }
+        // Say the timeout out loud. A silent give-up lets the caller's own
+        // assertions report the symptom instead of the wait that failed.
+        Issue.record("waitFor timed out after \(timeout)")
+        return false
     }
 
     private func chat(

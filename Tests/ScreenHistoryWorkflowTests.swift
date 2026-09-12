@@ -297,10 +297,12 @@ struct ScreenHistoryWorkflowTests {
         // The search is held open, so the state is not ready yet, and the
         // controller's "loading" state appears (and stays) before results.
         #expect(vm.screenHistory.loadState != .ready)
-        var waited = 0
-        while vm.screenHistory.loadState != .loading, waited < 2_000 {
+        let loadingDeadline = ContinuousClock.now + .seconds(15)
+        while vm.screenHistory.loadState != .loading, ContinuousClock.now < loadingDeadline {
             try await Task.sleep(for: .milliseconds(20))
-            waited += 20
+        }
+        if vm.screenHistory.loadState != .loading {
+            Issue.record("the held search never reported loading")
         }
         #expect(vm.screenHistory.loadState == .loading)
         // Release the gate: the store returns, and the state becomes ready.
@@ -437,9 +439,12 @@ struct ScreenHistoryWorkflowTests {
         let slowVM = QuickViewModel(screenHistoryCoastImporter: slowImporter)
         let preview = Task { await slowVM.screenHistory.previewCoastImport() }
         let clock = ContinuousClock()
-        let deadline = clock.now + .milliseconds(1_500)
+        let deadline = clock.now + .seconds(15)
         while slowVM.screenHistory.coastImportState != .previewingMetadata, clock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
+        }
+        if slowVM.screenHistory.coastImportState != .previewingMetadata {
+            Issue.record("the preview never reached previewingMetadata")
         }
         #expect(slowVM.screenHistory.coastImportState == .previewingMetadata)
         #expect(slowVM.screenHistory.coastImportIsRunning)

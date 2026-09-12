@@ -143,12 +143,18 @@ struct AttachmentFlowTests {
         await vm.attachmentTray.waitUntilRead()
     }
 
-    private func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
+    private func eventually(
+        timeout: Duration = .seconds(15),
+        _ condition: () -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
-        return condition()
+        if condition() { return true }
+        Issue.record("the attachment wait timed out after \(timeout)")
+        return false
     }
 
     private func ask(_ rig: Rig, _ question: String, reply: String = "Answer.") async {

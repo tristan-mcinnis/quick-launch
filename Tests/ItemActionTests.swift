@@ -165,13 +165,14 @@ struct ItemActionTests {
     @Test func controlXAsksOnceThenDeletes() async {
         let (vm, catalog) = makeSnippetViewModel()
         #expect(vm.performShortcut(characters: "x", keyCode: 7, modifiers: [.control]))
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(20))
+        await eventually("the delete confirmation") {
+            vm.isItemActionPanePresented && vm.focusedItemActions.last?.title == "Confirm Delete"
+        }
         #expect(vm.isItemActionPanePresented)
         #expect(vm.focusedItemActions.last?.title == "Confirm Delete")
         #expect(catalog.snippets.count == 1)
         #expect(vm.performShortcut(characters: "x", keyCode: 7, modifiers: [.control]))
-        try? await Task.sleep(for: .milliseconds(20))
+        await eventually("the snippet to be deleted") { catalog.snippets.isEmpty }
         #expect(catalog.snippets.isEmpty)
         #expect(!vm.isItemActionPanePresented)
     }
@@ -182,7 +183,7 @@ struct ItemActionTests {
         let token = NotificationCenter.default.addObserver(forName: .dismissOverlay, object: nil, queue: nil) { _ in dismissed += 1 }
         defer { NotificationCenter.default.removeObserver(token) }
         #expect(vm.performShortcut(characters: "\r", keyCode: 36, modifiers: [.command]))
-        try? await Task.sleep(for: .milliseconds(20))
+        await eventually("the copy and the dismissal") { vm.justCopied && dismissed >= 1 }
         #expect(vm.justCopied)
         #expect(dismissed >= 1)
     }
@@ -249,4 +250,21 @@ private final class ActionFakeApplicationCatalog: ApplicationCatalogServicing {
         ),
     ]
     func launch(_ application: LaunchableApplication) -> Bool { true }
+}
+
+/// Polls `condition` instead of sleeping a fixed time, and records the
+/// timeout itself rather than leaving the next assertion to report it.
+@MainActor
+private func eventually(
+    _ description: String,
+    timeout: Duration = .seconds(15),
+    _ condition: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if condition() { return }
+    Issue.record("timed out waiting for \(description)")
 }

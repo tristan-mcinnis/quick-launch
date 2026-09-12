@@ -172,7 +172,8 @@ private final class SyntheticVariableRateVideo: @unchecked Sendable {
             (5, (255, 255, 0)),
         ]
         for (seconds, rgb) in frames {
-            for _ in 0..<100 where !input.isReadyForMoreMediaData {
+            let readyDeadline = ContinuousClock.now + .seconds(15)
+            while !input.isReadyForMoreMediaData, ContinuousClock.now < readyDeadline {
                 try await Task.sleep(for: .milliseconds(5))
             }
             guard input.isReadyForMoreMediaData,

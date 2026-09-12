@@ -44,6 +44,25 @@ struct SnippetEditorRenderProofTests {
         }
     }
 
+    /// An empty catalog draws no preview column, so the panel stays at its
+    /// narrow width: the same card, floating, with its hint still whole.
+    @Test func rendersTheNewSnippetFormOnTheOneColumnPanel() throws {
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let vm = QuickViewModel(
+                settings: Self.settings(appearance: appearance == .darkAqua ? .dark : .light),
+                launcherCatalog: EmptyEditorProofCatalog(),
+                pasteboard: FakePasteboard()
+            )
+            vm.beginCreatingSnippet()
+            #expect(!vm.showsDetailPane)
+            #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+            try Self.save(
+                try Self.render(vm, appearance: appearance),
+                name: "snippet-editor-new-snippet-one-column-\(suffix).png"
+            )
+        }
+    }
+
     /// A stored Quicklink now carries Edit and Delete, so its ⌘K list is
     /// worth a look beside the snippet's.
     @Test func rendersTheQuicklinkActionList() throws {
@@ -60,10 +79,15 @@ struct SnippetEditorRenderProofTests {
 
     // MARK: - Harness
 
-    private static func makeViewModel(appearance: AppearancePreference) -> QuickViewModel {
+    private static func settings(appearance: AppearancePreference) -> QuickSettings {
         var settings = QuickSettings()
         settings.appearance = appearance
         settings.historyEnabled = false
+        return settings
+    }
+
+    private static func makeViewModel(appearance: AppearancePreference) -> QuickViewModel {
+        let settings = Self.settings(appearance: appearance)
         return QuickViewModel(
             settings: settings,
             launcherCatalog: EditorProofCatalog(),
@@ -118,6 +142,38 @@ private final class EditorProofCatalog: LauncherCatalogServicing {
 
     func reload() {}
 
+    func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {}
+    func deleteSnippet(_ item: LauncherCatalogItem) throws {}
+    func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws {}
+    func deleteQuickLink(_ item: LauncherCatalogItem) throws {}
+
+    func createSnippet(title: String, value: String) throws -> LauncherCatalogItem {
+        let item = LauncherCatalogItem(
+            kind: .snippet, itemID: "tuna-custom-new", title: title,
+            detail: "Tuna snippet", value: value
+        )
+        snippets.append(item)
+        return item
+    }
+
+    func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem {
+        let item = LauncherCatalogItem(
+            kind: .quickLink, itemID: "tuna-url-new", title: title,
+            detail: "example.com", value: value
+        )
+        quickLinks.append(item)
+        return item
+    }
+}
+
+
+/// A catalog with nothing in it, for the narrow-panel proof.
+@MainActor
+private final class EmptyEditorProofCatalog: LauncherCatalogServicing {
+    var snippets: [LauncherCatalogItem] = []
+    var quickLinks: [LauncherCatalogItem] = []
+
+    func reload() {}
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws {}
     func deleteSnippet(_ item: LauncherCatalogItem) throws {}
     func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws {}

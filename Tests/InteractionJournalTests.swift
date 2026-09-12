@@ -661,7 +661,7 @@ struct InteractionJournalTests {
         let (cancelling, cancelJournal) = makeViewModel(service: slow)
         cancelling.input = "long prompt"
         let submitTask = Task { await cancelling.submit() }
-        try await Task.sleep(for: .milliseconds(50))
+        #expect(await waitForStreaming(cancelling))
         cancelling.cancel()
         await submitTask.value
         #expect(cancelJournal.count(of: .aiCancelled) == 1)
@@ -700,7 +700,7 @@ struct InteractionJournalTests {
         let (vm, journal) = makeViewModel(service: slow)
         vm.input = "long prompt"
         let submitTask = Task { await vm.submit() }
-        try await Task.sleep(for: .milliseconds(50))
+        #expect(await waitForStreaming(vm))
         vm.cancel()
         await submitTask.value
 
@@ -757,8 +757,7 @@ struct InteractionJournalTests {
         let (vm, journal) = makeViewModel(settings: settings)
         vm.input = "/run-slow"
         let submitTask = Task { await vm.submit() }
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(vm.isStreaming)
+        #expect(await waitForStreaming(vm), "the command is running")
 
         vm.cancel()
         await submitTask.value
@@ -1132,4 +1131,18 @@ private final class JournalFakeApplicationCatalog: ApplicationCatalogServicing {
         launched = application
         return true
     }
+}
+
+/// Waits for the stream to start instead of sleeping a fixed time, and says
+/// so when it never does.
+@MainActor
+private func waitForStreaming(_ vm: QuickViewModel, timeout: Duration = .seconds(15)) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if vm.isStreaming { return true }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if vm.isStreaming { return true }
+    Issue.record("the stream never started")
+    return false
 }
