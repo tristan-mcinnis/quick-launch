@@ -83,7 +83,11 @@ struct QuickAIThreadScrollTests {
 
         // ⌥↑: a page back up, to where it started.
         vm.handleThreadKey(.up, command: false, option: true)
-        try await settle { distance(vm) > onePageDown + QuickViewModel.threadFollowThreshold }
+        // Settle on the position being asserted, not merely on having moved
+        // past a threshold: a page scroll crosses that threshold before it
+        // lands, so the older predicate could measure mid-animation and read
+        // a few points short of the top.
+        try await settle { abs(distance(vm) - fromTop) <= 1 }
         #expect(abs(distance(vm) - fromTop) <= 1)
 
         // ⌘↓ (or the chip): the bottom, following again.
