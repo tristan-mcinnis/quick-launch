@@ -178,4 +178,56 @@ struct LocalConversionResolverTests {
         #expect(answer("Plan a date night") == nil)
         #expect(answer("") == nil)
     }
+
+    // MARK: Feet and inches
+
+    @Test func convertsFeetAndInchMarks() {
+        #expect(answer("5'11 in cm") == "180.34 cm")
+        #expect(answer("5'11\" to cm") == "180.34 cm")
+        #expect(answer("6'2\" in cm") == "187.96 cm")
+        #expect(answer("6' in cm") == "182.88 cm")
+    }
+
+    @Test func convertsSpelledCompoundLengths() {
+        #expect(answer("5 ft 11 in cm") == "180.34 cm")
+        #expect(answer("5 feet 11 inches in cm") == "180.34 cm")
+        #expect(answer("5 ft 11 in to m") == "1.8 m")
+    }
+
+    @Test func rejectsCompoundsThatAreNotTwoOrderedLengths() {
+        #expect(answer("5 kg 11 in cm") == nil)
+        #expect(answer("5 in 11 ft cm") == nil)
+        #expect(answer("whats the plan") == nil)
+    }
+
+    // MARK: Bare pairs
+
+    @Test func convertsABarePairWithNoConnector() {
+        #expect(answer("12kg lb") == "26.46 lb")
+        #expect(answer("12 kg lb") == "26.46 lb")
+        #expect(answer("100f c") == "37.8 °C")
+    }
+
+    @Test func rejectsBarePairsThatAreNotTwoDistinctUnits() {
+        #expect(answer("12 kg kg") == nil)
+        #expect(answer("5 things to") == nil)
+        #expect(answer("3 in 4") == nil)
+    }
+
+    // MARK: Ordinary searches are left alone
+
+    @Test func returnsNilForOrdinarySearchText() {
+        for query in [
+            "safari", "system preferences", "1password", "notes", "mail", "slack",
+            "visual studio code", "final cut pro", "logic pro x", "time machine",
+            "kg", "m", "in", "to", "12", "e", "pi", "b", "t", "s",
+            "meeting notes", "week in review", "day one", "screen",
+            "5 things to do", "top 10 in c", "2 fast 2 furious", "4k video",
+            "8 ball pool", "7 zip", "10 things i hate", "3 day weekend plan",
+            "open in finder", "go to bed", "add to cart", "move to trash",
+            "how to cook", "1 to 1", "5 minute timer", "what is love",
+        ] {
+            #expect(answer(query) == nil, "\(query) must not answer")
+        }
+    }
 }
