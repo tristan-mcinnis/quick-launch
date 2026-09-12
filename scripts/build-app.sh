@@ -54,6 +54,19 @@ cp "$ROOT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null
 
+# ...and record WHICH COMMIT went in, ALONGSIDE the two version stamps above
+# (never replacing them), so an installed binary is always traceable even when
+# the version alone cannot say. A dirty tree is marked, because such a build
+# traces to no commit at all; `make install` refuses one unless QL_ALLOW_DIRTY=1.
+# A plain build is never refused here, only marked. This runs before
+# sign_bundle, so the signature covers the stamp.
+COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || print unknown)"
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null)" ]]; then
+    COMMIT="${COMMIT}-dirty"
+fi
+/usr/libexec/PlistBuddy -c "Add :QuickLaunchBuiltFromCommit string ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Set :QuickLaunchBuiltFromCommit ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null
+
 [[ -f "$ICON_SOURCE" ]] && cp "$ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]] && cp "$ROOT_DIR/PrivacyInfo.xcprivacy" "$APP_BUNDLE/Contents/Resources/"
 
