@@ -745,7 +745,22 @@ private struct ItemActionPane: View {
     }
 
     private var title: String {
-        application?.name ?? item?.title ?? ""
+        // A draft has no name yet, so its header says what is being made.
+        if let item, item.title.isEmpty { return item.detail }
+        return application?.name ?? item?.title ?? ""
+    }
+
+    private var isEditingQuickLink: Bool { item?.kind == .quickLink }
+
+    /// The form is also where the placeholder grammar is taught, in one line.
+    private var editFormHint: String {
+        isEditingQuickLink
+            ? "{query} asks for words first · ⌘↩ saves"
+            : "{cursor} {clipboard} {date} {argument} expand on paste · ⌘↩ saves"
+    }
+
+    private var isCreatingItem: Bool {
+        item.map(viewModel.isDraftItem) ?? false
     }
 
     private var subtitle: String {
@@ -770,7 +785,7 @@ private struct ItemActionPane: View {
 
     private var formTitle: String {
         switch viewModel.activeItemActionForm {
-        case .edit: "Edit"
+        case .edit: isCreatingItem ? "New" : "Edit"
         case .alias: "Alias"
         case .hotkey: "Hotkey"
         case .screenHistorySave: "Save to Vault"
@@ -853,18 +868,27 @@ private struct ItemActionPane: View {
         switch form {
         case .edit:
             VStack(alignment: .leading, spacing: 8) {
-                TextField("Snippet name", text: $editedTitle)
+                TextField(isEditingQuickLink ? "Quicklink name" : "Snippet name", text: $editedTitle)
                     .textFieldStyle(.roundedBorder)
                     .focused($formFocused)
                     .onChange(of: editedTitle) { _, _ in viewModel.noteInteraction() }
-                TextEditor(text: $editedValue)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 72, maxHeight: 130)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
-                            .stroke(AQDesign.ColorToken.fieldStroke, lineWidth: AQDesign.hairline)
-                    )
-                    .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
+                if isEditingQuickLink {
+                    // An address is one line, so it gets a field, not a sheet
+                    // of text. Everything else about the form is the same.
+                    TextField("https://example.com/search?q={query}", text: $editedValue)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                        .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
+                } else {
+                    TextEditor(text: $editedValue)
+                        .font(.body.monospaced())
+                        .frame(minHeight: 72, maxHeight: 130)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                                .stroke(AQDesign.ColorToken.fieldStroke, lineWidth: AQDesign.hairline)
+                        )
+                        .onChange(of: editedValue) { _, _ in viewModel.noteInteraction() }
+                }
                 HStack(spacing: AQDesign.Space.standard) {
                     Button {
                         saveEdit()
@@ -875,9 +899,10 @@ private struct ItemActionPane: View {
                     .buttonStyle(InkButtonStyle())
                     Button("Cancel") { viewModel.dismissItemActionLayer() }
                     Spacer()
-                    Text("⌘↩ saves · esc cancels")
+                    Text(editFormHint)
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
                 }
             }
         case .alias:
@@ -970,7 +995,7 @@ private struct ItemActionPane: View {
 
     private func saveEdit() {
         guard let item else { return }
-        _ = viewModel.updateSnippet(item, title: editedTitle, value: editedValue)
+        viewModel.commitItemEdit(item, title: editedTitle, value: editedValue)
     }
 
     private func focusSearch() {

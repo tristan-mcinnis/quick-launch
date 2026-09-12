@@ -11,14 +11,20 @@ protocol LauncherCatalogServicing: AnyObject {
     func createSnippet(title: String, value: String) throws -> LauncherCatalogItem
     /// Adds a fixed Quick Link to the store and returns the stored item.
     func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem
+    /// Renames a stored Quick Link or points it somewhere else. Smart Links
+    /// come from a file this app only reads, so they are never editable.
+    func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws
+    func deleteQuickLink(_ item: LauncherCatalogItem) throws
 }
 
 enum LauncherCatalogError: LocalizedError {
     case creationUnsupported
+    case editingUnsupported
 
     var errorDescription: String? {
         switch self {
         case .creationUnsupported: "This catalog cannot create snippets."
+        case .editingUnsupported: "This catalog cannot change Quicklinks."
         }
     }
 }
@@ -29,6 +35,12 @@ extension LauncherCatalogServicing {
     }
     func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem {
         throw LauncherCatalogError.creationUnsupported
+    }
+    func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws {
+        throw LauncherCatalogError.editingUnsupported
+    }
+    func deleteQuickLink(_ item: LauncherCatalogItem) throws {
+        throw LauncherCatalogError.editingUnsupported
     }
 }
 

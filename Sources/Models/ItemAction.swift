@@ -255,11 +255,19 @@ enum ItemActionCatalog {
                 actions.append(cleanLinkAction)
             }
             if item.itemID.hasPrefix("typed:") { return actions }
+            // A stored Quicklink gets the same edit and delete a snippet has,
+            // on the same keys. A Smart Link keeps the read-only list.
+            if item.isEditableQuickLink {
+                actions.append(ItemAction(kind: .edit, title: "Edit Quicklink", systemImage: "pencil", shortcut: .command("e")))
+            }
             actions += [
                 pinAction(for: item),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
+            if item.isEditableQuickLink {
+                actions.append(ItemAction(kind: .delete, title: "Delete Quicklink", systemImage: "trash", shortcut: .control("x"), isDestructive: true))
+            }
             return actions
         case .command:
             return [

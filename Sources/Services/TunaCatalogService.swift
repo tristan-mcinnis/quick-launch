@@ -4,12 +4,16 @@ import Foundation
 final class TunaCatalogService: LauncherCatalogServicing {
     enum MutationError: LocalizedError {
         case invalidSnippet, unreadableStore, snippetNotFound
+        case invalidQuickLink, quickLinkNotFound, smartLinkIsReadOnly
 
         var errorDescription: String? {
             switch self {
             case .invalidSnippet: "The snippet title and text cannot be empty."
             case .unreadableStore: "Quick Launch could not safely read Tuna's snippet store."
             case .snippetNotFound: "That snippet no longer exists in Tuna."
+            case .invalidQuickLink: "A Quicklink needs a name and a web address."
+            case .quickLinkNotFound: "That Quicklink no longer exists in Tuna."
+            case .smartLinkIsReadOnly: "Smart Links are set up in Tuna and cannot be changed here."
             }
         }
     }
@@ -46,7 +50,7 @@ final class TunaCatalogService: LauncherCatalogServicing {
         guard item.kind == .snippet, !cleanTitle.isEmpty, !value.isEmpty else {
             throw MutationError.invalidSnippet
         }
-        try mutateSnippet(item) { record in
+        try mutateRecord(item) { record in
             record["label"] = cleanTitle
             record["value"] = value
             return true
@@ -55,21 +59,50 @@ final class TunaCatalogService: LauncherCatalogServicing {
 
     func deleteSnippet(_ item: LauncherCatalogItem) throws {
         guard item.kind == .snippet else { throw MutationError.invalidSnippet }
-        try mutateSnippet(item) { _ in false }
+        try mutateRecord(item) { _ in false }
     }
 
-    private func mutateSnippet(
+    func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard item.kind == .quickLink else { throw MutationError.invalidQuickLink }
+        guard item.isEditableQuickLink else { throw MutationError.smartLinkIsReadOnly }
+        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
+            throw MutationError.invalidQuickLink
+        }
+        try mutateRecord(item) { record in
+            record["label"] = cleanTitle
+            record["value"] = cleanValue
+            return true
+        }
+    }
+
+    func deleteQuickLink(_ item: LauncherCatalogItem) throws {
+        guard item.kind == .quickLink else { throw MutationError.invalidQuickLink }
+        guard item.isEditableQuickLink else { throw MutationError.smartLinkIsReadOnly }
+        try mutateRecord(item) { _ in false }
+    }
+
+    /// Finds one stored record by the item's identity, applies `transform`,
+    /// and writes the whole catalog back. Returning false from `transform`
+    /// deletes the record. Only the two record kinds Tuna already stores are
+    /// addressable: nothing here invents a key or a kind.
+    private func mutateRecord(
         _ item: LauncherCatalogItem,
         transform: (inout [String: Any]) -> Bool
     ) throws {
+        let storedKind = item.kind == .snippet ? "text" : "url"
+        let notFound: MutationError = item.kind == .snippet ? .snippetNotFound : .quickLinkNotFound
         guard let (root, storedRecords) = Self.readCustomItems(from: preferencesURL) else { throw MutationError.unreadableStore }
         var records = storedRecords
 
-        let storedID = item.itemID.replacingOccurrences(of: "tuna-custom-", with: "")
+        let storedID = ["tuna-custom-", "tuna-url-"].reduce(item.itemID) {
+            $0.replacingOccurrences(of: $1, with: "")
+        }
         guard let index = records.firstIndex(where: {
-            ($0["kind"] as? String) == "text"
+            ($0["kind"] as? String) == storedKind
                 && ($0["id"] as? String)?.lowercased() == storedID.lowercased()
-        }) else { throw MutationError.snippetNotFound }
+        }) else { throw notFound }
 
         var record = records[index]
         if transform(&record) {
@@ -98,7 +131,7 @@ final class TunaCatalogService: LauncherCatalogServicing {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
-            throw MutationError.invalidSnippet
+            throw MutationError.invalidQuickLink
         }
         guard let (root, storedRecords) = Self.readCustomItems(from: preferencesURL) else { throw MutationError.unreadableStore }
         var records = storedRecords
@@ -173,7 +206,10 @@ final class TunaCatalogService: LauncherCatalogServicing {
                     itemID: "tuna-url-\(storedID.lowercased())",
                     title: title.isEmpty ? (url.host ?? "Untitled link") : title,
                     detail: url.host ?? "Tuna link",
-                    value: value
+                    value: value,
+                    // A `{query}` in the address asks for the search words
+                    // first, exactly as a Smart Link's `{{input}}` does.
+                    requiresInput: value.contains(QuickLinkQuery.placeholder)
                 )
             default:
                 return nil
