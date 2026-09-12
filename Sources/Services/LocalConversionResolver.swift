@@ -38,7 +38,7 @@ enum LocalConversionResolver {
     ]
 
     private static func normalized(_ input: String) -> String {
-        var text = input.lowercased()
+        var text = expandFeetAndInchMarks(input.lowercased())
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "’", with: "")
         for (symbol, word) in [("->", " to "), ("→", " to "), ("=", " to ")] {
@@ -60,6 +60,41 @@ enum LocalConversionResolver {
             text = "days " + text.dropFirst("how long ".count)
         }
         return text
+    }
+
+    private static let footMarks: Set<Character> = ["'", "’", "′"]
+    private static let inchMarks: Set<Character> = ["\"", "”", "″"]
+
+    /// Writes the surveyor's marks as words before apostrophes are stripped for
+    /// "what's": 5'11" and 5'11 both become "5 ft 11 in", and 6" becomes "6 in".
+    /// A mark only counts with a digit in front of it, so ordinary prose and
+    /// quoted text keep their punctuation.
+    private static func expandFeetAndInchMarks(_ text: String) -> String {
+        let chars = Array(text)
+        var result = ""
+        var index = 0
+        while index < chars.count {
+            let char = chars[index]
+            let digitBefore = index > 0 && chars[index - 1].isNumber
+            guard digitBefore, footMarks.contains(char) || inchMarks.contains(char) else {
+                result.append(char)
+                index += 1
+                continue
+            }
+            index += 1
+            guard footMarks.contains(char) else { result.append(" in "); continue }
+            // A foot mark: the number after it is inches, marked or not.
+            result.append(" ft ")
+            var inches = ""
+            while index < chars.count, chars[index].isNumber || chars[index] == "." {
+                inches.append(chars[index])
+                index += 1
+            }
+            guard !inches.isEmpty else { continue }
+            result.append(inches + " in ")
+            if index < chars.count, inchMarks.contains(chars[index]) { index += 1 }
+        }
+        return result
     }
 
     /// Removes commas used as thousands separators ("1,000") and leaves every other comma alone.
@@ -198,19 +233,57 @@ enum LocalConversionResolver {
 
     private static func convertUnits(_ rawTokens: [String], _ context: Context) -> String? {
         let tokens = splitNumbersFromUnits(rawTokens)
-        guard tokens.count >= 4, let value = number(from: tokens[0]) else { return nil }
-        for index in 2..<(tokens.count - 1) where connectors.contains(tokens[index]) {
-            guard let source = unit(for: tokens[1..<index]),
-                  let target = unit(for: tokens[(index + 1)...]),
-                  source.dimension == target.dimension else { continue }
-            let result = convert(value, from: source, to: target)
-            guard result.isFinite else { return nil }
-            let digits = target.dimension == .temperature ? 1 : (result != 0 && result.magnitude < 0.01 ? 6 : 2)
-            let text = formatNumber(result, maximumFractionDigits: digits, locale: context.locale)
-            let symbol = text == "1" ? target.symbol : (target.plural ?? target.symbol)
-            return "\(text) \(symbol)"
+        if let compound = convertCompound(tokens, context) { return compound }
+        guard tokens.count >= 3, let value = number(from: tokens[0]) else { return nil }
+        if tokens.count >= 4 {
+            for index in 2..<(tokens.count - 1) where connectors.contains(tokens[index]) {
+                guard let source = unit(for: tokens[1..<index]),
+                      let target = unit(for: tokens[(index + 1)...]),
+                      source.dimension == target.dimension else { continue }
+                return formatted(convert(value, from: source, to: target), target: target, context)
+            }
         }
-        return nil
+        return convertBare(tokens, context)
+    }
+
+    /// "5'11 in cm", "6'2\" in cm", "5 ft 11 in cm": a coarse length and a fine
+    /// one add up before the connector. Both halves must be lengths and the
+    /// first must be the larger unit, so prose cannot reach this shape.
+    private static func convertCompound(_ tokens: [String], _ context: Context) -> String? {
+        guard tokens.count >= 5,
+              let major = number(from: tokens[0]),
+              let minor = number(from: tokens[2]),
+              let coarse = unit(for: tokens[1..<2]),
+              let fine = unit(for: tokens[3..<4]),
+              coarse.dimension == .length, fine.dimension == .length,
+              coarse.factor > fine.factor
+        else { return nil }
+        var rest = tokens[4...]
+        if let next = rest.first, connectors.contains(next) { rest = rest.dropFirst() }
+        guard let target = unit(for: rest), target.dimension == .length else { return nil }
+        let base = major * coarse.factor + minor * fine.factor
+        return formatted(base / target.factor, target: target, context)
+    }
+
+    /// "12kg lb": a bare pair with no connector. It only reads as a conversion
+    /// when both words are units of one dimension, which ordinary search text
+    /// is not.
+    private static func convertBare(_ tokens: [String], _ context: Context) -> String? {
+        guard tokens.count == 3, let value = number(from: tokens[0]),
+              let source = unit(for: tokens[1..<2]),
+              let target = unit(for: tokens[2...]),
+              source.dimension == target.dimension,
+              source.symbol != target.symbol
+        else { return nil }
+        return formatted(convert(value, from: source, to: target), target: target, context)
+    }
+
+    private static func formatted(_ result: Double, target: Unit, _ context: Context) -> String? {
+        guard result.isFinite else { return nil }
+        let digits = target.dimension == .temperature ? 1 : (result != 0 && result.magnitude < 0.01 ? 6 : 2)
+        let text = formatNumber(result, maximumFractionDigits: digits, locale: context.locale)
+        let symbol = text == "1" ? target.symbol : (target.plural ?? target.symbol)
+        return "\(text) \(symbol)"
     }
 
     private static func convert(_ value: Double, from source: Unit, to target: Unit) -> Double {
