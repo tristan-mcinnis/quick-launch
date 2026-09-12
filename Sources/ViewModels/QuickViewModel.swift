@@ -1965,8 +1965,25 @@ import Observation
         return activeModelDisplay
     }
 
+    /// The footer while an item's form is open. The form is the top layer,
+    /// so the footer names the form's own keys, not the row's behind it.
+    static func footerHints(forForm form: ItemActionForm) -> [FooterHint] {
+        let cancel = FooterHint(label: "Cancel", keys: ["esc"])
+        switch form {
+        case .edit:
+            return [FooterHint(label: "Save", keys: ["⌘", "↩"]), cancel]
+        case .alias, .hotkey:
+            return [FooterHint(label: "Done", keys: ["⌘", "↩"]), cancel]
+        case .screenHistorySave:
+            return [FooterHint(label: "Save moment", keys: ["⌘", "↩"]), cancel]
+        }
+    }
+
     /// Right side of the footer: what Return and the main shortcuts do now.
     var footerHints: [FooterHint] {
+        // An open form owns the footer: Paste and Copy act on the row behind
+        // it, and neither is what Return does while the editor is up.
+        if let activeItemActionForm { return Self.footerHints(forForm: activeItemActionForm) }
         if isStreaming { return [FooterHint(label: "Stop", keys: ["esc"])] }
         if hasPendingAttachment {
             var hints = [

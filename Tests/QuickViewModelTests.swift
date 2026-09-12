@@ -71,8 +71,7 @@ struct QuickViewModelTests {
         vm.input = "long prompt"
 
         let submitTask = Task { await vm.submit() }
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(vm.isStreaming == true)
+        #expect(await waitForStreaming(vm))
         await submitTask.value
     }
 
@@ -137,8 +136,7 @@ struct QuickViewModelTests {
         vm.input = "Long running prompt"
 
         let submitTask = Task { await vm.submit() }
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(vm.isStreaming == true)
+        #expect(await waitForStreaming(vm))
 
         vm.cancel()
         await submitTask.value
@@ -160,7 +158,7 @@ struct QuickViewModelTests {
         vm.input = "prompt"
 
         let submitTask = Task { await vm.submit() }
-        try await Task.sleep(for: .milliseconds(50))
+        #expect(await waitForStreaming(vm))
         vm.cancel()
         await submitTask.value
 
@@ -393,7 +391,7 @@ struct QuickViewModelTests {
         // Poll rather than sleep a fixed time: under a loaded machine the
         // 50 ms timer can fire late, and the test is about "it clears".
         let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(2)
+        let deadline = clock.now + .seconds(15)
         while vm.justCopied, clock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -640,4 +638,18 @@ extension MockQuickService {
     func setDelay(_ value: Duration) {
         delay = value
     }
+}
+
+/// Waits for the stream to start instead of sleeping a fixed time, and says
+/// so when it never does.
+@MainActor
+private func waitForStreaming(_ vm: QuickViewModel, timeout: Duration = .seconds(15)) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if vm.isStreaming { return true }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if vm.isStreaming { return true }
+    Issue.record("the stream never started")
+    return false
 }

@@ -52,7 +52,7 @@ struct QuickAITests {
         selection.clear()
         // ⌘↩ is the explicit paste-back, the same as every result action.
         #expect(vm.performShortcut(characters: nil, keyCode: VirtualKey.return.rawValue, modifiers: [.command]))
-        try? await Task.sleep(for: .milliseconds(50))
+        await eventually("the explicit paste-back") { selection.pasted == "Bonjour" }
         #expect(selection.pasted == "Bonjour")
     }
 
@@ -107,7 +107,7 @@ struct QuickAITests {
         #expect(vm.resultActions.contains(.previousChat))
 
         #expect(vm.performShortcut(characters: "]", keyCode: 30, modifiers: [.command]))
-        try? await Task.sleep(for: .milliseconds(20))
+        await eventually("the next chat to open") { vm.output == "Second answer" }
         #expect(vm.output == "Second answer")
 
         await vm.performResultAction(.deleteChat)
@@ -180,4 +180,21 @@ private final class PasteRecorder: SelectedTextServicing {
     func paste(_ text: String, to target: SelectionTarget) async -> Bool { pasted = text; return true }
     func openAccessibilitySettings() {}
     func clear() { pasted = nil }
+}
+
+/// Polls `condition` instead of sleeping a fixed time, and records the
+/// timeout itself rather than leaving the next assertion to report it.
+@MainActor
+private func eventually(
+    _ description: String,
+    timeout: Duration = .seconds(15),
+    _ condition: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if condition() { return }
+    Issue.record("timed out waiting for \(description)")
 }

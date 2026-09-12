@@ -44,7 +44,7 @@ struct QuickAIThreadScrollTests {
     /// Waits until `condition` holds and the view has been still for a
     /// moment, or fails after a few seconds.
     private func settle(_ condition: @MainActor () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             try await spin(0.05)
             if condition() {

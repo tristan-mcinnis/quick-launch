@@ -245,6 +245,68 @@ struct SnippetAuthoringTests {
         #expect(vm.catalogScope == .quickLinks)
     }
 
+    /// Beside a stored row the catalog shows its preview column, and the
+    /// editor takes that column rather than hanging across the list.
+    @Test func theEditorTakesTheDetailColumnWhenThereIsOne() throws {
+        let fixture = try Self.makeFixture(records: [
+            ["kind": "text", "id": "one", "label": "Note", "value": "Body"],
+        ])
+        defer { fixture.remove() }
+        let vm = QuickViewModel(launcherCatalog: fixture.service(), pasteboard: FakePasteboard())
+
+        vm.beginCreatingSnippet()
+        #expect(vm.showsDetailPane)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidthWithDetail)
+        let pane = PanelSizing.itemActionPaneWidth(
+            panelWidth: vm.currentPanelWidth,
+            showsDetailPane: vm.showsDetailPane
+        )
+        #expect(pane < vm.currentPanelWidth - PanelSizing.detailListWidth,
+                "the card stays inside the detail column")
+    }
+
+    /// An empty catalog has no preview column, so the panel stays narrow and
+    /// the editor keeps the floating width every ⌘K pane has.
+    @Test func theEditorKeepsThePaletteWidthOnTheOneColumnPanel() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.remove() }
+        let vm = QuickViewModel(launcherCatalog: fixture.service(), pasteboard: FakePasteboard())
+
+        vm.beginCreatingSnippet()
+        #expect(!vm.showsDetailPane)
+        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
+        #expect(PanelSizing.itemActionPaneWidth(
+            panelWidth: vm.currentPanelWidth,
+            showsDetailPane: vm.showsDetailPane
+        ) == PanelSizing.actionPaletteWidth)
+    }
+
+    /// The footer belongs to whatever is on top. While the editor is open
+    /// that is the editor, not the row it was opened from.
+    @Test func theFooterNamesTheEditorsOwnKeysWhileItIsOpen() throws {
+        let fixture = try Self.makeFixture(records: [
+            ["kind": "text", "id": "one", "label": "Note", "value": "Body"],
+        ])
+        defer { fixture.remove() }
+        let vm = QuickViewModel(launcherCatalog: fixture.service(), pasteboard: FakePasteboard())
+
+        vm.beginCreatingSnippet()
+        #expect(vm.footerHints == [
+            QuickViewModel.FooterHint(label: "Save", keys: ["⌘", "↩"]),
+            QuickViewModel.FooterHint(label: "Cancel", keys: ["esc"]),
+        ])
+
+        vm.dismissItemActionLayer()
+        #expect(vm.activeItemActionForm == nil)
+        let backOnTheRow = vm.footerHints.map(\.label)
+        #expect(!backOnTheRow.contains("Save"), "the row's own actions come back")
+        #expect(backOnTheRow.contains("Actions"))
+        #expect(backOnTheRow.first == "Paste", "Return acts on the row again")
+
+        vm.beginCreatingQuicklink()
+        #expect(vm.footerHints.map(\.label) == ["Save", "Cancel"])
+    }
+
     @Test func savingADraftWritesItToTheStore() throws {
         let fixture = try Self.makeFixture()
         defer { fixture.remove() }

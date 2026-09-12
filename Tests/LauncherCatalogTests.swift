@@ -149,10 +149,13 @@ struct LauncherCatalogTests {
         vm.enterCatalog(.snippets)
         vm.input = "greet"
         vm.noteInteraction()
-        // Other suites share the main actor; wait for the reset rather than a fixed delay.
-        for _ in 0..<100 where vm.catalogScope != nil {
+        // Other suites share the main actor; wait for the reset rather than a
+        // fixed delay, with a budget that survives a loaded machine.
+        let deadline = ContinuousClock.now + .seconds(15)
+        while vm.catalogScope != nil, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
+        if vm.catalogScope != nil { Issue.record("the catalog never reset to root") }
         #expect(vm.catalogScope == nil)
         #expect(vm.input.isEmpty)
     }

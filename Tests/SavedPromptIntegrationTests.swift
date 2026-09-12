@@ -39,7 +39,7 @@ struct SavedPromptIntegrationTests {
         vm.input = "/translate"
         await vm.submit()
         #expect(vm.errorMessage == "This action needs selected text.")
-        let sent = await service.waitForPrompt(timeoutMs: 50)
+        let sent = await service.waitForPrompt(timeoutMs: 50, expectingNone: true)
         #expect(sent == nil)
     }
 
@@ -115,12 +115,18 @@ actor CapturingService: QuickService {
         }
     }
 
-    /// Poll briefly so tests don't race against the detached Task in send().
-    func waitForPrompt(timeoutMs: Int = 200) async -> String? {
+    /// Polls so tests don't race against the detached Task in send(). The
+    /// budget is generous because the wait crosses a task boundary on a
+    /// machine that may be running other suites; a test expecting no prompt
+    /// passes `expectingNone` and keeps its short budget.
+    func waitForPrompt(timeoutMs: Int = 15_000, expectingNone: Bool = false) async -> String? {
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         while Date() < deadline {
             if let p = _lastPrompt { return p }
             try? await Task.sleep(for: .milliseconds(5))
+        }
+        if _lastPrompt == nil, !expectingNone {
+            Issue.record("no prompt reached the service within \(timeoutMs) ms")
         }
         return _lastPrompt
     }

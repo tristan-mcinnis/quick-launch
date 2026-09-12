@@ -927,7 +927,7 @@ struct OverlayRenderProofTests {
     /// Polls a condition the test cannot await directly (a stream landing on
     /// the main actor), failing instead of hanging.
     private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
         while !condition() {
             guard ContinuousClock.now < deadline else { throw ProofError.timedOut }
             try await Task.sleep(for: .milliseconds(5))

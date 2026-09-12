@@ -194,7 +194,7 @@ struct ReadAloudTests {
     /// Polls `condition` instead of a fixed sleep, so a check on the
     /// fire-and-forget speak `Task` stays reliable under load.
     private static func waitUntil(
-        timeout: Duration = .seconds(2),
+        timeout: Duration = .seconds(15),
         _ condition: @Sendable () async -> Bool
     ) async {
         let deadline = ContinuousClock.now + timeout
@@ -202,5 +202,7 @@ struct ReadAloudTests {
             if await condition() { return }
             try? await Task.sleep(for: .milliseconds(5))
         }
+        if await condition() { return }
+        Issue.record("the read-aloud wait timed out after \(timeout)")
     }
 }

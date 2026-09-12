@@ -654,10 +654,11 @@ struct PiHandoffTests {
         ))
         #expect(panel.performKeyEquivalent(with: event))
 
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
         while vm.threadNotice == nil, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(2))
         }
+        if vm.threadNotice == nil { Issue.record("the handoff notice never arrived") }
         #expect(vm.threadNotice == "Opened in pi · tmux session ql-3fa9c1")
     }
 }
