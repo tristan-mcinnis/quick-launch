@@ -256,6 +256,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             screenshotTextIndex: screenshotTextIndex,
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
+            // What every other house app can do, read from the manifests they
+            // publish. Without this the catalog is nil, every house-command
+            // path returns at its `guard let`, and no row can ever appear —
+            // while the tests all pass, because they inject their own.
+            houseCommandCatalog: HouseCommandCatalog(),
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
