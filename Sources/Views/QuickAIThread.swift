@@ -16,7 +16,6 @@ struct QuickAIThread: View {
     var find: ThreadFindHighlights? = nil
     /// Where the current hit sits under its message's head, once laid out.
     var onFindHitOffset: ((FindHit, CGFloat) -> Void)? = nil
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Where the thread is scrolled. Every scroll the thread makes goes
     /// through it: to a message's head, to an edge, or by a page.
     @State private var threadPosition = ScrollPosition()
@@ -613,7 +612,7 @@ struct QuickAIThread: View {
             case .pageDown: threadPosition.scrollTo(y: min(geometry.maximumTop, geometry.top + geometry.page))
             }
         }
-        animate(move)
+        performScroll(move)
     }
 
     /// A find scroll that waited for its message: the message is laid out
@@ -622,15 +621,17 @@ struct QuickAIThread: View {
         guard let pending = turnGeometry.pending, pending.id == id, let top = turnGeometry.tops[id] else { return }
         turnGeometry.pending = nil
         let target = threadGeometry.findScrollTop(hitAt: top + pending.offset)
-        animate { threadPosition.scrollTo(y: target) }
+        performScroll { threadPosition.scrollTo(y: target) }
     }
 
-    private func animate(_ move: @escaping () -> Void) {
-        if reduceMotion {
-            move()
-        } else {
-            withAnimation(.easeOut(duration: AQDesign.Motion.select)) { move() }
-        }
+    /// Keyboard and find navigation land directly at the requested position.
+    /// A pending animated scroll can be lost while the native editor owns
+    /// focus. Immediate transactions also honor Reduce Motion; following a
+    /// live answer remains on its separate path above.
+    private func performScroll(_ move: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { move() }
     }
 
     // MARK: - Thread error

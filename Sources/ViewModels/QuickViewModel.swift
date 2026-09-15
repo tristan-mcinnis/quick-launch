@@ -2634,7 +2634,7 @@ import Observation
 
     /// The Quick AI composer's placeholder on an empty surface, Raycast's
     /// own words.
-    static let quickAIPlaceholder = "Ask anything, @ tools, or / for commands…"
+    static let quickAIPlaceholder = "Ask anything, @ to attach, or / for commands…"
     /// Once a thread exists and the next question joins it.
     static let quickAIFollowUpPlaceholder = "Ask a follow-up…"
     /// While Recent Chats is up the composer filters the list.
@@ -2650,6 +2650,7 @@ import Observation
         if isRecentChatsPresented { return Self.recentChatsPlaceholder }
         if isAskQuestionActive { return Self.askQuestionPlaceholder }
         if isStreaming { return Self.streamingPlaceholder }
+        if hasPendingChatContext { return "Ask about the attached context…" }
         if isFollowUp, !shouldStartNewConversation { return Self.quickAIFollowUpPlaceholder }
         return Self.quickAIPlaceholder
     }
@@ -2667,7 +2668,7 @@ import Observation
               pendingAskQuestion == nil
         else { return [] }
         return [
-            "\(Self.addContextTrigger) adds a window, a selection, or a screen",
+            "\(Self.addContextTrigger) attaches files, links, or selected text",
             "\(Self.recentChatsShortcut.keyCaps.joined()) opens recent chats",
             "\(ResultAction.changeModel.shortcut.keyCaps.joined()) changes the model",
         ]
@@ -2677,8 +2678,19 @@ import Observation
     /// the field as a label and its key cap. The surface has no footer; this
     /// is its one hint.
     struct ComposerAction: Equatable, Sendable {
+        enum Behavior: Equatable, Sendable { case submit, stop }
         let label: String
         let keys: [String]
+        var behavior: Behavior = .submit
+    }
+
+    /// The visible button can offer Stop while Return still queues a draft.
+    /// Keep its behavior explicit instead of interpreting its displayed label.
+    func performComposerPrimaryAction() {
+        switch quickAIComposerAction.behavior {
+        case .submit: submitFromComposer()
+        case .stop: cancel()
+        }
     }
 
     /// What Return does in the Transform chooser, in its header and in the
@@ -2713,9 +2725,9 @@ import Observation
             // A follow-up queued with Return waits in the field for the
             // stream to end; the label says so until it goes.
             if isFollowUpQueued { return ComposerAction(label: Self.queuedActionLabel, keys: ["↩"]) }
-            return ComposerAction(label: "Stop", keys: ["esc"])
+            return ComposerAction(label: "Stop", keys: ["esc"], behavior: .stop)
         }
-        if !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !hasPendingChatContext, !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch primaryAnswerAction {
             case .pasteToActiveApp: return ComposerAction(label: "Paste Response", keys: ["↩"])
             case .copyToClipboard: return ComposerAction(label: "Copy Response", keys: ["↩"])
@@ -2885,7 +2897,7 @@ import Observation
     }
 
     func classifySubmit() -> SubmitIntent {
-        if pendingImage != nil || !attachmentTray.isEmpty { return .attachment }
+        if hasPendingChatContext { return .attachment }
         if inputMode != nil { return .inputMode }
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if pendingQuickLink == nil, exactCommandAlias() != nil { return .commandAlias }
@@ -4589,7 +4601,7 @@ import Observation
         context.appText = nil
         context.focusedValue = nil
         pendingContext = context
-        pendingImage = nil
+        // Adding text keeps the images already chosen for this question.
         // An explicit Selected Text capture supersedes the auto-captured
         // launch selection, so the two are never sent twice.
         launchSelection = nil
@@ -5612,7 +5624,8 @@ import Observation
     /// Actions on the Quick AI window itself, while the surface is up:
     /// Reset Quick AI Size once the user has dragged it off 750 × 475.
     var quickAISurfaceActions: [QuickAISurfaceAction] {
-        let composerActions: [QuickAISurfaceAction] = canOpenAttachments ? [.attach] : []
+        var composerActions: [QuickAISurfaceAction] = canOpenAttachments ? [.attach] : []
+        if isQuickAIPresented, webSearchService != nil { composerActions.append(.searchSettings) }
         // The AI Chat window offers its own: the chat list, find, and
         // Keep on Top.
         if let chatWindowHost { return composerActions + chatWindowHost.windowSurfaceActions + messageSurfaceActions }
@@ -5634,6 +5647,10 @@ import Observation
     }
 
     func performQuickAISurfaceAction(_ action: QuickAISurfaceAction) {
+        if action == .searchSettings {
+            openActionPaletteSubmenu(.searchProviders)
+            return
+        }
         // Copy Message and Capture Message keep the palette, on its list of
         // the chat's messages.
         if action == .copyMessage || action == .captureMessage {
@@ -5647,7 +5664,7 @@ import Observation
             openAddContextMenu()
         case .resetSize:
             resetQuickAISize()
-        case .copyMessage, .captureMessage:
+        case .copyMessage, .captureMessage, .searchSettings:
             return
         case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop:
             chatWindowHost?.performWindowSurfaceAction(action)
@@ -5712,6 +5729,7 @@ import Observation
     var actionPaletteEntryCount: Int {
         switch actionPaletteSubmenu {
         case .tools: paletteToolRows.count
+        case .searchProviders: paletteSearchProviders.count
         case .sources: paletteSourceRows.count
         case .messages: paletteMessageRows.count
         case nil:
@@ -6436,7 +6454,7 @@ import Observation
         // read from the session store (pictures included).
         reaskedAttachments = replaced.first?.attachments
         defer { reaskedAttachments = nil }
-        await submit(text: question)
+        await submit(text: question, reasksTurn: true)
         // The ask never went out (no provider, no key): the thread is left
         // as it was, and the bottom line says why.
         if currentConversation?.id == conversation.id,
@@ -7032,10 +7050,11 @@ import Observation
 
     /// `text` asks that question instead of the composer's (⌘R asking a
     /// turn again); the composer then keeps what is typed in it.
-    private func submit(text: String?) async {
-        // Chips still reading hold the send, with their status line.
-        guard await waitForReadingAttachments() else { return }
-        guard var request = await prepareRequest(text: text) else { return }
+    private func submit(text: String?, reasksTurn: Bool = false) async {
+        // Draft attachments belong to the next question, not to a turn
+        // being retried. A retry never waits on or consumes that draft.
+        if !reasksTurn, !(await waitForReadingAttachments()) { return }
+        guard var request = await prepareRequest(text: text, reasksTurn: reasksTurn) else { return }
         guard await enrich(&request) else { return }
         await stream(request)
     }
@@ -7043,10 +7062,15 @@ import Observation
     /// Resolves saved-prompt aliases, runs command actions, expands
     /// `{selection}`, and answers locally (math, conversions, facts). Returns
     /// `nil` when the request was handled here or could not proceed.
-    func prepareRequest(text: String? = nil) async -> PreparedRequest? {
+    func prepareRequest(text: String? = nil, reasksTurn: Bool = false) async -> PreparedRequest? {
         let takesComposerText = text == nil
-        let reasksTurn = text != nil
         let submittedInput = text ?? input
+        if !reasksTurn, submittedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           pendingContext != nil || launchSelection != nil {
+            errorMessage = "Ask a question about the attached context."
+            requestInputFocus()
+            return nil
+        }
         // A turn asked again keeps its attachments; a new question takes
         // the screenshots and the chips that were read.
         let attachments: [AttachmentContent] = reasksTurn
@@ -7074,6 +7098,25 @@ import Observation
             prefix: settings.savedPromptPrefix,
             savedPrompts: settings.savedPrompts
         )
+
+        if reasksTurn {
+            // The saved question already contains its original selection
+            // and action expansion. Reusing the draft's context here would
+            // attach unrelated text to the old question and erase its chip.
+            return PreparedRequest(
+                submittedInput: submittedInput,
+                takesComposerText: false,
+                reasksTurn: true,
+                submittedImages: submittedImages,
+                attachments: attachments,
+                action: action,
+                actionDefinition: action.flatMap { resolution in
+                    settings.savedPrompts.first { $0.id == resolution.actionID }
+                },
+                effectivePrompt: submittedInput,
+                chatShowedAnswer: chatShowsAnswer
+            )
+        }
 
         // An assistant's alias alone, with nothing selected, picks the
         // assistant for the chat and sends nothing. With text after it, or
@@ -7227,7 +7270,9 @@ import Observation
             let preamble = submittedContext.promptPreamble()
             if !preamble.isEmpty { preambleParts.append(preamble) }
         }
-        if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           pendingContext?.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines)
+                != launchText.trimmingCharacters(in: .whitespacesAndNewlines) {
             var context = CaptureContext(
                 appName: launchSelection?.appName ?? "the background"
             )
@@ -7397,7 +7442,7 @@ import Observation
             beginPendingQuestion(request)
             isStreaming = true
             do {
-                let searchBundle = try await webSearchService.search(query)
+                let searchBundle = try await webSearchService.search(query, provider: settings.webSearchProvider)
                 guard enrichmentContinues else {
                     restoreEnrichmentInput()
                     return false
@@ -7526,14 +7571,12 @@ import Observation
             .compactMap { attachmentStore.storedImage(for: $0) }
         let reaskedImages = attachments.compactMap { attachmentStore.storedImage(for: $0.ref) }
         var visionImage = submittedImages.last ?? reaskedImages.last ?? threadImages.last
-        if visionImage != nil, !visionRouteWorks {
+        if !visionRouteWorks {
             visionImage = nil
-            if attachments.contains(where: { $0.image != nil }) {
-                attachments = await readImagesAsText(attachments)
-                guard !Task.isCancelled else {
-                    restoreEnrichmentInput()
-                    return
-                }
+            attachments = await readImagesAsText(attachments)
+            guard !Task.isCancelled else {
+                restoreEnrichmentInput()
+                return
             }
         }
         let routesToVision = visionImage != nil
@@ -7626,6 +7669,15 @@ import Observation
         }
         // Each turn's attachments in front of its question, fitted into
         // their share of the answering model's window first.
+        if !routesToVision {
+            await cacheImageText(for: requestMessages.flatMap(\.attachmentRefs))
+            guard !Task.isCancelled else {
+                restoreEnrichmentInput()
+                return
+            }
+        }
+        let availableImageIDs = routesToVision ? Set(requestMessages.flatMap(\.attachmentRefs)
+            .filter { attachmentStore.storedImage(for: $0) != nil }.map(\.id)) : []
         let attachmentBudget = attachmentContextBudget(provider: provider, model: model)
         let composed = AttachmentRequestComposer.compose(
             messages: requestMessages,
@@ -7636,7 +7688,8 @@ import Observation
                     + settings.systemPrompt.utf8.count
                     + (assistantSystem?.utf8.count ?? 0)
             ),
-            excluded: request.inlineAttachmentIDs
+            excluded: request.inlineAttachmentIDs,
+            availableImages: availableImageIDs
         )
         requestMessages = composed.messages
         let requestImages = routesToVision ? turnImages(for: requestMessages) : [:]
@@ -7652,8 +7705,10 @@ import Observation
         // The question is a turn now; a stream failure keeps it there.
         enrichmentSubmittedInput = nil
         let sentPendingImages = pendingImages
-        pendingImages.removeAll()
-        pendingContext = nil
+        if !request.reasksTurn {
+            pendingImages.removeAll()
+            pendingContext = nil
+        }
         // The chips that rode leave the tray (and so does a failed one); a
         // chip added while a search ran stays for the next question.
         var takenChips = AttachmentTray.Handoff()
@@ -8328,11 +8383,12 @@ import Observation
             guard let url = URL(string: provider.baseURL) else { return nil }
             let tools = self.chatTools
             // The model gets a search_web tool so it can look things up
-            // mid-answer; SearXNG stays the single search backend.
+            // mid-answer, using the same provider as explicit searches.
             var webSearch: (@Sendable (String) async throws -> String)?
             let webEnabled = chatTools ? tools.contains(.web) : settings.modelWebSearchEnabled
             if webEnabled, let webSearchService {
-                webSearch = { query in try await webSearchService.search(query) }
+                let searchProvider = settings.webSearchProvider
+                webSearch = { query in try await webSearchService.search(query, provider: searchProvider) }
             }
             let profile = modelPreferences.profile(providerID: provider.id, model: model)
             // The question card is behind the Quick AI setting "Let the model
@@ -9059,7 +9115,7 @@ import Observation
     /// it is the search, so typing moves the highlight to the first match
     /// (a search cleared by opening or Escape keeps the highlight it set);
     /// elsewhere a typed `@` opens Add Context.
-    func quickAIComposerDidChange(_ newValue: String) {
+    func quickAIComposerDidChange(_ newValue: String, allowsContextTrigger: Bool = true) {
         noteInteraction()
         // A queued follow-up cleared from the field is no longer queued.
         if isFollowUpQueued, newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -9067,7 +9123,7 @@ import Observation
         }
         if isRecentChatsPresented {
             if !newValue.isEmpty { recentChatsIndex = 0 }
-        } else {
+        } else if allowsContextTrigger {
             addContextTriggerDidChange(newValue)
         }
     }

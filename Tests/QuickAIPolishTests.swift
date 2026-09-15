@@ -454,7 +454,7 @@ struct QuickAIPolishTests {
         let vm = make(service: mock)
         vm.input = ""
         #expect(vm.handleTab())
-        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ tools, or / for commands…")
+        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ to attach, or / for commands…")
 
         await ask(vm, mock, "hello", reply: "Hi.")
         #expect(vm.quickAIComposerPlaceholder == "Ask a follow-up…", "a thread exists")
@@ -469,7 +469,7 @@ struct QuickAIPolishTests {
         vm.isStreaming = false
 
         vm.startNewConversation()
-        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ tools, or / for commands…")
+        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ to attach, or / for commands…")
     }
 
     @Test func theQuestionCardSaysTheWaitIsYours() {
@@ -489,7 +489,7 @@ struct QuickAIPolishTests {
         let mock = MockQuickService()
         let vm = make(service: mock) { $0.newChatInterval = .always }
         await ask(vm, mock, "hello", reply: "Hi.")
-        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ tools, or / for commands…",
+        #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ to attach, or / for commands…",
                 "with New Chat set to always, the next question starts its own chat")
     }
 
@@ -649,7 +649,7 @@ struct QuickAIPolishTests {
         vm.input = ""
         #expect(vm.handleTab())
         #expect(vm.quickAIEmptyStateHints == [
-            "@ adds a window, a selection, or a screen",
+            "@ attaches files, links, or selected text",
             "⌘P opens recent chats",
             "⇧⌘O changes the model",
         ])

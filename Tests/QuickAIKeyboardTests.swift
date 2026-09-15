@@ -360,7 +360,7 @@ struct QuickAIKeyboardTests {
         viewModel.isStreaming = true
         viewModel.streamingStatus = "Thinking…"
         #expect(viewModel.isQuickAIPresented, "streaming presents the surface")
-        #expect(viewModel.quickAIComposerAction == .init(label: "Stop", keys: ["esc"]))
+        #expect(viewModel.quickAIComposerAction == .init(label: "Stop", keys: ["esc"], behavior: .stop))
 
         try overlay.pressEscape()
 

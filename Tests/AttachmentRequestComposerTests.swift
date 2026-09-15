@@ -146,12 +146,13 @@ struct AttachmentRequestComposerTests {
         #expect(result.messages[0].content == "summarise https://example.com")
     }
 
-    @Test func imagesAddNoBlock() {
+    @Test func imagesWhosePixelsAreSentAddNoBlock() {
         let shot = Self.ref(.screenshot, "Screenshot")
         let result = AttachmentRequestComposer.compose(
             messages: [QuickMessage(role: .user, content: "what is this", attachments: [shot])],
             text: Self.lookup([:]),
-            share: .max
+            share: .max,
+            availableImages: [shot.id]
         )
         #expect(result.messages[0].content == "what is this")
     }

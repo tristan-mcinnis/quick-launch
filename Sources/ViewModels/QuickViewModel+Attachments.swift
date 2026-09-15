@@ -15,6 +15,10 @@ extension QuickViewModel {
     /// The session's attachment text and pictures, shared with the other view.
     var attachmentStore: AttachmentSessionStore { store.attachments }
 
+    /// Any context waiting for the next question takes precedence over
+    /// copying the previous answer when the composer is empty.
+    var hasPendingChatContext: Bool { hasPendingAttachment || launchSelection != nil }
+
     // MARK: - Add Context
 
     /// Finder is the app behind the overlay, so Add Context lists Finder
@@ -114,16 +118,24 @@ extension QuickViewModel {
     /// the status line; Escape (`cancel()`) stops the reads and keeps the
     /// typed text. Returns false when the wait was cancelled.
     func waitForReadingAttachments() async -> Bool {
-        guard attachmentTray.isReading else { return true }
-        isWaitingForAttachments = true
-        isStreaming = true
-        streamingStatus = attachmentTray.readingStatusLine
-        await attachmentTray.waitUntilRead()
-        let cancelled = !isWaitingForAttachments || Task.isCancelled
-        isWaitingForAttachments = false
-        guard !cancelled else { return false }
-        isStreaming = false
-        streamingStatus = nil
+        if attachmentTray.isReading {
+            isWaitingForAttachments = true
+            isStreaming = true
+            streamingStatus = attachmentTray.readingStatusLine
+            await attachmentTray.waitUntilRead()
+            let cancelled = !isWaitingForAttachments || Task.isCancelled
+            isWaitingForAttachments = false
+            guard !cancelled else { return false }
+            isStreaming = false
+            streamingStatus = nil
+        }
+        // A failed chip stays visible until the user retries or removes it.
+        // Never silently send a question with one of its attachments missing.
+        if let failed = attachmentTray.items.first(where: \.isFailed) {
+            errorMessage = "Could not read \(failed.name). Retry or remove it before sending."
+            requestInputFocus()
+            return false
+        }
         return true
     }
 
@@ -174,24 +186,46 @@ extension QuickViewModel {
         return true
     }
 
-    /// No vision route: each picture this turn carries is read on this Mac
-    /// and rides as text ("Text read from the image on this Mac"); its
-    /// pixels are not sent.
+    /// No vision route: use existing OCR text, or read current/session pixels
+    /// locally. Reference-only retries use the same fallback as new images.
     func readImagesAsText(_ contents: [AttachmentContent]) async -> [AttachmentContent] {
         var result: [AttachmentContent] = []
         for var content in contents {
-            if let image = content.image, content.ref.kind.isImage {
-                streamingStatus = "Reading text from \(content.ref.name) on this Mac…"
-                let text = await recognizeImageText(image.data)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !Task.isCancelled else { return result }
+            if content.ref.kind.isImage {
+                if content.text == nil, let stored = attachmentStore.text(for: content.ref) {
+                    content.text = stored.text
+                    content.kindLabel = stored.kindLabel
+                    content.notes = stored.notes
+                }
+                if content.text == nil,
+                   let image = content.image ?? attachmentStore.image(for: content.ref) {
+                    streamingStatus = "Reading text from \(content.ref.name) on this Mac…"
+                    let text = await recognizeImageText(image.data)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !Task.isCancelled else { return result }
+                    content.text = text.isEmpty ? "(No text was found in the image.)" : text
+                    content.kindLabel = "Text read from the image on this Mac"
+                }
                 content.image = nil
-                content.text = text.isEmpty ? "(No text was found in the image.)" : text
-                content.kindLabel = "Text read from the image on this Mac"
             }
             result.append(content)
         }
         streamingStatus = nil
         return result
+    }
+
+    /// Older turns may have been sent through vision before that route became
+    /// unavailable. OCR their session pixels once; missing pixels remain missing
+    /// so the request composer can name them instead of silently dropping them.
+    func cacheImageText(for references: [ChatAttachmentRef]) async {
+        for ref in references where ref.kind.isImage {
+            guard !Task.isCancelled else { return }
+            guard attachmentStore.text(for: ref) == nil else { continue }
+            let contents = await readImagesAsText([AttachmentContent(ref: ref)])
+            guard !Task.isCancelled else { return }
+            for content in contents where content.text != nil { attachmentStore.store(content) }
+        }
     }
 
     /// Each user turn's pictures, by message id, from the session store.
@@ -222,7 +256,9 @@ extension QuickViewModel {
         let live = attachmentTray.items.filter { !$0.isFailed }
         let hasImage = !pendingImages.isEmpty || live.contains { $0.kind.isImage }
         if hasImage {
-            return visionRouteWorks ? visionRoutingNote : Self.imageAsTextLine
+            return visionRouteWorks
+                ? visionRoutingNote.replacingOccurrences(of: "Sent ", with: "Will send ")
+                : Self.pendingImageAsTextLine
         }
         guard !live.isEmpty, let provider = activeProvider else { return nil }
         let model = resolvedModel(for: provider, override: chatModelOverride(for: provider)) ?? ""
@@ -233,9 +269,10 @@ extension QuickViewModel {
         )
         let characters = attachmentTray.readyContents.compactMap(\.text).reduce(0) { $0 + $1.utf8.count }
         if characters > share { return "Will be cut to fit \(provider.name)" }
-        return provider.location == .local ? "Only on this Mac" : "Sent to \(provider.name)"
+        return provider.location == .local ? "Only on this Mac" : "Will send to \(provider.name)"
     }
 
+    static let pendingImageAsTextLine = "Will send as text (read on this Mac)"
     static let imageAsTextLine = "Sent as text (read on this Mac)"
 
     // MARK: - Chips on sent questions

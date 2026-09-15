@@ -37,7 +37,9 @@ final class AttachmentTray {
     /// One chip.
     struct Item: Identifiable, Equatable, Sendable {
         let id: UUID
-        let source: AttachmentSource
+        var source: AttachmentSource?
+        /// An unresolved drag stays with its chip across window handoffs.
+        var dropSource: DropSource? = nil
         var phase: Phase
         /// The provisional kind until the source is read, then the
         /// reference's.
@@ -62,7 +64,7 @@ final class AttachmentTray {
 
         /// The file behind the chip, for Quick Look and Open.
         var fileURL: URL? {
-            if case .file(let url) = source { return url }
+            if case .some(.file(let url)) = source { return url }
             return content?.ref.path.map { URL(fileURLWithPath: $0) }
         }
     }
@@ -135,7 +137,6 @@ final class AttachmentTray {
     @ObservationIgnored private var reads: [UUID: Task<Result<AttachmentContent, AttachmentReadFailure>, Never>] = [:]
     /// Per chip, the task that waits on its read and files the result here.
     @ObservationIgnored private var readTasks: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var intakeTask: Task<Void, Never>?
 
     init(
         extractor: any AttachmentExtracting,
@@ -217,7 +218,7 @@ final class AttachmentTray {
             break
         }
         if let identity = source.identity,
-           let existing = liveItems.first(where: { $0.source.identity == identity }) {
+           let existing = liveItems.first(where: { $0.source?.identity == identity }) {
             return "\(existing.name) is already attached."
         }
         if liveItems.count >= AttachmentLimits.attachmentsPerMessage {
@@ -242,9 +243,17 @@ final class AttachmentTray {
     private func startReading(_ item: Item) {
         let extractor = extractor
         let timeout = readTimeout
-        let source = item.source
         let read = Task {
-            await Self.read(source, with: extractor, timeout: timeout)
+            let source: AttachmentSource?
+            if let drop = item.dropSource {
+                source = await drop.resolve(timeout: timeout)
+            } else {
+                source = item.source
+            }
+            guard !Task.isCancelled else { return Result<AttachmentContent, AttachmentReadFailure>.failure(.init("Cancelled")) }
+            guard let source else { return .failure(.init(Self.nothingToAttachNotice)) }
+            if case .file(let url) = source, Self.isFolder(url) { return .failure(.folder) }
+            return await Self.read(source, with: extractor, timeout: timeout)
         }
         watch(item.id, read)
     }
@@ -292,6 +301,16 @@ final class AttachmentTray {
         reads[id] = nil
         // A chip removed or cancelled while it read is already gone.
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].isReading else { return }
+        if let resolved = items[index].dropSource?.resolvedSource {
+            if let identity = resolved.identity,
+               let existing = liveItems.first(where: { $0.id != id && $0.source?.identity == identity }) {
+                items.remove(at: index)
+                afterRemoval()
+                notice = "\(existing.name) is already attached."
+                return
+            }
+            items[index].source = resolved
+        }
         switch result {
         case .success(let content):
             let isNewImage = content.ref.kind.isImage && !items[index].kind.isImage
@@ -315,6 +334,38 @@ final class AttachmentTray {
             readTasks[entry.key] = nil
             if Task.isCancelled { return }
         }
+    }
+
+    /// Retry a failed read in place, keeping its position and keyboard focus.
+    @discardableResult
+    func retry(_ id: UUID) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].isFailed else { return false }
+        let item = items[index]
+        if item.source == nil, liveItems.count >= AttachmentLimits.attachmentsPerMessage {
+            notice = Self.attachmentLimitNotice
+            return false
+        }
+        if item.source == nil, item.kind.isImage, liveImageCount >= AttachmentLimits.imagesPerMessage {
+            notice = Self.imageLimitNotice
+            return false
+        }
+        if let source = item.source,
+           let refusal = refusal(for: source, kind: item.kind, name: item.name) {
+            notice = refusal
+            return false
+        }
+        notice = nil
+        items[index].phase = .reading
+        startReading(items[index])
+        return true
+    }
+
+    /// Space on a failed chip retries it instead of opening its file.
+    @discardableResult
+    func retryFocusedFailure() -> Bool {
+        guard let focusedItemID, items.contains(where: { $0.id == focusedItemID && $0.isFailed }) else { return false }
+        _ = retry(focusedItemID)
+        return true
     }
 
     // MARK: - Removing
@@ -352,8 +403,6 @@ final class AttachmentTray {
 
     func removeAll() {
         for id in Set(readTasks.keys).union(reads.keys) { stopReading(id) }
-        intakeTask?.cancel()
-        intakeTask = nil
         items.removeAll()
         focusedItemID = nil
         pastedLink = nil
@@ -396,8 +445,6 @@ final class AttachmentTray {
         for task in readTasks.values { task.cancel() }
         readTasks.removeAll()
         reads.removeAll()
-        intakeTask?.cancel()
-        intakeTask = nil
         items.removeAll()
         focusedItemID = nil
         pastedLink = nil
@@ -599,29 +646,76 @@ final class AttachmentTray {
     /// What a drop target takes: files, web links, and images.
     static let droppableTypes: [UTType] = [.fileURL, .url, .image]
 
-    /// A drop: the dropped items are loaded off the drag, then become
-    /// chips in order. A file wins over a picture of it, and a picture over
-    /// the link it came from. A newer drop replaces a load still running.
+    /// A provider gets a chip before loading begins. Its complete read belongs
+    /// to that chip, so Send waits and moving to AI Chat transfers the same read.
+    /// A later drop appends; it never cancels an earlier drop still loading.
     func acceptDrop(_ providers: [NSItemProvider]) {
-        intakeTask?.cancel()
-        intakeTask = Task { [weak self] in
-            var sources: [AttachmentSource] = []
-            for provider in providers {
-                if let source = await Self.source(from: provider) { sources.append(source) }
+        for provider in providers {
+            let hasFile = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+            let hasImage = provider.registeredTypeIdentifiers.contains {
+                UTType($0)?.conforms(to: .image) == true
             }
-            guard !Task.isCancelled, let self else { return }
-            self.intakeTask = nil
-            if sources.isEmpty {
-                self.notice = Self.nothingToAttachNotice
-            } else {
-                self.add(contentsOf: sources)
+            let hasURL = provider.hasItemConformingToTypeIdentifier(UTType.url.identifier)
+            guard hasFile || hasImage || hasURL else {
+                notice = Self.nothingToAttachNotice
+                continue
             }
+            guard liveItems.count < AttachmentLimits.attachmentsPerMessage else {
+                notice = Self.attachmentLimitNotice
+                continue
+            }
+            let kind: ChatAttachmentKind = hasFile ? .text : (hasImage ? .image : .link)
+            if kind.isImage, liveImageCount >= AttachmentLimits.imagesPerMessage {
+                notice = Self.imageLimitNotice
+                continue
+            }
+            let name = provider.suggestedName ?? (hasFile ? "Dropped file" : (hasImage ? Self.droppedImageName : "Dropped link"))
+            let item = Item(
+                id: UUID(), source: nil, dropSource: DropSource(provider: provider),
+                phase: .reading, kind: kind, name: name
+            )
+            items.append(item)
+            startReading(item)
         }
     }
 
-    /// Waits for a drop still loading.
+    /// Includes provider resolution and extraction: a drop is ready to send
+    /// only after both have finished.
     func waitForDrop() async {
-        await intakeTask?.value
+        await waitUntilRead()
+    }
+
+    /// NSItemProvider is used only on the main actor. Reference identity makes
+    /// this transferable with a Sendable chip without copying provider state.
+    @MainActor
+    final class DropSource: Equatable {
+        private let provider: NSItemProvider
+        private(set) var resolvedSource: AttachmentSource?
+
+        init(provider: NSItemProvider) { self.provider = provider }
+
+        nonisolated static func == (lhs: DropSource, rhs: DropSource) -> Bool { lhs === rhs }
+
+        private func loadSource() async -> AttachmentSource? {
+            await AttachmentTray.source(from: provider)
+        }
+
+        func resolve(timeout: Duration) async -> AttachmentSource? {
+            if let resolvedSource { return resolvedSource }
+            let source = await withTaskGroup(of: AttachmentSource?.self) { group in
+                group.addTask { await self.loadSource() }
+                group.addTask {
+                    try? await Task.sleep(for: timeout)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
+            }
+            guard !Task.isCancelled else { return nil }
+            resolvedSource = source
+            return source
+        }
     }
 
     static let nothingToAttachNotice = "Nothing here can be attached."
@@ -631,6 +725,7 @@ final class AttachmentTray {
            let url = await loadURL(from: provider), url.isFileURL {
             return .file(url)
         }
+        guard !Task.isCancelled else { return nil }
         if let type = provider.registeredTypeIdentifiers
             .compactMap(UTType.init)
             .first(where: { $0.conforms(to: .image) }),
@@ -641,6 +736,7 @@ final class AttachmentTray {
            ) {
             return .image(image, name: droppedImageName, kind: .image)
         }
+        guard !Task.isCancelled else { return nil }
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
            let url = await loadURL(from: provider), isWebURL(url) {
             return .link(url)
@@ -649,19 +745,19 @@ final class AttachmentTray {
     }
 
     private static func loadURL(from provider: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { continuation in
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                continuation.resume(returning: url)
-            }
-        }
+        let type: UTType = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) ? .fileURL : .url
+        guard let data = await loadData(from: provider, type: type) else { return nil }
+        return URL(dataRepresentation: data, relativeTo: nil)
     }
 
     private static func loadData(from provider: NSItemProvider, type: UTType) async -> Data? {
-        await withCheckedContinuation { continuation in
-            _ = provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
-                continuation.resume(returning: data)
+        let load = DropLoad<Data>()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard load.install(continuation) else { return }
+                load.setProgress(provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in load.finish(data) })
             }
-        }
+        } onCancel: { load.cancel() }
     }
 
     // MARK: - Links
@@ -694,4 +790,51 @@ final class AttachmentTray {
         "java", "kt", "rb", "sh", "zsh", "css", "scss", "sql", "lua", "php", "cs", "r", "pl",
         "png", "jpg", "jpeg", "heic", "heif", "tif", "tiff", "gif", "webp",
     ]
+}
+
+/// Provider callbacks may arrive on any queue or after cancellation. The lock
+/// guards the continuation, completion flag, and Progress; exactly one path
+/// resumes, so removing a chip never waits indefinitely for its drag provider.
+private final class DropLoad<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value?, Never>?
+    private var progress: Progress?
+    private var finished = false
+
+    func install(_ continuation: CheckedContinuation<Value?, Never>) -> Bool {
+        let installed = lock.withLock {
+            guard !finished else { return false }
+            self.continuation = continuation
+            return true
+        }
+        if !installed { continuation.resume(returning: nil) }
+        return installed
+    }
+
+    func setProgress(_ progress: Progress) {
+        let cancelled = lock.withLock {
+            guard !finished else { return true }
+            self.progress = progress
+            return false
+        }
+        if cancelled { progress.cancel() }
+    }
+
+    func finish(_ value: Value?) {
+        let continuation = lock.withLock {
+            guard !finished else { return Optional<CheckedContinuation<Value?, Never>>.none }
+            finished = true
+            let kept = self.continuation
+            self.continuation = nil
+            progress = nil
+            return kept
+        }
+        continuation?.resume(returning: value)
+    }
+
+    func cancel() {
+        let progress = lock.withLock { self.progress }
+        finish(nil)
+        progress?.cancel()
+    }
 }

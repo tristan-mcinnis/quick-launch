@@ -480,8 +480,9 @@ struct AttachmentTrayTests {
 
         tray.acceptDrop([NSItemProvider(object: folder as NSURL)])
         await tray.waitForDrop()
-        #expect(tray.isEmpty)
-        #expect(tray.notice == "Folders cannot be attached; drop the files.")
+        #expect(tray.readyContents.isEmpty)
+        #expect(tray.items.first?.failureLine == "Folders cannot be attached; drop the files.",
+                "a refused pending drop stays visible so a waiting Send cannot omit it silently")
 
         tray.acceptDrop([NSItemProvider(object: "just words" as NSString)])
         await tray.waitForDrop()

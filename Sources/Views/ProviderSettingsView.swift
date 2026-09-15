@@ -196,13 +196,12 @@ struct ProviderSettingsView: View {
         }
     }
 
-    /// The switch itself lives in General › Chat with the other chat
-    /// defaults (one setting, `modelWebSearchEnabled`); this card only says
-    /// where, for anyone who looks for it beside the models.
+    /// The same provider picker as General › Chat; every surface shares it.
     private var webSearchCard: some View {
         SettingsCard("Web search") {
-            CardNote(isFirst: true) {
-                CardText("Web search is one of the chat defaults. Turn it on or off in General › Chat. The Translator uses the same switch.")
+            WebSearchProviderRow(viewModel: viewModel, isFirst: true)
+            CardNote {
+                CardText("Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
             }
         }
     }

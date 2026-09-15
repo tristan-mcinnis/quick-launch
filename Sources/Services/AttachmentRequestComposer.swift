@@ -50,11 +50,14 @@ enum AttachmentRequestComposer {
 
     /// - `excluded`: references on the current turn whose text already
     ///   rides the prompt another way (a page read of a URL in the question).
+    /// - `availableImages`: image references whose pixels accompany the request;
+    ///   every other image needs its OCR text or an explicit unavailable notice.
     static func compose(
         messages: [QuickMessage],
         text lookup: TextLookup,
         share: Int,
         excluded: Set<UUID> = [],
+        availableImages: Set<UUID> = [],
         timeZone: TimeZone = .current
     ) -> Result {
         guard let current = messages.lastIndex(where: { $0.role == .user }),
@@ -68,8 +71,9 @@ enum AttachmentRequestComposer {
             var used = 0
             for (position, ref) in message.attachmentRefs.enumerated() {
                 if messageIndex == current, excluded.contains(ref.id) { continue }
+                if ref.kind.isImage, availableImages.contains(ref.id) { continue }
                 guard let stored = lookup(ref) else {
-                    if !ref.kind.isImage { stubs[ref.id] = notLoadedStub(for: ref) }
+                    stubs[ref.id] = notLoadedStub(for: ref)
                     continue
                 }
                 var body = stored.text
@@ -299,7 +303,10 @@ enum AttachmentRequestComposer {
 
     /// An attachment from an earlier session: its text is not in memory.
     static func notLoadedStub(for ref: ChatAttachmentRef) -> String {
-        "[\(stubHead(for: ref)): attached earlier in this chat; its text is not loaded in this session, so it is not included.]"
+        if ref.kind.isImage {
+            return "[\(stubHead(for: ref)): image and extracted text are unavailable in this session. Ask for the image to be attached again; do not infer its contents.]"
+        }
+        return "[\(stubHead(for: ref)): attached earlier in this chat; its text is not loaded in this session, so it is not included.]"
     }
 
     private static func stubHead(for ref: ChatAttachmentRef) -> String {

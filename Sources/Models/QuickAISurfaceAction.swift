@@ -10,6 +10,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     case resetSize
     /// The composer’s plus menu: files, links, and captured context.
     case attach
+    /// Shared provider choice for explicit searches and model tool calls.
+    case searchSettings
     /// AI Chat: slide the chat list in (`⌘\`).
     case showChatList
     /// AI Chat: slide the chat list out (`⌘\`).
@@ -30,6 +32,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .attach: "Attach…"
+        case .searchSettings: "Search Provider…"
         case .resetSize: "Reset Quick AI Size"
         case .showChatList: "Show Chat List"
         case .hideChatList: "Hide Chat List"
@@ -45,6 +48,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .attach:
             "Add a file, link, selection, or screenshot"
+        case .searchSettings:
+            "Choose the search source used by all chats"
         case .resetSize:
             "Back to \(Int(QuickAISize.standard.width)) × \(Int(QuickAISize.standard.height))"
         case .showChatList, .hideChatList:
@@ -69,6 +74,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     var systemImage: String {
         switch self {
         case .attach: "plus"
+        case .searchSettings: "magnifyingglass"
         case .resetSize: "arrow.down.right.and.arrow.up.left"
         case .showChatList, .hideChatList: "sidebar.left"
         case .findInChat: "magnifyingglass"
@@ -85,7 +91,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     var shortcut: KeyShortcut? {
         switch self {
         case .attach: QuickViewModel.attachShortcut
-        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage: nil
+        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings: nil
         case .showChatList, .hideChatList: AIChatWindowModel.chatListShortcut
         case .findInChat: AIChatWindowModel.findShortcut
         }

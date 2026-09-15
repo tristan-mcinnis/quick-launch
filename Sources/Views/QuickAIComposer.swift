@@ -18,8 +18,8 @@ struct QuickAIComposer: View {
     /// (`\.attachmentTray`), then to the view model's own
     /// (`QuickViewModel.attachmentTray`).
     var tray: AttachmentTray? = nil
-    /// The AI Chat window's field grows to `AIChatWindowModel.composerLineLimit`
-    /// lines; the Quick AI surface's stays one line.
+    /// AI Chat grows to eight lines; Quick AI grows to four. Both scroll
+    /// longer drafts inside the editor, keeping the primary action visible.
     var multiline = false
     /// Tells the AI Chat window where the keyboard is.
     var onFocusChange: ((Bool) -> Void)? = nil
@@ -27,6 +27,8 @@ struct QuickAIComposer: View {
     @Environment(\.attachmentTray) private var environmentTray
 
     private var activeTray: AttachmentTray? { tray ?? environmentTray ?? viewModel.attachmentTray }
+    private var editsMessage: Bool { !viewModel.isRecentChatsPresented && viewModel.inputMode == nil }
+    static let quickLineLimit = 4
 
     /// The field's name. In the AI Chat window it is a message field, not
     /// "Ask Quick AI"; in Recent Chats it searches.
@@ -79,6 +81,7 @@ struct QuickAIComposer: View {
             ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray)
             composerRow
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background { pasteShortcuts }
         // Quick AI's whole surface is the drop target (OverlayView); in the
         // AI Chat window it is the composer.
@@ -114,7 +117,7 @@ struct QuickAIComposer: View {
                     : "Attach (⇧⌘A): a window, a selection, a screen, a file, or a link (or type @)"
             )
 
-            HStack(spacing: House.Spacing.xs) {
+            HStack(alignment: .bottom, spacing: House.Spacing.xs) {
                 // The placeholder is drawn as an overlay, not as the field's
                 // prompt: a styled prompt takes the field's ink on macOS and
                 // read as typed text. The empty prompt keeps the field from
@@ -122,11 +125,11 @@ struct QuickAIComposer: View {
                 TextField(
                     text: $viewModel.input,
                     prompt: Text(""),
-                    axis: multiline ? .vertical : .horizontal
+                    axis: editsMessage ? .vertical : .horizontal
                 ) {
                     Text(Self.fieldName(multiline: multiline, searchingChats: false))
                 }
-                .lineLimit(multiline ? 1...AIChatWindowModel.composerLineLimit : 1...1)
+                .lineLimit(1...(editsMessage ? (multiline ? AIChatWindowModel.composerLineLimit : Self.quickLineLimit) : 1))
                 .textFieldStyle(.plain)
                 .labelsHidden()
                 // Raycast's field runs at the small reading size, the same
@@ -134,7 +137,7 @@ struct QuickAIComposer: View {
                 .font(AQDesign.TypeToken.body)
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
                 .frame(maxWidth: .infinity)
-                .overlay(alignment: multiline ? .topLeading : .leading) {
+                .overlay(alignment: .topLeading) {
                     if viewModel.input.isEmpty {
                         Text(viewModel.quickAIComposerPlaceholder)
                             .font(AQDesign.TypeToken.body)
@@ -158,40 +161,50 @@ struct QuickAIComposer: View {
                 .onKeyPress(keys: [.leftArrow, .rightArrow, .delete, .space, .escape], phases: [.down, .repeat]) { press in
                     stripKey(press)
                 }
-                .onChange(of: viewModel.input) { _, newValue in
+                .onChange(of: viewModel.input) { oldValue, newValue in
                     // Recent Chats filters on it; elsewhere a typed `@`
                     // opens the same Add Context menu the circle does.
-                    viewModel.quickAIComposerDidChange(newValue)
+                    viewModel.quickAIComposerDidChange(
+                        newValue, allowsContextTrigger: newValue.last == "@" && newValue.dropLast() == oldValue[...]
+                    )
                     activeTray?.composerTextDidChange(newValue)
                 }
                 .accessibilityLabel(
                     Self.fieldName(multiline: multiline, searchingChats: viewModel.isRecentChatsPresented)
                 )
-                if let confirmation = viewModel.composerConfirmation {
-                    // A copy just landed: a checkmark in place of the action
-                    // for a moment, then the action comes back.
-                    Image(systemName: "checkmark")
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .accessibilityHidden(true)
-                    Text(confirmation)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .lineLimit(1)
-                } else {
-                    Text(action.label)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .lineLimit(1)
-                    KeyCapGroup(keys: action.keys)
+                .help(editsMessage ? "Return sends. Shift–Return adds a new line." : "Return chooses the selected item.")
+                .padding(.vertical, Self.multilineTextInset)
+                Button {
+                    viewModel.performComposerPrimaryAction()
+                    viewModel.requestInputFocus()
+                } label: {
+                    HStack(spacing: House.Spacing.xs) {
+                        if let confirmation = viewModel.composerConfirmation {
+                            Image(systemName: "checkmark")
+                                .accessibilityHidden(true)
+                            Text(confirmation)
+                        } else {
+                            Text(action.label)
+                            KeyCapGroup(keys: action.keys)
+                        }
+                    }
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                    .padding(.horizontal, House.Spacing.xxs)
+                    .frame(minHeight: House.Control.pill)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(action.label)
+                .accessibilityIdentifier("composer-primary-action")
+                .help("\(action.label) (\(action.keys.joined()))")
             }
             .padding(.leading, House.Spacing.md)
             .padding(.trailing, House.Spacing.sm)
             // One line is the pill; a multi-line field grows from it, the
             // text inset as the pill centres one line.
-            .padding(.vertical, multiline ? Self.multilineTextInset : 0)
-            .frame(minHeight: House.Control.pill, maxHeight: multiline ? nil : House.Control.pill)
+            .frame(minHeight: House.Control.pill)
             // `Radius.pill` is half the row height, so this is a capsule,
             // drawn as a circular rounded rectangle: `Capsule`'s stroke
             // leaves a stray hairline outside its left cap on macOS 26.
@@ -241,7 +254,7 @@ struct QuickAIComposer: View {
     /// Above and below the text of a multi-line field: what centres one
     /// line of `body` text in the pill's height.
     static let multilineTextInset: CGFloat = {
-        let font = NSFont.systemFont(ofSize: House.TypeToken.Size.bodySmall)
+        let font = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
         let line = font.ascender - font.descender + font.leading
         return max(0, (House.Control.pill - line) / 2)
     }()
@@ -271,6 +284,7 @@ struct QuickAIComposer: View {
         case .rightArrow: tray.moveFocus(1)
         case .delete: tray.handleBackspace(composerIsEmpty: viewModel.input.isEmpty)
         case .space:
+            if tray.retryFocusedFailure() { return .handled }
             if let url = tray.focusedFileURL { AttachmentQuickLook.shared.preview(url) }
         default: tray.leaveStrip()
         }

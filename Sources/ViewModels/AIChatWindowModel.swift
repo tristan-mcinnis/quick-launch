@@ -661,7 +661,7 @@ protocol AIChatWindowPresenting: AnyObject {
         case .keepOnTop: isAlwaysOnTop = true; focusComposer()
         case .stopKeepingOnTop: isAlwaysOnTop = false; focusComposer()
         // The chat's own actions, run by the view model.
-        case .resetSize, .attach, .copyMessage, .captureMessage: focusComposer()
+        case .resetSize, .attach, .copyMessage, .captureMessage, .searchSettings: focusComposer()
         }
     }
 

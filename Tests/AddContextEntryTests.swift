@@ -8,13 +8,13 @@ import Testing
 @Suite("Add Context rows")
 @MainActor
 struct AddContextEntryTests {
-    @Test func theMenuListsTheCapturesThenFileAndLink() {
+    @Test func theMenuListsFilesLinksAndSelectedTextBeforeCaptures() {
         let rows = AddContextRow.menu(finderIsBehind: false)
         #expect(rows.map(\.title) == [
-            "Focused Window", "Selected Text", "Selected Area", "Entire Screen", "File…", "Link…",
+            "Files…", "Link…", "Selected Text", "Focused Window", "Selected Area", "Entire Screen",
         ])
-        #expect(rows.prefix(4).compactMap(\.capture) == AddContextEntry.allCases, "the captures keep their order")
-        #expect(rows.dropFirst(4).allSatisfy { $0.capture == nil })
+        #expect(rows.prefix(2).allSatisfy { $0.capture == nil })
+        #expect(rows.dropFirst(2).compactMap(\.capture) == [.selectedText, .focusedWindow, .selectedArea, .entireScreen])
     }
 
     @Test func finderSelectionIsListedOnlyBehindFinder() {

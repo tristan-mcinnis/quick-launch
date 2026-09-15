@@ -64,7 +64,7 @@ final class AttachmentSessionStore {
     /// The key a reference's text is kept under: its content hash and
     /// extractor version, so the same file attached twice shares one entry.
     /// A reference without a hash (a selection or a page read before
-    /// hashing) uses its id. Images have no text key.
+    /// hashing) uses its id. Image OCR text uses the same reference id.
     static func key(for ref: ChatAttachmentRef) -> String {
         if let hash = ref.contentHash {
             return "\(hash)-v\(ref.extractorVersion ?? 0)"
@@ -151,11 +151,11 @@ final class AttachmentSessionStore {
     /// A chat was deleted: its attachments go unless another chat still
     /// names them.
     func remove(_ deleted: [ChatAttachmentRef], keeping stillReferenced: [ChatAttachmentRef]) {
-        let keptKeys = Set(stillReferenced.filter { !$0.kind.isImage }.map(Self.key(for:)))
+        let keptKeys = Set(stillReferenced.map(Self.key(for:)))
         let keptImages = Set(stillReferenced.filter(\.kind.isImage).map(\.id))
         for ref in deleted {
-            if ref.kind.isImage {
-                guard !keptImages.contains(ref.id), let image = images.removeValue(forKey: ref.id) else { continue }
+            if ref.kind.isImage, !keptImages.contains(ref.id),
+               let image = images.removeValue(forKey: ref.id) {
                 imageByteCount -= image.data.count
                 imageOrder.removeAll { $0 == ref.id }
             }

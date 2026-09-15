@@ -248,7 +248,7 @@ struct AttachmentFlowTests {
         #expect(rig.vm.addContextRows.last == .finderSelection)
         #expect(rig.vm.attachmentTray.finderIsBehind)
         #expect(rig.vm.addContextRows.map(\.title) == [
-            "Focused Window", "Selected Text", "Selected Area", "Entire Screen", "File…", "Link…", "Finder Selection",
+            "Files…", "Link…", "Selected Text", "Focused Window", "Selected Area", "Entire Screen", "Finder Selection",
         ])
 
         rig.vm.addContextIndex = rig.vm.addContextRows.count - 1
@@ -264,7 +264,7 @@ struct AttachmentFlowTests {
         let chat = QuickViewModel(store: launcher.vm.store, service: launcher.service)
         let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: "AttachmentFlowTests.\(UUID())")!)
         withExtendedLifetime(window) {
-            #expect(chat.addContextRows == [.capture(.selectedArea), .capture(.entireScreen), .file, .link])
+            #expect(chat.addContextRows == [.file, .link, .capture(.selectedArea), .capture(.entireScreen)])
             #expect(AddContextPane.rows(captures: chat.addContextOptions, tray: chat.attachmentTray) == chat.addContextRows)
         }
     }
@@ -475,7 +475,7 @@ struct AttachmentFlowTests {
         rig.vm.openQuickAI()
         rig.vm.attachmentTray.add(.image(Self.image, name: "Pasted image", kind: .image))
         await settle(rig.vm)
-        #expect(rig.vm.attachmentRoutingLine == QuickViewModel.imageAsTextLine)
+        #expect(rig.vm.attachmentRoutingLine == QuickViewModel.pendingImageAsTextLine)
 
         await ask(rig, "what is the number")
 

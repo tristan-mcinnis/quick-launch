@@ -10,6 +10,7 @@ final class KeyablePanel: NSPanel {
     override var canBecomeMain: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 
+    weak var composerModel: QuickViewModel?
     var commandKHandler: (() -> Void)?
     var commandCHandler: (() -> Bool)?
     /// ⌘⇧S captures the previous app's window, ⌘⇧D the display under the pointer.
@@ -54,6 +55,17 @@ final class KeyablePanel: NSPanel {
     /// Unmodified keys never reach `performKeyEquivalent`; the field editor
     /// eats Backspace before SwiftUI sees it. `sendEvent` sees everything.
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, let editor = firstResponder as? NSTextView {
+            // Pinyin and other input methods own Return and Escape until the
+            // marked text is committed; no launcher action may steal them.
+            if editor.hasMarkedText() {
+                super.sendEvent(event)
+                return
+            }
+            if let composerModel, QuickAIComposerEditing.handle(event, editor: editor, model: composerModel) {
+                return
+            }
+        }
         if event.type == .keyDown, event.modifierFlags.overlayRelevant.isEmpty {
             switch VirtualKey(event: event) {
             case .escape where escapeHandler?() == true:
@@ -68,6 +80,14 @@ final class KeyablePanel: NSPanel {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown, let editor = firstResponder as? NSTextView {
+            if editor.hasMarkedText(), VirtualKey.isReturn(keyCode: event.keyCode) {
+                return super.performKeyEquivalent(with: event)
+            }
+            if let composerModel, QuickAIComposerEditing.handle(event, editor: editor, model: composerModel) {
+                return true
+            }
+        }
         let modifiers = event.modifierFlags.overlayRelevant
         if event.type == .keyDown,
            event.charactersIgnoringModifiers?.lowercased() == "c",
@@ -582,6 +602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // The delegate hears the end of a user's drag on the Quick AI
         // surface and remembers the size.
         panel.delegate = self
+        panel.composerModel = viewModel
         panel.commandKHandler = { [weak viewModel] in
             viewModel?.handleCommandK()
         }

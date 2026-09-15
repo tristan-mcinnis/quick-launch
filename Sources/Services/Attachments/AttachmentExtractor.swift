@@ -53,7 +53,7 @@ enum AttachmentFailure: Error, Equatable, Sendable {
         case .tooLarge(let limit): "Larger than \(limit / (1_024 * 1_024)) MB"
         case .tooLargeUnpacked: "Too large once unpacked; not read"
         case .notDownloaded: "Not downloaded"
-        case .accessDenied: "macOS blocked access. Drop the file or use File…"
+        case .accessDenied: "macOS blocked access. Drop the file or use Files…"
         case .missing: "File not found"
         case .wrongContent(let kind): Self.wrongContentLine(kind)
         case .empty: "No readable text"

@@ -255,6 +255,8 @@ struct QuickSettings: Codable, Sendable {
     /// Offer the model a `search_web` tool (backed by SearXNG) so it can
     /// look things up mid-answer instead of guessing from training data.
     var modelWebSearchEnabled: Bool = true
+    /// Shared by explicit searches and model tool calls on every AI surface.
+    var webSearchProvider: WebSearchProvider = .automatic
     /// The tools a new chat starts with (Settings › General › Chat). Web
     /// search is `modelWebSearchEnabled`, which the Translator reads too;
     /// `newChatTools` joins the four.
@@ -422,6 +424,7 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .modelWebSearchEnabled
         ) ?? true
+        webSearchProvider = (try? c.decodeIfPresent(WebSearchProvider.self, forKey: .webSearchProvider)) ?? .automatic
         newChatMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatMemoryEnabled) ?? true
         newChatVaultEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatVaultEnabled) ?? true
         newChatSkillsEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatSkillsEnabled) ?? true

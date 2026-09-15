@@ -624,7 +624,7 @@ struct AttachmentExtractorTests {
         try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
         #expect(await failure(url) == .accessDenied)
-        #expect(AttachmentFailure.accessDenied.chipLine == "macOS blocked access. Drop the file or use File…")
+        #expect(AttachmentFailure.accessDenied.chipLine == "macOS blocked access. Drop the file or use Files…")
         let tcc = NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)
         #expect(AttachmentFileGate.failure(for: tcc) == .accessDenied)
         #expect(AttachmentFileGate.failure(for: NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))) == .accessDenied)

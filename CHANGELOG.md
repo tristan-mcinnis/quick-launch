@@ -6,6 +6,10 @@
 - Quick AI and AI Chat offer Attach… in `⌘K` and through `⇧⌘A`.
 - The open chat's action palette searches the current Pin Chat or Unpin Chat label. AI Chat's sidebar action menu has its own fuzzy search and keyboard selection.
 - Clipboard changes refresh the list even at its history limit. Delayed pasteboard data is retried. Clipboard and screenshot catalogs keep their preview space and navigation context; reopening Screenshots refreshes saved files.
+- Quick AI drafts grow to four lines, AI Chat to eight, with scrolling beyond that. Shift-Return adds a line; the primary action is clickable. Draft caret keys and pasted text retain their editing behavior.
+- Attach puts files and links first, shows readiness and Retry, and offers a full selected-text preview. Selected text and pending file drops survive expansion to AI Chat. Failed attachments block a new send until resolved; regenerating an old answer preserves the new draft.
+- Search Provider… in `⌘K` and the shared settings chooses Automatic, Google, or Bing for explicit and model-requested searches.
+- Selected text avoids the old ambient-context cutoff. Image questions use available session OCR when vision becomes unavailable, name missing images, and release extracted text when their final owning chat is deleted.
 
 ## v1.5.0 — 2026-09-11
 

@@ -124,12 +124,16 @@ struct AttachmentChipModel: Identifiable, Equatable {
             self.detail = ""
             self.spokenDetail = nil
             self.cut = nil
-            if case .image(let image, _, _) = item.source {
+            if case .some(.image(let image, _, _)) = item.source {
                 self.imageData = image.data
             } else {
                 self.imageData = nil
             }
             self.glyphOverride = nil
+        }
+        if phase == .ready {
+            detail = ["Ready", detail].filter { !$0.isEmpty }.joined(separator: " · ")
+            spokenDetail = ["ready to send", spokenDetail ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
         }
     }
 
@@ -318,6 +322,8 @@ struct AttachmentChip: View {
     var onRemove: (() -> Void)? = nil
     /// Opens the attachment (a pill chip in the thread).
     var onOpen: (() -> Void)? = nil
+    /// Reads a failed composer attachment again.
+    var onRetry: (() -> Void)? = nil
     /// Reads a "Not loaded" attachment again: the same file, or the link
     /// fetched again. Only when the user clicks it.
     var onReattach: (() -> Void)? = nil
@@ -339,7 +345,7 @@ struct AttachmentChip: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.accessibilityLabel)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .modifier(ChipAccessibilityActions(onRemove: onRemove, onOpen: onOpen, onReattach: onReattach))
+            .modifier(ChipAccessibilityActions(onRemove: onRemove, onOpen: onOpen, onRetry: onRetry, onReattach: onReattach))
     }
 
     private var content: some View {
@@ -351,6 +357,14 @@ struct AttachmentChip: View {
                 ProgressView()
                     .controlSize(.mini)
                     .frame(width: House.Spacing.sm, height: House.Spacing.sm)
+                    .accessibilityHidden(true)
+            }
+            if let onRetry {
+                Button("Retry", action: onRetry)
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textPrimary)
+                    .buttonStyle(.plain)
+                    .help("Read \(model.name) again (Space on the selected chip)")
                     .accessibilityHidden(true)
             }
             if let onReattach { reattachButton(onReattach) }
@@ -390,7 +404,7 @@ struct AttachmentChip: View {
             Text(line)
                 .font(House.TypeToken.meta)
                 .monospacedDigit()
-                .foregroundStyle(House.ColorToken.textTertiary)
+                .foregroundStyle(House.ColorToken.textPrimary)
                 .lineLimit(1)
         }
     }
@@ -451,12 +465,14 @@ struct AttachmentChip: View {
 private struct ChipAccessibilityActions: ViewModifier {
     let onRemove: (() -> Void)?
     let onOpen: (() -> Void)?
+    let onRetry: (() -> Void)?
     let onReattach: (() -> Void)?
 
     func body(content: Content) -> some View {
         content.accessibilityActions {
             if let onRemove { Button("Remove", action: onRemove) }
             if let onOpen { Button("Open", action: onOpen) }
+            if let onRetry { Button("Retry", action: onRetry) }
             if let onReattach { Button("Re-attach", action: onReattach) }
         }
     }
@@ -476,6 +492,8 @@ struct AttachmentStripView: View {
     var sideInset: CGFloat = House.Spacing.xs
     let onRemove: (String) -> Void
     let onClearAll: () -> Void
+    var onRetry: ((String) -> Void)? = nil
+    var selectionPreview: QuickViewModel.LaunchSelection? = nil
 
     var body: some View {
         HStack(spacing: House.Spacing.xs) {
@@ -486,7 +504,8 @@ struct AttachmentStripView: View {
                             AttachmentChip(
                                 model: chip,
                                 isSelected: chip.id == focusedID,
-                                onRemove: { onRemove(chip.id) }
+                                onRemove: { onRemove(chip.id) },
+                                onRetry: retryAction(for: chip)
                             )
                             .id(chip.id)
                         }
@@ -504,9 +523,15 @@ struct AttachmentStripView: View {
             if let routingLine, !routingLine.isEmpty {
                 Text(routingLine)
                     .font(House.TypeToken.meta)
-                    .foregroundStyle(House.ColorToken.textTertiary)
+                    .foregroundStyle(House.ColorToken.textPrimary)
                     .lineLimit(1)
                     .fixedSize()
+            }
+            if let selectionPreview {
+                SelectedTextPreviewButton(
+                    text: selectionPreview.text,
+                    title: "Selected text from \(selectionPreview.appName)"
+                )
             }
             Button(action: onClearAll) {
                 Image(systemName: "xmark.circle.fill")
@@ -524,6 +549,11 @@ struct AttachmentStripView: View {
         .frame(height: PanelSizing.attachmentStripHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(chips.count == 1 ? "1 attachment" : "\(chips.count) attachments")
+    }
+
+    private func retryAction(for chip: AttachmentChipModel) -> (() -> Void)? {
+        guard case .failed = chip.phase, let onRetry else { return nil }
+        return { onRetry(chip.id) }
     }
 }
 
@@ -562,7 +592,9 @@ struct ComposerAttachmentStrip: View {
                     routingLine: routingLine,
                     sideInset: sideInset,
                     onRemove: remove,
-                    onClearAll: clearAll
+                    onClearAll: clearAll,
+                    onRetry: retry,
+                    selectionPreview: selectionPreview
                 )
             }
         }
@@ -570,6 +602,13 @@ struct ComposerAttachmentStrip: View {
             guard let notice else { return }
             QuickAIAnnouncement.post(notice, priority: .medium)
         }
+    }
+
+    private var selectionPreview: QuickViewModel.LaunchSelection? {
+        guard viewModel.launchSelection == nil,
+              let context = viewModel.pendingContext,
+              let text = context.selectedText, !text.isEmpty else { return nil }
+        return QuickViewModel.LaunchSelection(text: text, appName: context.appName)
     }
 
     private var routingLine: String? {
@@ -584,6 +623,12 @@ struct ComposerAttachmentStrip: View {
         } else {
             PendingCaptureChips.remove(id, from: viewModel)
         }
+    }
+
+    private func retry(_ id: String) {
+        guard let id = UUID(uuidString: id), let tray else { return }
+        if tray.retry(id) { viewModel.errorMessage = nil }
+        viewModel.requestInputFocus()
     }
 
     private func clearAll() {

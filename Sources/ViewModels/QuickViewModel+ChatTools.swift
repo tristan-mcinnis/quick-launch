@@ -4,6 +4,8 @@ import Foundation
 enum ActionPaletteSubmenu: Equatable, Sendable {
     /// The chat's tools, each toggled with Return.
     case tools
+    /// The saved web-search provider, shared by every chat surface.
+    case searchProviders
     /// The answer's sources, each opened with Return.
     case sources
     /// Every question and answer of the chat, newest first; Return copies
@@ -69,6 +71,16 @@ extension QuickViewModel {
     var paletteToolRows: [ChatToolKind] {
         guard !actionQuery.isEmpty else { return ChatToolKind.allCases }
         return Self.rankByQuery(ChatToolKind.allCases, query: actionQuery, title: \.displayName)
+    }
+
+    var paletteSearchProviders: [WebSearchProvider] {
+        Self.rankByQuery(WebSearchProvider.allCases, query: actionQuery, title: \.title)
+    }
+
+    func selectWebSearchProvider(_ provider: WebSearchProvider, defaults: UserDefaults = .standard) {
+        settings.webSearchProvider = provider
+        settings.save(to: defaults)
+        closeActionPalette()
     }
 
     /// Opens the `⌘K` palette on one of its second lists.

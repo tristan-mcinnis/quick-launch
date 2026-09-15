@@ -6,6 +6,8 @@ struct OverlayView: View {
     /// The composer's attachment tray. Passed down through the environment,
     /// so the Quick AI composer and Add Context pane find it.
     var tray: AttachmentTray? = nil
+    @State private var quickAIComposerHeight = QuickAIView.composerRowHeight
+    @State private var surfaceHeight = PanelSizing.quickAIHeight
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.attachmentTray) private var inheritedTray
@@ -20,7 +22,7 @@ struct OverlayView: View {
                 // Quick AI replaces the launcher in place: its own header,
                 // thread, and bottom composer, and no footer well. The whole
                 // surface takes a drop.
-                QuickAIView(viewModel: viewModel)
+                QuickAIView(viewModel: viewModel) { quickAIComposerHeight = $0 }
                     .attachmentDropTarget(activeTray)
             } else {
                 rootSurface
@@ -37,8 +39,12 @@ struct OverlayView: View {
             alignment: .top
         )
         .panelGlass()
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { surfaceHeight = $0 }
         .overlay(alignment: viewModel.isQuickAIPresented ? .bottomTrailing : .topTrailing) {
             actionPopover
+                .environment(\.composerPaneMaximumHeight, viewModel.isQuickAIPresented
+                    ? max(0, surfaceHeight - quickAIComposerHeight - QuickAIView.headerHeight - House.Spacing.xs)
+                    : nil)
         }
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
         .onAppear { focusInput() }
@@ -324,7 +330,7 @@ struct OverlayView: View {
                 : PanelSizing.inputHeight
                     + (viewModel.hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
         )
-        .padding(.bottom, viewModel.isQuickAIPresented ? QuickAIView.composerRowHeight : 0)
+        .padding(.bottom, viewModel.isQuickAIPresented ? quickAIComposerHeight : 0)
         .padding(.trailing, House.Spacing.sm)
     }
 
@@ -844,6 +850,7 @@ private struct ItemActionPane: View {
             rowHeight: PanelSizing.actionRowHeight,
             listInsets: EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8),
             emptyText: "No matching actions",
+            scrollsToSelection: true,
             accessibilityValue: { index, isSelected in
                 ScreenHistoryAccessibilityPresentation.actionValue(
                     isSelected: isSelected,
@@ -881,7 +888,10 @@ private struct ItemActionPane: View {
         }
         // Exactly as tall as its rows (capped at six): the pane hugs its
         // content instead of stretching into an empty dark sheet.
-        .frame(height: PanelSizing.actionListHeight(rows: actions.count))
+        .modifier(ComposerPaneListHeight(
+            preferredHeight: PanelSizing.actionListHeight(rows: actions.count),
+            chromeHeight: PanelSizing.itemActionPaneHeight(rows: 1) - PanelSizing.actionListHeight(rows: 1)
+        ))
     }
 
     private var searchField: some View {
@@ -1084,6 +1094,7 @@ struct QuickActionPalette: View {
         case prompt(SavedPrompt)
         /// `⌘K` › Tools: one of the chat's tools, toggled by Return.
         case tool(ChatToolKind)
+        case searchProvider(WebSearchProvider)
         /// `⌘K` › Open Source: one of the answer's sources.
         case source(ChatSource)
         /// `⌘K` › Copy Message or Capture Message to Memory: one message.
@@ -1096,6 +1107,7 @@ struct QuickActionPalette: View {
             case .command(let item): "command:" + item.itemID
             case .prompt(let prompt): "prompt:" + prompt.id.uuidString
             case .tool(let kind): "tool:" + kind.rawValue
+            case .searchProvider(let provider): "search-provider:" + provider.rawValue
             case .source(let source): "source:" + source.id
             case .message(let message): "message:" + message.id.uuidString
             }
@@ -1106,6 +1118,8 @@ struct QuickActionPalette: View {
         switch viewModel.actionPaletteSubmenu {
         case .tools:
             return viewModel.paletteToolRows.map(Entry.tool)
+        case .searchProviders:
+            return viewModel.paletteSearchProviders.map(Entry.searchProvider)
         case .sources:
             return viewModel.paletteSourceRows.map(Entry.source)
         case .messages:
@@ -1121,6 +1135,7 @@ struct QuickActionPalette: View {
     private var searchPrompt: String {
         switch viewModel.actionPaletteSubmenu {
         case .tools: "Search tools"
+        case .searchProviders: "Search providers"
         case .sources: "Search sources"
         case .messages: "Search messages"
         case nil: "Search actions"
@@ -1148,6 +1163,7 @@ struct QuickActionPalette: View {
                 rowHeight: PanelSizing.actionRowHeight,
                 listInsets: EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6),
                 emptyText: "No actions here yet",
+                scrollsToSelection: true,
                 accessibilityValue: { index, isSelected in
                     isSelected
                         ? "Selected, \(index + 1) of \(entries.count)"
@@ -1160,7 +1176,10 @@ struct QuickActionPalette: View {
             }
             // Hug the rows (capped at six); an empty palette shows one quiet
             // placeholder row instead of a stretched dark sheet.
-            .frame(height: PanelSizing.actionListHeight(rows: entries.count, padded: false))
+            .modifier(ComposerPaneListHeight(
+                preferredHeight: PanelSizing.actionListHeight(rows: entries.count, padded: false),
+                chromeHeight: PanelSizing.actionPaletteHeight(rows: 1) - PanelSizing.actionListHeight(rows: 1, padded: false)
+            ))
 
             HStack(spacing: AQDesign.Space.row) {
                 Text("↑↓ Navigate")
@@ -1168,6 +1187,9 @@ struct QuickActionPalette: View {
                 case .tools:
                     Text("↩ Turn on or off")
                     Text("For this chat")
+                case .searchProviders:
+                    Text("↩ Use provider")
+                    Text("All chats")
                 case .sources:
                     Text("↩ Open")
                 case .messages(let action):
@@ -1228,6 +1250,13 @@ struct QuickActionPalette: View {
             ) {
                 if let hotkey = action.hotkey {
                     KeyCapGroup(keys: hotkey.keyCaps)
+                }
+            }
+        case .searchProvider(let provider):
+            paletteRow(symbol: "magnifyingglass", title: provider.title, detail: provider.detail) {
+                if viewModel.settings.webSearchProvider == provider {
+                    Image(systemName: "checkmark")
+                        .accessibilityLabel("Current provider")
                 }
             }
         case .tool(let kind):
@@ -1320,6 +1349,8 @@ struct QuickActionPalette: View {
         case .surface(let action): title = action.title
         case .command(let item): title = item.title
         case .prompt(let prompt): title = prompt.name
+        case .searchProvider(let provider):
+            title = provider.title + (viewModel.settings.webSearchProvider == provider ? ", current provider" : "")
         case .tool(let kind):
             title = "\(kind.displayName), \(viewModel.chatTools.contains(kind) ? "on" : "off")"
         case .source(let source): title = "Source \(source.title)"
@@ -1356,6 +1387,8 @@ struct QuickActionPalette: View {
             // The palette stays open so several tools can change at once.
             viewModel.toggleChatTool(kind)
             announceSelected()
+        case .searchProvider(let provider):
+            viewModel.selectWebSearchProvider(provider)
         case .source(let source):
             viewModel.requestOpenSource(source)
         case .message(let message):
@@ -1599,6 +1632,9 @@ struct LaunchSelectionStrip: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: AQDesign.Space.standard)
+            if let selection = viewModel.launchSelection {
+                SelectedTextPreviewButton(text: selection.text, title: viewModel.launchSelectionTitle)
+            }
             if !viewModel.chipTransformOptions.isEmpty {
                 Button {
                     viewModel.toggleTransformChooser()
@@ -1661,6 +1697,7 @@ struct TransformChooserPane: View {
                 items: viewModel.chipTransformOptions,
                 selectedIndex: $viewModel.transformChooserIndex,
                 rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
                 onActivate: { _ in
                     Task { await viewModel.runTransformChooserSelection() }
                 }
@@ -1679,9 +1716,9 @@ struct TransformChooserPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .frame(
-                height: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
-            )
+            .modifier(ComposerPaneListHeight(
+                preferredHeight: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
+            ))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }
@@ -1737,12 +1774,9 @@ struct ModelChooserPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .frame(
-                height: PanelSizing.actionListHeight(
-                    rows: viewModel.modelChooserOptions.count,
-                    padded: false
-                )
-            )
+            .modifier(ComposerPaneListHeight(
+                preferredHeight: PanelSizing.actionListHeight(rows: viewModel.modelChooserOptions.count, padded: false)
+            ))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }
@@ -1781,7 +1815,7 @@ struct AddContextPane: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Add Context")
+        .accessibilityLabel("Attach")
         .onDisappear { activeTray?.cancelLinkEntry() }
     }
 
@@ -1789,9 +1823,13 @@ struct AddContextPane: View {
         let rows = Self.rows(captures: viewModel.addContextOptions, tray: activeTray)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: AQDesign.Space.row) {
-                Text("Add Context")
+                Text("Attach")
                     .font(AQDesign.TypeToken.section)
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Text("Add context, then ask a question")
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textSecondary)
+                    .lineLimit(1)
                 Spacer()
                 KeyHint(label: "Move", keys: ["↑", "↓"])
                 KeyHint(label: QuickViewModel.addContextConfirmTitle, keys: ["↩"])
@@ -1826,7 +1864,7 @@ struct AddContextPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .frame(height: PanelSizing.addContextListHeight(rows: rows.count))
+            .modifier(ComposerPaneListHeight(preferredHeight: PanelSizing.addContextListHeight(rows: rows.count)))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }

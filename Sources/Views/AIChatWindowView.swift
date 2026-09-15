@@ -14,6 +14,8 @@ import SwiftUI
 /// its row with the window's traffic lights.
 struct AIChatWindowView: View {
     @Bindable var model: AIChatWindowModel
+    @State private var composerHeight = QuickAIView.composerRowHeight
+    @State private var conversationHeight = House.Layout.chatMinHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A tray from the environment (render proofs) wins over the chat's own.
     @Environment(\.attachmentTray) private var environmentTray
@@ -82,9 +84,13 @@ struct AIChatWindowView: View {
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
         }
-        .overlay(alignment: .bottom) { QuickAIFloatingChooser(viewModel: chat) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { conversationHeight = $0 }
+        .overlay(alignment: .bottom) { QuickAIFloatingChooser(viewModel: chat, composerHeight: composerHeight) }
         .overlay(alignment: .bottomTrailing) { actionPalette }
+        .environment(\.composerPaneMaximumHeight,
+            max(0, conversationHeight - composerHeight - Self.titleBarHeight - House.Spacing.xs))
     }
 
     // MARK: - Header
@@ -146,7 +152,7 @@ struct AIChatWindowView: View {
                 .panelGlass(radius: AQDesign.cardCornerRadius)
                 .panelShadows()
                 .frame(maxHeight: PanelSizing.actionPaletteMaxHeight, alignment: .bottom)
-                .padding(.bottom, QuickAIView.composerRowHeight)
+                .padding(.bottom, composerHeight)
                 .padding(.trailing, House.Spacing.sm)
         }
     }

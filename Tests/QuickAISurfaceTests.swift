@@ -192,7 +192,7 @@ struct QuickAISurfaceTests {
         vm.isStreaming = true
         vm.streamingStatus = "Thinking…"
         #expect(vm.isQuickAIPresented)
-        #expect(vm.quickAIComposerAction == .init(label: "Stop", keys: ["esc"]))
+        #expect(vm.quickAIComposerAction == .init(label: "Stop", keys: ["esc"], behavior: .stop))
 
         #expect(vm.handleEscapeKey())
         #expect(!vm.isStreaming)
@@ -212,7 +212,7 @@ struct QuickAISurfaceTests {
         let submit = vm.tabSubmitTask
         await search.waitUntilSearching()
         #expect(vm.topLayer == .streaming)
-        #expect(vm.quickAIComposerAction == .init(label: "Stop", keys: ["esc"]))
+        #expect(vm.quickAIComposerAction == .init(label: "Stop", keys: ["esc"], behavior: .stop))
 
         #expect(vm.handleEscapeKey())
         #expect(!vm.isStreaming)

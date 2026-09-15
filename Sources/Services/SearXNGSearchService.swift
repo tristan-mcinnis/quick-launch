@@ -28,24 +28,32 @@ actor SearXNGSearchService: WebSearchServicing {
         let url: String?
     }
 
-    private let host: String
     private let requestTimeout: Duration
+    private let transport: @Sendable (URL) async throws -> Data
 
-    init(host: String = "vault-vps", requestTimeout: Duration = .seconds(8)) {
-        self.host = host
+    init(
+        host: String = "vault-vps",
+        requestTimeout: Duration = .seconds(8),
+        transport: (@Sendable (URL) async throws -> Data)? = nil
+    ) {
         self.requestTimeout = requestTimeout
+        self.transport = transport ?? { url in try await Self.runSearch(host: host, url: url) }
     }
 
     func search(_ query: String) async throws -> String {
+        try await search(query, provider: .automatic)
+    }
+
+    func search(_ query: String, provider: WebSearchProvider) async throws -> String {
         let boundedQuery = String(query.prefix(500))
         let date = Date.now.formatted(.iso8601.year().month().day())
-        guard let url = Self.searchURL(query: "\(boundedQuery) current date \(date)") else {
+        guard let url = Self.searchURL(query: "\(boundedQuery) current date \(date)", provider: provider) else {
             throw WebSearchError.failed("invalid query")
         }
 
         return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { [host] in
-                let data = try await Self.runSearch(host: host, url: url)
+            group.addTask { [transport] in
+                let data = try await transport(url)
                 return try Self.formatResults(data)
             }
             group.addTask { [requestTimeout] in
@@ -90,16 +98,25 @@ actor SearXNGSearchService: WebSearchServicing {
         return rows.joined(separator: "\n\n")
     }
 
-    private nonisolated static func searchURL(query: String) -> URL? {
+    private nonisolated static func searchURL(query: String, provider: WebSearchProvider) -> URL? {
         var components = URLComponents(string: "http://127.0.0.1:8888/search")
         components?.queryItems = [
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "format", value: "json"),
             URLQueryItem(name: "pageno", value: "1"),
             URLQueryItem(name: "language", value: "en"),
-            URLQueryItem(name: "categories", value: "general"),
             URLQueryItem(name: "safesearch", value: "0"),
         ]
+        // Passing categories together with engines makes SearXNG include
+        // the category's other engines. A selected provider must stay exact.
+        switch provider {
+        case .automatic:
+            components?.queryItems?.append(URLQueryItem(name: "categories", value: "general"))
+        case .google:
+            components?.queryItems?.append(URLQueryItem(name: "engines", value: "google cse"))
+        case .bing:
+            components?.queryItems?.append(URLQueryItem(name: "engines", value: "bing"))
+        }
         return components?.url
     }
 

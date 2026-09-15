@@ -18,6 +18,9 @@ import SwiftUI
 /// open, streaming included.
 struct QuickAIView: View {
     @Bindable var viewModel: QuickViewModel
+    var onComposerHeightChange: ((CGFloat) -> Void)? = nil
+    @State private var composerHeight = Self.composerRowHeight
+    @State private var surfaceHeight = PanelSizing.quickAIHeight
 
     /// The composer row from the panel's bottom edge: the pill-high row plus
     /// its inset above and below. The floating `⌘K` pane and the choosers
@@ -47,6 +50,10 @@ struct QuickAIView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             QuickAIComposer(viewModel: viewModel)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    composerHeight = height
+                    onComposerHeightChange?(height)
+                }
         }
         // Fills the window: 750 × 475 at the least, as large as the user
         // drags it. A fixed frame would pin the hosting view and stop the
@@ -57,7 +64,12 @@ struct QuickAIView: View {
             minHeight: PanelSizing.quickAIHeight,
             maxHeight: .infinity
         )
-        .overlay(alignment: .bottom) { QuickAIFloatingChooser(viewModel: viewModel) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { surfaceHeight = $0 }
+        .overlay(alignment: .bottom) {
+            QuickAIFloatingChooser(viewModel: viewModel, composerHeight: composerHeight)
+                .environment(\.composerPaneMaximumHeight,
+                    max(0, surfaceHeight - composerHeight - Self.headerHeight - House.Spacing.xs))
+        }
         .onChange(of: viewModel.threadError) { _, error in
             guard let error else { return }
             QuickAIAnnouncement.post("Error. \(error.message)", priority: .high)
@@ -234,7 +246,7 @@ struct AssistantChooserPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .frame(height: PanelSizing.actionListHeight(rows: options.count, padded: false))
+            .modifier(ComposerPaneListHeight(preferredHeight: PanelSizing.actionListHeight(rows: options.count, padded: false)))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }

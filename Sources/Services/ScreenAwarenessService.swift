@@ -48,9 +48,6 @@ struct CaptureContext: Equatable, Sendable {
         if let windowTitle, !windowTitle.isEmpty { header += " (window: \(windowTitle))" }
         if let pageURL, !pageURL.isEmpty { header += ", page: \(pageURL)" }
         lines.append(header + ".")
-        if includeSelectedText, let selectedText, !selectedText.isEmpty {
-            lines.append("Selected text:\n\(selectedText)")
-        }
         if let focusedValue, !focusedValue.isEmpty, focusedValue != selectedText {
             lines.append("Focused field:\n\(focusedValue)")
         }
@@ -63,6 +60,12 @@ struct CaptureContext: Equatable, Sendable {
         var joined = lines.joined(separator: "\n\n")
         if joined.count > limit {
             joined = String(joined.prefix(limit)) + "…"
+        }
+        // Explicitly chosen text is kept whole. The ambient window dump
+        // remains bounded; the model's ContextBudget handles total size and
+        // reports any request-level trimming.
+        if includeSelectedText, let selectedText, !selectedText.isEmpty {
+            joined += "\n\nSelected text:\n\(selectedText)"
         }
         return joined
     }

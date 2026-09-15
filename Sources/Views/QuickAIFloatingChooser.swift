@@ -5,6 +5,7 @@ import SwiftUI
 /// the AI Chat window.
 struct QuickAIFloatingChooser: View {
     @Bindable var viewModel: QuickViewModel
+    var composerHeight: CGFloat = QuickAIView.composerRowHeight
 
     // MARK: - Floating choosers
 
@@ -31,7 +32,7 @@ struct QuickAIFloatingChooser: View {
             .panelGlass(radius: AQDesign.cardCornerRadius)
             .panelShadows()
             .padding(.horizontal, House.Spacing.xs)
-            .padding(.bottom, QuickAIView.composerRowHeight)
+            .padding(.bottom, composerHeight)
         }
     }
 }

@@ -47,7 +47,7 @@ enum AddContextEntry: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// One row of the Add Context menu once files and links can be attached:
-/// the four captures, then File…, Link…, and Finder Selection. The same
+/// Files…, Link…, selected text, the other captures, and Finder Selection. The same
 /// list sits behind the plus circle and behind `@`, in Quick AI and in AI
 /// Chat. Each row names what it attaches; the attaching itself is the
 /// tray's (`AttachmentTray`) and its owner's.
@@ -64,23 +64,19 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
     /// app behind the overlay is Finder.
     static let finderBundleIdentifier = "com.apple.finder"
 
-    /// The menu in order: the four captures, File…, Link…, and Finder
+    /// The menu in order: Files…, Link…, selected text, captures, and Finder
     /// Selection when Finder is the app behind the overlay.
     static func menu(finderIsBehind: Bool) -> [AddContextRow] {
-        var rows = AddContextEntry.allCases.map(AddContextRow.capture)
-        rows.append(.file)
-        rows.append(.link)
-        if finderIsBehind { rows.append(.finderSelection) }
-        return rows
+        menu(captures: AddContextEntry.allCases, finderIsBehind: finderIsBehind)
     }
 
     /// The menu with the captures the surface offers (the AI Chat window
-    /// drops the two that need an app behind it while it knows none), then
-    /// File…, Link…, and Finder Selection when Finder is behind.
+    /// drops the two that need an app behind it while it knows none). Files
+    /// and links come first; Finder Selection appears when Finder is behind.
     static func menu(captures: [AddContextEntry], finderIsBehind: Bool) -> [AddContextRow] {
-        var rows = captures.map(AddContextRow.capture)
-        rows.append(.file)
-        rows.append(.link)
+        var rows: [AddContextRow] = [.file, .link]
+        if captures.contains(.selectedText) { rows.append(.capture(.selectedText)) }
+        rows += captures.filter { $0 != .selectedText }.map(AddContextRow.capture)
         if finderIsBehind { rows.append(.finderSelection) }
         return rows
     }
@@ -102,7 +98,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .capture(let entry): entry.title
-        case .file: "File…"
+        case .file: "Files…"
         case .link: "Link…"
         case .finderSelection: "Finder Selection"
         }

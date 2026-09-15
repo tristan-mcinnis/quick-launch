@@ -58,7 +58,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Window management, Raycast's full set: Maximize, Almost Maximize, Maximize Height/Width, Reasonable Size, Center, Left/Center/Right/Top/Bottom Half, four Quarters, Thirds and Two Thirds, Fourths, six Sixths, Make Smaller/Larger, Move Left/Right/Up/Down, Restore, Toggle Fullscreen, Move to Next/Previous Display. Left and Right Half cycle half → two thirds → third on repeat. Every command takes an alias and a hotkey in Settings › Items › Windows
 - Native Caffeinate toggle that keeps the Mac awake while Quick Launch is running
 - The input row holds Add Context on the left and one ⋯ menu on the right (Actions, the screenshot commands, the model, New Chat, Recent Chats, Open AI Chat, Settings); Return sends, so there is no Send button
-- Direct SearXNG web search for explicit searches and time-sensitive questions
+- Web search uses Automatic, Google, or Bing through the existing SearXNG service. Choose in Settings → General → Chat, Models → Web search, or `⌘K` → Search Provider…; Quick AI, AI Chat, and model-requested searches share the saved choice
 - Vault Search catalog backed by the VPS and Neon: Current Project, Reconcile Changes, Project History, and Across Projects. Structured modes make one read-only product call with no model-provider egress, show freshness and source paths, refuse future evidence, and ask for project scope when a name is ambiguous
 - Local Screen History catalog over the owned SQLite FTS store and the closed Coast database, with time, app, and site filters, stable source-labelled rows, image and OCR previews, surrounding timelines, and no AI or VPS fallback. This search-only beta hard-locks owned capture. Browser capture remains unavailable in the later capture path.
 - Provider and model switcher in the ⋯ menu, listing only the models you have left on
@@ -354,15 +354,27 @@ not stop the session; close it in tmux as usual.
 ## Attachments
 
 Quick AI and AI Chat take files, links, pictures, and selected text as
-context for a question. The model reads them; nothing is changed.
+reference material for a question. They wait alongside your draft until you
+type what you want and press Return or click Ask.
 
-**How to attach.** Add Context (the plus circle, `⇧⌘A`, `⌘K` → Attach…,
-or `@` in the composer)
-lists the four captures, then File…, Link…, and Finder Selection (only when
-Finder is the app behind the overlay). You can also paste files, an image, or a
+**How to attach.** Attach (the plus circle, `⇧⌘A`, `⌘K` → Attach…,
+or `@` in the composer) lists Files… and Link… first, then selected text
+and screen captures. Finder Selection appears when Finder is the app behind
+Quick Launch. You can also paste files, an image, or a
 lone web link into the composer (`⌘Z` turns a pasted link back into text), or
 drop them on Quick AI or on the AI Chat thread and composer. A web address in
 your question is read once and kept with that question.
+
+**Check the context.** Selected text captured from the previous app appears
+as a chip. Preview (`⌥⌘I`) shows the complete passage. File chips say Reading,
+Ready, or why reading failed; use Retry or Remove to resolve a failure before
+sending. Send waits for dropped files to finish loading. Moving to AI Chat
+keeps the draft, selected text, pictures, and pending file reads together.
+
+**Long drafts.** Quick AI grows to four lines and AI Chat to eight, then the
+field scrolls. `⇧↩` inserts a new line; `↩` sends. Paste keeps paragraphs,
+code indentation, and a trailing `@` intact. Regenerating an old answer with
+`⌘R` keeps any new draft and attachments you have prepared.
 
 **What you can attach.** PDF; Word (docx, doc, rtf, odt); PowerPoint (pptx);
 Excel (xlsx); HTML; plain text, Markdown, and code; web pages; and images

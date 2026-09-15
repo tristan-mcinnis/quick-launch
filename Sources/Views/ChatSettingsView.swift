@@ -30,6 +30,8 @@ struct ChatSettingsView: View {
                 }
             }
 
+            WebSearchProviderRow(viewModel: viewModel)
+
             SettingsRow(
                 title: "Keep AI Chat on top",
                 detail: "The AI Chat window stays above other apps' windows."
@@ -63,7 +65,7 @@ struct ChatSettingsView: View {
 
     static func detail(for tool: ChatToolKind) -> String {
         switch tool {
-        case .web: "Search the web with SearXNG. The Translator uses it too."
+        case .web: "Search with the provider chosen below. The Translator uses it too."
         default: tool.detail
         }
     }

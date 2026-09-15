@@ -19,11 +19,13 @@ struct AIChatHandoff {
     /// A Change Model on the empty surface, before a chat exists: the model
     /// the next chat starts on. A chat carries its own.
     var pendingModel: ChatModelChoice? = nil
+    /// The selected-text chip captured before Quick AI took the keyboard.
+    var launchSelection: QuickViewModel.LaunchSelection? = nil
 
     /// Whether the hand-off brings anything for the composer: text or an
     /// attachment. One that brings none leaves the window's own draft.
     var bringsDraft: Bool {
-        !input.isEmpty || !pendingImages.isEmpty || pendingContext != nil || !pendingAttachments.isEmpty
+        !input.isEmpty || !pendingImages.isEmpty || pendingContext != nil || !pendingAttachments.isEmpty || launchSelection != nil
     }
 }
 
@@ -198,7 +200,8 @@ extension QuickViewModel {
             pendingContext: pendingContext,
             // The chips leave this tray now, reads and all.
             pendingAttachments: attachmentTray.handOff(),
-            pendingModel: pendingModelChoice
+            pendingModel: pendingModelChoice,
+            launchSelection: launchSelection
         )
     }
 
@@ -233,6 +236,7 @@ extension QuickViewModel {
             input: input,
             images: pendingImages,
             context: pendingContext,
+            selection: launchSelection,
             chips: attachmentTray.handOff()
         )
         reset([.layers, .thread, .attachments, .input])
@@ -249,11 +253,13 @@ extension QuickViewModel {
         if handoff.bringsDraft {
             pendingImages = handoff.pendingImages
             pendingContext = handoff.pendingContext
+            launchSelection = handoff.launchSelection
             attachmentTray.adopt(handoff.pendingAttachments)
             input = handoff.input
         } else {
             pendingImages = draft.images
             pendingContext = draft.context
+            launchSelection = draft.selection
             attachmentTray.adopt(draft.chips)
             input = draft.input
         }
