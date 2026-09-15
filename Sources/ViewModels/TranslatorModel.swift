@@ -81,6 +81,11 @@ enum LanguageDetection {
         return TranslationTarget.fromRecognized(recognizer.dominantLanguage)
     }
 
+    @concurrent
+    static func recognizeForTranslation(_ text: String) async -> TranslationTarget? {
+        recognize(text)
+    }
+
     /// Where the text should go: CJK text goes to English, everything else
     /// to `lastTarget` (Chinese by default). If the recognised source is the
     /// same as `lastTarget`, English is used instead.
@@ -95,6 +100,11 @@ enum LanguageDetection {
 
 /// Pinyin for Simplified Chinese translations, display only.
 enum Pinyin {
+    @concurrent
+    static func romanizeForDisplay(_ text: String) async -> String? {
+        romanize(text)
+    }
+
     static func romanize(_ text: String) -> String? {
         guard LanguageDetection.cjkRatio(text) > 0.15 else { return nil }
         let mutable = NSMutableString(string: text)
@@ -117,13 +127,25 @@ struct TranslationRecord: Codable, Equatable, Sendable {
 @Observable
 @MainActor
 final class TranslatorModel {
-    nonisolated static let debounce: Duration = .milliseconds(260)
+    nonisolated static let debounce: Duration = .milliseconds(600)
     nonisolated static let historyLimit = 500
 
     var source = ""
     var translation = ""
     var pinyin: String?
     var target: TranslationTarget
+    var sourceLanguage: TranslationTarget
+    var sourceFocusRevision = 0
+    private(set) var isWaitingForTranslation = false
+
+    /// Only editor writes schedule a translation; imports and swaps manage their own work.
+    var sourceInput: String {
+        get { source }
+        set {
+            source = newValue
+            sourceChanged()
+        }
+    }
     var detectedSource: TranslationTarget?
     var isTranslating = false
     var message: String?
@@ -143,7 +165,6 @@ final class TranslatorModel {
     @ObservationIgnored private(set) var pasteTarget: SelectionTarget?
     /// Set by Swap: the language of the swapped-in text is known, not guessed.
     @ObservationIgnored private var knownSourceOfSwappedText: TranslationTarget?
-    @ObservationIgnored private var lastTranslatedSource = ""
     /// The launch-time selected text, retained so "Use selected text" can fill
     /// the source even after the original app lost focus. Never auto-applied
     /// after the window is open — that would erase a manually typed source.
@@ -157,11 +178,16 @@ final class TranslatorModel {
 
     init(
         lastTarget: TranslationTarget = .simplifiedChinese,
+        lastSource: TranslationTarget? = nil,
         serviceFactory: @escaping () -> (any QuickService)? = { nil },
         selectedTextService: (any SelectedTextServicing)? = nil,
         pasteboard: (any PasteboardWriting)? = nil
     ) {
         self.target = lastTarget
+        let rememberedSource = lastSource ?? (lastTarget == .english ? .simplifiedChinese : .english)
+        self.sourceLanguage = rememberedSource == lastTarget
+            ? (lastTarget == .english ? .simplifiedChinese : .english)
+            : rememberedSource
         self.serviceFactory = serviceFactory
         self.selectedTextService = selectedTextService
         // In memory unless the app passes the system pasteboard, so a test
@@ -180,12 +206,16 @@ final class TranslatorModel {
         selectedText: String?,
         retainedSelection: String? = nil
     ) {
+        clear()
+        message = nil
+        isTargetPickerPresented = false
+        targetQuery = ""
+        requestSourceFocus()
         pasteTarget = selectionTarget
         knownSourceOfSwappedText = nil
         self.retainedSelection = retainedSelection
         if let selectedText, !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             source = selectedText
-            chooseTargetAutomatically()
             translateNow()
         }
     }
@@ -206,9 +236,14 @@ final class TranslatorModel {
     /// the selected text rather than toggling the window shut.
     func retainLaunchSelection(_ text: String?) {
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        cancelTranslation()
+        knownSourceOfSwappedText = nil
         retainedSelection = text
         source = text
-        chooseTargetAutomatically()
+        translation = ""
+        pinyin = nil
+        isTargetPickerPresented = false
+        requestSourceFocus()
         translateNow()
     }
 
@@ -223,17 +258,14 @@ final class TranslatorModel {
     /// Called on every keystroke in the source pane.
     func sourceChanged() {
         knownSourceOfSwappedText = nil
-        detectedSource = LanguageDetection.recognize(source)
-        chooseTargetAutomatically()
-        debounceTask?.cancel()
+        cancelTranslation()
+        translation = ""
+        pinyin = nil
+        detectedSource = nil
+        message = nil
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            requestTask?.cancel()
-            translation = ""
-            pinyin = nil
-            isTranslating = false
-            return
-        }
+        guard !trimmed.isEmpty else { return }
+        isWaitingForTranslation = true
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: self?.debounce ?? TranslatorModel.debounce)
             guard !Task.isCancelled else { return }
@@ -241,15 +273,29 @@ final class TranslatorModel {
         }
     }
 
-    private func chooseTargetAutomatically() {
-        let preferred = target.isChinese || target == .english ? target : target
-        let next = LanguageDetection.target(for: source, lastTarget: preferred)
-        if next != target {
-            target = next
-        }
+    func requestSourceFocus() {
+        sourceFocusRevision += 1
+    }
+
+    private func cancelTranslation() {
+        debounceTask?.cancel()
+        debounceTask = nil
+        requestTask?.cancel()
+        requestTask = nil
+        isTranslating = false
+        isWaitingForTranslation = false
+        pendingCommit = nil
     }
 
     func setTarget(_ newTarget: TranslationTarget) {
+        cancelTranslation()
+        translation = ""
+        pinyin = nil
+        if sourceLanguage == newTarget {
+            sourceLanguage = target == newTarget
+                ? (newTarget == .english ? .simplifiedChinese : .english)
+                : target
+        }
         target = newTarget
         isTargetPickerPresented = false
         targetQuery = ""
@@ -262,27 +308,33 @@ final class TranslatorModel {
     /// language the text was actually in, so repeated swaps round-trip.
     func swap() {
         let previousSource = source
-        let previousTranslation = translation
-        let sourceLanguage = knownSourceOfSwappedText ?? detectedSource ?? (target == .english ? .simplifiedChinese : .english)
-        let newTarget = sourceLanguage == target ? .english : sourceLanguage
-        if previousTranslation.isEmpty {
-            target = newTarget
-            message = "Direction flipped"
-            return
-        }
-        knownSourceOfSwappedText = target
-        source = previousTranslation
-        translation = previousSource
-        pinyin = target.isChinese ? nil : Pinyin.romanize(previousSource)
-        detectedSource = target
+        let previousTranslation = isTranslating || isWaitingForTranslation ? "" : translation
+        let previousTarget = target
+        let recognized = knownSourceOfSwappedText ?? detectedSource
+        let newTarget = recognized.flatMap { $0 == target ? nil : $0 } ?? sourceLanguage
+        cancelTranslation()
+        sourceLanguage = previousTarget
         target = newTarget
+        let hasCompletedTranslation = !previousTranslation.isEmpty
+        knownSourceOfSwappedText = hasCompletedTranslation ? previousTarget : nil
+        // A quick swap during debounce or streaming must never erase what was
+        // typed. Only a complete result can replace the source for a round trip.
+        source = hasCompletedTranslation ? previousTranslation : previousSource
+        translation = hasCompletedTranslation ? previousSource : ""
+        pinyin = target.isChinese ? Pinyin.romanize(translation) : nil
+        detectedSource = hasCompletedTranslation ? previousTarget : nil
         onTargetChange?(newTarget)
-        message = "Languages swapped"
+        isTargetPickerPresented = false
+        requestSourceFocus()
+        message = hasCompletedTranslation ? "Languages swapped" : "Direction flipped"
+        if !hasCompletedTranslation, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            translateNow()
+        }
     }
 
     func clear() {
-        debounceTask?.cancel()
-        requestTask?.cancel()
+        cancelTranslation()
+        knownSourceOfSwappedText = nil
         source = ""
         translation = ""
         pinyin = nil
@@ -305,6 +357,7 @@ final class TranslatorModel {
 
     func translateNow() {
         debounceTask?.cancel()
+        isWaitingForTranslation = false
         let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard let service = serviceFactory() else {
@@ -313,9 +366,17 @@ final class TranslatorModel {
         }
         requestTask?.cancel()
         isTranslating = true
-        lastTranslatedSource = text
-        let prompt = Self.prompt(for: text, target: target)
+        let requestTarget = target
+        let knownSource = knownSourceOfSwappedText
+        let prompt = Self.prompt(for: text, target: requestTarget)
         requestTask = Task { [weak self] in
+            let detected = await LanguageDetection.recognizeForTranslation(text)
+            guard !Task.isCancelled else { return }
+            self?.detectedSource = knownSource ?? detected
+            if let detectedSource = self?.detectedSource, detectedSource != requestTarget {
+                self?.sourceLanguage = detectedSource
+                self?.onTargetChange?(requestTarget)
+            }
             var collected = ""
             do {
                 for try await delta in service.send(messages: [QuickMessage(role: .user, content: prompt)]) {
@@ -325,7 +386,10 @@ final class TranslatorModel {
                 }
                 guard let self, !Task.isCancelled else { return }
                 self.translation = collected.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.pinyin = self.target.isChinese ? Pinyin.romanize(self.translation) : nil
+                let romanized = requestTarget.isChinese
+                    ? await Pinyin.romanizeForDisplay(self.translation) : nil
+                guard !Task.isCancelled else { return }
+                self.pinyin = romanized
                 self.isTranslating = false
                 if let pending = self.pendingCommit {
                     self.pendingCommit = nil
@@ -351,6 +415,7 @@ final class TranslatorModel {
 
     /// ⌘↩: copy the translation. If one is still arriving, copy when it lands.
     func copyTranslation() {
+        if isWaitingForTranslation { translateNow() }
         if isTranslating {
             pendingCommit = .copy
             message = "Copying when ready…"
@@ -371,6 +436,7 @@ final class TranslatorModel {
     /// ⌘⇧↩: paste the translation into the app that was behind the window.
     @discardableResult
     func pasteBack() async -> Bool {
+        if isWaitingForTranslation { translateNow() }
         if isTranslating {
             pendingCommit = .paste
             message = "Pasting when ready…"

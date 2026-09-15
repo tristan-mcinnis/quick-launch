@@ -246,6 +246,7 @@ struct AIChatRail: View {
     @Bindable var model: AIChatWindowModel
     @FocusState private var searchFocused: Bool
     @FocusState private var renameFocused: Bool
+    @FocusState private var actionSearchFocused: Bool
 
     var body: some View {
         let items = model.railItems
@@ -295,6 +296,7 @@ struct AIChatRail: View {
         .onChange(of: model.railFocusRequest) { _, _ in FocusRequest.apply($searchFocused) }
         .onChange(of: model.renameFocusRequest) { _, _ in FocusRequest.apply($renameFocused) }
         .onChange(of: searchFocused) { _, focused in model.noteFocus(.rail, focused) }
+        .onChange(of: actionSearchFocused) { _, focused in model.noteFocus(.rail, focused) }
         .onChange(of: renameFocused) { _, focused in model.noteFocus(.rename, focused) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chats")
@@ -474,7 +476,25 @@ struct AIChatRail: View {
     /// `⌘K` on a row: its actions, over the foot of the rail.
     private var rowActions: some View {
         VStack(alignment: .leading, spacing: House.Spacing.xxs) {
-            ForEach(Array(model.railActions.enumerated()), id: \.element.id) { index, action in
+            TextField("Search actions", text: $model.railActionQuery)
+                .textFieldStyle(.plain)
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .padding(.horizontal, House.Spacing.xs)
+                .frame(height: House.Control.chip)
+                .focused($actionSearchFocused)
+                .onSubmit { model.activateRailSelection() }
+                .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                    model.handleRailArrow(press.key == .upArrow ? -1 : 1) ? .handled : .ignored
+                }
+                .onAppear { FocusRequest.apply($actionSearchFocused) }
+            if model.filteredRailActions.isEmpty {
+                Text("No matching actions")
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .padding(House.Spacing.xs)
+            }
+            ForEach(Array(model.filteredRailActions.enumerated()), id: \.element.id) { index, action in
                 Button {
                     model.railActionIndex = index
                     model.performRailAction(action)
@@ -486,7 +506,7 @@ struct AIChatRail: View {
                                 ? AQDesign.ColorToken.danger
                                 : AQDesign.ColorToken.textSecondary)
                             .frame(width: House.Control.keyCap)
-                        Text(model.title(of: action))
+                        Text(model.compactTitle(of: action))
                             .font(AQDesign.TypeToken.label)
                             .foregroundStyle(action == .delete
                                 ? AQDesign.ColorToken.danger
@@ -501,6 +521,7 @@ struct AIChatRail: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(model.title(of: action))
                 .accessibilityAddTraits(index == model.railActionIndex ? .isSelected : [])
             }
         }

@@ -8,6 +8,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     /// Back to the standard 750 × 475 after the user dragged the window
     /// larger. Offered only when the size is not the standard one.
     case resetSize
+    /// The composer’s plus menu: files, links, and captured context.
+    case attach
     /// AI Chat: slide the chat list in (`⌘\`).
     case showChatList
     /// AI Chat: slide the chat list out (`⌘\`).
@@ -27,6 +29,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
+        case .attach: "Attach…"
         case .resetSize: "Reset Quick AI Size"
         case .showChatList: "Show Chat List"
         case .hideChatList: "Hide Chat List"
@@ -40,6 +43,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
 
     var detail: String {
         switch self {
+        case .attach:
+            "Add a file, link, selection, or screenshot"
         case .resetSize:
             "Back to \(Int(QuickAISize.standard.width)) × \(Int(QuickAISize.standard.height))"
         case .showChatList, .hideChatList:
@@ -63,6 +68,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
+        case .attach: "plus"
         case .resetSize: "arrow.down.right.and.arrow.up.left"
         case .showChatList, .hideChatList: "sidebar.left"
         case .findInChat: "magnifyingglass"
@@ -78,6 +84,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     /// The key that does the same, drawn as caps in the palette row.
     var shortcut: KeyShortcut? {
         switch self {
+        case .attach: QuickViewModel.attachShortcut
         case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage: nil
         case .showChatList, .hideChatList: AIChatWindowModel.chatListShortcut
         case .findInChat: AIChatWindowModel.findShortcut

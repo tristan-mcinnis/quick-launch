@@ -171,7 +171,8 @@ struct PanelSizingTests {
         let column = PanelSizing.panelWidthWithDetail
             - PanelSizing.detailListWidth - House.hairline
         #expect(pane + House.Spacing.sm * 2 == column)
-        #expect(pane > PanelSizing.actionPaletteWidth, "the column is wider than the old fixed card")
+        #expect(pane < PanelSizing.actionPaletteWidth, "the detail card fits inside the shared launcher width")
+        #expect(PanelSizing.panelWidthWithDetail == House.Layout.panelWidth)
 
         let alone = PanelSizing.itemActionPaneWidth(
             panelWidth: PanelSizing.panelWidth,

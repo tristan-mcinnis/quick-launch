@@ -161,7 +161,7 @@ struct ClipboardPayload: Sendable, Equatable {
             return nil
         }
 
-        let ignored = ignoredPasteboardTypes
+        let ignored = ignoredPasteboardTypes.union(["com.apple.is-remote-clipboard"])
         var rawItems: [[ClipboardRawItem]] = []
         var text: String?
         var imageRep: (data: Data, mimeType: String)?

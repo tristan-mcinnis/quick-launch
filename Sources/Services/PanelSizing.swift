@@ -12,7 +12,7 @@ enum PanelSizing {
     /// width and can be dragged wider (`QuickAISize`).
     static let panelWidth = House.Layout.panelWidth
     /// A preview-worthy catalog with its detail pane beside the list.
-    static let panelWidthWithDetail: CGFloat = 960
+    static let panelWidthWithDetail = panelWidth
     /// The list column beside a detail pane. The floating ⌘K pane measures
     /// the detail column from it, so the pane and the preview share one
     /// number instead of two that can drift.

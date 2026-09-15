@@ -111,6 +111,130 @@ struct TranslatorModelTests {
         #expect(empty.message == "Direction flipped")
     }
 
+    @Test func typingKeepsTheChosenTargetAndCancelsOldWorkImmediately() async {
+        let (model, mock, _) = await makeModel()
+        await mock.setDelay(.seconds(1))
+        model.setTarget(.simplifiedChinese)
+        model.source = "hello"
+        model.translateNow()
+        model.copyTranslation()
+        model.source = "你好"
+        model.sourceChanged()
+        #expect(model.target == .simplifiedChinese, "Typing must not override an explicit target")
+        #expect(!model.isTranslating, "Old streaming output must stop while typing")
+        #expect(model.pendingCommit == nil, "Editing must discard a copy queued for the old text")
+        model.clear()
+    }
+
+    @Test func reopeningWithoutASelectionStartsEmptyAndClosesThePicker() {
+        let model = TranslatorModel(lastTarget: .english)
+        model.source = "earlier source"
+        model.translation = "earlier translation"
+        model.isTargetPickerPresented = true
+        model.prepare(target: nil, selectedText: nil)
+        #expect(model.source.isEmpty && model.translation.isEmpty)
+        #expect(!model.isTargetPickerPresented)
+        #expect(model.target == .english)
+    }
+
+    @Test func emptySwapPersistsTheNewDirection() {
+        let model = TranslatorModel(lastTarget: .simplifiedChinese)
+        var remembered: TranslationTarget?
+        model.onTargetChange = { remembered = $0 }
+        model.swap()
+        #expect(remembered == .english)
+    }
+
+    @Test func editorBindingDoesNotRetranslateProgrammaticSwaps() async {
+        let (model, mock, _) = await makeModel()
+        model.source = "hello"
+        model.translation = "你好"
+        model.detectedSource = .english
+        model.swap()
+        #expect(model.sourceInput == "你好")
+        #expect(!model.isWaitingForTranslation)
+        #expect(await mock.sendCallCount == 0)
+        model.sourceInput = "another reply"
+        #expect(model.isWaitingForTranslation)
+        #expect(model.target == .english)
+        model.clear()
+    }
+
+    @Test func swapWhileWaitingKeepsTypedSourceAndTranslatesInTheNewDirection() async {
+        let (model, mock, _) = await makeModel(reply: "hello")
+        model.sourceInput = "hello"
+        #expect(model.isWaitingForTranslation)
+        model.swap()
+        #expect(model.source == "hello")
+        #expect(model.target == .english)
+        #expect(model.isTranslating)
+        await settle(model)
+        #expect(await mock.lastPrompt?.contains("to English") == true)
+        #expect(await mock.lastPrompt?.hasSuffix("hello") == true)
+    }
+
+    @Test func swapWhileStreamingKeepsSourceAndDiscardsPartialOutput() async {
+        let (model, mock, _) = await makeModel(reply: "hello")
+        model.source = "hello"
+        model.translateNow()
+        // Exercise the state after a partial stream update, before completion.
+        model.translation = "你"
+        #expect(model.isTranslating)
+        model.swap()
+        #expect(model.source == "hello")
+        #expect(model.translation.isEmpty)
+        #expect(model.target == .english)
+        #expect(model.isTranslating)
+        await settle(model)
+        #expect(await mock.lastPrompt?.contains("to English") == true)
+        #expect(model.source == "hello")
+    }
+
+    @Test func emptySwapRestoresTheSavedLanguagePair() throws {
+        let model = TranslatorModel(lastTarget: .english, lastSource: .japanese)
+        model.swap()
+        #expect(model.target == .japanese && model.sourceLanguage == .english)
+        var settings = QuickSettings()
+        settings.lastTranslationTarget = model.target.code
+        settings.lastTranslationSource = model.sourceLanguage.code
+        let restored = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(settings))
+        let reopened = TranslatorModel(
+            lastTarget: try #require(TranslationTarget.named(restored.lastTranslationTarget)),
+            lastSource: TranslationTarget.named(restored.lastTranslationSource)
+        )
+        reopened.swap()
+        #expect(reopened.target == .english && reopened.sourceLanguage == .japanese)
+    }
+
+    @Test func selectingTheSourceAsTargetKeepsTwoDifferentLanguages() {
+        let model = TranslatorModel()
+        model.setTarget(.english)
+        model.swap()
+        #expect(model.target == .simplifiedChinese)
+        #expect(model.sourceLanguage == .english)
+        let restored = TranslatorModel(lastTarget: .english, lastSource: .english)
+        restored.swap()
+        #expect(restored.target == .simplifiedChinese)
+    }
+
+    @Test func commandASelectsSourceWithoutAnEditMenu() throws {
+        let panel = TranslatorPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+        defer { panel.orderOut(nil) }
+        let editor = NSTextView(frame: .zero)
+        editor.string = "An earlier translation"
+        panel.contentView = editor
+        #expect(panel.makeFirstResponder(editor))
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0,
+            windowNumber: panel.windowNumber, context: nil, characters: "a",
+            charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0
+        ))
+        #expect(panel.performKeyEquivalent(with: event))
+        #expect(editor.selectedRange() == NSRange(location: 0, length: (editor.string as NSString).length))
+        editor.deleteBackward(nil)
+        #expect(editor.string.isEmpty)
+    }
+
     @Test func committedTranslationsAreRecordedAndBounded() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-translations-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }

@@ -674,8 +674,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
             // Capture the background selection before the panel becomes key
             // and steals focus, so ad-hoc Quick AI sees what the user selected.
-            viewModel?.captureLaunchSelection()
+            if viewModel?.catalogScope == nil {
+                viewModel?.captureLaunchSelection()
+            }
             viewModel?.captureImageFromClipboard()
+        }
+        if let vm = viewModel, vm.settings.clipboardHistoryEnabled {
+            clipboardHistory.capture(from: .general, limit: vm.settings.clipboardHistoryLimit)
         }
         applicationCatalog.refreshIfNeeded()
         // A Quick AI thread kept from the last open shows the chat as the
@@ -720,7 +725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     ? PanelSizing.quickAIPlacedSize(vm.quickAISize, visibleFrame: screen.visibleFrame)
                     : nil
             }
-            let size = quickAISize ?? panel.frame.size
+            // Resolve the destination surface before making the window visible.
+            // Reusing the previous frame caused a visible resize on the next
+            // Observation pass when entering or reopening a history catalog.
+            let size = quickAISize ?? viewModel.map(targetPanelSize) ?? panel.frame.size
             let frame = anchor.frame(
                 width: size.width,
                 height: size.height,
@@ -908,7 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// with the selection of the app behind it; toggles closed on repeat.
     func showTranslator(retainedSelection handedOffSelection: String? = nil) {
         guard let vm = viewModel else { return }
-        if let panel = translatorPanel, panel.isVisible {
+        if let panel = translatorPanel, panel.isVisible, panel.isKeyWindow {
             // A handoff means the user asked to translate a selection: bring the
             // existing window forward and import it, don't toggle it shut.
             if handedOffSelection != nil {
@@ -930,7 +938,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // when the translator is opened directly (⇧⌘T) and no snapshot exists.
         model.prepare(
             target: target,
-            selectedText: selected,
+            selectedText: handedOffSelection ?? selected,
             retainedSelection: handedOffSelection ?? vm.launchSelection?.text ?? selected
         )
         let panel = translatorPanel ?? makeTranslatorPanel(model: model)
@@ -948,6 +956,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKey()
+        model.requestSourceFocus()
     }
 
     func hideTranslator() {
@@ -994,12 +1003,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func makeTranslatorModel(for vm: QuickViewModel) -> TranslatorModel {
         let model = TranslatorModel(
             lastTarget: TranslationTarget.named(vm.settings.lastTranslationTarget) ?? .simplifiedChinese,
+            lastSource: TranslationTarget.named(vm.settings.lastTranslationSource),
             serviceFactory: { [weak vm] in vm?.makeCurrentService() },
             selectedTextService: selectedTextService,
             pasteboard: vm.pasteboard
         )
-        model.onTargetChange = { [weak vm] target in
+        model.onTargetChange = { [weak vm, weak model] target in
             vm?.settings.lastTranslationTarget = target.code
+            if let model { vm?.settings.lastTranslationSource = model.sourceLanguage.code }
             vm?.settings.save()
         }
         model.onCommit = { record in
@@ -1324,6 +1335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             _ = viewModel.pendingContext
             _ = viewModel.applicationSelectionIndex
             _ = viewModel.screenshotIndexProgress
+            _ = viewModel.screenshotFiles
+            _ = viewModel.clipboardEntries
             _ = viewModel.screenHistory.captureStatus
             // Screen History loads frames asynchronously and can flip into
             // the timeline; both change the row count the window must fit.

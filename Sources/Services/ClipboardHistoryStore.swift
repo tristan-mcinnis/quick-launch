@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import Observation
 
+@Observable
 @MainActor
 final class ClipboardHistoryStore: ClipboardHistoryServicing {
     /// Hard bound on the total payload bytes stored across the whole history
@@ -22,10 +24,15 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         var payload: StoredPayloadMeta?
     }
 
-    private(set) var entries: [LauncherCatalogItem] = []
-    private var storedEntries: [StoredEntry] = []
-    private var timer: Timer?
-    private var lastChangeCount = NSPasteboard.general.changeCount
+    private(set) var entries: [LauncherCatalogItem] = [] {
+        didSet { revision &+= 1 }
+    }
+    private(set) var revision = 0
+    @ObservationIgnored private var storedEntries: [StoredEntry] = []
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var lastChangeCount = NSPasteboard.general.changeCount
+    @ObservationIgnored private var lastPasteboardName = NSPasteboard.general.name
+    @ObservationIgnored private var pendingReadCount = 0
     private let fileURL: URL
     /// Metadata JSON: small, so it loads and rewrites cheaply. The heavy bytes
     /// are in `blobs` and are written/read incrementally.
@@ -36,7 +43,7 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     private let ocr: @Sendable (Data) async -> String
     /// In-flight OCR keyed by entry id, so tests can await it and stale results
     /// can be ignored after delete/clear.
-    private var ocrTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var ocrTasks: [String: Task<Void, Never>] = [:]
 
     /// - Parameters:
     ///   - fileURL: Where the metadata JSON lives (`clipboard-history.json`).
@@ -65,6 +72,8 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     func startMonitoring(limit: Int) {
         stopMonitoring()
         lastChangeCount = NSPasteboard.general.changeCount
+        lastPasteboardName = NSPasteboard.general.name
+        pendingReadCount = 0
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.capturePasteboard(limit: limit) }
         }
@@ -298,12 +307,32 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     }
 
     func capture(from pasteboard: NSPasteboard, limit: Int) {
-        guard pasteboard.changeCount != lastChangeCount else { return }
-        lastChangeCount = pasteboard.changeCount
-        if pasteboard.types?.contains(where: Self.ignoredPasteboardTypes.contains) == true {
+        let changeCount = pasteboard.changeCount
+        if pasteboard.name != lastPasteboardName || changeCount != lastChangeCount {
+            lastPasteboardName = pasteboard.name
+            lastChangeCount = changeCount
+            pendingReadCount = 0
+        } else if pendingReadCount == 0 {
             return
         }
-        guard let payload = ClipboardPayload.extract(from: pasteboard) else { return }
+        if pasteboard.types?.contains(where: Self.ignoredPasteboardTypes.contains) == true {
+            pendingReadCount = 0
+            return
+        }
+        guard let payload = ClipboardPayload.extract(from: pasteboard) else {
+            // A declared representation may arrive after its ownership change
+            // (including Universal Clipboard). Retry on the next monitor ticks;
+            // bound retries so an oversized or unsupported copy cannot keep
+            // expensive extraction running forever.
+            pendingReadCount += 1
+            if pendingReadCount >= 5 { pendingReadCount = 0 }
+            return
+        }
+        // Reading promised data can replace the pasteboard or introduce a
+        // privacy marker. Never save a mixture of two copies or concealed data.
+        guard pasteboard.changeCount == changeCount else { return }
+        pendingReadCount = 0
+        guard pasteboard.types?.contains(where: Self.ignoredPasteboardTypes.contains) != true else { return }
         _ = record(payload, limit: limit)
     }
 

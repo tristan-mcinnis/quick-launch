@@ -77,7 +77,7 @@ struct QuickAIResizeRenderProofTests {
         // ⌘K on the sized surface offers the reset, after the answer
         // actions (then Copy Message, for any message); typing finds it.
         vm.handleCommandK()
-        #expect(vm.paletteSurfaceActions == [.resetSize, .copyMessage])
+        #expect(vm.paletteSurfaceActions == [.attach, .resetSize, .copyMessage])
         vm.actionQuery = "reset size"
         #expect(vm.paletteSurfaceActions == [.resetSize])
         try Self.save(

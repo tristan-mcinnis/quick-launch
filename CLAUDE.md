@@ -98,3 +98,9 @@ singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 Run `swift test` after source changes. For packaging or identity changes, also
 run `SIGN_IDENTITY=- ./scripts/build-app.sh` and verify the resulting
 `build/Quick Launch.app` metadata.
+
+The native rail focus proof takes the keyboard and runs separately from other
+window tests. After the main suite, run
+`QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --skip-build --filter PaletteRailFocusProofTests`.
+It checks action-search typing and Escape focus restoration, and writes dark
+and light render proofs to `/tmp/quick-launch-render-proof/`.

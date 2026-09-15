@@ -28,7 +28,12 @@ struct TranslatorView: View {
         }
         .frame(width: Self.size.width, height: Self.size.height)
         .panelGlass()
-        .onAppear { focusSource() }
+        .task(id: model.sourceFocusRevision) {
+            sourceFocused = false
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            sourceFocused = true
+        }
         .onChange(of: model.isTargetPickerPresented) { _, presented in
             if presented { focusPicker() } else { focusSource() }
         }
@@ -43,11 +48,9 @@ struct TranslatorView: View {
             Text("Translate")
                 .font(AQDesign.TypeToken.subheading)
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
-            if let detected = model.detectedSource {
-                Text("from \(detected.title)")
-                    .font(AQDesign.TypeToken.caption)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-            }
+            Text("from \((model.detectedSource ?? model.sourceLanguage).title)")
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
             Spacer()
             if model.isTranslating {
                 ThinkingIndicator().frame(width: 18, height: 18)
@@ -101,11 +104,11 @@ struct TranslatorView: View {
                         .font(AQDesign.TypeToken.caption)
                         .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }
-                TextEditor(text: $model.source)
+                TextEditor(text: $model.sourceInput)
                     .font(AQDesign.TypeToken.prose)
                     .scrollContentBackground(.hidden)
                     .focused($sourceFocused)
-                    .onChange(of: model.source) { _, _ in model.sourceChanged() }
+                    .accessibilityLabel("Source text")
                     .overlay(alignment: .topLeading) {
                         if model.source.isEmpty {
                             Text(TranslatorKey.sourcePlaceholder)
@@ -274,6 +277,20 @@ final class TranslatorPanel: NSPanel {
             .subtracting([.function, .numericPad, .capsLock])
         if event.type == .keyDown,
            shortcutHandler?(event.charactersIgnoringModifiers, event.keyCode, modifiers) == true {
+            return true
+        }
+        // Accessory apps do not always have an Edit menu installed. Route
+        // native editing directly so selection and paste work on every reopen.
+        if event.type == .keyDown, modifiers == [.command],
+           let editor = firstResponder as? NSTextView {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "a": editor.selectAll(nil)
+            case "c": editor.copy(nil)
+            case "v" where editor.isEditable: editor.paste(nil)
+            case "x" where editor.isEditable: editor.cut(nil)
+            case "z" where editor.isEditable: editor.undoManager?.undo()
+            default: return super.performKeyEquivalent(with: event)
+            }
             return true
         }
         return super.performKeyEquivalent(with: event)

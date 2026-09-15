@@ -149,17 +149,17 @@ struct QuickAIResizeTests {
     @Test func resetIsOfferedInCommandKOnlyOnAResizedSurface() {
         let vm = make()
         vm.openQuickAI()
-        #expect(vm.quickAISurfaceActions.isEmpty, "nothing to reset at 750 × 475")
+        #expect(!vm.quickAISurfaceActions.contains(.resetSize), "nothing to reset at 750 × 475")
 
         vm.rememberQuickAISize(Self.large)
-        #expect(vm.quickAISurfaceActions == [.resetSize])
+        #expect(vm.quickAISurfaceActions == [.attach, .resetSize])
         #expect(QuickAISurfaceAction.resetSize.title == "Reset Quick AI Size")
         #expect(QuickAISurfaceAction.resetSize.detail == "Back to 750 × 475")
 
         vm.handleCommandK()
         #expect(vm.isActionPalettePresented)
         let before = vm.actionPaletteEntryCount
-        #expect(vm.paletteSurfaceActions == [.resetSize])
+        #expect(vm.paletteSurfaceActions == [.attach, .resetSize])
         vm.actionQuery = "reset size"
         #expect(vm.paletteSurfaceActions == [.resetSize], "the palette search finds it")
         vm.actionQuery = "zzzz"
@@ -172,7 +172,7 @@ struct QuickAIResizeTests {
         #expect(vm.settings.quickAISize == .standard)
         #expect(vm.currentPanelWidth == 750)
         #expect(vm.estimatedWindowHeight == 475)
-        #expect(vm.quickAISurfaceActions.isEmpty)
+        #expect(!vm.quickAISurfaceActions.contains(.resetSize))
 
         // Root search never offers it, whatever the size.
         vm.rememberQuickAISize(Self.large)

@@ -98,6 +98,10 @@ protocol AIChatWindowPresenting: AnyObject {
     /// `⌘K` on the rail: the highlighted row's actions.
     var railActionsPresented = false
     var railActionIndex = 0
+    /// Search within the highlighted chat's actions, separate from chat search.
+    var railActionQuery = "" {
+        didSet { if railActionQuery != oldValue { railActionIndex = 0 } }
+    }
     /// Delete is pressed twice: the first press arms it on that chat.
     var deleteArmedChatID: UUID?
     /// The chat being renamed in its row, and the name typed so far.
@@ -295,7 +299,7 @@ protocol AIChatWindowPresenting: AnyObject {
 
     func moveRailSelection(_ delta: Int) {
         if railActionsPresented {
-            let count = railActions.count
+            let count = filteredRailActions.count
             guard count > 0 else { return }
             railActionIndex = ListSelection.wrappedIndex(railActionIndex, by: delta, count: count)
             return
@@ -310,8 +314,9 @@ protocol AIChatWindowPresenting: AnyObject {
     /// row action while `⌘K` is open.
     func activateRailSelection() {
         if railActionsPresented {
-            guard railActions.indices.contains(railActionIndex) else { return }
-            performRailAction(railActions[railActionIndex])
+            let actions = filteredRailActions
+            guard actions.indices.contains(railActionIndex) else { return }
+            performRailAction(actions[railActionIndex])
             return
         }
         guard let item = highlightedRailItem else { return }
@@ -369,9 +374,25 @@ protocol AIChatWindowPresenting: AnyObject {
 
     var railActions: [RailAction] { highlightedRailItem == nil ? [] : RailAction.allCases }
 
+    var filteredRailActions: [RailAction] {
+        QuickViewModel.rankByQuery(railActions, query: railActionQuery) { title(of: $0) }
+    }
+
     /// A row action's title for the highlighted chat.
     func title(of action: RailAction) -> String {
         title(of: action, for: highlightedRailItem)
+    }
+
+    /// The rail already identifies the chat. Keep verbs short enough to
+    /// fit beside the shortcut; context menus and VoiceOver use full titles.
+    func compactTitle(of action: RailAction) -> String {
+        switch action {
+        case .pin: highlightedRailItem?.isPinned == true ? "Unpin" : "Pin"
+        case .rename: "Rename"
+        case .delete:
+            deleteArmedChatID != nil && highlightedRailItem?.itemID == deleteArmedChatID?.uuidString
+                ? "Confirm" : "Delete"
+        }
     }
 
     /// A row action's title for one row (its context menu, VoiceOver).
@@ -402,6 +423,8 @@ protocol AIChatWindowPresenting: AnyObject {
         guard !railActions.isEmpty else { return }
         railActionsPresented.toggle()
         railActionIndex = 0
+        railActionQuery = ""
+        if !railActionsPresented { focusRail() }
     }
 
     func performRailAction(_ action: RailAction) {
@@ -413,6 +436,7 @@ protocol AIChatWindowPresenting: AnyObject {
             // The row moves between Pinned and Recent; the highlight follows it.
             railIndex = railItems.firstIndex { $0.itemID == item.itemID } ?? railIndex
             railActionsPresented = false
+            focusRail()
         case .rename:
             deleteArmedChatID = nil
             railActionsPresented = false
@@ -428,6 +452,7 @@ protocol AIChatWindowPresenting: AnyObject {
             chat.deleteConversation(id: id)
             chat.isQuickAIPresented = true
             railIndex = min(railIndex, max(0, railItems.count - 1))
+            focusRail()
         }
     }
 
@@ -636,7 +661,7 @@ protocol AIChatWindowPresenting: AnyObject {
         case .keepOnTop: isAlwaysOnTop = true; focusComposer()
         case .stopKeepingOnTop: isAlwaysOnTop = false; focusComposer()
         // The chat's own actions, run by the view model.
-        case .resetSize, .copyMessage, .captureMessage: focusComposer()
+        case .resetSize, .attach, .copyMessage, .captureMessage: focusComposer()
         }
     }
 
@@ -661,6 +686,7 @@ protocol AIChatWindowPresenting: AnyObject {
         } else if railActionsPresented {
             railActionsPresented = false
             deleteArmedChatID = nil
+            focusRail()
         } else if focus == .rail, !railQuery.isEmpty {
             railQuery = ""
         } else if focus == .rail, isRailVisible {

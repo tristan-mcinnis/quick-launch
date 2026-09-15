@@ -46,6 +46,8 @@ extension LauncherCatalogServicing {
 
 @MainActor
 protocol ClipboardHistoryServicing: AnyObject {
+    /// Changes when copies, ordering, pins, or OCR search text change.
+    var revision: Int { get }
     var entries: [LauncherCatalogItem] { get }
     func startMonitoring(limit: Int)
     func stopMonitoring()
@@ -61,6 +63,16 @@ protocol ClipboardHistoryServicing: AnyObject {
 }
 
 extension ClipboardHistoryServicing {
+    var revision: Int {
+        var hasher = Hasher()
+        for entry in entries {
+            hasher.combine(entry.id)
+            hasher.combine(entry.detail)
+            hasher.combine(entry.keywords)
+            hasher.combine(entry.isPinned)
+        }
+        return hasher.finalize()
+    }
     func togglePin(_ item: LauncherCatalogItem) {}
     func payload(for item: LauncherCatalogItem) async -> ClipboardPayload? { nil }
 }

@@ -65,7 +65,7 @@ The same key means the same thing on every layer.
 | `↩` | Primary action: open, paste, run, browse, ask; on an answer with nothing typed, paste the answer back (or copy, per Settings; AI Chat always copies); with text typed, follow up; while an answer streams, queue the follow-up |
 | `⌘↩` | Secondary action: copy, show in Finder, copy link, paste back an answer |
 | `⌘⇧↩` | Copy and paste |
-| `⌘K` | Open or close the action list for the highlighted row |
+| `⌘K` | Open or close the action list for the highlighted row; type to fuzzy-search actions. Pin/Unpin follows that item's current state, including the open chat and AI Chat's sidebar |
 | `⎋` | Step back one layer, outermost first: a ⌘K form, the ⌘K pane or palette, a chooser, Recent Chats (its search text first), a stream (what arrived stays as the answer), typed text, an attachment, the Quick AI surface (back to root search, the thread kept), a local answer, a mode, a catalog. At root search it closes the launcher. In AI Chat it closes the ⌘K palette or a chooser, stops a stream, then closes the rename field, the chat list's actions, its search, the list, and the find bar; it never clears typed text or closes the window. In the Translator: the language list, then the text, then the window |
 | `⌫` on empty | Pop one layer: a chooser closes, catalog → root, mode → root, answer → root, attachment → removed; it never closes the launcher |
 | `⇧↩` | Translate the typed text (direction from the script); in the AI Chat composer, a new line; in its find bar, the previous match |
@@ -87,6 +87,8 @@ The same key means the same thing on every layer.
 | `⇧⌘O` / `⇧⌘R` | Change the model / ask the last question again on another model |
 | `⌘W` | Close the AI Chat window or the Translator |
 | `⌘T` | Translator: open or close the target-language list |
+| `⌘S` | Translator: swap the saved language pair and completed text, then focus the source; unfinished input is kept and translated in the new direction |
+| `⇧⌘A` in a chat | Attach context in Quick AI or AI Chat; also available through `⌘K` → Attach… |
 | `⌥⌘T` | With a selected-text chip: open or close the Transform chooser (Make Shorter, Turn into Bullets, Improve Writing, Summarize, Translate) |
 | `⇧⌘M` | Fold or unfold the newest long question in the thread |
 | `⌘L` / `⇧⌘W` | Read the answer aloud / search the web for it |

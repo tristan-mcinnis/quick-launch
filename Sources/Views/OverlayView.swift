@@ -175,9 +175,17 @@ struct OverlayView: View {
             if !viewModel.isTransformChooserPresented,
                !viewModel.isModelChooserPresented,
                !viewModel.isAddContextMenuPresented,
-               !viewModel.launcherMatches.isEmpty {
+               (!viewModel.launcherMatches.isEmpty || (viewModel.isHistoryCatalog && viewModel.showsDetailPane)) {
                 HouseDivider()
-                if viewModel.isGridCatalog {
+                if viewModel.launcherMatches.isEmpty {
+                    Text(viewModel.input.isEmpty
+                         ? (viewModel.catalogScope == .screenshots ? "Take a screenshot to see it here" : "Copy text or an image to see it here")
+                         : "No matches. Try a different search.")
+                        .font(House.TypeToken.body)
+                        .foregroundStyle(House.ColorToken.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: PanelSizing.launcherListMaximumHeight)
+                } else if viewModel.isGridCatalog {
                     EmojiGridView(viewModel: viewModel)
                 } else {
                     HStack(alignment: .top, spacing: 0) {
@@ -195,6 +203,8 @@ struct OverlayView: View {
                             }
                         }
                     }
+                    .frame(height: viewModel.isHistoryCatalog && viewModel.showsDetailPane
+                           ? PanelSizing.launcherListMaximumHeight : nil)
                 }
             }
 
@@ -1192,7 +1202,7 @@ struct QuickActionPalette: View {
     private func row(for entry: Entry, isSelected: Bool) -> some View {
         switch entry {
         case .result(let action):
-            paletteRow(symbol: action.systemImage, title: action.title, detail: viewModel.resultActionDetail(action) ?? action.paletteGroup) {
+            paletteRow(symbol: viewModel.resultActionSystemImage(action), title: viewModel.resultActionTitle(action), detail: viewModel.resultActionDetail(action) ?? action.paletteGroup) {
                 KeyCapGroup(keys: action.shortcut.keyCaps)
             }
         case .surface(let action):
@@ -1306,7 +1316,7 @@ struct QuickActionPalette: View {
         guard current.indices.contains(selectedIndex) else { return }
         let title: String
         switch current[selectedIndex] {
-        case .result(let action): title = action.title
+        case .result(let action): title = viewModel.resultActionTitle(action)
         case .surface(let action): title = action.title
         case .command(let item): title = item.title
         case .prompt(let prompt): title = prompt.name

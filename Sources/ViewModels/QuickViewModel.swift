@@ -1681,8 +1681,12 @@ import Observation
         guard let catalogScope, Self.detailPaneScopes.contains(catalogScope),
               inputMode == nil, pendingImage == nil
         else { return false }
-        return detailItem != nil
+        return isHistoryCatalog || detailItem != nil
     }
+
+    /// Histories keep their two-column surface through empty searches and new
+    /// copies, instead of collapsing the window on every change in row count.
+    var isHistoryCatalog: Bool { catalogScope == .clipboard || catalogScope == .screenshots }
 
     var detailItem: LauncherCatalogItem? {
         guard let catalogScope, Self.detailPaneScopes.contains(catalogScope) else { return nil }
@@ -1732,6 +1736,13 @@ import Observation
         // treated as a `max(base, pane)` overlay, which left the inline
         // chip + chooser taller than the window and cut off the bottom.
         var total = base
+        if isHistoryCatalog, showsDetailPane {
+            let measuredListHeight: CGFloat = launcherMatches.isEmpty ? 0
+                : max(PanelSizing.detailPaneMinimumHeight,
+                      min(CGFloat(launcherMatches.count) * PanelSizing.launcherRowHeight
+                          + PanelSizing.launcherListChrome, PanelSizing.launcherListMaximumHeight))
+            total += PanelSizing.launcherListMaximumHeight - measuredListHeight
+        }
         if let rootAnswer {
             total += PanelSizing.rootAnswerBlockHeight(
                 answerHeight: MarkdownRenderer.measuredHeight(
@@ -1959,7 +1970,7 @@ import Observation
         parts.append(houseCommandRows.map(\.id).joined(separator: ","))
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
-        parts.append(String(clipboardEntries.count))
+        parts.append(String(clipboardHistory?.revision ?? 0))
         parts.append(String(screenHistory.items.count))
         parts.append(screenHistory.showsTimeline ? "timeline" : "results")
         parts.append(String(history.count))
@@ -3359,7 +3370,13 @@ import Observation
             let isFresh = lastScreenshotScanAt.map {
                 Date().timeIntervalSince($0) < Self.screenshotScanFreshness
             } ?? false
-            if !isFresh { reloadScreenshotFiles() }
+            if !isFresh {
+                reloadScreenshotFiles()
+            } else {
+                // Keep the cached list responsive, then include any capture
+                // made during a rapid Back → Return round trip.
+                refreshScreenshotFilesInBackground()
+            }
         }
         inputMode = nil
         // A catalog is a root-search surface: Quick AI steps aside.
@@ -3378,11 +3395,23 @@ import Observation
 
     func leaveCatalog() {
         if screenHistory.leaveCatalogIfTimeline() { return }
+        let previousScope = catalogScope
         reset([.layers, .mode, .input])
+        // Back returns to the catalog's root row, so Return enters it again.
+        if let previousScope, let index = launcherMatches.firstIndex(where: {
+            if case .catalog(let scope, _) = $0 { return scope == previousScope }
+            return false
+        }) {
+            applicationSelectionIndex = index
+        }
         requestInputFocus()
     }
 
     func noteInteraction() {
+        if isHistoryCatalog {
+            catalogIdleResetTask?.cancel()
+            return
+        }
         guard catalogScope != nil || pendingQuickLinkID != nil
                 || isCatalogActionPanePresented || isApplicationActionPanePresented else {
             catalogIdleResetTask?.cancel()
@@ -3975,6 +4004,17 @@ import Observation
         aiChatOpener != nil && !isAIChatWindow && isQuickAIPresented
     }
 
+    /// Display, search, and VoiceOver use the same state-dependent action.
+    func resultActionTitle(_ action: ResultAction) -> String {
+        if action == .pinChat, currentConversation?.isPinned == true { return "Unpin Chat" }
+        return action.title
+    }
+
+    func resultActionSystemImage(_ action: ResultAction) -> String {
+        if action == .pinChat, currentConversation?.isPinned == true { return "pin.slash" }
+        return action.systemImage
+    }
+
     /// The palette row's second line: the app a destination answer action
     /// targets (so the user never guesses which app receives the output),
     /// the model or tools in use, or what a chat action does to the chat.
@@ -4221,6 +4261,16 @@ import Observation
 
     // MARK: - Add Context
 
+    nonisolated static let attachShortcut: KeyShortcut = .commandShift("a")
+
+    /// The attachment menu belongs to the composer, not a chat-list search
+    /// or a rename/alias form. Those keep their own keyboard commands.
+    var canOpenAttachments: Bool {
+        isQuickAIPresented && !isRecentChatsPresented && inputMode == nil
+            && !isStreaming && !isAskQuestionActive
+            && !isItemActionPanePresented && activeItemActionForm == nil
+    }
+
     /// True while the Add Context menu is open. The same menu opens from the
     /// control left of the composer and from typing `@` in it.
     var isAddContextMenuPresented = false {
@@ -4444,7 +4494,12 @@ import Observation
     /// Warms the list when the cached scan is older than the freshness window.
     /// Called whenever the overlay appears, off the keystroke path.
     func warmScreenshotCatalogIfStale() {
-        guard catalogScope != .screenshots else { return }
+        if catalogScope == .screenshots {
+            // A rapid capture can arrive inside the cache freshness window.
+            // Retained history always refreshes when the overlay reopens.
+            refreshScreenshotFilesInBackground()
+            return
+        }
         if let last = lastScreenshotScanAt, Date().timeIntervalSince(last) < Self.screenshotScanFreshness {
             return
         }
@@ -4465,12 +4520,20 @@ import Observation
         screenshotScanTask = nil
         guard folder == screenshotsFolder else { return }
         if let applied = lastScreenshotScanAt, requestedAt < applied { return }
+        let browsedItemID = catalogScope == .screenshots && applicationSelectionIndex > 0
+            ? focusedLauncherResult?.id : nil
         screenshotFiles = items
         lastScreenshotScanAt = Date()
         if settings.screenshotTextSearch {
             screenshotTextIndex.refresh(for: items)
         }
         invalidateLauncherRanking()
+        if let browsedItemID {
+            // Keep an older capture under the cursor when a new one arrives.
+            // Row zero intentionally follows the newest capture for rapid paste.
+            applicationSelectionIndex = launcherMatches.firstIndex { $0.id == browsedItemID }
+                ?? min(applicationSelectionIndex, max(0, launcherMatches.count - 1))
+        }
     }
 
     /// Send Screen Area to AI: the system selection rectangle, then attach.
@@ -5543,17 +5606,18 @@ import Observation
             actions.append(.recentChats)
         }
         guard !actionQuery.isEmpty else { return actions }
-        return Self.rankByQuery(actions, query: actionQuery, title: \.title)
+        return Self.rankByQuery(actions, query: actionQuery, title: resultActionTitle)
     }
 
     /// Actions on the Quick AI window itself, while the surface is up:
     /// Reset Quick AI Size once the user has dragged it off 750 × 475.
     var quickAISurfaceActions: [QuickAISurfaceAction] {
+        let composerActions: [QuickAISurfaceAction] = canOpenAttachments ? [.attach] : []
         // The AI Chat window offers its own: the chat list, find, and
         // Keep on Top.
-        if let chatWindowHost { return chatWindowHost.windowSurfaceActions + messageSurfaceActions }
+        if let chatWindowHost { return composerActions + chatWindowHost.windowSurfaceActions + messageSurfaceActions }
         guard isQuickAIPresented else { return [] }
-        return (settings.quickAISize.isStandard ? [] : [.resetSize]) + messageSurfaceActions
+        return composerActions + (settings.quickAISize.isStandard ? [] : [.resetSize]) + messageSurfaceActions
     }
 
     /// Copy Message and Capture Message to Memory, while the chat has a
@@ -5579,6 +5643,8 @@ import Observation
         isActionPalettePresented = false
         actionQuery = ""
         switch action {
+        case .attach:
+            openAddContextMenu()
         case .resetSize:
             resetQuickAISize()
         case .copyMessage, .captureMessage:
@@ -5627,14 +5693,14 @@ import Observation
     static func rankByQuery<T>(
         _ items: [T],
         query: String,
-        title: KeyPath<T, String>
+        title: (T) -> String
     ) -> [T] {
         let folded = FuzzyMatcher.fold(query)
         return items.enumerated()
             .compactMap { index, item -> (item: T, score: Int, index: Int)? in
                 guard let score = FuzzyMatcher.score(
                     foldedQuery: folded,
-                    foldedCandidate: FuzzyMatcher.fold(item[keyPath: title])
+                    foldedCandidate: FuzzyMatcher.fold(title(item))
                 ) else { return nil }
                 return (item, score, index)
             }
@@ -5953,6 +6019,12 @@ import Observation
                modifiers: modifiers
            ) {
             openModelChooser(.change)
+            return true
+        }
+        if canOpenAttachments, Self.attachShortcut.matches(
+            characters: characters, keyCode: keyCode, modifiers: modifiers
+        ) {
+            toggleAddContextMenu()
             return true
         }
         // Tools opens on the surface before the first answer too.
@@ -8869,8 +8941,11 @@ import Observation
     /// Overlay open: offer a clipboard image once per copy. A clipboard the
     /// user already saw (or dismissed) is not re-attached, and a non-image
     /// clipboard never clears an attachment retained for follow-ups.
-    func captureImageFromClipboard() {
-        guard let fresh = ClipboardImageReader.attachmentIfFresh() else { return }
+    func captureImageFromClipboard(from pasteboard: NSPasteboard = .general) {
+        // A fresh image belongs in history while browsing a catalog. Offering
+        // it as an AI attachment here discarded the retained history panel.
+        guard catalogScope == nil else { return }
+        guard let fresh = ClipboardImageReader.attachmentIfFresh(from: pasteboard) else { return }
         pendingImage = fresh
         errorMessage = nil
         catalogScope = nil

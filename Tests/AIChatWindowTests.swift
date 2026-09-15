@@ -88,6 +88,28 @@ struct AIChatWindowTests {
         #expect(contract.contains("It is not a general chat workspace or an autonomous desktop agent."))
     }
 
+    @Test func bothChatSurfacesOfferAttachFromTheKeyboardAndPalette() throws {
+        let rig = makeRig()
+        rig.launcher.openQuickAI()
+        rig.window.open(handoff: nil)
+        for chat in [rig.launcher, rig.chat] {
+            chat.input = "a draft to keep"
+            #expect(chat.performShortcut(characters: "a", keyCode: 0, modifiers: [.command, .shift]))
+            #expect(chat.isAddContextMenuPresented)
+            #expect(chat.input == "a draft to keep")
+            chat.closeAddContextMenu()
+            chat.handleCommandK()
+            chat.actionQuery = "attach"
+            let action = try #require(chat.paletteSurfaceActions.first { $0.title == "Attach…" })
+            chat.performQuickAISurfaceAction(action)
+            #expect(chat.isAddContextMenuPresented)
+            #expect(!chat.isActionPalettePresented)
+            #expect(chat.input == "a draft to keep")
+            #expect(chat.handleEscapeKey())
+            #expect(!chat.isAddContextMenuPresented)
+        }
+    }
+
     // MARK: - One store, two views
 
     @Test func theWindowSharesTheStoreButNotTheComposer() async {
@@ -364,7 +386,7 @@ struct AIChatWindowTests {
         #expect(actions.contains(.copy))
         #expect(rig.chat.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
         #expect(rig.launcher.primaryAnswerAction == .pasteToActiveApp, "the launcher keeps its setting")
-        #expect(rig.chat.paletteSurfaceActions == [.showChatList, .findInChat, .keepOnTop, .copyMessage])
+        #expect(rig.chat.paletteSurfaceActions == [.attach, .showChatList, .findInChat, .keepOnTop, .copyMessage])
     }
 
     @Test func renameFromThePaletteGoesToTheChatList() async throws {

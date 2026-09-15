@@ -344,13 +344,16 @@ struct ScreenHistorySaveForm: View {
                         }
                     }
                     .buttonStyle(InkButtonStyle())
+                    .fixedSize(horizontal: true, vertical: false)
                     .font(AQDesign.TypeToken.scaledBody(textScale, weight: .semibold))
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(preview.validationError != nil)
                     Button("Cancel") { viewModel.dismissItemActionLayer() }
                         .font(AQDesign.TypeToken.scaledBody(textScale))
+                        .fixedSize(horizontal: true, vertical: false)
                     Spacer()
                     Text("⌘↩ saves · esc cancels")
+                        .lineLimit(1)
                         .font(AQDesign.TypeToken.scaledHint(textScale))
                         .foregroundStyle(AQDesign.ColorToken.textTertiary)
                 }

@@ -203,6 +203,7 @@ struct QuickSettings: Codable, Sendable {
     // Translator window (⇧⌘T by default)
     var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
     var lastTranslationTarget: String = "zh-Hans"
+    var lastTranslationSource: String = "en"
 
     // Type to Click (⌃⌥C by default): show named targets, then fuzzy-filter controls and menus in the
     // app behind Quick Launch, then use Return to act. It stays open by
@@ -341,6 +342,8 @@ struct QuickSettings: Codable, Sendable {
             TypeToClickContinuation.self, forKey: .typeToClickContinuation
         ) ?? .continuous
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
+        lastTranslationSource = try c.decodeIfPresent(String.self, forKey: .lastTranslationSource)
+            ?? (lastTranslationTarget == "en" ? "zh-Hans" : "en")
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true
         screenHistoryCaptureEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenHistoryCaptureEnabled) ?? false

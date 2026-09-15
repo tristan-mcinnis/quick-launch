@@ -106,12 +106,12 @@ struct QuickAIComposer: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Add Context")
+            .accessibilityLabel("Attach")
             .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
             .help(
                 activeTray == nil
-                    ? "Add context: a window, a selection, an area, or a screen (or type @)"
-                    : "Add context: a window, a selection, a screen, a file, or a link (or type @)"
+                    ? "Attach (⇧⌘A): a window, a selection, an area, or a screen (or type @)"
+                    : "Attach (⇧⌘A): a window, a selection, a screen, a file, or a link (or type @)"
             )
 
             HStack(spacing: House.Spacing.xs) {
