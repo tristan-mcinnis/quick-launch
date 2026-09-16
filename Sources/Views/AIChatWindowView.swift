@@ -102,7 +102,7 @@ struct AIChatWindowView: View {
                 font: AQDesign.TypeToken.glyphSmall,
                 color: AQDesign.ColorToken.textSecondary,
                 label: model.isRailVisible ? "Hide Chat List" : "Show Chat List",
-                help: "\(model.isRailVisible ? "Hide" : "Show") chat list (\(AIChatWindowModel.chatListShortcut.keyCaps.joined()))"
+                help: "\(model.isRailVisible ? "Hide" : "Show") chat list (\(chat.shortcutLabel(for: .chatList)))"
             ) {
                 model.toggleRail()
             }
@@ -125,7 +125,7 @@ struct AIChatWindowView: View {
                 font: AQDesign.TypeToken.glyphMedium,
                 color: AQDesign.ColorToken.textPrimary,
                 label: ResultAction.newChat.title,
-                help: "\(ResultAction.newChat.title) (\(ResultAction.newChat.shortcut.keyCaps.joined()))"
+                help: "\(ResultAction.newChat.title) (\(chat.shortcutLabel(for: .newChat)))"
             ) {
                 model.closeFind()
                 // Live while an answer streams: it stops first and keeps it.
@@ -519,7 +519,7 @@ struct AIChatRail: View {
                                 : AQDesign.ColorToken.textPrimary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        KeyCapGroup(keys: action.shortcut.keyCaps)
+                        KeyCapGroup(keys: model.chat.shortcutKeyCaps(for: action.shortcutAction))
                     }
                     .padding(.horizontal, House.Spacing.xs)
                     .frame(height: House.Control.railRow)

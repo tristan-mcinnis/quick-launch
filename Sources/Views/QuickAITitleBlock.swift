@@ -52,7 +52,7 @@ struct QuickAITitleBlock: View {
                     .accessibilityLabel("Model: \(viewModel.activeModelDisplay)")
                     .accessibilityHint("Change the model")
                     .accessibilityValue(viewModel.isModelChooserPresented ? "Open" : "Closed")
-                    .help("Change model (\(ResultAction.changeModel.shortcut.keyCaps.joined()))")
+                    .help("Change model (\(viewModel.shortcutLabel(for: .changeModel)))")
                 }
             }
         }
@@ -75,7 +75,7 @@ struct QuickAITitleBlock: View {
         .accessibilityLabel("Assistant: \(name)")
         .accessibilityHint("Change the assistant")
         .accessibilityValue(viewModel.isAssistantChooserPresented ? "Open" : "Closed")
-        .help("Change assistant (\(ResultAction.changeAssistant.shortcut.keyCaps.joined()))")
+        .help("Change assistant (\(viewModel.shortcutLabel(for: .changeAssistant)))")
     }
 }
 

@@ -65,9 +65,28 @@ struct StatusMenuTests {
 
     @Test func aiChatSitsRightAfterOpenQuickLaunch() {
         let titles = menu().items.filter { !$0.isSeparatorItem }.prefix(4).map(\.title)
-        #expect(titles == ["Open Quick Launch", "AI Chat", "Settings…", "Turn Caffeinate On"])
-        #expect(menu(isCaffeinating: true).items[3].title == "Turn Caffeinate Off")
+        #expect(titles == ["Open Quick Launch", "AI Chat", "Settings…", "Caffeinate"])
+        #expect(menu(isCaffeinating: true).items[3].title == "Decaffeinate")
         #expect(menu(isCaffeinating: true).items[3].state == .on)
+    }
+
+    @Test func aPausedCaffeinateSessionStillOffersDecaffeinate() throws {
+        let paused = StatusMenu.make(
+            StatusMenu.State(
+                settings: QuickSettings(),
+                isCaffeinating: false,
+                hasCaffeinateSession: true,
+                screenHistory: ScreenHistoryStatusPresentation.make(status: nil),
+                version: "1.5.0"
+            ),
+            target: nil,
+            action: nil
+        )
+        let item = try #require(
+            paused.items.first { $0.tag == StatusMenu.Command.toggleCaffeinate.rawValue }
+        )
+        #expect(item.title == "Decaffeinate (Paused)")
+        #expect(item.state == .on, "a live paused session is still on until decaffeinated")
     }
 
     @Test func everyActionItemCarriesItsCommand() {

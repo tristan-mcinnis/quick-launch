@@ -16,6 +16,9 @@ struct CollapsibleMessageText: View {
     /// Only then does the control draw the key caps, in both Show more
     /// and Collapse.
     var showsShortcut = false
+    /// The caps the owner's resolved shortcut table draws; the built-in
+    /// `⇧⌘M` when no owner passed one.
+    var shortcutKeyCaps: [String] = QuickViewModel.transcriptCollapseShortcut.keyCaps
     /// The font of the body. A user pill in the thread reads at `body`; the
     /// default is the transcript's `detail`.
     var plainTextFont: Font = AQDesign.TypeToken.detail
@@ -41,7 +44,7 @@ struct CollapsibleMessageText: View {
                         Text(title)
                             .font(AQDesign.TypeToken.metadata)
                         if showsShortcut {
-                            KeyCapGroup(keys: QuickViewModel.transcriptCollapseShortcut.keyCaps)
+                            KeyCapGroup(keys: shortcutKeyCaps)
                         }
                     }
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
@@ -65,7 +68,7 @@ struct CollapsibleMessageText: View {
     private var helpText: String {
         let help = state.isExpanded ? "Collapse this message" : "Show the rest of this message"
         guard showsShortcut else { return help }
-        return "\(help) (\(QuickViewModel.transcriptCollapseShortcut.keyCaps.joined()))"
+        return "\(help) (\(shortcutKeyCaps.joined()))"
     }
 
     private var messageBody: some View {

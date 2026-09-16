@@ -33,9 +33,9 @@ struct SavedPromptsEditor: View {
     }
 
     var body: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .prompts) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
-                commandsCard
+                commandsCard.settingsAnchor("prompts.commands")
                 if let selection,
                    let prompt = viewModel.settings.savedPrompts.first(where: { $0.id == selection }) {
                     detailCard(prompt)

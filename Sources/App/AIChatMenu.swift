@@ -44,13 +44,12 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         edit.addItem(responderItem("Paste", #selector(NSText.paste(_:)), "v"))
         edit.addItem(responderItem("Select All", #selector(NSText.selectAll(_:)), "a"))
         edit.addItem(.separator())
-        edit.addItem(item("Find in Chat", #selector(find), "f"))
+        edit.addItem(shortcutItem("Find in Chat", #selector(find), .findInChat))
 
         let view = submenu(in: main, title: "View")
-        let chatList = item("Show Chat List", #selector(toggleChatList), "s")
-        // ⌃⌘S, the macOS sidebar key; RTI owns ⌘\ as a global hotkey.
-        chatList.keyEquivalentModifierMask = [.control, .command]
-        view.addItem(chatList)
+        // The chat-list key comes from the live table, so a rebind in Settings
+        // reaches this equivalent too (`refreshMenu` rebuilds the bar).
+        view.addItem(shortcutItem("Show Chat List", #selector(toggleChatList), .chatList))
 
         let window = submenu(in: main, title: "Window")
         window.addItem(item("Minimize", #selector(minimize), "m"))
@@ -81,6 +80,41 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         item.keyEquivalentModifierMask = modifiers
         item.target = self
         return item
+    }
+
+    /// An item whose key equivalent is the resolved in-app shortcut: a
+    /// character or, after a rebind, a key code. Read from the window's own
+    /// settings, the same value its router and hints read, so the menu cannot
+    /// name a key the model would not accept. The item is still clickable
+    /// when the recorded key has no menu equivalent.
+    private func shortcutItem(
+        _ title: String,
+        _ action: Selector,
+        _ actionName: ShortcutAction
+    ) -> NSMenuItem {
+        let shortcut = bindings.keyShortcut(for: actionName)
+        let item = NSMenuItem(
+            title: title,
+            action: action,
+            keyEquivalent: Self.menuKey(for: shortcut)
+        )
+        item.keyEquivalentModifierMask = NSEvent.ModifierFlags(rawValue: shortcut.modifiers)
+        item.target = self
+        return item
+    }
+
+    /// The chat window's live table: the same value its router, its hints and
+    /// its palette rows read.
+    private var bindings: ShortcutBindings {
+        controller?.model.chat.settings.shortcuts ?? .defaults
+    }
+
+    private static func menuKey(for shortcut: KeyShortcut) -> String {
+        switch shortcut.key {
+        case .character(let character): String(character)
+        case .return: "\r"
+        case .keyCode(let keyCode): KeyCodes.menuEquivalent(for: keyCode) ?? ""
+        }
     }
 
     /// An Edit item that goes to the first responder, the focused text field.

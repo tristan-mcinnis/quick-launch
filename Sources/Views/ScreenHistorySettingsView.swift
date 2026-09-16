@@ -27,16 +27,16 @@ struct ScreenHistorySettingsView: View {
     ]
 
     var body: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .screenHistory) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 introCard
-                sourcesCard
+                sourcesCard.settingsAnchor("screenHistory.sources")
                 communicationCard
                 coastCard
-                captureCard
-                retentionCard
-                excludedApplicationsCard
-                excludedWebsitesCard
+                captureCard.settingsAnchor("screenHistory.capture")
+                retentionCard.settingsAnchor("screenHistory.retention")
+                excludedApplicationsCard.settingsAnchor("screenHistory.excludedApplications")
+                excludedWebsitesCard.settingsAnchor("screenHistory.excludedWebsites")
                 captureControlCard
             }
             .padding(.horizontal, SettingsMetrics.paneInset)

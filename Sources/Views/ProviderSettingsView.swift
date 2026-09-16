@@ -41,12 +41,12 @@ struct ProviderSettingsView: View {
     }
 
     private var providerPane: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .models) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
-                providerCard
-                visionCard
-                webSearchCard
-                instructionCard
+                providerCard.settingsAnchor("models.provider")
+                visionCard.settingsAnchor("models.vision")
+                webSearchCard.settingsAnchor("models.webSearch")
+                instructionCard.settingsAnchor("models.instruction")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)

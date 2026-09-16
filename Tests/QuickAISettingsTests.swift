@@ -400,7 +400,7 @@ struct QuickAISettingsTests {
         ])
         vm.addFallbackCommand(FallbackCommandID.command("caffeinate.toggle"))
         #expect(vm.settings.fallbackCommandIDs.count == 2, "adding twice changes nothing")
-        #expect(vm.fallbackCommandEntries.last?.title == "Caffeinate: Off")
+        #expect(vm.fallbackCommandEntries.last?.title == "Caffeinate")
 
         vm.moveFallbackCommand(FallbackCommandID.command("caffeinate.toggle"), toIndex: 0)
         #expect(vm.settings.fallbackCommandIDs.first == FallbackCommandID.command("caffeinate.toggle"))

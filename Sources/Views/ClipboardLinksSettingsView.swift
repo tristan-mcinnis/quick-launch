@@ -8,14 +8,14 @@ struct ClipboardLinksSettingsView: View {
     @State private var browsers: [LaunchableApplication] = []
 
     var body: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .clipboard) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
-                clipboardCard
-                colorsCard
-                emojiCard
-                screenTextCard
-                quicklinksCard
-                tunaCard
+                clipboardCard.settingsAnchor("clipboard.history")
+                colorsCard.settingsAnchor("clipboard.colors")
+                emojiCard.settingsAnchor("clipboard.emoji")
+                screenTextCard.settingsAnchor("clipboard.screenText")
+                quicklinksCard.settingsAnchor("clipboard.quicklinks")
+                tunaCard.settingsAnchor("clipboard.tuna")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)

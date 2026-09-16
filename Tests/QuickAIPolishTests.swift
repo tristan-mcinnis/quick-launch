@@ -587,8 +587,8 @@ struct QuickAIPolishTests {
         let vm = make(service: mock)
         await ask(vm, mock, "hello", reply: "Hi.")
         #expect(ResultAction.copyChat.title == "Copy Chat")
-        #expect(ResultAction.copyChat.shortcut == .commandOption("c"))
-        #expect(ResultAction.copyChat.shortcut.keyCaps == ["⌥", "⌘", "C"])
+        #expect(ResultAction.copyChat.defaultShortcut == .commandOption("c"))
+        #expect(ResultAction.copyChat.defaultShortcut.keyCaps == ["⌥", "⌘", "C"])
         vm.handleCommandK()
         #expect(vm.paletteResultActions.contains(.copyChat))
         vm.actionQuery = "copy chat"
@@ -599,8 +599,8 @@ struct QuickAIPolishTests {
     /// overlay's own keys, the ⌘K row actions of every kind, and the default
     /// global hotkeys.
     @Test func optionCommandCIsFreeEverywhere() {
-        let copyChat = ResultAction.copyChat.shortcut
-        let answerKeys = ResultAction.allCases.filter { $0 != .copyChat }.map(\.shortcut)
+        let copyChat = ResultAction.copyChat.defaultShortcut
+        let answerKeys = ResultAction.allCases.filter { $0 != .copyChat }.map(\.defaultShortcut)
         let overlayKeys: [KeyShortcut] = [
             QuickViewModel.recentChatsShortcut,
             QuickViewModel.transformChooserShortcut,
@@ -655,7 +655,7 @@ struct QuickAIPolishTests {
         ])
         // The keys come from the tables, so a rebind renames the hint.
         #expect(vm.quickAIEmptyStateHints[1].hasPrefix(QuickViewModel.recentChatsShortcut.keyCaps.joined()))
-        #expect(vm.quickAIEmptyStateHints[2].hasPrefix(ResultAction.changeModel.shortcut.keyCaps.joined()))
+        #expect(vm.quickAIEmptyStateHints[2].hasPrefix(ResultAction.changeModel.defaultShortcut.keyCaps.joined()))
         #expect(vm.quickAIEmptyStateHints[0].first == QuickViewModel.addContextTrigger)
 
         vm.input = "@"

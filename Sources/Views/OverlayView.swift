@@ -428,7 +428,7 @@ struct OverlayView: View {
                     Task { await viewModel.attachScreenshot(kind, clearingInput: false) }
                 } label: {
                     Label(
-                        "\(kind.title)  \(kind.overlayKeyCaps.joined())",
+                        "\(kind.title)  \(kind.overlayKeyCaps(viewModel.shortcuts).joined())",
                         systemImage: kind.systemImage
                     )
                 }
@@ -442,7 +442,7 @@ struct OverlayView: View {
                 Button {
                     viewModel.performChatMenuEntry(entry)
                 } label: {
-                    Label(entry.menuTitle, systemImage: entry.systemImage)
+                    Label(entry.menuTitle(viewModel.shortcuts), systemImage: entry.systemImage)
                 }
                 .disabled(!viewModel.isChatMenuEntryEnabled(entry))
             }
@@ -906,7 +906,7 @@ private struct ItemActionPane: View {
                 .onSubmit { runSelected() }
                 .onKeyPress(.downArrow) { move(1); return .handled }
                 .onKeyPress(.upArrow) { move(-1); return .handled }
-            KeyCapGroup(keys: ["⌘", "K"])
+            KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: .commandPalette))
         }
         .padding(.horizontal, 20)
         .frame(height: PanelSizing.paneSearchRowHeight)
@@ -1151,7 +1151,7 @@ struct QuickActionPalette: View {
                     .onSubmit { runSelected() }
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onKeyPress(.upArrow) { move(-1); return .handled }
-                KeyCapGroup(keys: ["⌘", "K"])
+                KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: .commandPalette))
             }
             .padding(.horizontal, AQDesign.Space.panel)
             .padding(.vertical, 10)
@@ -1225,11 +1225,14 @@ struct QuickActionPalette: View {
         switch entry {
         case .result(let action):
             paletteRow(symbol: viewModel.resultActionSystemImage(action), title: viewModel.resultActionTitle(action), detail: viewModel.resultActionDetail(action) ?? action.paletteGroup) {
-                KeyCapGroup(keys: action.shortcut.keyCaps)
+                // The row names the key the router answers, not the default.
+                KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: ShortcutAction.forResultAction(action)))
             }
         case .surface(let action):
             paletteRow(symbol: action.systemImage, title: action.title, detail: action.detail) {
-                if let shortcut = action.shortcut {
+                if let actionName = action.shortcutAction {
+                    KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: actionName))
+                } else if let shortcut = action.shortcut {
                     KeyCapGroup(keys: shortcut.keyCaps)
                 }
             }
@@ -1445,18 +1448,27 @@ private struct LauncherFooter: View {
 }
 
 /// A coloured light and its word: "● On" in the success colour, "● Off" in
-/// the danger colour. Read at a glance before the row text is.
+/// the danger colour, "● Paused" in the warning colour while a live session's
+/// assertion is released by the battery. Read at a glance before the row text.
 struct StatusLightLabel: View {
     let light: LauncherStatusLight
+
+    private var color: Color {
+        switch light {
+        case .on: AQDesign.ColorToken.success
+        case .paused: AQDesign.ColorToken.warning
+        case .off: AQDesign.ColorToken.danger
+        }
+    }
 
     var body: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(light == .on ? AQDesign.ColorToken.success : AQDesign.ColorToken.danger)
+                .fill(color)
                 .frame(width: 7, height: 7)
             Text(light.label)
                 .font(AQDesign.TypeToken.metadata.weight(.medium))
-                .foregroundStyle(light == .on ? AQDesign.ColorToken.success : AQDesign.ColorToken.danger)
+                .foregroundStyle(color)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(light.label)
@@ -1655,7 +1667,7 @@ struct LaunchSelectionStrip: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Transform selected text")
-                .help("Transform the selected text (⌘⌥T)")
+                .help("Transform the selected text (\(viewModel.shortcutLabel(for: .transformChooser)))")
             }
             Button {
                 viewModel.clearLaunchSelection()

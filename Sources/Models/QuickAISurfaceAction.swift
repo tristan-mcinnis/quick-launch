@@ -96,4 +96,17 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         case .findInChat: AIChatWindowModel.findShortcut
         }
     }
+
+    /// The registry action this row's key belongs to, so a view can draw the
+    /// resolved caps rather than the built-in default. Nil when the row has
+    /// no key of its own.
+    var shortcutAction: ShortcutAction? {
+        switch self {
+        case .attach: .attachMenu
+        case .showChatList, .hideChatList: .chatList
+        case .findInChat: .findInChat
+        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings:
+            nil
+        }
+    }
 }

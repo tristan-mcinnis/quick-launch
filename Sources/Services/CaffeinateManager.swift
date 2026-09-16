@@ -37,7 +37,7 @@ final class PowerAssertion: PowerAssertionHolding {
 
 /// Battery state from IOKit, pushed on change rather than polled.
 @MainActor
-final class PowerSourceMonitor {
+final class PowerSourceMonitor: PowerSourceReading {
     private(set) var onBattery = false
     private(set) var batteryPercent = 100
     var onChange: (() -> Void)?
@@ -94,7 +94,7 @@ final class PowerSourceMonitor {
 final class CaffeinateManager: CaffeinateManaging {
     private let assertion: any PowerAssertionHolding
     private let watcher: AgentSessionWatcher?
-    private let power: PowerSourceMonitor?
+    private let power: (any PowerSourceReading)?
     private var reviewTask: Task<Void, Never>?
     var now: () -> Date = Date.init
 
@@ -107,7 +107,7 @@ final class CaffeinateManager: CaffeinateManaging {
     var keepsDisplayAwake = false { didSet { if assertion.isHeld { reassert() } } }
     var onChange: (() -> Void)?
 
-    init(assertion: any PowerAssertionHolding, watcher: AgentSessionWatcher? = nil, power: PowerSourceMonitor? = nil) {
+    init(assertion: any PowerAssertionHolding, watcher: AgentSessionWatcher? = nil, power: (any PowerSourceReading)? = nil) {
         self.assertion = assertion
         self.watcher = watcher
         self.power = power
@@ -123,10 +123,30 @@ final class CaffeinateManager: CaffeinateManaging {
 
     var isEnabled: Bool { assertion.isHeld }
 
+    /// A session is in force (manual, timed, or agents). True while the battery
+    /// has paused an otherwise-live session, so cancel stays possible.
+    var hasLiveSession: Bool {
+        switch decision {
+        case .active, .batteryPaused: true
+        case .inactive: false
+        }
+    }
+
+    /// The battery pause, when it is why the assertion is not held.
+    var pauseDetail: String? {
+        if case .batteryPaused(let percent) = decision {
+            return "Paused at \(percent)% battery. Decaffeinate to cancel."
+        }
+        return nil
+    }
+
     var endsAt: Date? {
         if case .active = decision, !manualIndefinite { return manualUntil }
         return nil
     }
+
+    /// The intended deadline, held or paused: what a relaunch restores.
+    var sessionDeadline: Date? { manualIndefinite ? nil : manualUntil }
 
     var reason: String? {
         if case .active(let reason, _) = decision { return reason }
@@ -152,15 +172,13 @@ final class CaffeinateManager: CaffeinateManaging {
     @discardableResult
     func setEnabled(_ enabled: Bool) -> Bool {
         if enabled {
-            manualIndefinite = true
-            manualUntil = nil
-        } else {
-            manualIndefinite = false
-            manualUntil = nil
-            watcher?.clearAll()
+            return applyManualIntent(indefinite: true, until: nil)
         }
+        manualIndefinite = false
+        manualUntil = nil
+        watcher?.clearAll()
         evaluate()
-        return enabled ? isEnabled : true
+        return true
     }
 
     @discardableResult
@@ -172,10 +190,31 @@ final class CaffeinateManager: CaffeinateManaging {
     @discardableResult
     func enable(until date: Date) -> Bool {
         guard date > now() else { return false }
-        manualIndefinite = false
+        return applyManualIntent(indefinite: false, until: date)
+    }
+
+    /// One mutation path for the whole manual-intent family, so every entry
+    /// point reports the same way. A battery pause is a success: the session is
+    /// in force and resumes on AC. Only a policy that asks for an active
+    /// session whose assertion did not take (an IOKit refusal) is a failure,
+    /// and it puts the prior intent and timer back exactly as they were.
+    private func applyManualIntent(indefinite: Bool, until date: Date?) -> Bool {
+        let previousIndefinite = manualIndefinite
+        let previousUntil = manualUntil
+        manualIndefinite = indefinite
         manualUntil = date
         evaluate()
-        return isEnabled
+        switch decision {
+        case .active where assertion.isHeld:
+            return true
+        case .batteryPaused:
+            return true
+        case .active, .inactive:
+            manualIndefinite = previousIndefinite
+            manualUntil = previousUntil
+            evaluate()
+            return false
+        }
     }
 
     /// Release without touching intent or agent files, for app termination.

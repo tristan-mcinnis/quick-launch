@@ -9,6 +9,11 @@ protocol OverlayPresenting: AnyObject {
     func presentOverlay()
     func dismissOverlay()
     func openSettings()
+    /// Opens Settings at one searched destination: the pane row, then the
+    /// scroll and highlight for its group. The default reveals through the
+    /// notification and opens the window; a presenter that owns the window
+    /// (the app delegate) passes the destination in at creation instead.
+    func openSettings(destination: SettingsDestination)
     func openTranslator()
     /// Opens the Translator with the launch-time selected text handed over
     /// explicitly, so it survives the overlay closing (which clears the
@@ -28,6 +33,17 @@ extension OverlayPresenting {
     /// need after a capture.
     func restoreAfterExternalAction() {
         presentOverlay()
+    }
+
+    /// Default: open the window, then ask it to reveal the group. The app
+    /// delegate overrides this so a not-yet-created window is born on the
+    /// destination instead of missing the reveal notification.
+    func openSettings(destination: SettingsDestination) {
+        openSettings()
+        NotificationCenter.default.post(
+            name: .revealSettingsDestination,
+            object: destination
+        )
     }
 
     /// Default: ignore the handed-over text and forward to `openTranslator()`.

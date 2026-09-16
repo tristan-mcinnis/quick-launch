@@ -1,15 +1,18 @@
 import Foundation
 
 /// On/off state a row reports at a glance: green light and "On", red light
-/// and "Off". Status colour only, never chrome.
+/// and "Off", amber light and "Paused" while a session is in force but the
+/// battery has released the assertion. Status colour only, never chrome.
 enum LauncherStatusLight: Equatable, Sendable {
     case on
     case off
+    case paused
 
     var label: String {
         switch self {
         case .on: "On"
         case .off: "Off"
+        case .paused: "Paused"
         }
     }
 }
@@ -28,8 +31,8 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var isPinned: Bool = false
     /// Screenshots only: when the file was captured, for date filters.
     var capturedAt: Date?
-    /// A live on/off state the row shows as a coloured light with a word,
-    /// in place of its type label. Caffeinate uses it.
+    /// A live on/off/paused state the row shows as a coloured light with a
+    /// word, in place of its type label. Caffeinate uses it.
     var statusLight: LauncherStatusLight?
     /// Clipboard entries: the full multi-type contents so the UI can preview
     /// and restore the original representation. Nil for plain-text entries
@@ -49,6 +52,27 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         kind == .quickLink
             && !itemID.hasPrefix("tuna-smart-")
             && !itemID.hasPrefix("typed:")
+    }
+
+    /// The launcher row that toggles Caffeinate.
+    static let caffeinateToggleValue = "caffeinate.toggle"
+
+    /// Whether a Caffeinate session is in force, or nil for every other row.
+    /// The row carries the manager's real state in `statusLight`, so a timed
+    /// session and Agent Watch read as in force even though the stored
+    /// `caffeinateEnabled` preference is off. `.paused` (the battery released
+    /// the assertion while the session is live) is still in force.
+    var caffeinateIsActive: Bool? {
+        value == Self.caffeinateToggleValue ? statusLight != .off : nil
+    }
+
+    /// The Caffeinate toggle's one action word, matching what Return does:
+    /// "Decaffeinate" while a session is in force, "Caffeinate" when it is
+    /// not. A battery-paused session is still in force and still cancellable.
+    /// Nil for every other row. One word per state, like Pin/Unpin.
+    var caffeinateActionTitle: String? {
+        guard let active = caffeinateIsActive else { return nil }
+        return active ? "Decaffeinate" : "Caffeinate"
     }
 
     /// Icons for the helper commands that are neither toggles nor panes.
@@ -83,7 +107,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .application: "Open"
         case .snippet, .clipboard, .emoji: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
-        case .command: value.hasPrefix("vault.") ? "Search" : "Run"
+        case .command: value.hasPrefix("vault.") ? "Search" : (value.hasPrefix(SettingsDestination.valuePrefix) ? "Open" : "Run")
         case .screenshot: "Paste"
         case .conversation: "Continue"
         case .askAI: "Ask"
@@ -101,6 +125,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .quickLink: return "link"
         case .clipboard: return clipboardPayload?.kind == .image ? "photo" : "clipboard"
         case .command:
+            if value.hasPrefix(SettingsDestination.valuePrefix) { return "gearshape" }
             if let icon = Self.helperCommandIcons[value] { return icon }
             if value.hasPrefix("vault.") { return "magnifyingglass" }
             if value.hasPrefix("settingspane."),

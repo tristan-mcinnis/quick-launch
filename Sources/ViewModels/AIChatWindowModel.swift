@@ -27,7 +27,10 @@ protocol AIChatWindowPresenting: AnyObject {
 
     // MARK: - Keys
 
-    /// `⌘\`: slide the chat list in or out. Free in every key table.
+    /// `⌃⌘S`: the built-in key for the chat list. The header tooltip, the
+    /// `⌘K` row and the menu equivalent draw the owner's resolved caps
+    /// (`chat.shortcutLabel`); this is the built-in value the key tables and
+    /// the free-key checks name.
     nonisolated static let chatListShortcut: KeyShortcut = .controlCommand("s")
     /// `⌘F`: find in chat.
     nonisolated static let findShortcut: KeyShortcut = .command("f")
@@ -355,11 +358,13 @@ protocol AIChatWindowPresenting: AnyObject {
 
         var id: String { rawValue }
 
-        var shortcut: KeyShortcut {
+        /// The registry action this row's key belongs to: the owner's resolved
+        /// table is what the router matches and what a view draws.
+        var shortcutAction: ShortcutAction {
             switch self {
-            case .pin: ResultAction.pinChat.shortcut
-            case .rename: ResultAction.renameChat.shortcut
-            case .delete: ResultAction.deleteChat.shortcut
+            case .pin: .pinChat
+            case .rename: .renameChat
+            case .delete: .deleteChat
             }
         }
 
@@ -461,7 +466,12 @@ protocol AIChatWindowPresenting: AnyObject {
     private func performRailRowShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard focus == .rail, highlightedRailItem != nil,
               let action = RailAction.allCases.first(where: {
-                  $0.shortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
+                  chat.shortcuts.matches(
+                      $0.shortcutAction,
+                      characters: characters,
+                      keyCode: keyCode,
+                      modifiers: modifiers
+                  )
               })
         else { return false }
         performRailAction(action)
@@ -762,19 +772,25 @@ protocol AIChatWindowPresenting: AnyObject {
     /// Modified keys, before the chat's own shortcuts. Returns `true` when
     /// the window used the key.
     func handleKeyEquivalent(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        // The window's own settings are the truth here, the same value its
+        // views and the chat's router read.
+        let bindings = chat.shortcuts
+        func matchesBinding(_ action: ShortcutAction) -> Bool {
+            bindings.matches(action, characters: characters, keyCode: keyCode, modifiers: modifiers)
+        }
         func matches(_ shortcut: KeyShortcut) -> Bool {
             shortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
         }
-        if matches(Self.chatListShortcut) || matches(QuickViewModel.recentChatsShortcut) {
+        if matchesBinding(.chatList) || matchesBinding(.recentChats) {
             // `⌘P` is Recent Chats in Quick AI; here the chat list is it.
-            if matches(QuickViewModel.recentChatsShortcut), isRailVisible, focus != .rail {
+            if matchesBinding(.recentChats), isRailVisible, focus != .rail {
                 focusRail()
             } else {
                 toggleRail()
             }
             return true
         }
-        if matches(Self.findShortcut) {
+        if matchesBinding(.findInChat) {
             openFind()
             return true
         }
@@ -792,7 +808,7 @@ protocol AIChatWindowPresenting: AnyObject {
             jumpToRailRow(digit)
             return true
         }
-        if focus == .rail, modifiers.overlayRelevant == [.command], characters?.lowercased() == "k" {
+        if focus == .rail, matchesBinding(.commandPalette) {
             toggleRailActions()
             return true
         }
@@ -800,7 +816,7 @@ protocol AIChatWindowPresenting: AnyObject {
             return true
         }
         // Everything else is the chat's: ⌘K, ⌘N, ⌘R, ⇧⌘O, ⌘[ ⌘] …
-        if modifiers.overlayRelevant == [.command], characters?.lowercased() == "k" {
+        if matchesBinding(.commandPalette) {
             chat.handleCommandK()
             return true
         }

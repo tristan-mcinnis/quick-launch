@@ -250,7 +250,7 @@ struct ChatToolsViewModelTests {
     }
 
     @Test func answerActionKeysStayUniqueAndOffThePanelsOwnKeys() {
-        let keys = ResultAction.allCases.map(\.shortcut)
+        let keys = ResultAction.allCases.map(\.defaultShortcut)
         #expect(Set(keys.map(\.keyCaps)).count == keys.count, "every answer action has its own key")
         // The panel consumes these before any answer action sees them.
         let reserved: [KeyShortcut] = [
@@ -259,11 +259,11 @@ struct ChatToolsViewModelTests {
             QuickViewModel.transcriptCollapseShortcut,
         ]
         for action in [ResultAction.openSource, .captureToMemory, .tools] {
-            #expect(!reserved.contains(action.shortcut), "\(action.title) must not take a reserved key")
+            #expect(!reserved.contains(action.defaultShortcut), "\(action.title) must not take a reserved key")
         }
-        #expect(ResultAction.openSource.shortcut.keyCaps == ["⌘", "O"])
-        #expect(ResultAction.captureToMemory.shortcut.keyCaps == ["⌥", "⌘", "M"])
-        #expect(ResultAction.tools.shortcut.keyCaps == ["⌥", "⌘", "K"])
+        #expect(ResultAction.openSource.defaultShortcut.keyCaps == ["⌘", "O"])
+        #expect(ResultAction.captureToMemory.defaultShortcut.keyCaps == ["⌥", "⌘", "M"])
+        #expect(ResultAction.tools.defaultShortcut.keyCaps == ["⌥", "⌘", "K"])
     }
 
     // MARK: - Open Source

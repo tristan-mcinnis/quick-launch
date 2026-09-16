@@ -113,8 +113,8 @@ struct QuickAIComposer: View {
             .accessibilityValue(viewModel.isAddContextMenuPresented ? "Open" : "Closed")
             .help(
                 activeTray == nil
-                    ? "Attach (⇧⌘A): a window, a selection, an area, or a screen (or type @)"
-                    : "Attach (⇧⌘A): a window, a selection, a screen, a file, or a link (or type @)"
+                    ? "Attach (\(viewModel.shortcutLabel(for: .attachMenu))): a window, a selection, an area, or a screen (or type @)"
+                    : "Attach (\(viewModel.shortcutLabel(for: .attachMenu))): a window, a selection, a screen, a file, or a link (or type @)"
             )
 
             HStack(alignment: .bottom, spacing: House.Spacing.xs) {
@@ -246,7 +246,7 @@ struct QuickAIComposer: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Actions")
             .accessibilityValue(viewModel.isActionPalettePresented ? "Open" : "Closed")
-            .help("Actions (⌘K)")
+            .help("Actions (\(viewModel.shortcutLabel(for: .commandPalette)))")
         }
         .padding(House.Spacing.xs)
     }

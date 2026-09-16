@@ -482,7 +482,7 @@ struct PiHandoffTests {
         #expect(vm.resultActions.contains(.continueInPi))
         #expect(vm.resultActions.firstIndex(of: .continueInPi) == vm.resultActions.firstIndex(of: .copyChat).map { $0 + 1 })
         #expect(ResultAction.continueInPi.title == "Continue in pi")
-        #expect(ResultAction.continueInPi.shortcut.keyCaps == ["⌥", "⌘", "P"])
+        #expect(ResultAction.continueInPi.defaultShortcut.keyCaps == ["⌥", "⌘", "P"])
         #expect(vm.resultActionDetail(.continueInPi) == "New tmux session in Ghostty")
         vm.handleCommandK()
         vm.actionQuery = "continue"
@@ -582,8 +582,8 @@ struct PiHandoffTests {
     /// overlay's own keys, the ⌘K row actions of every kind, and the
     /// default global hotkeys.
     @Test func optionCommandPIsFreeEverywhere() {
-        let key = ResultAction.continueInPi.shortcut
-        let answerKeys = ResultAction.allCases.filter { $0 != .continueInPi }.map(\.shortcut)
+        let key = ResultAction.continueInPi.defaultShortcut
+        let answerKeys = ResultAction.allCases.filter { $0 != .continueInPi }.map(\.defaultShortcut)
         let overlayKeys: [KeyShortcut] = [
             QuickViewModel.recentChatsShortcut,
             QuickViewModel.transformChooserShortcut,

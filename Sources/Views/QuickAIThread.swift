@@ -410,7 +410,7 @@ struct QuickAIThread: View {
                 sourceRow(source)
             }
             if sources.count > Self.listedSourceLimit {
-                Text("\(sources.count - Self.listedSourceLimit) more in ⌘K › Open Source")
+                Text("\(sources.count - Self.listedSourceLimit) more in \(viewModel.shortcutLabel(for: .commandPalette)) › Open Source")
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .padding(.leading, House.Control.keyCap + House.Spacing.xs)
@@ -654,12 +654,12 @@ struct QuickAIThread: View {
             Button {
                 viewModel.retryFailedTurn()
             } label: {
-                KeyHint(label: "Retry", keys: ResultAction.regenerate.shortcut.keyCaps)
+                KeyHint(label: "Retry", keys: viewModel.shortcutKeyCaps(for: .regenerate))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retry")
-            .help("Ask this question again (\(ResultAction.regenerate.shortcut.keyCaps.joined()))")
+            .help("Ask this question again (\(viewModel.shortcutLabel(for: .regenerate)))")
         }
         .frame(minHeight: House.Control.keyCap)
         .accessibilityElement(children: .contain)

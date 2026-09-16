@@ -125,59 +125,33 @@ struct SettingsView: View {
     @State private var tab: SettingsTab
     @State private var settingsQuery = ""
     @State private var hoveredTab: SettingsTab?
+    /// The group a search result asked to reveal. Cleared on any manual tab
+    /// change so the highlight does not linger after the user moves on.
+    @State private var focus: SettingsFocus?
+    @State private var focusToken = 0
+    @State private var searchSelection = 0
+    @State private var clearFocusTask: Task<Void, Never>?
+    @FocusState private var searchFieldFocused: Bool
 
-    init(viewModel: QuickViewModel, initialTab: SettingsTab = .general) {
+    init(
+        viewModel: QuickViewModel,
+        initialTab: SettingsTab = .general,
+        initialDestination: SettingsDestination? = nil
+    ) {
         self.viewModel = viewModel
-        _tab = State(initialValue: initialTab)
+        _tab = State(initialValue: initialDestination?.pane ?? initialTab)
+        let token = 1
+        _focusToken = State(initialValue: token)
+        _focus = State(initialValue: initialDestination.map {
+            SettingsFocus(pane: $0.pane, anchor: $0.anchor, token: token)
+        })
     }
 
-    enum SettingsTab: String, CaseIterable, Identifiable {
-        case general, items, models, clipboard, screenHistory, prompts, about
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .general: "General"
-            case .items: "Items"
-            case .models: "Models"
-            case .clipboard: "Clipboard & Capture"
-            case .screenHistory: "Screen History"
-            case .prompts: "AI Commands"
-            case .about: "About"
-            }
-        }
-        var systemImage: String {
-            switch self {
-            case .general: "gearshape"
-            case .items: "square.grid.2x2"
-            case .models: "cpu"
-            case .clipboard: "clipboard"
-            case .screenHistory: "clock.arrow.circlepath"
-            case .prompts: "text.quote"
-            case .about: "info.circle"
-            }
-        }
-        /// One plain line under the pane title.
-        var subtitle: String {
-            switch self {
-            case .general: "Hotkeys, launcher behaviour, chats, and learning."
-            case .items: "Aliases and hotkeys for apps, folders, and commands."
-            case .models: "Providers, models, and the quick-action instruction."
-            case .clipboard: "Clipboard history, colors, emoji, and Quicklinks."
-            case .screenHistory: "Sources, capture, retention, and exclusions."
-            case .prompts: "Saved AI commands, their aliases, and hotkeys."
-            case .about: "Version, updates, and source."
-            }
-        }
-        /// The quiet hint on the left of the footer well. Keep it true.
-        var footerHint: String {
-            switch self {
-            case .general, .items, .clipboard, .prompts: "Applies immediately"
-            case .models: "Model changes apply immediately"
-            case .screenHistory: "Capture stays locked in this build"
-            case .about: "Version and updates"
-            }
-        }
-    }
+    /// The Settings tabs. The enum now lives in the model layer
+    /// (`SettingsPane`) so the launcher's search index can name a pane without
+    /// importing this view; the old nested name stays as an alias for every
+    /// existing caller and test.
+    typealias SettingsTab = SettingsPane
 
     static let windowSize = NSSize(width: 1_040, height: 680)
     /// Wide enough for the widest tab's fixed chrome (the Items filter
@@ -201,8 +175,21 @@ struct SettingsView: View {
         )
         .background(AQDesign.ColorToken.windowSurface)
         .preferredColorScheme(viewModel.settings.appearance.swiftUIColorScheme)
+        .onReceive(
+            NotificationCenter.default.publisher(for: .revealSettingsDestination)
+        ) { note in
+            guard let destination = note.object as? SettingsDestination else { return }
+            reveal(destination)
+        }
+        .onAppear { scheduleFocusFade() }
+        .onChange(of: tab) { _, newTab in
+            // ⌘1…⌘8 and rail clicks move panes without clearing a reveal, so
+            // clear it here: the highlight belongs to the pane that was asked
+            // for, not to whatever pane the user moved to next.
+            if let current = focus, current.pane != newTab { focus = nil }
+        }
         .background {
-            // ⌘1…⌘7 switch tabs, like Raycast.
+            // ⌘1…⌘8 switch tabs, like Raycast.
             ForEach(Array(SettingsTab.allCases.enumerated()), id: \.element.id) { index, item in
                 Button("") { tab = item }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command])
@@ -213,12 +200,20 @@ struct SettingsView: View {
 
     // MARK: - Pane
 
+    /// The pane and anchor this view was asked to open on. Internal so a test
+    /// can assert the destination landed, not just that the frame has a size.
+    var revealedDestinationForTesting: (pane: SettingsPane, anchor: String)? {
+        guard let focus else { return nil }
+        return (focus.pane, focus.anchor)
+    }
+
     private var pane: some View {
         VStack(spacing: 0) {
             paneHeader
             Group {
                 switch tab {
                 case .general: GeneralTab(viewModel: viewModel)
+                case .keyboard: KeyboardShortcutsSettingsView(viewModel: viewModel)
                 case .items: ItemsSettingsView(viewModel: viewModel)
                 case .models: ProviderSettingsView(viewModel: viewModel)
                 case .clipboard: ClipboardLinksSettingsView(viewModel: viewModel)
@@ -227,6 +222,7 @@ struct SettingsView: View {
                 case .about: AboutTab(viewModel: viewModel)
                 }
             }
+            .environment(\.settingsFocus, focus)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             paneFooter
         }
@@ -268,12 +264,56 @@ struct SettingsView: View {
 
     // MARK: - Rail
 
-    private var filteredTabs: [SettingsTab] {
-        let query = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return SettingsTab.allCases }
-        return SettingsTab.allCases.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
+    /// The destinations the typed query matches, or nothing when the field is
+    /// empty. The sidebar and the launcher share this one index.
+    private var searchHits: [SettingsDestination] {
+        SettingsDestinationIndex.matching(settingsQuery)
+    }
+
+    private var isSearching: Bool {
+        !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Switches to a destination's pane, scrolls its group into view, and
+    /// lights it. The token makes a repeated request for the same group
+    /// scroll again instead of reading as no change.
+    private func reveal(_ destination: SettingsDestination) {
+        tab = destination.pane
+        focusToken += 1
+        focus = SettingsFocus(pane: destination.pane, anchor: destination.anchor, token: focusToken)
+        scheduleFocusFade()
+    }
+
+    /// Fades a reveal highlight after the user has had time to see where it
+    /// landed. Also called on appear, so a destination an `initialDestination`
+    /// set before the window existed fades too (there is no `reveal` then).
+    private func scheduleFocusFade() {
+        guard let current = focus else { return }
+        let token = current.token
+        clearFocusTask?.cancel()
+        clearFocusTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled, focus?.token == token else { return }
+            focus = nil
         }
+    }
+
+    /// Moves the search highlight. Arrow keys in the search field route here
+    /// before the field editor sees them.
+    private func moveSearchSelection(_ delta: Int) {
+        let count = searchHits.count
+        guard count > 0 else { return }
+        searchSelection = min(max(searchSelection + delta, 0), count - 1)
+    }
+
+    /// Return in the search field: go to the highlighted hit, or the first one
+    /// when the highlight was never moved.
+    private func activateSearchSelection() {
+        let hits = searchHits
+        let destination = hits.indices.contains(searchSelection) ? hits[searchSelection] : hits.first
+        guard let destination else { return }
+        reveal(destination)
+        searchFieldFocused = false
     }
 
     private var sidebar: some View {
@@ -282,8 +322,18 @@ struct SettingsView: View {
 
             ScrollView {
                 LazyVStack(spacing: SettingsMetrics.railGap) {
-                    ForEach(filteredTabs) { item in
-                        railRow(item)
+                    if isSearching {
+                        if searchHits.isEmpty {
+                            noResults
+                        } else {
+                            ForEach(Array(searchHits.enumerated()), id: \.element.id) { index, hit in
+                                searchResultRow(hit, isSelected: index == searchSelection)
+                            }
+                        }
+                    } else {
+                        ForEach(SettingsTab.allCases) { item in
+                            railRow(item)
+                        }
                     }
                 }
             }
@@ -296,6 +346,78 @@ struct SettingsView: View {
         .padding(House.Spacing.sm)
         .frame(width: House.Layout.settingsRail)
         .background(AQDesign.ColorToken.sidebarSurface)
+        .onChange(of: settingsQuery) { _, _ in searchSelection = 0 }
+    }
+
+    /// A usable empty state: it names the query and offers words that work.
+    private var noResults: some View {
+        VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+            Text("No settings found")
+                .font(AQDesign.TypeToken.label)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            Text("Nothing matches \u{201C}\(settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}. Try caffeinate, updates, or clipboard.")
+                .font(AQDesign.TypeToken.caption)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, AQDesign.Space.standard)
+        .padding(.vertical, AQDesign.Space.standard)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One search hit: the setting's own name above the pane it lives in, so
+    /// a glance says both what and where before Return goes there.
+    private func searchResultRow(_ destination: SettingsDestination, isSelected: Bool) -> some View {
+        Button {
+            reveal(destination)
+            searchFieldFocused = false
+        } label: {
+            HStack(spacing: AQDesign.Space.standard) {
+                IconTile {
+                    Image(systemName: destination.pane.systemImage)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(
+                            isSelected
+                                ? AQDesign.ColorToken.textPrimary
+                                : AQDesign.ColorToken.textSecondary
+                        )
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(destination.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(
+                            isSelected
+                                ? AQDesign.ColorToken.textPrimary
+                                : AQDesign.ColorToken.textSecondary
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(destination.pane.title)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: AQDesign.Space.compact)
+                if isSelected {
+                    Image(systemName: "return")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                }
+            }
+            .padding(.horizontal, AQDesign.Space.standard)
+            .frame(maxWidth: .infinity, minHeight: House.Control.railRow, alignment: .leading)
+            .background(
+                RowHighlight(
+                    isSelected: isSelected,
+                    isHovering: false,
+                    radius: AQDesign.menuCornerRadius
+                )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityLabel("\(destination.title), \(destination.pane.title)")
     }
 
     private var searchField: some View {
@@ -314,7 +436,11 @@ struct SettingsView: View {
                     .textFieldStyle(.plain)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .focused($searchFieldFocused)
                     .accessibilityLabel("Search settings…")
+                    .onSubmit { activateSearchSelection() }
+                    .onKeyPress(.downArrow) { moveSearchSelection(1); return .handled }
+                    .onKeyPress(.upArrow) { moveSearchSelection(-1); return .handled }
             }
         }
         .padding(.horizontal, AQDesign.Space.standard)
@@ -333,6 +459,7 @@ struct SettingsView: View {
         let isSelected = tab == item
         return Button {
             tab = item
+            focus = nil
         } label: {
             HStack(spacing: AQDesign.Space.standard) {
                 IconTile {
@@ -387,20 +514,24 @@ struct SettingsView: View {
 
 private struct GeneralTab: View {
     @Bindable var viewModel: QuickViewModel
+    /// A failed Caffeinate assertion is surfaced here, beside the switch that
+    /// asked for it, instead of being silently swallowed.
+    @State private var caffeinateError: String?
 
     var body: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .general) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
-                hotkeysCard
-                behaviourCard
+                hotkeysCard.settingsAnchor("general.hotkeys")
+                behaviourCard.settingsAnchor("general.behaviour")
+                caffeinateCard.settingsAnchor("general.caffeinate")
                 // High in the pane: these are behaviour settings, and the
                 // cards under them (Learning & Review especially) are long.
-                QuickAISettingsView(viewModel: viewModel)
-                ChatSettingsView(viewModel: viewModel)
-                FallbackCommandsView(viewModel: viewModel)
-                learningAndReviewCard
-                HistorySettingsView(viewModel: viewModel)
-                appearanceCard
+                QuickAISettingsView(viewModel: viewModel).settingsAnchor("general.quickAI")
+                ChatSettingsView(viewModel: viewModel).settingsAnchor("general.chat")
+                FallbackCommandsView(viewModel: viewModel).settingsAnchor("general.fallback")
+                learningAndReviewCard.settingsAnchor("general.learning")
+                HistorySettingsView(viewModel: viewModel).settingsAnchor("general.history")
+                appearanceCard.settingsAnchor("general.appearance")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)
@@ -559,6 +690,118 @@ private struct GeneralTab: View {
                 .toggleStyle(InkToggleStyle())
             }
         }
+    }
+
+    /// Caffeinate's four preferences. These lived only in the launcher's
+    /// Caffeinate catalog; the master switch, Agent Watch, the battery cutoff,
+    /// and the display assertion now have a home here too, and every control
+    /// writes both the stored setting and the running manager.
+    private var caffeinateCard: some View {
+        SettingsCard("Caffeinate") {
+            SettingsRow(
+                title: "Keep this Mac awake",
+                detail: "Hold a sleep assertion until you turn it off. A timed session set from the launcher still shows below.",
+                isFirst: true
+            ) {
+                Toggle(
+                    "Keep this Mac awake",
+                    isOn: Binding(
+                        get: { viewModel.settings.caffeinateEnabled },
+                        set: { enabled in
+                            if viewModel.setCaffeinateEnabled(enabled) {
+                                caffeinateError = nil
+                            } else {
+                                caffeinateError = "Could not turn Caffeinate \(enabled ? "on" : "off")."
+                            }
+                        }
+                    )
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            .settingsAnchor("general.caffeinate.enabled", radius: AQDesign.fieldCornerRadius)
+
+            SettingsRow(
+                title: "Agent Watch",
+                detail: "Stay awake while Claude Code or Codex is working, then let the Mac sleep again."
+            ) {
+                Toggle(
+                    "Agent Watch",
+                    isOn: viewModel.settingsBinding(\.caffeinateAgentWatch) { _ in
+                        viewModel.applyCaffeinatePreferences()
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            .settingsAnchor("general.caffeinate.agentWatch", radius: AQDesign.fieldCornerRadius)
+
+            SettingsRow(
+                title: "Pause on battery at",
+                detail: "On battery at or below this percent, sleep is allowed again. Off never pauses."
+            ) {
+                Picker(
+                    "Pause on battery at",
+                    selection: viewModel.settingsBinding(\.caffeinateBatteryCutoff) { _ in
+                        viewModel.applyCaffeinatePreferences()
+                    }
+                ) {
+                    ForEach(batteryCutoffChoices, id: \.self) { percent in
+                        Text(percent == 0 ? "Off" : "\(percent)%").tag(percent)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 110)
+                .accessibilityLabel("Pause Caffeinate on battery at")
+            }
+            .settingsAnchor("general.caffeinate.battery", radius: AQDesign.fieldCornerRadius)
+
+            SettingsRow(
+                title: "Keep the display awake",
+                detail: "Also prevent the display from idle-sleeping. Off, only the system stays awake."
+            ) {
+                Toggle(
+                    "Keep the display awake",
+                    isOn: viewModel.settingsBinding(\.caffeinateKeepDisplayAwake) { _ in
+                        viewModel.applyCaffeinatePreferences()
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            .settingsAnchor("general.caffeinate.display", radius: AQDesign.fieldCornerRadius)
+
+            CardNote { CardText(caffeinateStatusText) }
+            // A timed or Agent Watch session leaves the master switch off, so
+            // its own cancel control lives here. A paused session is still in
+            // force and is exactly the case this is for.
+            if viewModel.hasCaffeinateSession, !viewModel.settings.caffeinateEnabled {
+                CardNote {
+                    Button("Decaffeinate", role: .destructive) {
+                        _ = viewModel.setCaffeinateEnabled(false)
+                    }
+                }
+            }
+            if let caffeinateError {
+                CardNote { CardText(caffeinateError, tone: AQDesign.ColorToken.danger) }
+            }
+        }
+    }
+
+    /// The presets, plus whatever is stored, so a value written by an older
+    /// build (or a hand-edited plist) still renders and stays selectable.
+    private var batteryCutoffChoices: [Int] {
+        var choices = [0, 10, 20, 30, 50]
+        let current = viewModel.settings.caffeinateBatteryCutoff
+        if !choices.contains(current) {
+            choices.append(current)
+            choices.sort()
+        }
+        return choices
+    }
+
+    /// The manager's own policy line: it names the reason and reports a
+    /// battery pause, which `isCaffeinating` alone cannot (the assertion is
+    /// released while paused).
+    private var caffeinateStatusText: String {
+        viewModel.caffeinateStatusSummary
     }
 
     /// Ranking learning and the interaction journal sit together: they are the
@@ -829,7 +1072,7 @@ private struct AboutTab: View {
     @Bindable var viewModel: QuickViewModel
 
     var body: some View {
-        ScrollView {
+        SettingsPaneScroller(pane: .about) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 SettingsCard("Version") {
                     SettingsRow(title: "Quick Launch", isFirst: true) {
@@ -847,7 +1090,20 @@ private struct AboutTab: View {
                             .disabled(viewModel.updateState == .checking)
                         }
                     }
+                    .settingsAnchor("about.updates", radius: AQDesign.fieldCornerRadius)
+
+                    SettingsRow(
+                        title: "Check for updates on launch",
+                        detail: "Asks GitHub once at launch for the newest release tag. Never installs on its own."
+                    ) {
+                        Toggle(
+                            "Check for updates on launch",
+                            isOn: viewModel.settingsBinding(\.checkForUpdatesOnLaunch)
+                        )
+                        .toggleStyle(InkToggleStyle())
+                    }
                 }
+                .settingsAnchor("about.version")
 
                 SettingsCard("Source") {
                     SettingsRow(title: "Repository", isFirst: true) {
@@ -859,6 +1115,7 @@ private struct AboutTab: View {
                         .foregroundStyle(AQDesign.ColorToken.accent)
                     }
                 }
+                .settingsAnchor("about.source")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)

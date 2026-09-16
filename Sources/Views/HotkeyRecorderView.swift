@@ -25,8 +25,10 @@ struct HotkeyRecorderView: View {
                 }
                 if isRecording {
                     HotkeyCapture { captured in
-                        let rawMods = captured.modifierFlags
-                            .intersection(.deviceIndependentFlagsMask).rawValue
+                        // Normalized the same way every stored and compared
+                        // value is: fn, caps lock, and the numeric keypad's
+                        // bit are noise, never part of the user's choice.
+                        let rawMods = captured.modifierFlags.overlayRelevant.rawValue
                         guard QuickSettings.isValidHotkey(
                             keyCode: captured.keyCode, modifiers: rawMods
                         ) else {
@@ -96,6 +98,9 @@ struct ActionHotkeyRecorderView: View {
     var label: String = "Global hotkey"
     /// False when the surrounding row already names the control.
     var showsLabel: Bool = true
+    /// False for a shortcut that always has a key: Clear would then mean the
+    /// same thing as Reset and would read as if the key could be unbound.
+    var allowsClear: Bool = true
     var changeNotification: Notification.Name = .actionHotkeysChanged
 
     var body: some View {
@@ -109,8 +114,7 @@ struct ActionHotkeyRecorderView: View {
                 }
                 if isRecording {
                     HotkeyCapture { event in
-                        let modifiers = event.modifierFlags
-                            .intersection(.deviceIndependentFlagsMask).rawValue
+                        let modifiers = event.modifierFlags.overlayRelevant.rawValue
                         guard QuickSettings.isValidHotkey(
                             keyCode: event.keyCode,
                             modifiers: modifiers
@@ -147,13 +151,15 @@ struct ActionHotkeyRecorderView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(displayName(hotkey))
                     .help("Click, then press the keys")
-                    Button("Clear") {
-                        self.hotkey = nil
-                        notifyChanged()
+                    if allowsClear {
+                        Button("Clear") {
+                            self.hotkey = nil
+                            notifyChanged()
+                        }
+                        .buttonStyle(.plain)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
                     }
-                    .buttonStyle(.plain)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 } else {
                     Button("Set hotkey…") { isRecording = true }
                         .buttonStyle(.plain)

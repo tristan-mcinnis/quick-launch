@@ -40,12 +40,21 @@ enum ScreenshotKind: String, CaseIterable, Sendable {
         }
     }
 
-    /// Shortcut inside the open overlay.
-    var overlayKeyCaps: [String] {
+    /// The registry action this capture's in-app key belongs to.
+    var overlayAction: ShortcutAction {
         switch self {
-        case .window: ["⌘", "⇧", "S"]
-        case .display: ["⌘", "⇧", "D"]
+        case .window: .attachWindow
+        case .display: .attachDisplay
         }
+    }
+
+    /// The built-in in-app key, for the key tables and the free-key checks.
+    var overlayShortcut: KeyShortcut { overlayAction.defaultShortcut }
+
+    /// The caps the owner's resolved table draws, so a rebind reaches the
+    /// footer hint and the attach menu together.
+    func overlayKeyCaps(_ bindings: ShortcutBindings) -> [String] {
+        bindings.keyCaps(for: overlayAction)
     }
 }
 

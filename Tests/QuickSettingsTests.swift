@@ -199,7 +199,41 @@ struct QuickSettingsTests {
 
         settings.savedPrompts[0].hotkey = ActionHotkey(keyCode: 3, modifiers: 786_432)
         settings.savedPrompts[1].hotkey = settings.savedPrompts[0].hotkey
+        #expect(settings.savedPrompts[0].id != settings.savedPrompts[1].id, "two prompts, not one")
         #expect(settings.actionHotkeyConflict(for: firstID)?.contains(settings.savedPrompts[1].name) == true)
+        // The other action names this one in return, and neither reports
+        // itself.
+        let secondID = settings.savedPrompts[1].id
+        #expect(settings.actionHotkeyConflict(for: secondID)?.contains(settings.savedPrompts[0].name) == true)
+        #expect(settings.actionHotkeyConflict(for: secondID)?.contains(settings.savedPrompts[1].name) == false)
+    }
+
+    /// A lone action is not in conflict with itself. The shared global check
+    /// used to match the very entry being edited, so a saved action with a
+    /// key nothing else used reported a clash with its own name.
+    @Test func aLoneSavedActionHotkeyDoesNotConflictWithItself() {
+        var settings = QuickSettings()
+        let lone = ActionHotkey(keyCode: 38, modifiers: 786_432)   // ⌃⌥J
+        settings.savedPrompts[0].hotkey = lone
+        #expect(settings.actionHotkeyConflict(for: settings.savedPrompts[0].id) == nil)
+        // The same key on a *second* action is a real conflict, with the
+        // other action named.
+        settings.savedPrompts[1].hotkey = lone
+        #expect(settings.actionHotkeyConflict(for: settings.savedPrompts[0].id)
+            == "This conflicts with \(settings.savedPrompts[1].name).")
+    }
+
+    @Test func aLoneLauncherItemHotkeyDoesNotConflictWithItself() {
+        var settings = QuickSettings()
+        settings.launcherItemConfigurations.append(
+            LauncherItemConfiguration(
+                kind: .command,
+                itemID: "shortcutTest.lone",
+                hotkey: ActionHotkey(keyCode: 38, modifiers: 786_432)   // ⌃⌥J
+            )
+        )
+        let id = settings.launcherItemConfigurations.last!.id
+        #expect(settings.launcherItemHotkeyConflict(for: id) == nil)
     }
 
     @Test func clipboardHistoryConflictNamesDedicatedHotkeys() {

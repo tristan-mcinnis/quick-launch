@@ -213,6 +213,13 @@ struct QuickSettings: Codable, Sendable {
     var typeToClickHotkeyEnabled: Bool = true
     var typeToClickContinuation: TypeToClickContinuation = .continuous
 
+    // The user's in-app shortcut overrides, keyed by `ShortcutAction.rawValue`.
+    // Empty on a fresh install and on every stored blob from before this
+    // existed, so the built-in keys stay the built-in keys. One entry replaces
+    // one action's key whole; the Keyboard Shortcuts pane writes them, and
+    // `ShortcutBindings` is the only reader.
+    var shortcutOverrides: [String: ActionHotkey] = [:]
+
     // Appearance
     var appearance: AppearancePreference = .dark
 
@@ -376,6 +383,20 @@ struct QuickSettings: Codable, Sendable {
             ActionHotkey.self,
             forKey: .clipboardHistoryHotkey
         ) ?? ActionHotkey(keyCode: 9, modifiers: 1_048_576 | 131_072)
+        // An id this build does not know, a value that is not a usable
+        // shortcut, or the default it would not have changed is dropped here
+        // rather than carried around: the entry falls back to the built-in
+        // key instead of shadowing it with nonsense.
+        let storedShortcuts = try c.decodeIfPresent(
+            [String: ActionHotkey].self,
+            forKey: .shortcutOverrides
+        ) ?? [:]
+        shortcutOverrides = storedShortcuts.reduce(into: [:]) { result, entry in
+            guard let action = ShortcutAction(rawValue: entry.key) else { return }
+            let hotkey = entry.value.normalized
+            guard hotkey.isValidShortcut, hotkey != action.defaultHotkey else { return }
+            result[entry.key] = hotkey
+        }
         colorFormat = try c.decodeIfPresent(ColorFormat.self, forKey: .colorFormat) ?? .hex
         colorHistoryLimit = try c.decodeIfPresent(Int.self, forKey: .colorHistoryLimit) ?? 50
         emojiSkinTone = try c.decodeIfPresent(Int.self, forKey: .emojiSkinTone) ?? 0
@@ -863,28 +884,166 @@ extension QuickSettings {
         }
     }
 
-    func actionHotkeyConflict(for actionID: UUID) -> String? {
-        guard let action = savedPrompts.first(where: { $0.id == actionID }),
-              let hotkey = action.hotkey else { return nil }
+    // MARK: In-app shortcut overrides
+
+    /// The stored overrides as a typed table. An id the build no longer knows
+    /// is ignored here even if it survives in the blob.
+    var shortcutOverrideTable: [ShortcutAction: ActionHotkey] {
+        shortcutOverrides.reduce(into: [:]) { table, entry in
+            guard let action = ShortcutAction(rawValue: entry.key) else { return }
+            table[action] = entry.value.normalized
+        }
+    }
+
+    /// The live table every router, hint, and menu equivalent reads. Read
+    /// through the settings their owner holds, so a rebind redraws every
+    /// surface that names it and no store can see another's keys.
+    var shortcuts: ShortcutBindings { ShortcutBindings(overrides: shortcutOverrideTable) }
+
+    /// The key an action answers to now: its override, or its built-in key.
+    func shortcutHotkey(for action: ShortcutAction) -> ActionHotkey {
+        shortcuts.hotkey(for: action)
+    }
+
+    /// Whether the action has been rebound away from its built-in key.
+    func isShortcutCustomized(_ action: ShortcutAction) -> Bool {
+        shortcuts.isCustomized(action)
+    }
+
+    /// Why `candidate` may not be bound to `action`, given every other
+    /// setting that owns a key. Nil means it may.
+    func shortcutConflict(for action: ShortcutAction, candidate: ActionHotkey) -> String? {
+        shortcuts.conflict(for: candidate, action: action, settings: self)
+    }
+
+    /// A global hotkey setter's own view of the same question: is this
+    /// combination already an in-app shortcut? One place, so the launcher,
+    /// the clipboard, the translator, Type to Click, a saved action and a
+    /// launcher item all refuse the same keys with the same words.
+    ///
+    /// The main Quick Launch hotkey is checked by `launcherHotkeyConflict`,
+    /// which owns the rest of its own cross-checks.
+    func inAppShortcutConflictMessage(for hotkey: ActionHotkey) -> String? {
+        guard let action = shortcuts.action(matching: hotkey) else { return nil }
+        return "This conflicts with \(action.title)."
+    }
+
+    /// Every global hotkey a candidate could collide with, except the main
+    /// Quick Launch hotkey and the dedicated ones a caller checks itself.
+    /// Shared by the in-app conflict check and by the global setters.
+    ///
+    /// `excludingPrompt` and `excludingItem` are for the two callers that ask
+    /// about one entry in a list: without them the entry's own hotkey would
+    /// match itself and be reported as a conflict with itself.
+    func globalHotkeyConflictMessage(
+        for hotkey: ActionHotkey,
+        excludingPrompt promptID: UUID? = nil,
+        excludingItem itemID: String? = nil
+    ) -> String? {
+        let hotkey = hotkey.normalized
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
         if hotkey.keyCode == hotkeyKeyCode,
-           hotkey.modifiers == hotkeyModifiers {
+           hotkey.modifiers == NSEvent.ModifierFlags(rawValue: hotkeyModifiers).overlayRelevant.rawValue {
             return "This conflicts with the main Quick Launch hotkey."
-        }
-        if let other = savedPrompts.first(where: {
-            $0.id != actionID && $0.hotkey == hotkey
-        }) {
-            return "This conflicts with \(other.name)."
-        }
-        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) {
-            return "This conflicts with a launcher item hotkey."
         }
         if hotkey == clipboardHistoryHotkey {
             return "This conflicts with the Clipboard History hotkey."
         }
+        if hotkey == translatorHotkey {
+            return "This conflicts with the Translator hotkey."
+        }
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
         }
+        if let prompt = savedPrompts.first(where: {
+            $0.id != promptID && $0.hotkey?.normalized == hotkey
+        }) {
+            return "This conflicts with \(prompt.name) quick action."
+        }
+        if let configuration = launcherItemConfigurations.first(where: {
+            $0.itemID != itemID && $0.hotkey?.normalized == hotkey
+        }) {
+            return "This conflicts with the \(configuration.itemID) launcher hotkey."
+        }
         return nil
+    }
+
+    /// Why the main Quick Launch hotkey may not be used. It is the one global
+    /// hotkey with no conflict function of its own until now: every other
+    /// reserved combination was checked, this one was not.
+    func launcherHotkeyConflict() -> String? {
+        let hotkey = ActionHotkey(keyCode: hotkeyKeyCode, modifiers: hotkeyModifiers).normalized
+        guard hotkey.isValidShortcut else { return nil }
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
+        if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
+            return "This conflicts with the Type to Click hotkey."
+        }
+        if let prompt = savedPrompts.first(where: { $0.hotkey?.normalized == hotkey }) {
+            return "This conflicts with the \(prompt.name) quick action."
+        }
+        if let configuration = launcherItemConfigurations.first(where: {
+            $0.hotkey?.normalized == hotkey
+        }) {
+            return "This conflicts with the \(configuration.itemID) launcher hotkey."
+        }
+        return nil
+    }
+
+    /// Rebinds one action. Recording the built-in key, or nil, clears the
+    /// override instead of storing a no-op entry, and is never refused: it is
+    /// the key the app ships on, and a launcher row may legitimately share it.
+    /// Anything else that is not a usable shortcut, or that collides with a
+    /// fixed key, another action, or a global hotkey, is refused and the
+    /// settings are left alone. Returns the refusal message, if any.
+    @discardableResult
+    mutating func setShortcut(_ hotkey: ActionHotkey?, for action: ShortcutAction) -> String? {
+        guard let hotkey else {
+            shortcutOverrides[action.rawValue] = nil
+            return nil
+        }
+        let normalized = hotkey.normalized
+        guard normalized.isValidShortcut else { return "Must include Ctrl, Option, or Cmd" }
+        if normalized == action.defaultHotkey {
+            shortcutOverrides[action.rawValue] = nil
+            return nil
+        }
+        if let conflict = shortcutConflict(for: action, candidate: normalized) {
+            return conflict
+        }
+        shortcutOverrides[action.rawValue] = normalized
+        return nil
+    }
+
+    /// Back to the built-in key for one action.
+    mutating func resetShortcut(_ action: ShortcutAction) {
+        shortcutOverrides[action.rawValue] = nil
+    }
+
+    /// Back to every built-in key.
+    mutating func resetAllShortcuts() {
+        shortcutOverrides.removeAll()
+    }
+
+    /// The actions the user has rebound.
+    var customizedShortcuts: [ShortcutAction] { shortcuts.customized }
+
+    func actionHotkeyConflict(for actionID: UUID) -> String? {
+        guard let action = savedPrompts.first(where: { $0.id == actionID }),
+              let hotkey = action.hotkey else { return nil }
+        // An in-app shortcut first: a saved action that takes one is swallowed
+        // by the launcher whenever it is open, which is exactly when it is used.
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        // Another saved action before the shared checks, so the message names
+        // that action instead of saying "a quick action" or, worse, matching
+        // this one against itself.
+        if let other = savedPrompts.first(where: {
+            $0.id != actionID && $0.hotkey?.normalized == hotkey.normalized
+        }) {
+            return "This conflicts with \(other.name)."
+        }
+        return globalHotkeyConflictMessage(for: hotkey, excludingPrompt: actionID)
     }
 
     func launcherItemConfiguration(
@@ -901,56 +1060,64 @@ extension QuickSettings {
             $0.id == configurationID
         }), let hotkey = configuration.hotkey else { return nil }
 
-        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
-            return "This conflicts with the main Quick Launch hotkey."
-        }
-        if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a quick-action hotkey."
         }
         if launcherItemConfigurations.contains(where: {
-            $0.id != configurationID && $0.hotkey == hotkey
+            $0.id != configurationID && $0.hotkey?.normalized == hotkey.normalized
         }) {
             return "This conflicts with another launcher item."
         }
-        if hotkey == clipboardHistoryHotkey {
-            return "This conflicts with the Clipboard History hotkey."
-        }
-        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
-            return "This conflicts with the Type to Click hotkey."
-        }
-        return nil
+        return globalHotkeyConflictMessage(for: hotkey, excludingItem: configuration.itemID)
     }
 
+    /// The Translator is global and set beside the launcher hotkey; it checks
+    /// the in-app table and every other global key, and excludes itself.
     func translatorHotkeyConflict() -> String? {
         let hotkey = translatorHotkey
-        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if hotkey.keyCode == hotkeyKeyCode,
+           hotkey.modifiers == NSEvent.ModifierFlags(rawValue: hotkeyModifiers).overlayRelevant.rawValue {
             return "This conflicts with the main Quick Launch hotkey."
         }
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
-        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey { return "This conflicts with the Type to Click hotkey." }
-        if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
-        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a launcher item hotkey." }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
+            return "This conflicts with the Type to Click hotkey."
+        }
+        if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
+            return "This conflicts with a quick-action hotkey."
+        }
+        if launcherItemConfigurations.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
+            return "This conflicts with a launcher item hotkey."
+        }
         return nil
     }
 
     func typeToClickHotkeyConflict() -> String? {
         guard typeToClickHotkeyEnabled else { return nil }
         let hotkey = typeToClickHotkey
-        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if hotkey.keyCode == hotkeyKeyCode,
+           hotkey.modifiers == NSEvent.ModifierFlags(rawValue: hotkeyModifiers).overlayRelevant.rawValue {
             return "This conflicts with the main Quick Launch hotkey."
         }
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
         if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
-        if savedPrompts.contains(where: { $0.hotkey == hotkey }) { return "This conflicts with a quick-action hotkey." }
+        if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
+            return "This conflicts with a quick-action hotkey."
+        }
         if launcherItemConfigurations.contains(where: {
-            $0.itemID != "type-to-click.mode" && $0.hotkey == hotkey
+            $0.itemID != "type-to-click.mode" && $0.hotkey?.normalized == hotkey.normalized
         }) { return "This conflicts with a launcher item hotkey." }
         return nil
     }
 
     func clipboardHistoryHotkeyConflict() -> String? {
         let hotkey = clipboardHistoryHotkey
-        if hotkey.keyCode == hotkeyKeyCode, hotkey.modifiers == hotkeyModifiers {
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if hotkey.keyCode == hotkeyKeyCode,
+           hotkey.modifiers == NSEvent.ModifierFlags(rawValue: hotkeyModifiers).overlayRelevant.rawValue {
             return "This conflicts with the main Quick Launch hotkey."
         }
         if hotkey == translatorHotkey {
@@ -959,10 +1126,10 @@ extension QuickSettings {
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
         }
-        if savedPrompts.contains(where: { $0.hotkey == hotkey }) {
+        if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a quick-action hotkey."
         }
-        if launcherItemConfigurations.contains(where: { $0.hotkey == hotkey }) {
+        if launcherItemConfigurations.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a launcher item hotkey."
         }
         return nil

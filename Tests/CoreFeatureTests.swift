@@ -107,10 +107,10 @@ struct CoreFeatureTests {
         // The root carries one status row; timers and Agent Watch live in
         // the catalog so "caffeinate" answers "is it on?" in a single line.
         let rootTitles = vm.systemCommands.filter { $0.value.hasPrefix("caffeinate.") }.map(\.title)
-        #expect(rootTitles == ["Caffeinate: Off"])
+        #expect(rootTitles == ["Caffeinate"])
         #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.statusLight == .off)
         #expect(vm.caffeinateItems.map(\.title) == [
-            "Caffeinate: Off", "Keep Awake for 30 Minutes", "Keep Awake for 1 Hour",
+            "Caffeinate", "Keep Awake for 30 Minutes", "Keep Awake for 1 Hour",
             "Keep Awake for 2 Hours", "Keep Awake for 4 Hours", "Keep Awake Until a Time…", "Agent Watch: On",
         ])
         #expect(vm.caffeinateItems.map(\.itemID).first == "caffeinate.toggle")
@@ -123,14 +123,14 @@ struct CoreFeatureTests {
         #expect(!vm.settings.caffeinateEnabled)
         #expect(vm.settings.caffeinateUntil != nil)
         let running = vm.systemCommands.first { $0.value == "caffeinate.toggle" }!
-        #expect(running.title == "Caffeinate: On")
+        #expect(running.title == "Decaffeinate")
         #expect(running.statusLight == .on)
         #expect(running.detail.hasPrefix("Until "))
         #expect(running.detail.hasSuffix(" left"))
 
         manager.expire()
         #expect(!vm.isCaffeinating)
-        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.title == "Caffeinate: Off")
+        #expect(vm.systemCommands.first { $0.value == "caffeinate.toggle" }?.title == "Caffeinate")
 
         vm.performSystemCommand(vm.caffeinateItems.first { $0.value == "caffeinate.agentWatch" }!)
         #expect(!vm.settings.caffeinateAgentWatch)

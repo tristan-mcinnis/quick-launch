@@ -6,11 +6,21 @@ struct KeyShortcut: Equatable, Sendable {
     enum Key: Equatable, Sendable {
         case character(Character)
         case `return`
+        /// A recorded key. The Keyboard Shortcuts pane stores key codes, not
+        /// characters, because a rebind must not depend on the keyboard
+        /// layout; the built-in defaults keep their character form so their
+        /// display and their existing tests are unchanged.
+        case keyCode(UInt16)
     }
 
     let key: Key
     /// `NSEvent.ModifierFlags` raw value, device-independent bits only.
     let modifiers: UInt
+
+    init(key: Key, modifiers: UInt) {
+        self.key = key
+        self.modifiers = modifiers
+    }
 
     static func command(_ character: Character) -> KeyShortcut {
         KeyShortcut(key: .character(character), modifiers: NSEvent.ModifierFlags.command.rawValue)
@@ -58,9 +68,23 @@ struct KeyShortcut: Equatable, Sendable {
         switch key {
         case .character(let character): caps.append(String(character).uppercased())
         case .return: caps.append("\u{21A9}")
+        case .keyCode(let keyCode): caps.append(QuickSettings.keyName(for: keyCode))
         }
         return caps
     }
+
+    /// The key as a recorded `ActionHotkey` code, for the tables that answer
+    /// by key code. Nil only for a character with no ANSI code.
+    var virtualKeyCode: UInt16? {
+        switch key {
+        case .return: VirtualKey.`return`.rawValue
+        case .keyCode(let keyCode): keyCode
+        case .character(let character): KeyCodes.code(for: character)
+        }
+    }
+
+    /// Compact form for labels and accessibility: `⌥⌘←`.
+    var displayName: String { keyCaps.joined() }
 
     /// `characters` is `NSEvent.charactersIgnoringModifiers`; `keyCode` 36 is Return.
     func matches(characters: String?, keyCode: UInt16, modifiers flags: NSEvent.ModifierFlags) -> Bool {
@@ -70,8 +94,52 @@ struct KeyShortcut: Equatable, Sendable {
             return VirtualKey.isReturn(keyCode: keyCode)
         case .character(let character):
             return characters?.lowercased() == String(character).lowercased()
+        case .keyCode(let recorded):
+            return keyCode == recorded
         }
     }
+}
+
+/// ANSI virtual key codes by character, the inverse of
+/// `QuickSettings.keyName(for:)`. One table, so a built-in shortcut that is
+/// written as a character and the recorder's key code agree.
+enum KeyCodes {
+    static let byName: [String: UInt16] = [
+        "A": 0, "S": 1, "D": 2, "F": 3, "H": 4, "G": 5, "Z": 6, "X": 7,
+        "C": 8, "V": 9, "B": 11, "Q": 12, "W": 13, "E": 14, "R": 15,
+        "Y": 16, "T": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
+        "5": 23, "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
+        "]": 30, "O": 31, "U": 32, "[": 33, "I": 34, "P": 35, "L": 37,
+        "J": 38, "'": 39, "K": 40, ";": 41, "\\": 42, ",": 43, "/": 44,
+        "N": 45, "M": 46, ".": 47, "`": 50, "↩": 36, "⇥": 48, "Space": 49,
+        "⌫": 51, "⎋": 53, "←": 123, "→": 124, "↓": 125, "↑": 126,
+    ]
+
+    static func code(for character: Character) -> UInt16? {
+        byName[String(character).uppercased()]
+    }
+
+    /// The character AppKit spells a key code with for a menu item's key
+    /// equivalent. Letters, digits, and punctuation use their own character
+    /// in lower case, since the modifier mask carries Shift; the named keys
+    /// use the private-use range AppKit expects. Nil for a key with no
+    /// equivalent, and the menu then shows its item without one.
+    static func menuEquivalent(for keyCode: UInt16) -> String? {
+        menuCharacters[keyCode]
+    }
+
+    private static let menuCharacters: [UInt16: String] = [
+        0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x",
+        8: "c", 9: "v", 11: "b", 12: "q", 13: "w", 14: "e", 15: "r",
+        16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
+        23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+        30: "]", 31: "o", 32: "u", 33: "[", 34: "i", 35: "p", 36: "\r",
+        37: "l", 38: "j", 39: "'", 40: "k", 41: ";", 42: "\\", 43: ",",
+        44: "/", 45: "n", 46: "m", 47: ".", 48: "\t", 49: " ", 50: "`",
+        51: "\u{8}", 53: "\u{1B}",
+        116: "\u{F72C}", 121: "\u{F72D}",
+        123: "\u{F702}", 124: "\u{F703}", 125: "\u{F701}", 126: "\u{F700}",
+    ]
 }
 
 enum ItemActionKind: String, Sendable, CaseIterable {
@@ -127,10 +195,15 @@ struct ItemAction: Identifiable, Equatable, Sendable {
 /// Raycast conventions: Return is the primary action, ⌘↩ the secondary,
 /// ⌘E edits, ⌃X deletes, ⌘⇧A and ⌘⇧H configure alias and hotkey.
 enum ItemActionCatalog {
+    /// `bindings` is the owner's resolved in-app table. The launcher's rows
+    /// that name a chat key (Rename, Pin, Delete, Open in AI Chat) take their
+    /// caps from it, so a rebind moves the row and the key together; the
+    /// launcher's own row keys are fixed and do not.
     static func actions(
         for result: LauncherSearchResult,
         pasteTarget: String?,
-        isRunning: Bool = false
+        isRunning: Bool = false,
+        bindings: ShortcutBindings = .defaults
     ) -> [ItemAction] {
         switch result {
         case .catalog:
@@ -155,11 +228,15 @@ enum ItemActionCatalog {
             ]
             return actions
         case .item(let item):
-            return actions(for: item, pasteTarget: pasteTarget)
+            return actions(for: item, pasteTarget: pasteTarget, bindings: bindings)
         }
     }
 
-    private static func actions(for item: LauncherCatalogItem, pasteTarget: String?) -> [ItemAction] {
+    private static func actions(
+        for item: LauncherCatalogItem,
+        pasteTarget: String?,
+        bindings: ShortcutBindings
+    ) -> [ItemAction] {
         let pasteTitle = pasteTarget.map { "Paste to \($0)" } ?? "Paste to Active App"
         switch item.kind {
         case .snippet:
@@ -270,17 +347,27 @@ enum ItemActionCatalog {
             }
             return actions
         case .command:
+            // Caffeinate is one action whose word flips with the effective
+            // state, exactly like Pin/Unpin: only Decaffeinate is offered while
+            // a sleep assertion is held, only Caffeinate when it is not.
+            let caffeinateActive = item.caffeinateIsActive
             return [
                 ItemAction(
                     kind: .primary,
-                    title: item.value.hasPrefix("vault.") ? "Search" : "Run",
-                    systemImage: item.value.hasPrefix("vault.") ? "magnifyingglass" : "play",
+                    title: item.caffeinateActionTitle
+                        ?? (item.value.hasPrefix("vault.") ? "Search" : "Run"),
+                    systemImage: caffeinateActive != nil
+                        ? (caffeinateActive == true ? "moon.zzz" : "cup.and.saucer.fill")
+                        : (item.value.hasPrefix("vault.") ? "magnifyingglass" : "play"),
                     shortcut: .returnKey
                 ),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),
                 ItemAction(kind: .setHotkey, title: "Set Hotkey…", systemImage: "keyboard", shortcut: .commandShift("h")),
             ]
         case .conversation:
+            // A chat row's Rename, Pin, Delete, and Open in AI Chat are the
+            // chat actions, so they follow a rebind. The key that reaches this
+            // row from the list is the same one `performShortcut` matches.
             return [
                 ItemAction(kind: .primary, title: "Continue Chat", systemImage: "bubble.left.and.text.bubble.right", shortcut: .returnKey),
                 // The same move, title, and key as `⌘J` on the open chat.
@@ -288,12 +375,12 @@ enum ItemActionCatalog {
                     kind: .openInAIChat,
                     title: ResultAction.continueInAIChat.title,
                     systemImage: ResultAction.continueInAIChat.systemImage,
-                    shortcut: ResultAction.continueInAIChat.shortcut
+                    shortcut: bindings.keyShortcut(for: .continueInAIChat)
                 ),
                 ItemAction(kind: .secondary, title: "Copy Last Answer", systemImage: "doc.on.doc", shortcut: .commandReturn),
-                ItemAction(kind: .edit, title: "Rename Chat", systemImage: "pencil", shortcut: .command("e")),
-                pinAction(for: item),
-                ItemAction(kind: .delete, title: "Delete Chat", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
+                ItemAction(kind: .edit, title: "Rename Chat", systemImage: "pencil", shortcut: bindings.keyShortcut(for: .renameChat)),
+                pinAction(for: item, shortcut: bindings.keyShortcut(for: .pinChat)),
+                ItemAction(kind: .delete, title: "Delete Chat", systemImage: "trash", shortcut: bindings.keyShortcut(for: .deleteChat), isDestructive: true),
             ]
         case .folder:
             var actions = [
@@ -344,13 +431,17 @@ enum ItemActionCatalog {
         shortcut: .commandShift("u")
     )
 
-    /// The same pin on every pinnable kind: `⌘⇧P` toggles it.
-    private static func pinAction(for item: LauncherCatalogItem) -> ItemAction {
+    /// The same pin on every pinnable kind: `⇧⌘P` toggles it. A chat row
+    /// passes its own resolved key; every other kind passes the fixed one.
+    private static func pinAction(
+        for item: LauncherCatalogItem,
+        shortcut: KeyShortcut = .commandShift("p")
+    ) -> ItemAction {
         ItemAction(
             kind: .pin,
             title: item.isPinned ? "Unpin" : "Pin to Top",
             systemImage: item.isPinned ? "pin.slash" : "pin",
-            shortcut: .commandShift("p")
+            shortcut: shortcut
         )
     }
 
@@ -493,11 +584,22 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var shortcut: KeyShortcut {
+    /// The key this action runs, resolved through the bindings its owner
+    /// holds, so a rebind in Settings reaches the router, the footer hint, the
+    /// key-cap badge, the palette row, and the AI Chat menu together.
+    func shortcut(_ bindings: ShortcutBindings) -> KeyShortcut {
+        bindings.keyShortcut(for: ShortcutAction.forResultAction(self))
+    }
+
+    /// The built-in key, unaffected by any override. The registry's defaults,
+    /// the Settings pane, and the free-key checks read it; routing reads
+    /// `shortcut(_:)` above.
+    var defaultShortcut: KeyShortcut {
         switch self {
-        // Replace Selection moved off `⇧⌘R` when that became Regenerate with
-        // Model, which Raycast's Quick AI owns.
-        case .replaceSelection: .commandShift("v")
+        // `⌥⌘V`. Replace Selection was `⇧⌘V` until that turned out to be the
+        // shipped Clipboard History global hotkey, which swallows the key
+        // whenever the launcher is open; the global default is unchanged.
+        case .replaceSelection: .commandOption("v")
         case .pasteBack: .commandReturn
         case .copy: .commandShift("c")
         case .copyChat: .commandOption("c")

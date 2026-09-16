@@ -26,19 +26,26 @@ enum StatusMenu {
         /// The launcher hotkey, as `QuickSettings` stores it.
         var hotkeyKeyCode: UInt16
         var hotkeyModifiers: UInt
+        /// The sleep assertion is held right now.
         var isCaffeinating: Bool
+        /// A Caffeinate session is in force, even while the battery has paused
+        /// the assertion. Defaults to `isCaffeinating` for a caller that has no
+        /// paused state to report.
+        var hasCaffeinateSession: Bool
         var screenHistory: ScreenHistoryStatusPresentation
         var version: String
 
         init(
             settings: QuickSettings,
             isCaffeinating: Bool,
+            hasCaffeinateSession: Bool? = nil,
             screenHistory: ScreenHistoryStatusPresentation,
             version: String
         ) {
             hotkeyKeyCode = settings.hotkeyKeyCode
             hotkeyModifiers = settings.hotkeyModifiers
             self.isCaffeinating = isCaffeinating
+            self.hasCaffeinateSession = hasCaffeinateSession ?? isCaffeinating
             self.screenHistory = screenHistory
             self.version = version
         }
@@ -66,15 +73,12 @@ enum StatusMenu {
         if let key = keyEquivalent(forKeyCode: state.hotkeyKeyCode) {
             open.keyEquivalent = key
             open.keyEquivalentModifierMask = NSEvent.ModifierFlags(rawValue: state.hotkeyModifiers)
-                .intersection([.control, .option, .shift, .command])
+                .overlayRelevant
         }
         add("AI Chat", .openAIChat)
         add("Settings…", .openSettings, key: ",")
-        let caffeinate = add(
-            state.isCaffeinating ? "Turn Caffeinate Off" : "Turn Caffeinate On",
-            .toggleCaffeinate
-        )
-        caffeinate.state = state.isCaffeinating ? .on : .off
+        let caffeinate = add(caffeinateMenuTitle(state), .toggleCaffeinate)
+        caffeinate.state = state.hasCaffeinateSession ? .on : .off
 
         menu.addItem(.separator())
         add(state.screenHistory.statusTitle, nil)
@@ -89,6 +93,14 @@ enum StatusMenu {
         menu.addItem(.separator())
         add("Quit Quick Launch", .quit, key: "q")
         return menu
+    }
+
+    /// The Caffeinate item names the action, not the state: Caffeinate when no
+    /// session is in force, Decaffeinate when one is. A battery-paused session
+    /// is still in force and still cancellable, and the title says so.
+    static func caffeinateMenuTitle(_ state: State) -> String {
+        guard state.hasCaffeinateSession else { return "Caffeinate" }
+        return state.isCaffeinating ? "Decaffeinate" : "Decaffeinate (Paused)"
     }
 
     /// The menu key equivalent for a key code, or nil for a key a menu

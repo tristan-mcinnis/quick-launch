@@ -117,6 +117,7 @@ struct ChatListsRenderProofTests {
             #expect(vm.chatMenuEntries.map(\.title) == ["New Chat", "Recent Chats", "Open AI Chat"])
             let card = ChatMenuProofCard(
                 entries: vm.chatMenuEntries,
+                bindings: vm.shortcuts,
                 isEnabled: vm.isChatMenuEntryEnabled
             )
             try Self.save(try Self.renderView(card, appearance: appearance), name: "g1-more-menu-\(suffix).png")
@@ -191,6 +192,8 @@ struct ChatListsRenderProofTests {
 /// the system menu, which cannot draw offscreen.
 private struct ChatMenuProofCard: View {
     let entries: [ChatMenuEntry]
+    /// The owner's resolved shortcut table, the same one the real menu draws.
+    var bindings: ShortcutBindings = .defaults
     let isEnabled: (ChatMenuEntry) -> Bool
 
     var body: some View {
@@ -203,7 +206,7 @@ private struct ChatMenuProofCard: View {
                     Text(entry.title)
                         .font(AQDesign.TypeToken.label)
                     Spacer(minLength: House.Spacing.xl)
-                    if let shortcut = entry.shortcut {
+                    if let shortcut = entry.shortcut(bindings) {
                         KeyCapGroup(keys: shortcut.keyCaps)
                     }
                 }

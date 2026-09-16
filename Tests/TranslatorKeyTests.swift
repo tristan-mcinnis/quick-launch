@@ -79,7 +79,7 @@ struct TranslatorKeyTests {
         }
         otherKeys += ItemActionCatalog.actions(for: .application(app), pasteTarget: nil, isRunning: true)
             .compactMap(\.shortcut)
-        otherKeys += ResultAction.allCases.map(\.shortcut)
+        otherKeys += ResultAction.allCases.map(\.defaultShortcut)
         otherKeys += QuickAISurfaceAction.allCases.compactMap(\.shortcut)
         otherKeys += [
             QuickViewModel.recentChatsShortcut,

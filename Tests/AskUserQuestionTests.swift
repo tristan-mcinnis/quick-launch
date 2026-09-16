@@ -209,6 +209,6 @@ struct AskUserQuestionTests {
         #expect(copying.quickAIComposerAction == .init(label: "Copy Response", keys: ["↩"]))
         // ⌘⇧C stays the explicit copy in both settings.
         #expect(copying.resultActions.contains(.copy))
-        #expect(ResultAction.copy.shortcut.keyCaps == ["⇧", "⌘", "C"])
+        #expect(ResultAction.copy.defaultShortcut.keyCaps == ["⇧", "⌘", "C"])
     }
 }

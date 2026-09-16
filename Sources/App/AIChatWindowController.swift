@@ -209,11 +209,19 @@ protocol AIChatAppShell: AnyObject {
     /// Turns the app into a normal app with `menu` as its menu bar (unless
     /// it has one) and brings `window` to the front with the keyboard.
     func present(_ window: NSWindow, menu: () -> NSMenu)
+    /// Re-installs the menu bar from `menu` after an in-app shortcut was
+    /// rebound. A shell with no menu bar of its own does nothing.
+    func refreshMenu(_ menu: () -> NSMenu)
     /// `window` is closing: back to a menu-bar app unless another normal
     /// window is still up.
     func windowWillClose(_ window: NSWindow)
     /// Whether `window` is on screen now.
     func isOnScreen(_ window: NSWindow) -> Bool
+}
+
+extension AIChatAppShell {
+    /// A test shell has no menu bar; a rebind has nothing to refresh.
+    func refreshMenu(_ menu: () -> NSMenu) {}
 }
 
 @MainActor
@@ -230,6 +238,13 @@ final class SystemAIChatAppShell: AIChatAppShell {
     }
 
     func isOnScreen(_ window: NSWindow) -> Bool { window.isVisible }
+
+    func refreshMenu(_ menu: () -> NSMenu) {
+        // Only while this app still owns a menu bar. As a menu-bar app it has
+        // none, and nothing is installed.
+        guard NSApp.mainMenu != nil else { return }
+        NSApp.mainMenu = menu()
+    }
 }
 
 /// A notice that an answer finished while the AI Chat window was closed.
@@ -405,6 +420,8 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     /// Watches the stream so an answer that ends with the window closed
     /// posts a notice.
     private var streamWatch: Task<Void, Never>?
+    /// Rebuilds the menu bar after an in-app shortcut is rebound.
+    private var menuRefreshTask: Task<Void, Never>?
 
     init(
         model: AIChatWindowModel,
@@ -435,11 +452,21 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
             )
         }
         notifier.onOpen = { [weak self] in self?.model.open(handoff: nil) }
+        menuRefreshTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .shortcutBindingsChanged) {
+                guard let self else { return }
+                // The menu bar is built once per regular-app session, so a
+                // rebind has to re-install it or the old key equivalent stays
+                // live in the menu while the router already answers the new one.
+                self.shell.refreshMenu { self.menu.makeMenu() }
+            }
+        }
         watchStream()
     }
 
     isolated deinit {
         streamWatch?.cancel()
+        menuRefreshTask?.cancel()
     }
 
     var isVisible: Bool { window.map(shell.isOnScreen) ?? false }

@@ -818,7 +818,7 @@ struct AIChatWindowTests {
             QuickViewModel.transcriptCollapseShortcut,
         ]
         let recent = QuickViewModel.recentChatsShortcut
-        let continueKey = ResultAction.continueInAIChat.shortcut
+        let continueKey = ResultAction.continueInAIChat.defaultShortcut
         #expect(recent == .command("p"))
         #expect(continueKey == .command("j"))
         let windowKeys = [
@@ -827,7 +827,7 @@ struct AIChatWindowTests {
         ]
         for key in [recent, continueKey] + windowKeys {
             // Recent Chats is `⌘P` itself, in `⌘K`.
-            let others = ResultAction.allCases.filter { $0 != .continueInAIChat && $0 != .recentChats }.map(\.shortcut)
+            let others = ResultAction.allCases.filter { $0 != .continueInAIChat && $0 != .recentChats }.map(\.defaultShortcut)
             #expect(!others.contains(key), "\(key.keyCaps.joined()) is an answer action")
             #expect(!overlayKeys.contains(key))
             #expect(!rowKeys.contains(key), "\(key.keyCaps.joined()) is a row action")

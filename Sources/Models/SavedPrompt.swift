@@ -17,6 +17,53 @@ struct ActionHotkey: Codable, Sendable, Equatable, Hashable {
     var keyCode: UInt16
     var modifiers: UInt
 
+    init(keyCode: UInt16, modifiers: UInt) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+    }
+
+    /// A stored hotkey with only the device-independent modifier bits, so a
+    /// comparison never fails on the fn, keypad, or caps-lock noise a key
+    /// event carries. Every stored and compared value goes through this.
+    var normalized: ActionHotkey {
+        ActionHotkey(
+            keyCode: keyCode,
+            modifiers: NSEvent.ModifierFlags(rawValue: modifiers).overlayRelevant.rawValue
+        )
+    }
+
+    /// Whether this is a usable shortcut: at least one of Ctrl, Option, Cmd.
+    var isValidShortcut: Bool {
+        QuickSettings.isValidHotkey(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    /// Whether a key event is this hotkey.
+    func matches(keyCode: UInt16, modifiers flags: NSEvent.ModifierFlags) -> Bool {
+        let hotkey = normalized
+        return hotkey.keyCode == keyCode && hotkey.modifiers == flags.overlayRelevant.rawValue
+    }
+
+    /// The recorded form of a built-in shortcut. Every built-in key has an
+    /// ANSI code, and `ShortcutRegistryTests` asserts the round trip through
+    /// `QuickSettings.keyName(for:)` for all of them.
+    init(defaulting shortcut: KeyShortcut) {
+        self.init(
+            keyCode: shortcut.virtualKeyCode ?? 0,
+            modifiers: NSEvent.ModifierFlags(rawValue: shortcut.modifiers).overlayRelevant.rawValue
+        )
+    }
+
+    /// Decoding normalizes, so a hand-edited or older `modifiers` value with
+    /// extra bits compares equal to the key it names.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let stored = ActionHotkey(
+            keyCode: try c.decode(UInt16.self, forKey: .keyCode),
+            modifiers: try c.decode(UInt.self, forKey: .modifiers)
+        )
+        self = stored.normalized
+    }
+
     /// Modifier symbols and the key, one entry per key cap: `["⌥", "⌘", "←"]`.
     var keyCaps: [String] {
         let flags = NSEvent.ModifierFlags(rawValue: modifiers)

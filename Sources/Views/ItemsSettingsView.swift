@@ -11,6 +11,8 @@ struct ItemsSettingsView: View {
     @State private var filter: Filter = .all
     @State private var query = ""
     @State private var hoveredRow: String?
+    /// A custom folder or app waiting for the remove confirmation.
+    @State private var pendingRemoval: Row?
 
     enum Filter: String, CaseIterable, Identifiable {
         case all, apps, folders, snippets, quickLinks, windows, commands
@@ -117,6 +119,7 @@ struct ItemsSettingsView: View {
                 }
             }
             .raisedCard()
+            .settingsAnchor("items.list")
 
             Text("\(rows.count) items. Aliases are words you type to reach an item first. Hotkeys run the item from anywhere.")
                 .font(AQDesign.TypeToken.caption)
@@ -124,6 +127,23 @@ struct ItemsSettingsView: View {
         }
         .padding(.horizontal, SettingsMetrics.paneInset)
         .padding(.bottom, House.Spacing.md)
+        .confirmationDialog(
+            pendingRemoval.map { removeHelp(for: $0) } ?? "Remove",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { row in
+            Button(removeHelp(for: row), role: .destructive) {
+                remove(row)
+                pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: { row in
+            Text("\(row.name) also loses its alias, hotkey, and pin.")
+        }
     }
 
     private var toolbar: some View {
@@ -253,6 +273,18 @@ struct ItemsSettingsView: View {
                     )
                 CompactHotkeyRecorder(hotkey: hotkeyBinding(for: row))
                     .frame(width: 150, alignment: .leading)
+                if isCustom(row) {
+                    Button {
+                        pendingRemoval = row
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(removeHelp(for: row))
+                    .accessibilityLabel(removeHelp(for: row))
+                }
             }
             .padding(.horizontal, House.Spacing.sm)
             .frame(minHeight: House.Control.railRow)
@@ -277,6 +309,33 @@ struct ItemsSettingsView: View {
     private func isApplication(_ row: Row) -> Bool {
         if case .application = row { return true }
         return false
+    }
+
+    /// Only a folder or app the user added can be removed here; the built-in
+    /// folders and the scanned Applications folders are not this list's to edit.
+    private func isCustom(_ row: Row) -> Bool {
+        switch row {
+        case .application(let application):
+            return viewModel.settings.customApplicationPaths.contains(
+                application.url.standardizedFileURL.path
+            )
+        case .item(let item):
+            return item.kind == .folder
+                && !FolderLocationService.builtIn.contains { $0.id == item.itemID }
+        }
+    }
+
+    private func removeHelp(for row: Row) -> String {
+        isApplication(row) ? "Remove this app" : "Remove this folder"
+    }
+
+    private func remove(_ row: Row) {
+        switch row {
+        case .application(let application):
+            viewModel.removeCustomApplication(application)
+        case .item(let item):
+            viewModel.removeCustomFolder(item)
+        }
     }
 
     @ViewBuilder
@@ -347,7 +406,7 @@ struct CompactHotkeyRecorder: View {
         HStack(spacing: AQDesign.Space.standard) {
             if isRecording {
                 HotkeyCapture { captured in
-                    let rawMods = captured.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
+                    let rawMods = captured.modifierFlags.overlayRelevant.rawValue
                     guard QuickSettings.isValidHotkey(keyCode: captured.keyCode, modifiers: rawMods) else {
                         validationError = "Add \u{2303}, \u{2325}, or \u{2318}"
                         isRecording = false

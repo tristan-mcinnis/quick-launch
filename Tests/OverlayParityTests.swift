@@ -116,11 +116,11 @@ struct OverlayParityTests {
     // MARK: - 2. Answer model actions
 
     @Test func theShortcutTableKeepsCommandRAndGivesShiftCommandRToTheChooser() {
-        #expect(ResultAction.regenerate.shortcut == .command("r"))
-        #expect(ResultAction.regenerateWithModel.shortcut == .commandShift("r"))
+        #expect(ResultAction.regenerate.defaultShortcut == .command("r"))
+        #expect(ResultAction.regenerateWithModel.defaultShortcut == .commandShift("r"))
         #expect(ResultAction.changeModel == .changeModel)
         // Replace Selection moved off ⇧⌘R, which the chooser now owns.
-        #expect(ResultAction.replaceSelection.shortcut != .commandShift("r"))
+        #expect(ResultAction.replaceSelection.defaultShortcut != .commandShift("r"))
     }
 
     @Test func changeModelIsAFirstClassResultActionInThePalette() async {

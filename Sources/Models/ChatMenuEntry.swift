@@ -28,17 +28,17 @@ enum ChatMenuEntry: String, CaseIterable, Identifiable, Sendable {
 
     /// The key that does the same from root search, drawn after the title.
     /// `⌘N` is the thread's key only, so New Chat names none.
-    var shortcut: KeyShortcut? {
+    func shortcut(_ bindings: ShortcutBindings) -> KeyShortcut? {
         switch self {
-        case .recentChats: ResultAction.recentChats.shortcut
+        case .recentChats: bindings.keyShortcut(for: .recentChats)
         case .newChat, .openAIChat: nil
         }
     }
 
     /// The menu item's text: the title, then the key caps, as the
     /// screenshot entries of the same menu draw theirs.
-    var menuTitle: String {
-        guard let shortcut else { return title }
+    func menuTitle(_ bindings: ShortcutBindings) -> String {
+        guard let shortcut = shortcut(bindings) else { return title }
         return "\(title)  \(shortcut.keyCaps.joined())"
     }
 }

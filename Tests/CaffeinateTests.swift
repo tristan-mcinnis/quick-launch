@@ -89,8 +89,10 @@ struct CaffeinateTests {
         manager.now = { clock }
 
         #expect(!manager.isEnabled)
+        #expect(!manager.hasLiveSession)
         #expect(manager.setEnabled(true))
         #expect(assertion.isHeld)
+        #expect(manager.hasLiveSession)
         #expect(manager.reason == "Caffeinated until you decaffeinate.")
         #expect(manager.endsAt == nil)
 
@@ -99,6 +101,7 @@ struct CaffeinateTests {
         clock = clock.addingTimeInterval(601)
         manager.evaluate()
         #expect(!assertion.isHeld)
+        #expect(!manager.hasLiveSession)
         #expect(manager.reason == nil)
         #expect(manager.statusSummary.hasPrefix("Decaffeinated"))
         #expect(changes >= 3)
@@ -110,15 +113,191 @@ struct CaffeinateTests {
         manager.releaseForQuit()
         #expect(!assertion.isHeld)
     }
+
+    @Test func batteryPauseKeepsASessionCancellable() {
+        let assertion = RecordingAssertion()
+        let power = FakePowerSource()
+        let manager = CaffeinateManager(assertion: assertion, power: power)
+        manager.start()
+
+        #expect(manager.setEnabled(true))
+        #expect(manager.isEnabled)
+        #expect(manager.hasLiveSession)
+
+        power.set(onBattery: true, percent: 12)
+        #expect(!manager.isEnabled, "the battery releases the assertion")
+        #expect(manager.hasLiveSession, "the session is still in force")
+        #expect(manager.pauseDetail?.contains("Paused at 12%") == true)
+
+        // Decaffeinate cancels even while paused.
+        #expect(manager.setEnabled(false))
+        #expect(!manager.hasLiveSession)
+        #expect(manager.pauseDetail == nil)
+
+        // Plugging in must not resurrect a cancelled session.
+        power.set(onBattery: false, percent: 100)
+        #expect(!manager.isEnabled)
+        #expect(!manager.hasLiveSession)
+    }
+
+    @Test func batteryPauseKeepsATimedSessionCancellable() {
+        let assertion = RecordingAssertion()
+        let power = FakePowerSource()
+        let manager = CaffeinateManager(assertion: assertion, power: power)
+        var clock = Self.noon
+        manager.now = { clock }
+        manager.start()
+        #expect(manager.enable(for: 600))
+
+        power.set(onBattery: true, percent: 15)
+        #expect(!manager.isEnabled)
+        #expect(manager.hasLiveSession)
+
+        // A paused timed session is cancelled, not converted to indefinite.
+        #expect(manager.setEnabled(false))
+        #expect(!manager.hasLiveSession)
+        #expect(manager.endsAt == nil)
+
+        power.set(onBattery: false, percent: 100)
+        #expect(!manager.isEnabled, "a cancelled timed session does not resume on AC")
+    }
+
+    @Test func enableWhileBatteryPausedKeepsTheIntentAndResumesOnAC() {
+        let assertion = RecordingAssertion()
+        let power = FakePowerSource()
+        let manager = CaffeinateManager(assertion: assertion, power: power)
+        manager.start()
+        power.set(onBattery: true, percent: 10)
+
+        #expect(manager.setEnabled(true), "the session is in force even while paused")
+        #expect(!manager.isEnabled)
+        #expect(manager.hasLiveSession)
+
+        power.set(onBattery: false, percent: 100)
+        #expect(manager.isEnabled, "resumes on AC without another press")
+    }
+
+    @Test func startingATimerWhileBatteryPausedSucceedsWithTheDeadline() {
+        let assertion = RecordingAssertion()
+        let power = FakePowerSource()
+        let manager = CaffeinateManager(assertion: assertion, power: power)
+        var clock = Self.noon
+        manager.now = { clock }
+        manager.start()
+        power.set(onBattery: true, percent: 10)
+
+        #expect(manager.enable(for: 600), "a paused timer is still a started session")
+        #expect(manager.sessionDeadline == clock.addingTimeInterval(600))
+        #expect(manager.hasLiveSession)
+        #expect(!manager.isEnabled)
+
+        let later = clock.addingTimeInterval(3_600)
+        #expect(manager.enable(until: later))
+        #expect(manager.sessionDeadline == later)
+        #expect(manager.hasLiveSession)
+    }
+
+    @Test func failedTimerStartRollsBackThePriorDeadline() {
+        let assertion = RecordingAssertion()
+        let manager = CaffeinateManager(assertion: assertion)
+        var clock = Self.noon
+        manager.now = { clock }
+
+        #expect(manager.enable(for: 600))
+        let firstDeadline = manager.sessionDeadline
+        #expect(firstDeadline != nil)
+
+        // The held assertion drops and the next hold will not take. Both timer
+        // entry points must report failure and restore the prior deadline.
+        assertion.release()
+        assertion.refusesHold = true
+        #expect(manager.enable(for: 3_600) == false)
+        #expect(manager.sessionDeadline == firstDeadline, "the prior timer is restored")
+
+        #expect(manager.enable(until: clock.addingTimeInterval(7_200)) == false)
+        #expect(manager.sessionDeadline == firstDeadline)
+    }
+
+    @Test func failedEnableLeavesThePriorTimedIntentIntact() {
+        let assertion = RecordingAssertion()
+        let manager = CaffeinateManager(assertion: assertion)
+        var clock = Self.noon
+        manager.now = { clock }
+
+        #expect(manager.enable(for: 600))
+        let deadline = manager.endsAt
+        #expect(deadline != nil)
+
+        // The held assertion drops and the next hold will not take (an IOKit
+        // refusal). A failed enable must not silently convert the timed
+        // session into an indefinite one.
+        assertion.release()
+        assertion.refusesHold = true
+        #expect(manager.setEnabled(true) == false)
+        #expect(manager.endsAt == deadline)
+
+        assertion.refusesHold = false
+        manager.evaluate()
+        #expect(manager.isEnabled)
+        #expect(manager.endsAt == deadline)
+    }
+
+    @Test func agentSessionPausedByBatteryStillCancels() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-agent-pause-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let watcher = AgentSessionWatcher(folders: [folder])
+        let assertion = RecordingAssertion()
+        let power = FakePowerSource()
+        let manager = CaffeinateManager(assertion: assertion, watcher: watcher, power: power)
+        manager.start()
+
+        let fresh = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30))
+        try Data("{\"sessionID\":\"s1\",\"provider\":\"claude\",\"updatedAt\":\"\(fresh)\"}".utf8)
+            .write(to: folder.appendingPathComponent(
+                AgentSessionWatcher.fileName(provider: "claude", sessionID: "s1")
+            ))
+        watcher.reload()
+        manager.evaluate()
+        #expect(manager.hasLiveSession)
+        #expect(manager.isEnabled)
+
+        power.set(onBattery: true, percent: 10)
+        #expect(!manager.isEnabled)
+        #expect(manager.hasLiveSession)
+
+        // Decaffeinate cancels the agent session too, not just the assertion.
+        #expect(manager.setEnabled(false))
+        #expect(!manager.hasLiveSession)
+        #expect(watcher.sessions.isEmpty)
+    }
 }
 
 @MainActor
 private final class RecordingAssertion: PowerAssertionHolding {
     private(set) var isHeld = false
     private(set) var lastKeepDisplayAwake = false
+    /// When true, `hold` behaves like an IOKit refusal: the assertion does not
+    /// take, so the manager must report failure and keep the prior intent.
+    var refusesHold = false
     func hold(reason: String, keepDisplayAwake: Bool) {
-        isHeld = true
         lastKeepDisplayAwake = keepDisplayAwake
+        isHeld = !refusesHold
     }
     func release() { isHeld = false }
+}
+
+/// A battery that a test can move on and off AC. The real one is IOKit.
+@MainActor
+private final class FakePowerSource: PowerSourceReading {
+    var onBattery = false
+    var batteryPercent = 100
+    var onChange: (() -> Void)?
+    func start() {}
+    func set(onBattery: Bool, percent: Int) {
+        self.onBattery = onBattery
+        self.batteryPercent = percent
+        onChange?()
+    }
 }

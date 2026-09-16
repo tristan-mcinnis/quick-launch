@@ -153,7 +153,7 @@ struct ChatListsTests {
         #expect(rig.launcher.focusedItemActions.map(\.title) == expected)
         let open = try #require(rig.launcher.focusedItemActions.first { $0.kind == .openInAIChat })
         #expect(open.shortcut == .command("j"))
-        #expect(open.shortcut == ResultAction.continueInAIChat.shortcut)
+        #expect(open.shortcut == ResultAction.continueInAIChat.defaultShortcut)
 
         // Recent Chats: the same actions, in the same order.
         rig.launcher.openRecentChats()
@@ -276,11 +276,18 @@ struct ChatListsTests {
         #expect(rig.fake.shows == 0, "Return stays in Quick AI; ⌘J is the window")
     }
 
-    @Test func commandHOpensRecentChatsInsideQuickAI() async {
+    @Test func commandPOpensRecentChatsInsideQuickAIAndCommandHDoesNot() async {
         let rig = makeRig()
         rig.launcher.openQuickAI()
         await ask(rig.launcher, rig.service, "a question", reply: "An answer.")
-        #expect(rig.launcher.performShortcut(characters: "h", keyCode: 4, modifiers: [.command]))
+
+        // `⌘H` was the v1.4 alias. It is Hide now, and inside Quick AI it
+        // must reach nothing at all: no layer, no notice.
+        #expect(!rig.launcher.performShortcut(characters: "h", keyCode: 4, modifiers: [.command]))
+        #expect(!rig.launcher.isRecentChatsPresented)
+        #expect(rig.launcher.errorMessage == nil)
+
+        #expect(rig.launcher.performShortcut(characters: "p", keyCode: 35, modifiers: [.command]))
         #expect(rig.launcher.isRecentChatsPresented)
         #expect(rig.launcher.isQuickAIPresented)
         #expect(rig.launcher.catalogScope == nil, "never the root Chats catalog")
@@ -296,8 +303,8 @@ struct ChatListsTests {
         #expect(rig.launcher.isActionPalettePresented)
         #expect(rig.launcher.paletteResultActions.contains(.recentChats))
         #expect(ResultAction.recentChats.title == "Recent Chats")
-        #expect(ResultAction.recentChats.shortcut == QuickViewModel.recentChatsShortcut)
-        #expect(ResultAction.recentChats.shortcut.keyCaps == ["⌘", "P"])
+        #expect(ResultAction.recentChats.defaultShortcut == QuickViewModel.recentChatsShortcut)
+        #expect(ResultAction.recentChats.defaultShortcut.keyCaps == ["⌘", "P"])
         await rig.launcher.performResultAction(.recentChats)
         #expect(rig.launcher.isRecentChatsPresented)
         #expect(!rig.launcher.isActionPalettePresented)
@@ -319,9 +326,9 @@ struct ChatListsTests {
         let row = LauncherCatalogItem(kind: .conversation, itemID: UUID().uuidString, title: "A chat", detail: "", value: "")
         #expect(LauncherResultRow.typeLabel(for: .item(row)) == "Chat")
         #expect(ResultAction.continueInAIChat.title == "Open in AI Chat")
-        #expect(ResultAction.continueInAIChat.shortcut.keyCaps == ["⌘", "J"])
+        #expect(ResultAction.continueInAIChat.defaultShortcut.keyCaps == ["⌘", "J"])
         #expect(ChatMenuEntry.allCases.map(\.title) == ["New Chat", "Recent Chats", "Open AI Chat"])
-        #expect(ChatMenuEntry.recentChats.menuTitle == "Recent Chats  ⌘P")
+        #expect(ChatMenuEntry.recentChats.menuTitle(.defaults) == "Recent Chats  ⌘P")
         let actions = ItemActionCatalog.actions(for: .item(row), pasteTarget: nil)
         #expect(actions.first { $0.kind == .openInAIChat }?.title == "Open in AI Chat")
         // "AI Chat" names the window only: its root command.

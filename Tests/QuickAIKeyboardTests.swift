@@ -115,7 +115,7 @@ struct QuickAIKeyboardTests {
         #expect(await service.sendCallCount == 1, "Change Model picks, it never re-asks")
     }
 
-    @Test func commandShiftVRunsReplaceSelectionOnTheRetainedSelection() async throws {
+    @Test func optionCommandVRunsReplaceSelectionOnTheRetainedSelection() async throws {
         let service = MockQuickService()
         await service.setResponses([StreamDelta(text: "shorter text", finishReason: "stop")])
         let overlay = KeyboardOverlay(
@@ -131,7 +131,12 @@ struct QuickAIKeyboardTests {
         #expect(viewModel.resultActions.contains(.replaceSelection), "the selection is still replaceable")
         let answer = viewModel.output
 
-        #expect(try overlay.press("v", keyCode: 9, [.command, .shift]))
+        // `⇧⌘V` was the key until it turned out to be Clipboard History's
+        // global hotkey, which wins system-wide. It is dead here now.
+        #expect(!(try overlay.press("v", keyCode: 9, [.command, .shift])))
+        #expect(overlay.selection.replacedText == nil, "the old key writes nothing back")
+
+        #expect(try overlay.press("v", keyCode: 9, [.command, .option]))
 
         #expect(await waitFor { overlay.selection.replacedText == answer })
         #expect(overlay.selection.replacedText == answer)

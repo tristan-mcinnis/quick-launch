@@ -33,7 +33,9 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   favourites, and outrank unpinned matches when you type.
 - **Action.** What Return and the other keys do to the item. The action
   table is the single source of truth for the ⌘K pane, the footer hints,
-  the key-cap badges, and direct shortcuts. One table, four surfaces.
+  the key-cap badges, and direct shortcuts. One table, four surfaces. A
+  rebindable key resolves through `ShortcutAction`/`ShortcutTable`, so one
+  change in Settings › Keyboard Shortcuts moves all four surfaces at once.
 - **Mode.** A state that captures typing for one purpose: Quick Link input,
   Caffeinate Until, Rename Chat, a Vault Search mode, or an attached
   screenshot waiting for a question. Modes show their name on the left of the
@@ -75,7 +77,7 @@ The same key means the same thing on every layer.
 | `⌘N` / `⌘R` | New chat / ask the last question again (after a finished answer, a stop, or an error) |
 | `⌘[` / `⌘]` | Previous / next recent chat |
 | `⌘P` | Recent Chats inside Quick AI, from root search too; the chat list in AI Chat; nothing in the Translator |
-| `⌘H` | Recent Chats on the Quick AI surface (the v1.4 key); in AI Chat it is Hide Quick Launch |
+| `⌘H` | Hide Quick Launch in AI Chat; the v1.4 Recent Chats alias is gone |
 | `⌘J` | Open in AI Chat: the Quick AI chat (in Recent Chats and the Chats catalog, the highlighted chat) moves to the AI Chat window, and the launcher closes |
 | `⌃⌘S` | Show or hide the AI Chat chat list |
 | `⌘F` | Find in the AI Chat thread; `↩` or `⌘G` next, `⇧↩` or `⇧⌘G` previous |
@@ -95,7 +97,8 @@ The same key means the same thing on every layer.
 | `⌘L` / `⇧⌘W` | Read the answer aloud / search the web for it |
 | `↑` on an empty Quick AI composer | Put the last question back in the composer; `↓` does nothing there |
 | `PageUp` `PageDown` / `⌥↑` `⌥↓` / `⌘↑` `⌘↓` | Scroll the Quick AI thread by a page / by a page / to the top or bottom |
-| `⌘⇧S` / `⌘⇧D` | Send the focused window / this screen to AI (screenshot plus context) |
+| `⇧⌘S` / `⇧⌘D` | Send the focused window / this display to AI (screenshot plus context), in Quick Launch or AI Chat |
+| `⌥⌘V` | Replace the selected text with the answer. It was `⇧⌘V`, which is Clipboard History's global hotkey and won the key system-wide |
 | double tap right `⌘` | Send the focused window to AI from anywhere |
 | `⌘E` | Edit |
 | `⌘⇧A` / `⌘⇧H` | Set alias / set hotkey |
@@ -109,14 +112,41 @@ The same key means the same thing on every layer.
 
 The launcher list never uses `⌘1…9` to jump to rows. A number key is a row
 action where a catalog needs one (a colour's other notations are `⌘1…⌘4`,
-Screen History's import review is `⌘1` and `⌘2`), switches Settings tabs (`⌘1…⌘7`),
-or, in AI Chat only, opens a chat from the list. The answer keys live in one
-table, `ResultAction.shortcut` (`Sources/Models/ItemAction.swift`); the AI Chat
-window's own keys in `AIChatWindowModel`, the Translator's in `TranslatorKey`.
+Screen History's import review is `⌘1` and `⌘2`), switches Settings tabs (`⌘1…⌘8`),
+or, in AI Chat only, opens a chat from the list. The answer keys live in one table, `ResultAction.defaultShortcut`
+(`Sources/Models/ItemAction.swift`); the AI Chat window's own keys in
+`AIChatWindowModel`, the Translator's in `TranslatorKey`.
 
-Within the Keep my place interval (Settings › General › History, 10 seconds by
-default) the launcher reopens where it was left; after it, reopening starts at
-the root. Opening Settings or AI Chat from the launcher hides the launcher.
+**Rebindable keys.** One registry, `ShortcutAction`
+(`Sources/Models/ShortcutAction.swift`), owns the in-app keys a user may
+change: Add Context (`⇧⌘A`) and the two screenshot keys (`⇧⌘S`, `⇧⌘D`), the
+command palette (`⌘K`), and every Quick AI and AI Chat action (`⌘N`, `⌘P`,
+`⌘J`, `⌥⌘K`, `⌥⌘T`, `⇧⌘M`, `⌘F`, `⌃⌘S`, and the answer keys, including Replace
+Selection on `⌥⌘V`: it was `⇧⌘V` until that turned out to be Clipboard
+History's global hotkey, which wins the key system-wide). Settings › Keyboard
+Shortcuts (the last tab, `⌘8`) records one, `QuickSettings.shortcutOverrides`
+stores it, and `QuickSettings.shortcuts` is the resolved table the router, the
+footer hints, the key-cap badges, the tooltips, the `⌘K` rows, the launcher's
+chat-row actions, and the AI Chat menu all read: the built-in key stops
+matching the moment a new one is recorded, on every surface at once. The table
+belongs to the settings it came from, and the two AppKit surfaces with no view
+model of their own (the launcher panel, the AI Chat menu) are handed it by
+their owner, so a rebind never travels between windows. A recorded key is
+matched by key code, never by character, so a rebind survives a keyboard
+layout.
+
+**Scopes and fixed keys.** Two scopes keep `⇧⌘A` honest: it is Add Context in a
+chat and Set Alias… on a launcher row. The editor and navigation keys (`↩`,
+`⇧↩`, `⎋`, `⌫`, `⇥`, the arrows, `⌘C` `⌘V` `⌘X` `⌘Z` `⌘A`), the launcher row's
+own keys (`⌘E`, `⇧⌘P`, `⌃X`, `⇧⌘A`, `⇧⌘H`, `⇧⌘N`, `⇧⌘L`, `⇧⌘C`, `⌘⇧U`, `⌘Y`,
+`⇧⌘R`, `⌘⇧Q`, `⌥⌘H`, `⌥⌘Q`, `⌘1…⌘9`), the window and app keys, and the macOS
+system combinations are fixed; the pane lists them with the surface that owns
+each and the collision check refuses them. An action may ship on one of them
+(`⌘E` renames a chat and edits a row), which is why recording the built-in key
+is a reset rather than a rebind. The global hotkeys (Quick Launch, Clipboard
+History, the Translator, Type to Click, saved actions, launcher items) stay
+where they are configured, the pane names them, and they refuse an in-app key in
+return.
 
 ## 3. Surfaces
 
@@ -153,9 +183,13 @@ the root. Opening Settings or AI Chat from the launcher hides the launcher.
   chat to the AI Chat window, one conversation window with the same thread
   and composer, a multi-line composer, find (`⌘F`), and a chat list hidden
   until `⌃⌘S` (Pin, Rename, and Delete on its rows).
-- **Settings.** A sidebar of seven tabs (`⌘1…⌘7`), no system tab view. The
-  Items tab is one searchable table of every configurable item with its alias
-  and hotkey in place.
+- **Settings.** A sidebar of eight tabs (`⌘1…⌘8`), no system tab view.
+  Typing in the sidebar searches one index of every setting
+  (`SettingsDestinationIndex`), and the launcher row for a group opens Settings
+  on it. The Items tab is one searchable table of every configurable item with
+  its alias and hotkey in place; the Keyboard Shortcuts tab lists every
+  rebindable key with its caps, the fixed keys, and where the global hotkeys
+  live.
 
 ## 4. Speed contract
 

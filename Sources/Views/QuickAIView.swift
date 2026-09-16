@@ -108,7 +108,7 @@ struct QuickAIView: View {
                         .font(AQDesign.TypeToken.label)
                     Text(ResultAction.continueInAIChat.title)
                         .font(AQDesign.TypeToken.label)
-                    KeyCapGroup(keys: ResultAction.continueInAIChat.shortcut.keyCaps)
+                    KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: .continueInAIChat))
                 }
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
                 .padding(.horizontal, House.Spacing.sm)
@@ -121,7 +121,7 @@ struct QuickAIView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(ResultAction.continueInAIChat.title)
-            .help("\(ResultAction.continueInAIChat.title) (\(ResultAction.continueInAIChat.shortcut.keyCaps.joined()))")
+            .help("\(ResultAction.continueInAIChat.title) (\(viewModel.shortcutLabel(for: .continueInAIChat)))")
         }
         // A tighter left inset than right: with the compact button and the
         // row gap, the title starts where Raycast's does.

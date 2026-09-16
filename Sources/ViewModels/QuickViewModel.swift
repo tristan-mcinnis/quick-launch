@@ -114,6 +114,69 @@ import Observation
         get { store.settings }
         set { store.settings = newValue }
     }
+
+    // MARK: - In-app shortcuts
+
+    /// The live in-app shortcut table, read through this view model's own
+    /// settings: the router, the footer hints, the palette rows, the key-cap
+    /// badges and the tooltips all resolve through it, so a rebind in Settings
+    /// redraws every surface at once. The two AppKit surfaces that have no
+    /// view model of their own (the launcher panel, the AI Chat menu) are
+    /// handed these same bindings by their owner.
+    var shortcuts: ShortcutBindings { settings.shortcuts }
+
+    /// The key an action answers to now, for caps and help text.
+    func shortcut(for action: ShortcutAction) -> KeyShortcut {
+        shortcuts.keyShortcut(for: action)
+    }
+
+    func shortcutKeyCaps(for action: ShortcutAction) -> [String] {
+        shortcuts.keyCaps(for: action)
+    }
+
+    func shortcutDisplayName(for action: ShortcutAction) -> String {
+        shortcuts.displayName(for: action)
+    }
+
+    /// The caps as one label, for a tooltip: `⌥⌘K`.
+    func shortcutLabel(for action: ShortcutAction) -> String {
+        shortcuts.displayName(for: action)
+    }
+
+    /// Why a key may not be bound to an action, given every other setting
+    /// that owns a key. Nil means it may.
+    func shortcutConflict(for action: ShortcutAction, candidate: ActionHotkey) -> String? {
+        settings.shortcutConflict(for: action, candidate: candidate)
+    }
+
+    /// Rebinds one action, persists it, and tells the AppKit layers (the AI
+    /// Chat menu rebuilds its key equivalents). A collision refuses the change
+    /// and returns its message for the row to show; nil means it was applied.
+    /// Nothing process-wide is written: the resolved table is derived from
+    /// these settings, and every reader holds the settings it belongs to.
+    @discardableResult
+    func setShortcut(_ hotkey: ActionHotkey?, for action: ShortcutAction) -> String? {
+        var updated = settings
+        if let conflict = updated.setShortcut(hotkey, for: action) { return conflict }
+        settings = updated
+        settings.save()
+        NotificationCenter.default.post(name: .shortcutBindingsChanged, object: nil)
+        return nil
+    }
+
+    /// Back to the built-in key for one action.
+    func resetShortcut(_ action: ShortcutAction) {
+        setShortcut(nil, for: action)
+    }
+
+    /// Back to every built-in key.
+    func resetAllShortcuts() {
+        var updated = settings
+        updated.resetAllShortcuts()
+        settings = updated
+        settings.save()
+        NotificationCenter.default.post(name: .shortcutBindingsChanged, object: nil)
+    }
     var updateState: UpdateState = .idle
     /// Every write tells the other view on the store (`QuickStore`), so its
     /// open chat follows at once.
@@ -249,6 +312,14 @@ import Observation
     /// Resumes the service's tool call once the user picks.
     private var askQuestionContinuation: CheckedContinuation<AskUserQuestionAnswer?, Never>?
     var isCaffeinating: Bool = false
+    /// A Caffeinate session is in force (manual, timed, or agents), even while
+    /// the battery has paused the assertion. Distinct from `isCaffeinating`,
+    /// which is only whether the sleep assertion is held right now. The row
+    /// and its action follow this, so a paused session still reads
+    /// "Decaffeinate" and can be cancelled.
+    var hasCaffeinateSession: Bool = false
+    /// Why the assertion is released while a session is live (a battery pause).
+    var caffeinatePauseDetail: String?
     /// End of a timed Caffeinate session, for the command title.
     var caffeinateEndsAt: Date?
     var caffeinateReason: String?
@@ -1164,6 +1235,14 @@ import Observation
         return toggles + helpers + panes
     }
 
+    /// Every searchable setting, as launcher rows. Kept out of
+    /// `systemCommands` on purpose: the Commands catalog and the Items table
+    /// should list actions, not the Settings index. Root search folds these in
+    /// so typing a setting's words finds the place to change it.
+    var settingsDestinationItems: [LauncherCatalogItem] {
+        SettingsDestinationIndex.launcherItems
+    }
+
     var systemCommands: [LauncherCatalogItem] {
         let layouts = WindowLayout.allCases.map(windowCommand(for:))
             + WindowMove.allCases.map(windowMoveCommand(for:))
@@ -1258,12 +1337,16 @@ import Observation
         return commands
     }
 
-    /// The one Caffeinate row at the launcher root. The title says On or
-    /// Off, the light shows it, the detail says until when. Return toggles.
+    /// The one Caffeinate row at the launcher root. The title is the action
+    /// that changes the state (Caffeinate or Decaffeinate), the light shows
+    /// On, Off, or Paused, and the detail says until when or why it paused.
+    /// Return runs the action the title names.
     var caffeinateStatusRow: LauncherCatalogItem {
         let detail: String
-        if isCaffeinating {
-            if let caffeinateEndsAt {
+        if hasCaffeinateSession {
+            if let caffeinatePauseDetail {
+                detail = caffeinatePauseDetail
+            } else if let caffeinateEndsAt {
                 let clock = caffeinateEndsAt.formatted(date: .omitted, time: .shortened)
                 let left = Self.remainingTitle(until: caffeinateEndsAt, now: now())
                 detail = left.isEmpty ? "Until \(clock)" : "Until \(clock) · \(left) left"
@@ -1280,11 +1363,14 @@ import Observation
         return LauncherCatalogItem(
             kind: .command,
             itemID: "caffeinate.toggle",
-            title: isCaffeinating ? "Caffeinate: On" : "Caffeinate: Off",
+            // One action word per state, like Pin/Unpin. The state is the
+            // session, not the assertion, so a battery-paused session still
+            // reads Decaffeinate and Return cancels it.
+            title: hasCaffeinateSession ? "Decaffeinate" : "Caffeinate",
             detail: detail,
             value: "caffeinate.toggle",
-            keywords: "caffeine awake sleep decaffeinate",
-            statusLight: isCaffeinating ? .on : .off
+            keywords: "caffeine caffeinate awake sleep decaffeinate keep awake",
+            statusLight: !hasCaffeinateSession ? .off : (isCaffeinating ? .on : .paused)
         )
     }
 
@@ -2047,7 +2133,7 @@ import Observation
         for (application, score) in scoredApplications(foldedQuery: foldedQuery, signals: signals) {
             scored.append((.application(application), score))
         }
-        for item in systemCommands + folderItems + snippets + quickLinks {
+        for item in systemCommands + folderItems + snippets + quickLinks + settingsDestinationItems {
             guard let score = matchScore(
                 foldedQuery: foldedQuery,
                 title: item.title,
@@ -2152,7 +2238,7 @@ import Observation
         }) {
             return .application(application)
         }
-        if let item = (systemCommands + folderItems + snippets + quickLinks).first(where: { $0.id == id }) {
+        if let item = (systemCommands + folderItems + snippets + quickLinks + settingsDestinationItems).first(where: { $0.id == id }) {
             return .item(item)
         }
         return nil
@@ -2245,7 +2331,10 @@ import Observation
             ]
             // Retake is a screenshot's; a file or a link has nothing to retake.
             if !pendingImages.isEmpty || pendingContext != nil {
-                hints.append(FooterHint(label: "Retake", keys: ScreenshotKind.window.overlayKeyCaps))
+                hints.append(FooterHint(
+                    label: "Retake",
+                    keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
+                ))
             }
             return hints
         }
@@ -2300,7 +2389,7 @@ import Observation
                 var hints = [
                     FooterHint(label: "Open moment", keys: ["↩"]),
                     FooterHint(label: "Copy text", keys: ["⌘", "↩"]),
-                    FooterHint(label: "Actions", keys: ["⌘", "K"]),
+                    FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
                 if !screenHistory.showsTimeline {
@@ -2316,13 +2405,16 @@ import Observation
                 if let direction = translationDirection {
                     hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
                 } else {
-                    hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
+                    hints.append(FooterHint(
+                        label: "Screenshot",
+                        keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
+                    ))
                 }
             }
             if case .catalog = matches[index] {
                 // Roots have no ⌘K actions.
             } else {
-                hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
+                hints.append(FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)))
             }
             if catalogScope != nil {
                 hints.append(FooterHint(label: "Back", keys: ["⌫"]))
@@ -2342,8 +2434,11 @@ import Observation
         if let direction = translationDirection {
             hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
         }
-        hints.append(FooterHint(label: "Screenshot", keys: ScreenshotKind.window.overlayKeyCaps))
-        hints.append(FooterHint(label: "Actions", keys: ["⌘", "K"]))
+        hints.append(FooterHint(
+            label: "Screenshot",
+            keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
+        ))
+        hints.append(FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)))
         return hints
     }
 
@@ -2669,8 +2764,8 @@ import Observation
         else { return [] }
         return [
             "\(Self.addContextTrigger) attaches files, links, or selected text",
-            "\(Self.recentChatsShortcut.keyCaps.joined()) opens recent chats",
-            "\(ResultAction.changeModel.shortcut.keyCaps.joined()) changes the model",
+            "\(shortcutLabel(for: .recentChats)) opens recent chats",
+            "\(shortcutLabel(for: .changeModel)) changes the model",
         ]
     }
 
@@ -3094,10 +3189,51 @@ import Observation
     /// Pull what the manager knows into the observable state.
     func syncCaffeinateState() {
         isCaffeinating = caffeinateManager?.isEnabled ?? false
+        hasCaffeinateSession = caffeinateManager?.hasLiveSession ?? isCaffeinating
+        caffeinatePauseDetail = caffeinateManager?.pauseDetail
         caffeinateEndsAt = caffeinateManager?.endsAt
         caffeinateReason = caffeinateManager?.reason
         invalidateLauncherRanking()
         scheduleCaffeinateCountdown()
+    }
+
+    /// The Settings › General › Caffeinate master switch: starts or stops a
+    /// manual, indefinite session, exactly like the launcher's Caffeinate row.
+    /// A timed session lives in `caffeinateUntil` and leaves this off.
+    ///
+    /// Returns whether the manager actually applied it. A failed assertion is
+    /// not persisted as intent, so the toggle and the manager cannot disagree.
+    @discardableResult
+    func setCaffeinateEnabled(_ enabled: Bool) -> Bool {
+        let applied = caffeinateManager?.setEnabled(enabled) ?? enabled
+        guard applied else {
+            syncCaffeinateState()
+            return false
+        }
+        settings.caffeinateEnabled = enabled
+        if enabled { settings.caffeinateUntil = nil }
+        persistSettings(settings)
+        syncCaffeinateState()
+        return true
+    }
+
+    /// The manager's one-line effective state: held, why, or battery-paused.
+    /// `isCaffeinating` is false while the battery has paused an otherwise-live
+    /// intent, so the policy summary is the only honest source for the line.
+    var caffeinateStatusSummary: String {
+        caffeinateManager?.statusSummary
+            ?? (isCaffeinating ? "Caffeinated." : "Decaffeinated. Normal Mac sleep is enabled.")
+    }
+
+    /// Pushes the Caffeinate preference switches (Agent Watch, battery cutoff,
+    /// display assertion) onto the running manager and persists. It never
+    /// starts or stops a session; `setCaffeinateEnabled` owns that.
+    func applyCaffeinatePreferences() {
+        caffeinateManager?.isAgentWatchEnabled = settings.caffeinateAgentWatch
+        caffeinateManager?.batteryCutoff = settings.caffeinateBatteryCutoff
+        caffeinateManager?.keepsDisplayAwake = settings.caffeinateKeepDisplayAwake
+        persistSettings(settings)
+        syncCaffeinateState()
     }
 
     /// A timed session shows minutes left, so the row is re-derived once a
@@ -4273,6 +4409,9 @@ import Observation
 
     // MARK: - Add Context
 
+    /// `⇧⌘A`: the built-in key for Add Context on a chat. Routing and the
+    /// hints read the owner's resolved table (`shortcuts`); this is the
+    /// built-in value the key tables and the free-key checks name.
     nonisolated static let attachShortcut: KeyShortcut = .commandShift("a")
 
     /// The attachment menu belongs to the composer, not a chat-list search
@@ -4907,6 +5046,16 @@ import Observation
             return
         }
 
+        if item.value.hasPrefix(SettingsDestination.valuePrefix),
+           let destination = SettingsDestinationIndex.destination(
+               id: String(item.value.dropFirst(SettingsDestination.valuePrefix.count))
+           ) {
+            input = ""
+            overlayPresenter.dismissOverlay()
+            overlayPresenter.openSettings(destination: destination)
+            return
+        }
+
         if item.value == "settings.open" {
             input = ""
             overlayPresenter.dismissOverlay()
@@ -4915,7 +5064,10 @@ import Observation
         }
 
         if item.value == "caffeinate.toggle" {
-            let desired = !isCaffeinating
+            // The action follows the session, not the assertion: a battery-paused
+            // session still offers Decaffeinate and this cancels it rather than
+            // re-enabling.
+            let desired = !hasCaffeinateSession
             guard caffeinateManager?.setEnabled(desired) == true else {
                 errorMessage = "Could not change Caffeinate."
                 requestInputFocus()
@@ -4983,9 +5135,11 @@ import Observation
             }
             syncCaffeinateState()
             // A timed session is restored after a relaunch, an indefinite
-            // one is the launch-time preference.
+            // one is the launch-time preference. Persist the intended deadline,
+            // not `endsAt`: while the battery has paused the session `endsAt` is
+            // nil, but the timer must survive the relaunch.
             settings.caffeinateEnabled = false
-            settings.caffeinateUntil = caffeinateManager.endsAt
+            settings.caffeinateUntil = caffeinateManager.sessionDeadline
             persistSettings(settings)
             input = ""
             overlayPresenter.dismissOverlay()
@@ -5193,12 +5347,21 @@ import Observation
         overlayPresenter.dismissOverlay()
     }
 
-    func addCustomFolder(_ url: URL) {
+    @discardableResult
+    func addCustomFolder(_ url: URL) -> Bool {
         let location = FolderLocationService.custom(from: url)
-        guard !settings.customFolders.contains(where: { $0.id == location.id }) else { return }
+        let path = location.expandedURL.standardizedFileURL.path
+        // A folder already reachable as a built-in (or already added) is
+        // deduplicated out of `available`, so storing it would leave a hidden,
+        // non-removable record. Reject the covered path.
+        let covered = (FolderLocationService.builtIn + settings.customFolders).contains {
+            $0.expandedURL.standardizedFileURL.path == path
+        }
+        guard !covered else { return false }
         settings.customFolders.append(location)
         persistSettings(settings)
         invalidateLauncherRanking()
+        return true
     }
 
     func removeCustomFolder(_ item: LauncherCatalogItem) {
@@ -5208,10 +5371,37 @@ import Observation
         invalidateLauncherRanking()
     }
 
-    func addCustomApplication(_ url: URL) {
+    @discardableResult
+    func addCustomApplication(_ url: URL) -> Bool {
         let path = url.standardizedFileURL.path
-        guard !settings.customApplicationPaths.contains(path) else { return }
+        guard !settings.customApplicationPaths.contains(path) else { return false }
+        // An app inside a scanned Applications folder is already in the list;
+        // storing it again adds a duplicate the Items table cannot tell apart.
+        let covered = ApplicationCatalogService.roots.contains { root in
+            path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+        }
+        guard !covered else { return false }
         settings.customApplicationPaths.append(path)
+        persistSettings(settings)
+        applicationCatalog?.setExtraApplicationPaths(settings.customApplicationPaths)
+        return true
+    }
+
+    /// Removes an app the user added in Settings › Items. Only a custom app
+    /// can be removed: the scanned Applications folders are not this list's to
+    /// edit. Also drops the app's alias, hotkey, and pin.
+    func removeCustomApplication(_ application: LaunchableApplication) {
+        let path = application.url.standardizedFileURL.path
+        settings.customApplicationPaths.removeAll { $0 == path }
+        removeLauncherItemConfiguration(
+            for: LauncherCatalogItem(
+                kind: .application,
+                itemID: application.id,
+                title: application.name,
+                detail: "",
+                value: path
+            )
+        )
         persistSettings(settings)
         applicationCatalog?.setExtraApplicationPaths(settings.customApplicationPaths)
     }
@@ -5539,7 +5729,12 @@ import Observation
         if case .application(let application) = result {
             isRunning = runningApplication(for: application) != nil
         }
-        var actions = ItemActionCatalog.actions(for: result, pasteTarget: pasteTargetName, isRunning: isRunning)
+        var actions = ItemActionCatalog.actions(
+            for: result,
+            pasteTarget: pasteTargetName,
+            isRunning: isRunning,
+            bindings: shortcuts
+        )
         // Open in AI Chat needs a window to open, and the window itself has
         // no use for it.
         if aiChatOpener == nil || isAIChatWindow {
@@ -5955,23 +6150,30 @@ import Observation
     /// The keys a Recent Chats row answers to: Open in AI Chat (⌘J), Copy
     /// Last Answer (⌘↩), Rename (⌘E), Pin (⇧⌘P), and Delete (⌃X). With no
     /// row highlighted they do nothing, never act on the chat that is open.
-    private static let recentChatsRowShortcuts: [KeyShortcut] =
-        [.commandReturn] + [ResultAction.continueInAIChat, .renameChat, .pinChat, .deleteChat].map(\.shortcut)
+    /// The actions a Recent Chats row answers to: Open in AI Chat, Copy Last
+    /// Answer, Rename, Pin, and Delete. Read through `shortcuts`, so a rebind
+    /// is what the row matches and what the row draws.
+    private static let recentChatsRowActions: [ShortcutAction] =
+        [.continueInAIChat, .renameChat, .pinChat, .deleteChat]
 
     /// Direct shortcuts from the list or the pane (⌘↩, ⌘E, ⌃X, ⌘⇧A…).
     /// Returns `false` when nothing matched so the key reaches SwiftUI.
     func performShortcut(characters: String?, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        if Self.recentChatsShortcut.matches(
+        // ⌘K by default: the action palette, or the pane the surface is in.
+        // The launcher's own panel takes this key before the model sees it;
+        // the AI Chat window and every other caller reach it here, so both
+        // routes answer the resolved key rather than a hardcoded one.
+        if shortcuts.matches(
+            .commandPalette,
             characters: characters,
             keyCode: keyCode,
             modifiers: modifiers
         ) {
-            toggleRecentChats()
+            handleCommandK()
             return true
         }
-        // `⌘H`, the v1.4 Browse Chat History key, opens the same list on the
-        // Quick AI surface. The AI Chat window leaves it to Hide.
-        if isQuickAIPresented, !isAIChatWindow, Self.legacyRecentChatsShortcut.matches(
+        if shortcuts.matches(
+            .recentChats,
             characters: characters,
             keyCode: keyCode,
             modifiers: modifiers
@@ -5982,7 +6184,8 @@ import Observation
         // ⌘J on the Quick AI surface: Open in AI Chat, as in Raycast,
         // before the first answer too; in Recent Chats, the highlighted chat.
         if offersContinueInAIChat, !isItemActionPanePresented,
-           ResultAction.continueInAIChat.shortcut.matches(
+           shortcuts.matches(
+               .continueInAIChat,
                characters: characters,
                keyCode: keyCode,
                modifiers: modifiers
@@ -5992,11 +6195,17 @@ import Observation
         }
         // ⌘⌥T toggles the keyboard-first Transform chooser (reachable without a
         // mouse); while it is open ↑↓ and Return drive it in the view.
-        if Self.transformChooserShortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers) {
+        if shortcuts.matches(
+            .transformChooser,
+            characters: characters,
+            keyCode: keyCode,
+            modifiers: modifiers
+        ) {
             toggleTransformChooser()
             return true
         }
-        if Self.transcriptCollapseShortcut.matches(
+        if shortcuts.matches(
+            .transcriptCollapse,
             characters: characters,
             keyCode: keyCode,
             modifiers: modifiers
@@ -6022,16 +6231,27 @@ import Observation
         }
         // No row took it (the search matches nothing): a row key is
         // swallowed rather than passed to the open chat's answer actions.
-        if isRecentChatsPresented, Self.recentChatsRowShortcuts.contains(where: {
-            $0.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
-        }) {
+        if isRecentChatsPresented,
+           Self.recentChatsRowActions.contains(where: {
+               shortcuts.matches(
+                   $0,
+                   characters: characters,
+                   keyCode: keyCode,
+                   modifiers: modifiers
+               )
+           }) || KeyShortcut.commandReturn.matches(
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
             return true
         }
         // Change Model works on the Quick AI surface before the first answer
         // too: the empty surface names this key, and so does the header's
         // model line.
         if isQuickAIPresented, !isItemActionPanePresented,
-           ResultAction.changeModel.shortcut.matches(
+           shortcuts.matches(
+               .changeModel,
                characters: characters,
                keyCode: keyCode,
                modifiers: modifiers
@@ -6039,15 +6259,36 @@ import Observation
             openModelChooser(.change)
             return true
         }
-        if canOpenAttachments, Self.attachShortcut.matches(
-            characters: characters, keyCode: keyCode, modifiers: modifiers
-        ) {
+        if canOpenAttachments,
+           shortcuts.matches(
+               .attachMenu,
+               characters: characters,
+               keyCode: keyCode,
+               modifiers: modifiers
+           ) {
             toggleAddContextMenu()
+            return true
+        }
+        // The two screenshot keys do the same as Add Context › Focused
+        // Window / Entire Screen, on whichever surface has the keyboard. The
+        // launcher's own panel takes them before the model sees them; the AI
+        // Chat window reaches them here.
+        if canOpenAttachments, shortcuts.matches(
+            .attachWindow, characters: characters, keyCode: keyCode, modifiers: modifiers
+        ), addContextOptions.contains(.focusedWindow) {
+            Task { @MainActor in await attachScreenshot(.window, clearingInput: false) }
+            return true
+        }
+        if canOpenAttachments, shortcuts.matches(
+            .attachDisplay, characters: characters, keyCode: keyCode, modifiers: modifiers
+        ) {
+            Task { @MainActor in await attachScreenshot(.display, clearingInput: false) }
             return true
         }
         // Tools opens on the surface before the first answer too.
         if isQuickAIPresented, !isItemActionPanePresented, activeItemActionForm == nil,
-           ResultAction.tools.shortcut.matches(
+           shortcuts.matches(
+               .tools,
                characters: characters,
                keyCode: keyCode,
                modifiers: modifiers
@@ -6057,7 +6298,8 @@ import Observation
         }
         // Change Assistant, too: picking one is how an assistant chat starts.
         if isQuickAIPresented, !isItemActionPanePresented,
-           ResultAction.changeAssistant.shortcut.matches(
+           shortcuts.matches(
+               .changeAssistant,
                characters: characters,
                keyCode: keyCode,
                modifiers: modifiers
@@ -6067,7 +6309,12 @@ import Observation
         }
         if isAnswerActive, !isItemActionPanePresented, activeItemActionForm == nil,
            let action = resultActions.first(where: {
-               $0.shortcut.matches(characters: characters, keyCode: keyCode, modifiers: modifiers)
+               shortcuts.matches(
+                   ShortcutAction.forResultAction($0),
+                   characters: characters,
+                   keyCode: keyCode,
+                   modifiers: modifiers
+               )
            }) {
             Task { await performResultAction(action) }
             return true
@@ -9032,11 +9279,7 @@ import Observation
     /// (Raycast's key) in v1.5.0, and `⌘P` was free in every key table
     /// (`⇧⌘P` is Pin, `⌥⌘P` is Continue in pi). In the AI Chat window the
     /// same key opens the chat list.
-    static let recentChatsShortcut: KeyShortcut = ResultAction.recentChats.shortcut
-
-    /// `⌘H` was Browse Chat History, which opened the Chats catalog; it now
-    /// opens Recent Chats on the Quick AI surface, as `⌘P` does.
-    static let legacyRecentChatsShortcut: KeyShortcut = .command("h")
+    static let recentChatsShortcut: KeyShortcut = .command("p")
 
     /// Recent Chats has something to list.
     var canOpenRecentChats: Bool { !history.isEmpty || currentConversation != nil }
@@ -9159,6 +9402,10 @@ import Observation
     /// `⌘⇧M`: expand or collapse the newest long message in the transcript,
     /// for a reader who never leaves the composer. The control under the
     /// message carries the same key caps.
+    /// `⇧⌘M`: expand or collapse the newest long message in the transcript,
+    /// for a reader who never leaves the composer. The control under the
+    /// message carries the owner's resolved caps (`shortcutKeyCaps`), so a
+    /// rebind reaches both the key and the caps under the message.
     static let transcriptCollapseShortcut: KeyShortcut = .commandShift("m")
 
     /// Message ids the reader expanded out of the collapsed state. A message

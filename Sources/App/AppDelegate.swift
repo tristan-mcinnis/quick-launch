@@ -11,6 +11,11 @@ final class KeyablePanel: NSPanel {
     override var acceptsFirstResponder: Bool { true }
 
     weak var composerModel: QuickViewModel?
+    /// The live in-app shortcut table. The panel takes ⌘K and the screenshot
+    /// keys before the model sees them, so it has to ask the same table the
+    /// model and the hints ask; nil (tests, and any panel built without a view
+    /// model) falls back to the built-in keys.
+    var bindings: (() -> ShortcutBindings)?
     var commandKHandler: (() -> Void)?
     var commandCHandler: (() -> Bool)?
     /// ⌘⇧S captures the previous app's window, ⌘⇧D the display under the pointer.
@@ -89,6 +94,7 @@ final class KeyablePanel: NSPanel {
             }
         }
         let modifiers = event.modifierFlags.overlayRelevant
+        let shortcuts = bindings?() ?? .defaults
         if event.type == .keyDown,
            event.charactersIgnoringModifiers?.lowercased() == "c",
            modifiers == [.command],
@@ -96,18 +102,23 @@ final class KeyablePanel: NSPanel {
             return true
         }
         if event.type == .keyDown,
-           event.charactersIgnoringModifiers?.lowercased() == "k",
-           modifiers == [.command] {
+           shortcuts.matches(.commandPalette, keyCode: event.keyCode, modifiers: modifiers) {
             commandKHandler?()
             return true
         }
-        if event.type == .keyDown,
-           modifiers == [.command, .shift],
-           let screenshotHandler,
-           let key = event.charactersIgnoringModifiers?.lowercased(),
-           let kind: ScreenshotKind = key == "s" ? .window : (key == "d" ? .display : nil) {
-            screenshotHandler(kind)
-            return true
+        if event.type == .keyDown, let screenshotHandler {
+            let kind: ScreenshotKind?
+            if shortcuts.matches(.attachWindow, keyCode: event.keyCode, modifiers: modifiers) {
+                kind = .window
+            } else if shortcuts.matches(.attachDisplay, keyCode: event.keyCode, modifiers: modifiers) {
+                kind = .display
+            } else {
+                kind = nil
+            }
+            if let kind {
+                screenshotHandler(kind)
+                return true
+            }
         }
         if event.type == .keyDown,
            modifiers == [.shift],
@@ -574,7 +585,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         // Provider and network work remain dormant until the user runs an
-        // action or explicitly refreshes/checks from Settings.
+        // action or explicitly refreshes/checks from Settings. The one
+        // exception is the opt-in update check below.
+        if settings.checkForUpdatesOnLaunch {
+            // Settings › About › Updates: one silent release-tag check at
+            // launch. It never installs anything; the About pane owns that.
+            Task { @MainActor [weak viewModel] in
+                await viewModel?.checkForUpdateSilently()
+            }
+        }
 
         // Warm what the first keystrokes will need, off the hotkey path.
         AppIconCache.prewarm(paths: applicationCatalog.applications.map(\.url.path))
@@ -603,6 +622,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // surface and remembers the size.
         panel.delegate = self
         panel.composerModel = viewModel
+        panel.bindings = { [weak viewModel] in
+            viewModel?.shortcuts ?? .defaults
+        }
         panel.commandKHandler = { [weak viewModel] in
             viewModel?.handleCommandK()
         }
@@ -837,7 +859,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func registerGlobalHotkey() {
         guard let vm = viewModel else { return }
         let keyCode = vm.settings.hotkeyKeyCode
-        let modifierFlags = NSEvent.ModifierFlags(rawValue: vm.settings.hotkeyModifiers)
+        let modifierFlags = NSEvent.ModifierFlags(rawValue: vm.settings.hotkeyModifiers).overlayRelevant
+
+        // The main hotkey had no cross-check before: a combination that an
+        // in-app shortcut or another dedicated hotkey owns is refused here,
+        // with the same message the Settings row shows.
+        if let conflict = vm.settings.launcherHotkeyConflict() {
+            globalHotKey?.invalidate()
+            globalHotKey = nil
+            vm.hotkeyRegistrationError = conflict
+            return
+        }
 
         globalHotKey = GlobalHotKey(
             keyCode: UInt32(keyCode),
@@ -874,7 +906,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             vm.clipboardHistoryHotkeyRegistrationError = vm.settings.clipboardHistoryHotkeyConflict()
             return
         }
-        let hotkey = vm.settings.clipboardHistoryHotkey
+        let hotkey = vm.settings.clipboardHistoryHotkey.normalized
         let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
         clipboardHistoryHotKey = GlobalHotKey(
             keyCode: UInt32(hotkey.keyCode),
@@ -895,7 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             vm.translatorHotkeyRegistrationError = vm.settings.translatorHotkeyConflict()
             return
         }
-        let hotkey = vm.settings.translatorHotkey
+        let hotkey = vm.settings.translatorHotkey.normalized
         let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
         translatorHotKey = GlobalHotKey(
             keyCode: UInt32(hotkey.keyCode),
@@ -920,7 +952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             vm.typeToClickHotkeyRegistrationError = nil
             return
         }
-        let hotkey = vm.settings.typeToClickHotkey
+        let hotkey = vm.settings.typeToClickHotkey.normalized
         let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
         typeToClickHotKey = GlobalHotKey(
             keyCode: UInt32(hotkey.keyCode),
@@ -1109,7 +1141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for action in vm.settings.savedPrompts {
             guard let hotkey = action.hotkey,
                   vm.settings.actionHotkeyConflict(for: action.id) == nil else { continue }
-            let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+            let flags = NSEvent.ModifierFlags(rawValue: hotkey.normalized.modifiers)
             let registered = GlobalHotKey(
                 keyCode: UInt32(hotkey.keyCode),
                 modifiers: GlobalHotKey.carbonModifiers(from: flags)
@@ -1154,7 +1186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     for: configuration.id
                   ) == nil else { continue }
 
-            let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+            let flags = NSEvent.ModifierFlags(rawValue: hotkey.normalized.modifiers)
             let registered = GlobalHotKey(
                 keyCode: UInt32(hotkey.keyCode),
                 modifiers: GlobalHotKey.carbonModifiers(from: flags)
@@ -1288,6 +1320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             StatusMenu.State(
                 settings: viewModel?.settings ?? QuickSettings(),
                 isCaffeinating: viewModel?.isCaffeinating == true,
+                hasCaffeinateSession: viewModel?.hasCaffeinateSession == true,
                 screenHistory: ScreenHistoryStatusPresentation.make(
                     status: viewModel?.screenHistory.captureStatus
                 ),
@@ -1589,10 +1622,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         AppActivation.settleAfterClosing(closing)
     }
 
-    func showSettingsPanel() {
+    func showSettingsPanel(destination: SettingsDestination? = nil) {
         // Settings is a different job. Get the launcher out of the way.
         if panel?.isVisible == true { hideOverlay() }
         if let existing = settingsPanel, existing.isVisible {
+            // A live window is already hosting a view that observes the
+            // reveal notification; a not-yet-created one is born on the
+            // destination instead.
+            if let destination {
+                NotificationCenter.default.post(
+                    name: .revealSettingsDestination,
+                    object: destination
+                )
+            }
             AppActivation.bringToFront(existing)
             return
         }
@@ -1623,7 +1665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.delegate = self
 
         let hostingController = NSHostingController(
-            rootView: SettingsView(viewModel: vm)
+            rootView: SettingsView(viewModel: vm, initialDestination: destination)
         )
         panel.contentViewController = hostingController
         self.settingsPanel = panel
@@ -1776,6 +1818,9 @@ extension AppDelegate: OverlayPresenting {
     func presentOverlay() { showOverlay(captureSelectionTarget: false) }
     func dismissOverlay() { hideOverlay() }
     func openSettings() { showSettingsPanel() }
+    func openSettings(destination: SettingsDestination) {
+        showSettingsPanel(destination: destination)
+    }
     func openTranslator() { showTranslator() }
     func openTranslator(retainedSelection: String?) { showTranslator(retainedSelection: retainedSelection) }
     func openTypeToClick() { showTypeToClick() }
