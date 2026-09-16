@@ -29,10 +29,20 @@ extension QuickViewModel {
 
     static let finderApplicationName = "Finder"
 
-    /// The Add Context menu in order: the captures this surface offers,
-    /// File…, Link…, and Finder Selection when Finder is behind.
-    var addContextRows: [AddContextRow] {
+    /// The Add Context menu in order, for the surface: the captures this
+    /// surface offers, File…, Link…, and Finder Selection when Finder is
+    /// behind. Before the pane's own search filter.
+    var addContextAllRows: [AddContextRow] {
         AddContextRow.menu(captures: addContextOptions, finderIsBehind: isFinderBehind)
+    }
+
+    /// The rows after the pane's own search filter, best match first. Typing
+    /// there narrows this list; the composer draft is never touched. The
+    /// highlight always indexes this list, so the keys and the drawn rows
+    /// agree.
+    var addContextRows: [AddContextRow] {
+        guard !addContextQuery.isEmpty else { return addContextAllRows }
+        return Self.rankByQuery(addContextAllRows, query: addContextQuery, title: \.title)
     }
 
     /// One Add Context row, from a click or Return.

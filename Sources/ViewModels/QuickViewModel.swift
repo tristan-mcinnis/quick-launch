@@ -1840,13 +1840,13 @@ import Observation
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
         if isTransformChooserPresented { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
         if isCaptureChooserPresented {
-            total += PanelSizing.chooserBlockHeight(rows: captureChooserOptions.count)
+            total += PanelSizing.searchableChooserBlockHeight(rows: captureChooserOptions.count)
         }
         if isModelChooserPresented {
             total += PanelSizing.chooserBlockHeight(rows: modelChooserOptions.count)
         }
         if isAddContextMenuPresented {
-            total += PanelSizing.chooserBlockHeight(rows: addContextRows.count)
+            total += PanelSizing.searchableChooserBlockHeight(rows: addContextRows.count)
         }
         var pane: CGFloat?
         if isItemActionPanePresented {
@@ -4437,12 +4437,30 @@ import Observation
             && !isItemActionPanePresented && activeItemActionForm == nil
     }
 
+    /// True while a chooser with its own search field is up. Those panes
+    /// take the keyboard themselves, so the composer behind them must not
+    /// pull focus back when a focus request is made.
+    var searchablePaneOwningFocus: Bool {
+        isAddContextMenuPresented || isCaptureChooserPresented
+    }
+
     /// True while the Add Context menu is open. The same menu opens from the
     /// control left of the composer and from typing `@` in it.
     var isAddContextMenuPresented = false {
-        didSet { if !isAddContextMenuPresented { resumeQueuedFollowUp() } }
+        didSet {
+            if !isAddContextMenuPresented {
+                addContextQuery = ""
+                resumeQueuedFollowUp()
+            }
+        }
     }
     var addContextIndex = 0
+    /// Add Context's own search, typed in the pane's own field. It filters
+    /// the rows and never touches the composer draft; typing clears the
+    /// highlight, as the rail's search does.
+    var addContextQuery = "" {
+        didSet { if addContextQuery != oldValue { addContextIndex = 0 } }
+    }
 
     /// The four capture paths, in the order the menu lists them. The AI
     /// Chat window has no app behind it: Focused Window and Selected Text
@@ -4456,6 +4474,7 @@ import Observation
     func openAddContextMenu() {
         guard !isStreaming else { return }
         isAddContextMenuPresented = true
+        addContextQuery = ""
         addContextIndex = 0
         attachmentTray.cancelLinkEntry()
         attachmentTray.finderIsBehind = isFinderBehind
@@ -4544,21 +4563,47 @@ import Observation
     /// the highlighted capture, Escape closes. `⇧⌘D` stays the direct
     /// display capture and `⇧⌘A` stays the full Add Context menu.
     var isCaptureChooserPresented = false {
-        didSet { if !isCaptureChooserPresented { resumeQueuedFollowUp() } }
+        didSet {
+            if !isCaptureChooserPresented {
+                captureChooserQuery = ""
+                resumeQueuedFollowUp()
+            }
+        }
     }
     var captureChooserIndex = 0
+    /// The chooser's own search, typed in its own field. It filters the
+    /// captures and leaves the composer draft alone.
+    var captureChooserQuery = "" {
+        didSet {
+            guard captureChooserQuery != oldValue else { return }
+            if captureChooserQuery.isEmpty, isCaptureChooserPresented,
+               let preferred = captureChooserAllOptions.firstIndex(of: preferredCaptureEntry) {
+                captureChooserIndex = preferred
+            } else {
+                captureChooserIndex = 0
+            }
+        }
+    }
     /// Whether Selected Text is available, read once when the chooser opens
     /// and kept, so no Accessibility or capture work rides a render pass.
     private(set) var captureChooserHasSelection = false
 
-    /// The chooser's rows: the captures this surface can run, Selected Text
-    /// first. A capture that reads the app behind leaves the list while no
-    /// such app is known, so the chooser never advertises a row it cannot
-    /// run and every surface keeps at least the two screen captures.
-    var captureChooserOptions: [AddContextEntry] {
+    /// Every capture this surface can run, Selected Text first, before the
+    /// search filter. A capture that reads the app behind leaves the list
+    /// while no such app is known, so the chooser never advertises a row it
+    /// cannot run and every surface keeps at least the two screen captures.
+    var captureChooserAllOptions: [AddContextEntry] {
         AddContextEntry.captureChooser(offering: addContextOptions.filter {
             !$0.needsPreviousApp || selectionTarget != nil
         })
+    }
+
+    /// The chooser's rows after the search filter, best match first. The
+    /// highlight always indexes this list, so the keys and the drawn rows
+    /// agree.
+    var captureChooserOptions: [AddContextEntry] {
+        guard !captureChooserQuery.isEmpty else { return captureChooserAllOptions }
+        return Self.rankByQuery(captureChooserAllOptions, query: captureChooserQuery, title: \.title)
     }
 
     /// Whether the app behind holds selected text, without doing anything
@@ -4583,7 +4628,7 @@ import Observation
     /// available, else Focused Window, else the first capture this surface
     /// offers. Always a row inside `captureChooserOptions`.
     var preferredCaptureEntry: AddContextEntry {
-        let options = captureChooserOptions
+        let options = captureChooserAllOptions
         if captureChooserHasSelection, options.contains(.selectedText) { return .selectedText }
         if options.contains(.focusedWindow) { return .focusedWindow }
         return options.first ?? .selectedArea
@@ -4598,6 +4643,7 @@ import Observation
         closeItemActionPane()
         attachmentTray.cancelLinkEntry()
         errorMessage = nil
+        captureChooserQuery = ""
         let options = captureChooserOptions
         guard !options.isEmpty else {
             // Never a silent no-op: the key says why it did nothing.
@@ -6225,8 +6271,14 @@ import Observation
         if isAddContextMenuPresented {
             // Backspace in the Link field edits the link.
             if attachmentTray.isEnteringLink { return false }
+            // Backspace in the pane's own search edits the query.
+            if !addContextQuery.isEmpty { return false }
             closeAddContextMenu()
             return true
+        }
+        if isCaptureChooserPresented, !captureChooserQuery.isEmpty {
+            // Backspace in the chooser's own search edits the query.
+            return false
         }
         return popTopLayer()
     }

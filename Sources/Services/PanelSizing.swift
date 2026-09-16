@@ -122,6 +122,12 @@ enum PanelSizing {
     static func addContextBlockHeight(rows: Int) -> CGFloat {
         chooserChrome + addContextListHeight(rows: rows)
     }
+    /// The Capture chooser and Add Context carry their own search row above
+    /// the list; the other choosers do not. The window estimate counts it so
+    /// the field is never clipped.
+    static func searchableChooserBlockHeight(rows: Int) -> CGFloat {
+        chooserBlockHeight(rows: rows) + paneSearchRowHeight
+    }
     /// The search row and footer stay pinned while long result sets scroll.
     /// Twelve whole rows plus the section block: the list scrolls rather
     /// than cutting the thirteenth row in half.

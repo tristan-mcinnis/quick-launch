@@ -265,6 +265,8 @@ struct QuickAIComposer: View {
     }
 
     private func focusComposer() {
+        // A chooser with its own search field owns the keys while it is up.
+        guard !viewModel.searchablePaneOwningFocus else { return }
         FocusRequest.apply($composerFocused)
     }
 

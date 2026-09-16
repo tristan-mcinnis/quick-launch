@@ -290,6 +290,8 @@ struct OverlayView: View {
         // The Quick AI composer owns focus while the surface is up; asking
         // the hidden root field would move nothing.
         guard !viewModel.isQuickAIPresented else { return }
+        // A chooser with its own search field owns the keys while it is up.
+        guard !viewModel.searchablePaneOwningFocus else { return }
         FocusRequest.apply($inputFocused)
     }
 
@@ -1825,6 +1827,7 @@ struct ModelChooserPane: View {
 /// Finder Selection are Add Context's (`⇧⌘A`), never this pane's.
 struct CaptureChooserPane: View {
     @Bindable var viewModel: QuickViewModel
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         let rows = viewModel.captureChooserOptions
@@ -1845,10 +1848,31 @@ struct CaptureChooserPane: View {
             .padding(.horizontal, AQDesign.Space.panel)
             .padding(.top, AQDesign.Space.standard)
 
+            // The pane's own search, as the ⌘K palette has: it takes the
+            // keyboard on open, so typing narrows the rows instead of
+            // reaching the composer behind them.
+            HStack(spacing: AQDesign.Space.row) {
+                Image(systemName: "magnifyingglass")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+                TextField("Search captures…", text: $viewModel.captureChooserQuery)
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.body)
+                    .focused($searchFocused)
+                    .onSubmit { Task { await viewModel.runCaptureChooserSelection() } }
+                    .onKeyPress(.downArrow) { viewModel.moveCaptureChooserSelection(1); return .handled }
+                    .onKeyPress(.upArrow) { viewModel.moveCaptureChooserSelection(-1); return .handled }
+                    .accessibilityLabel("Search captures")
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .frame(height: PanelSizing.paneSearchRowHeight)
+
             SelectableListPane(
                 items: rows,
                 selectedIndex: $viewModel.captureChooserIndex,
                 rowHeight: AQDesign.rowHeight,
+                emptyText: "No matching captures",
                 scrollsToSelection: true,
                 onActivate: { entry in
                     // A click attaches the row it lands on, not whichever row
@@ -1879,13 +1903,20 @@ struct CaptureChooserPane: View {
                 .contentShape(Rectangle())
             }
             .modifier(ComposerPaneListHeight(
-                preferredHeight: PanelSizing.addContextListHeight(rows: rows.count)
+                preferredHeight: PanelSizing.addContextListHeight(rows: rows.count),
+                chromeHeight: PanelSizing.chooserChrome + PanelSizing.paneSearchRowHeight
             ))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Capture")
+        .onAppear { FocusRequest.apply($searchFocused) }
+        .onChange(of: viewModel.inputFocusRequest) { _, _ in
+            // The composer behind must not take the keys back while the
+            // chooser is up; a Back from a deeper field lands here.
+            FocusRequest.apply($searchFocused)
+        }
     }
 }
 
@@ -1900,6 +1931,7 @@ struct AddContextPane: View {
     var tray: AttachmentTray? = nil
     @Environment(\.attachmentTray) private var environmentTray
     @FocusState private var linkFocused: Bool
+    @FocusState private var searchFocused: Bool
 
     private var activeTray: AttachmentTray? { tray ?? environmentTray ?? viewModel.attachmentTray }
 
@@ -1924,7 +1956,9 @@ struct AddContextPane: View {
     }
 
     private var rowList: some View {
-        let rows = Self.rows(captures: viewModel.addContextOptions, tray: activeTray)
+        // The view model's own list, after the pane's search filter: the
+        // drawn rows and the keys' highlight index the same array.
+        let rows = viewModel.addContextRows
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: AQDesign.Space.row) {
                 Text("Attach")
@@ -1942,10 +1976,31 @@ struct AddContextPane: View {
             .padding(.horizontal, AQDesign.Space.panel)
             .padding(.top, AQDesign.Space.standard)
 
+            // The pane's own search, as the ⌘K palette has: it takes the
+            // keyboard on open, so typing narrows the rows instead of
+            // reaching the composer behind them.
+            HStack(spacing: AQDesign.Space.row) {
+                Image(systemName: "magnifyingglass")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+                TextField("Search context…", text: $viewModel.addContextQuery)
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.body)
+                    .focused($searchFocused)
+                    .onSubmit { Task { await viewModel.runAddContextSelection() } }
+                    .onKeyPress(.downArrow) { viewModel.moveAddContextSelection(1); return .handled }
+                    .onKeyPress(.upArrow) { viewModel.moveAddContextSelection(-1); return .handled }
+                    .accessibilityLabel("Search context")
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .frame(height: PanelSizing.paneSearchRowHeight)
+
             SelectableListPane(
                 items: rows,
                 selectedIndex: $viewModel.addContextIndex,
                 rowHeight: AQDesign.rowHeight,
+                emptyText: "No matching context",
                 scrollsToSelection: true,
                 onActivate: { row in activate(row) }
             ) { _, row, _ in
@@ -1968,9 +2023,19 @@ struct AddContextPane: View {
                 .padding(.horizontal, AQDesign.Space.row)
                 .contentShape(Rectangle())
             }
-            .modifier(ComposerPaneListHeight(preferredHeight: PanelSizing.addContextListHeight(rows: rows.count)))
+            .modifier(ComposerPaneListHeight(
+                preferredHeight: PanelSizing.addContextListHeight(rows: rows.count),
+                chromeHeight: PanelSizing.chooserChrome + PanelSizing.paneSearchRowHeight
+            ))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
+        }
+        .onAppear { FocusRequest.apply($searchFocused) }
+        .onChange(of: viewModel.inputFocusRequest) { _, _ in
+            // Back from the Link field lands in the search, never on the
+            // composer behind the pane.
+            guard !viewModel.attachmentTray.isEnteringLink else { return }
+            FocusRequest.apply($searchFocused)
         }
     }
 
