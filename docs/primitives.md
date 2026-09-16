@@ -97,7 +97,8 @@ The same key means the same thing on every layer.
 | `⌘L` / `⇧⌘W` | Read the answer aloud / search the web for it |
 | `↑` on an empty Quick AI composer | Put the last question back in the composer; `↓` does nothing there |
 | `PageUp` `PageDown` / `⌥↑` `⌥↓` / `⌘↑` `⌘↓` | Scroll the Quick AI thread by a page / by a page / to the top or bottom |
-| `⇧⌘S` / `⇧⌘D` | Send the focused window / this display to AI (screenshot plus context), in Quick Launch or AI Chat |
+| `⇧⌘S` | Open the capture chooser: Selected Text, Focused Window, Selected Area, Entire Screen. Return attaches the highlighted row, in Quick Launch or AI Chat |
+| `⇧⌘D` | Send this display to AI (screenshot plus context), in Quick Launch or AI Chat |
 | `⌥⌘V` | Replace the selected text with the answer. It was `⇧⌘V`, which is Clipboard History's global hotkey and won the key system-wide |
 | double tap right `⌘` | Send the focused window to AI from anywhere |
 | `⌘E` | Edit |
@@ -119,7 +120,8 @@ or, in AI Chat only, opens a chat from the list. The answer keys live in one tab
 
 **Rebindable keys.** One registry, `ShortcutAction`
 (`Sources/Models/ShortcutAction.swift`), owns the in-app keys a user may
-change: Add Context (`⇧⌘A`) and the two screenshot keys (`⇧⌘S`, `⇧⌘D`), the
+change: Add Context (`⇧⌘A`) and the two capture keys (`⇧⌘S` opens the capture
+chooser, `⇧⌘D` captures the display), the
 command palette (`⌘K`), and every Quick AI and AI Chat action (`⌘N`, `⌘P`,
 `⌘J`, `⌥⌘K`, `⌥⌘T`, `⇧⌘M`, `⌘F`, `⌃⌘S`, and the answer keys, including Replace
 Selection on `⌥⌘V`: it was `⇧⌘V` until that turned out to be Clipboard

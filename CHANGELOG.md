@@ -2,6 +2,7 @@
 
 ## Unreleased — 2026-09-15
 
+- **`⇧⌘S` asks what to capture.** The window key no longer attaches the focused window on its own. It opens a compact capture-only chooser — Selected Text, Focused Window, Selected Area, Entire Screen — with Selected Text highlighted when the app you were in has a selection, else Focused Window; Return attaches exactly the highlighted row. `⇧⌘D` still captures the display directly, and `⇧⌘A` still opens the full Add Context menu with Files…, Link…, and Finder Selection. In the AI Chat window with no app known behind it, the chooser lists only the two screen captures and never opens with nothing to do.
 - Translator waits for a pause in typing, cancels stale responses, remembers the language pair, and focuses a fresh source field on reopen. Selected-text handoffs import automatically. Swap keeps unfinished input; `⌘A` selects the native editor text.
 - Quick AI and AI Chat offer Attach… in `⌘K` and through `⇧⌘A`.
 - The open chat's action palette searches the current Pin Chat or Unpin Chat label. AI Chat's sidebar action menu has its own fuzzy search and keyboard selection.

@@ -27,7 +27,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
     /// Surface-gated: the same key on a launcher row opens "Set Alias…", which
     /// stays fixed in the launcher scope, so a rebind may not take it.
     case attachMenu
-    /// `⇧⌘S`: attach the focused window of the app behind.
+    /// `⇧⌘S`: the capture chooser (selected text, window, area, or screen).
     case attachWindow
     /// `⇧⌘D`: attach the display under the pointer.
     case attachDisplay
@@ -102,7 +102,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
     var title: String {
         switch self {
         case .attachMenu: "Add Context"
-        case .attachWindow: "Attach Window"
+        case .attachWindow: "Attach Capture"
         case .attachDisplay: "Attach Display"
         case .commandPalette: "Command Palette"
         case .newChat: "New Chat"
@@ -139,7 +139,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
     var detail: String {
         switch self {
         case .attachMenu: "A window, a selection, an area, a screen, a file, or a link"
-        case .attachWindow: "The focused window of the app behind, in Quick Launch or AI Chat"
+        case .attachWindow: "Pick what to attach: selected text, a window, an area, or a screen"
         case .attachDisplay: "The display under the pointer, in Quick Launch or AI Chat"
         case .commandPalette: "The action list for the highlighted row, or the surface"
         case .newChat: "Start an empty chat without leaving the surface"

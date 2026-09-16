@@ -167,6 +167,11 @@ struct OverlayView: View {
                 ModelChooserPane(viewModel: viewModel)
             }
 
+            if viewModel.isCaptureChooserPresented {
+                HouseDivider()
+                CaptureChooserPane(viewModel: viewModel)
+            }
+
             if viewModel.isAddContextMenuPresented {
                 HouseDivider()
                 AddContextPane(viewModel: viewModel)
@@ -180,6 +185,7 @@ struct OverlayView: View {
 
             if !viewModel.isTransformChooserPresented,
                !viewModel.isModelChooserPresented,
+               !viewModel.isCaptureChooserPresented,
                !viewModel.isAddContextMenuPresented,
                (!viewModel.launcherMatches.isEmpty || (viewModel.isHistoryCatalog && viewModel.showsDetailPane)) {
                 HouseDivider()
@@ -423,12 +429,24 @@ struct OverlayView: View {
             }
 
             Divider()
+            Button {
+                viewModel.openCaptureChooser()
+            } label: {
+                Label(
+                    "Capture…  \(ScreenshotKind.window.overlayKeyCaps(viewModel.shortcuts).joined())",
+                    systemImage: "camera.viewfinder"
+                )
+            }
             ForEach(ScreenshotKind.allCases, id: \.rawValue) { kind in
                 Button {
                     Task { await viewModel.attachScreenshot(kind, clearingInput: false) }
                 } label: {
+                    // The window key opens the chooser, so it is not shown
+                    // beside this row's direct capture.
                     Label(
-                        "\(kind.title)  \(kind.overlayKeyCaps(viewModel.shortcuts).joined())",
+                        kind == .window
+                            ? kind.title
+                            : "\(kind.title)  \(kind.overlayKeyCaps(viewModel.shortcuts).joined())",
                         systemImage: kind.systemImage
                     )
                 }
@@ -1572,6 +1590,10 @@ struct ComposerKeyRouting: ViewModifier {
             viewModel.moveAssistantChooserSelection(delta)
             return .handled
         }
+        if viewModel.isCaptureChooserPresented {
+            viewModel.moveCaptureChooserSelection(delta)
+            return .handled
+        }
         if viewModel.isAddContextMenuPresented {
             viewModel.moveAddContextSelection(delta)
             return .handled
@@ -1794,6 +1816,76 @@ struct ModelChooserPane: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(viewModel.modelChooserPurpose.title)
+    }
+}
+
+/// Capture chooser: the four captures only, in the order `⇧⌘S` lists them
+/// (Selected Text first), and only the ones this surface can run. Opened by
+/// `⇧⌘S`; Return attaches exactly the highlighted capture. Files, links, and
+/// Finder Selection are Add Context's (`⇧⌘A`), never this pane's.
+struct CaptureChooserPane: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        let rows = viewModel.captureChooserOptions
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Text("Capture")
+                    .font(AQDesign.TypeToken.section)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Text("What to attach")
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                KeyHint(label: "Move", keys: ["↑", "↓"])
+                KeyHint(label: "Attach", keys: ["↩"])
+                KeyHint(label: "Close", keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .padding(.top, AQDesign.Space.standard)
+
+            SelectableListPane(
+                items: rows,
+                selectedIndex: $viewModel.captureChooserIndex,
+                rowHeight: AQDesign.rowHeight,
+                scrollsToSelection: true,
+                onActivate: { entry in
+                    // A click attaches the row it lands on, not whichever row
+                    // the keyboard last highlighted.
+                    if let index = rows.firstIndex(of: entry) {
+                        viewModel.captureChooserIndex = index
+                    }
+                    Task { await viewModel.runCaptureChooserSelection() }
+                }
+            ) { _, entry, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    IconTile {
+                        Image(systemName: entry.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
+                    Text(entry.title)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Text(entry.detail)
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+                .contentShape(Rectangle())
+            }
+            .modifier(ComposerPaneListHeight(
+                preferredHeight: PanelSizing.addContextListHeight(rows: rows.count)
+            ))
+            .padding(.horizontal, AQDesign.Space.standard)
+            .padding(.bottom, AQDesign.Space.standard)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Capture")
     }
 }
 

@@ -89,7 +89,7 @@ struct ScreenshotWorkflowTests {
         #expect(labels == ["Ask", "Remove", "Retake"])
         vm.removePendingImage()
         #expect(vm.pendingImage == nil)
-        #expect(vm.footerHints.map(\.label).contains("Screenshot"))
+        #expect(vm.footerHints.map(\.label).contains("Capture"))
     }
 
     // MARK: - Vision routing

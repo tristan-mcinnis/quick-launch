@@ -36,6 +36,19 @@ enum AddContextEntry: String, CaseIterable, Identifiable, Sendable {
         self == .focusedWindow || self == .selectedText
     }
 
+    /// The capture chooser behind `⇧⌘S`: the four captures in the order it
+    /// lists them, Selected Text first. Files, links, and Finder Selection
+    /// never appear here; that is Add Context's menu (`⇧⌘A`).
+    static let captureChooserOrder: [AddContextEntry] = [
+        .selectedText, .focusedWindow, .selectedArea, .entireScreen,
+    ]
+
+    /// The chooser's rows for the captures a surface offers, in
+    /// `captureChooserOrder`, with any it cannot run left out.
+    static func captureChooser(offering available: [AddContextEntry]) -> [AddContextEntry] {
+        captureChooserOrder.filter(available.contains)
+    }
+
     var systemImage: String {
         switch self {
         case .focusedWindow: "macwindow"

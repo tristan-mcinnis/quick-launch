@@ -685,7 +685,7 @@ protocol AIChatWindowPresenting: AnyObject {
     func handleEscape() -> Bool {
         switch chat.topLayer {
         case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser,
-             .modelChooser, .assistantChooser, .addContextMenu, .streaming:
+             .modelChooser, .assistantChooser, .captureChooser, .addContextMenu, .streaming:
             chat.popTopLayer()
             return true
         default:
@@ -748,7 +748,7 @@ protocol AIChatWindowPresenting: AnyObject {
             // A chooser or the question card over the composer takes Return
             // whatever the modifier; a new line would land under it.
             if chat.isAskQuestionActive || chat.isModelChooserPresented || chat.isAssistantChooserPresented
-                || chat.isAddContextMenuPresented || chat.isTransformChooserPresented {
+                || chat.isCaptureChooserPresented || chat.isAddContextMenuPresented || chat.isTransformChooserPresented {
                 chat.submitFromComposer()
                 return .handled
             }

@@ -448,12 +448,14 @@ struct ShortcutRegistryTests {
         #expect(vm.setShortcut(replacement, for: .attachWindow) == nil)
 
         #expect(ScreenshotKind.window.overlayKeyCaps(vm.shortcuts) == ["⌥", "⌘", "J"])
-        #expect(vm.footerHints.first { $0.label == "Screenshot" }?.keys == ["⌥", "⌘", "J"])
+        #expect(vm.footerHints.first { $0.label == "Capture" }?.keys == ["⌥", "⌘", "J"])
         #expect(ScreenshotKind.display.overlayKeyCaps(vm.shortcuts) == ["⇧", "⌘", "D"], "the other kind is untouched")
 
-        // The panel intercepts the screenshot keys before the model sees
-        // them; it has to read the same table.
-        var captured: [ScreenshotKind] = []
+        // The panel intercepts the capture keys before the model sees them;
+        // it has to read the same table. The window key opens the chooser,
+        // the display key still captures directly.
+        var captures: [ScreenshotKind] = []
+        var chooserOpens = 0
         let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 90),
             styleMask: [.borderless],
@@ -461,27 +463,33 @@ struct ShortcutRegistryTests {
             defer: false
         )
         panel.bindings = { [weak vm] in vm?.shortcuts ?? .defaults }
-        panel.screenshotHandler = { captured.append($0) }
+        panel.captureChooserHandler = { chooserOpens += 1 }
+        panel.screenshotHandler = { captures.append($0) }
         panel.commandKHandler = {}
 
         _ = panel.performKeyEquivalent(with: keyEvent(characters: "j", keyCode: 38, modifiers: [.command, .option]))
-        #expect(captured == [.window])
+        #expect(chooserOpens == 1)
+        #expect(captures.isEmpty)
+        _ = panel.performKeyEquivalent(with: keyEvent(characters: "d", keyCode: 2, modifiers: [.command, .shift]))
+        #expect(captures == [.display])
         _ = panel.performKeyEquivalent(with: keyEvent(characters: "s", keyCode: 1, modifiers: [.command, .shift]))
-        #expect(captured == [.window], "the old key must stop working in the panel too")
+        #expect(chooserOpens == 1, "the old key must stop working in the panel too")
+        #expect(captures == [.display], "the window key never captures directly")
     }
 
-    /// The screenshots are advertised on a chat, so the chat's router takes
-    /// them: `⇧⌘S` and `⇧⌘D` do what Add Context › Focused Window and ›
-    /// Entire Screen do, on whichever surface has the keyboard.
-    @Test func theChatRouterTakesTheScreenshotKeys() async {
+    /// `⇧⌘S` opens the capture chooser on the chat's router; `⇧⌘D` still
+    /// captures the display directly.
+    @Test func theChatRouterOpensTheCaptureChooser() async {
         let vm = QuickViewModel(settings: QuickSettings())
         vm.openQuickAI()
         #expect(vm.canOpenAttachments)
 
-        // No capture service in a test, so the attempt shows up as its error.
         #expect(vm.performShortcut(characters: "s", keyCode: 1, modifiers: [.command, .shift]))
-        #expect(await eventually { vm.errorMessage != nil })
-        vm.errorMessage = nil
+        #expect(vm.isCaptureChooserPresented)
+        #expect(vm.topLayer == .captureChooser)
+        #expect(vm.errorMessage == nil, "opening the chooser attaches nothing and cannot fail")
+        vm.performShortcut(characters: "s", keyCode: 1, modifiers: [.command, .shift])
+        #expect(vm.isCaptureChooserPresented, "the window key opens it; it does not toggle")
 
         let replacement = ActionHotkey(keyCode: 11, modifiers: modifiers([.command, .control]))  // ⌃⌘B
         #expect(vm.setShortcut(replacement, for: .attachDisplay) == nil)

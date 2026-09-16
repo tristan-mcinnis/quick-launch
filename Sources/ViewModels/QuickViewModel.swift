@@ -1799,7 +1799,7 @@ import Observation
         // inside it, and every chooser and pane floats over it, so nothing
         // on it is measured.
         if isQuickAIPresented { return quickAISize.height }
-        let showsChooser = isTransformChooserPresented
+        let showsChooser = isTransformChooserPresented || isCaptureChooserPresented
         let base = PanelSizing.panelHeight(
             errorMessage: errorMessage,
             // The Transform chooser replaces the launcher list while open, so
@@ -1838,7 +1838,10 @@ import Observation
             )
         }
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
-        if showsChooser { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
+        if isTransformChooserPresented { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
+        if isCaptureChooserPresented {
+            total += PanelSizing.chooserBlockHeight(rows: captureChooserOptions.count)
+        }
         if isModelChooserPresented {
             total += PanelSizing.chooserBlockHeight(rows: modelChooserOptions.count)
         }
@@ -2406,7 +2409,7 @@ import Observation
                     hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
                 } else {
                     hints.append(FooterHint(
-                        label: "Screenshot",
+                        label: "Capture",
                         keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
                     ))
                 }
@@ -2435,7 +2438,7 @@ import Observation
             hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
         }
         hints.append(FooterHint(
-            label: "Screenshot",
+            label: "Capture",
             keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
         ))
         hints.append(FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)))
@@ -2793,6 +2796,8 @@ import Observation
     static let transformChooserConfirmTitle = "Run"
     /// What Return does in Add Context, in its header and in the composer.
     static let addContextConfirmTitle = "Add"
+    /// What Return does in the capture chooser (⇧⌘S), in both places.
+    static let captureChooserConfirmTitle = "Attach"
     /// The composer's label while a follow-up waits for the stream to end.
     static let queuedActionLabel = "Queued"
 
@@ -2809,6 +2814,9 @@ import Observation
         }
         if isAssistantChooserPresented {
             return ComposerAction(label: Self.assistantChooserConfirmTitle, keys: ["↩"])
+        }
+        if isCaptureChooserPresented {
+            return ComposerAction(label: Self.captureChooserConfirmTitle, keys: ["↩"])
         }
         if isAddContextMenuPresented {
             return ComposerAction(label: Self.addContextConfirmTitle, keys: ["↩"])
@@ -3070,6 +3078,11 @@ import Observation
             runAssistantChooserSelection()
             return
         }
+        if isCaptureChooserPresented {
+            // Return in the capture chooser attaches the highlighted capture.
+            await runCaptureChooserSelection()
+            return
+        }
         if isAddContextMenuPresented {
             // Return in Add Context attaches the highlighted entry.
             await runAddContextSelection()
@@ -3318,6 +3331,7 @@ import Observation
         isRecentChatsPresented = false
         isModelChooserPresented = false
         isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         isActionPalettePresented = false
@@ -4335,6 +4349,7 @@ import Observation
         modelChooserIndex = options.firstIndex { $0.model == activeModelID } ?? 0
         isModelChooserPresented = true
         isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         isApplicationActionPanePresented = false
@@ -4446,6 +4461,7 @@ import Observation
         attachmentTray.finderIsBehind = isFinderBehind
         isModelChooserPresented = false
         isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
         isActionPalettePresented = false
         closeItemActionPane()
         errorMessage = nil
@@ -4518,6 +4534,114 @@ import Observation
         // fresh question; from this menu the typed question comes back.
         if input.isEmpty, !typed.isEmpty { input = typed }
         requestInputFocus()
+    }
+
+    // MARK: - Capture chooser (⇧⌘S)
+
+    /// `⇧⌘S` opens the compact capture chooser: the four captures only, in
+    /// `AddContextEntry.captureChooserOrder` (Selected Text first), never
+    /// Files…, Link…, or Finder Selection. ↑↓ move, Return attaches exactly
+    /// the highlighted capture, Escape closes. `⇧⌘D` stays the direct
+    /// display capture and `⇧⌘A` stays the full Add Context menu.
+    var isCaptureChooserPresented = false {
+        didSet { if !isCaptureChooserPresented { resumeQueuedFollowUp() } }
+    }
+    var captureChooserIndex = 0
+    /// Whether Selected Text is available, read once when the chooser opens
+    /// and kept, so no Accessibility or capture work rides a render pass.
+    private(set) var captureChooserHasSelection = false
+
+    /// The chooser's rows: the captures this surface can run, Selected Text
+    /// first. A capture that reads the app behind leaves the list while no
+    /// such app is known, so the chooser never advertises a row it cannot
+    /// run and every surface keeps at least the two screen captures.
+    var captureChooserOptions: [AddContextEntry] {
+        AddContextEntry.captureChooser(offering: addContextOptions.filter {
+            !$0.needsPreviousApp || selectionTarget != nil
+        })
+    }
+
+    /// Whether the app behind holds selected text, without doing anything
+    /// the user can see or has to approve: the selection already captured
+    /// for this request, the silent launch snapshot, else the injected
+    /// `SelectedTextServicing` seam's own silent read. Tests drive it through
+    /// `launchSelection` or a fake service; nothing here prompts for
+    /// Accessibility, steals focus, or attaches anything.
+    func selectedTextIsAvailableSilently() -> Bool {
+        if let cached = selectedTextContext {
+            return !cached.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if let text = launchSelection?.text,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        guard let target = selectionTarget, let selectedTextService else { return false }
+        return selectedTextService.hasSelection(from: target)
+    }
+
+    /// The row the chooser highlights: Selected Text when selected text is
+    /// available, else Focused Window, else the first capture this surface
+    /// offers. Always a row inside `captureChooserOptions`.
+    var preferredCaptureEntry: AddContextEntry {
+        let options = captureChooserOptions
+        if captureChooserHasSelection, options.contains(.selectedText) { return .selectedText }
+        if options.contains(.focusedWindow) { return .focusedWindow }
+        return options.first ?? .selectedArea
+    }
+
+    func openCaptureChooser() {
+        isModelChooserPresented = false
+        isAssistantChooserPresented = false
+        isAddContextMenuPresented = false
+        isTransformChooserPresented = false
+        isActionPalettePresented = false
+        closeItemActionPane()
+        attachmentTray.cancelLinkEntry()
+        errorMessage = nil
+        let options = captureChooserOptions
+        guard !options.isEmpty else {
+            // Never a silent no-op: the key says why it did nothing.
+            errorMessage = "Nothing can be captured from here."
+            requestInputFocus()
+            return
+        }
+        captureChooserHasSelection = selectedTextIsAvailableSilently()
+        captureChooserIndex = options.firstIndex(of: preferredCaptureEntry) ?? 0
+        isCaptureChooserPresented = true
+        requestInputFocus()
+    }
+
+    func closeCaptureChooser() {
+        guard isCaptureChooserPresented else { return }
+        isCaptureChooserPresented = false
+        requestInputFocus()
+    }
+
+    func moveCaptureChooserSelection(_ delta: Int) {
+        let options = captureChooserOptions
+        guard !options.isEmpty else { return }
+        captureChooserIndex = ListSelection.wrappedIndex(
+            captureChooserIndex,
+            by: delta,
+            count: options.count
+        )
+    }
+
+    /// Return in the open chooser: attach exactly the highlighted capture,
+    /// through the same capture paths the Add Context rows use.
+    func runCaptureChooserSelection() async {
+        let options = captureChooserOptions
+        guard !options.isEmpty else {
+            // Never a silent no-op, even if the surface changed under the
+            // chooser: the key says why it did nothing.
+            isCaptureChooserPresented = false
+            errorMessage = "Nothing can be captured from here."
+            requestInputFocus()
+            return
+        }
+        let entry = options[min(max(captureChooserIndex, 0), options.count - 1)]
+        isCaptureChooserPresented = false
+        await addContext(entry)
     }
 
     /// The character that opens Add Context from the composer.
@@ -5645,6 +5769,7 @@ import Observation
         isTransformChooserPresented = true
         transformChooserIndex = 0
         isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
         isActionPalettePresented = false
         isApplicationActionPanePresented = false
         isCatalogActionPanePresented = false
@@ -5981,6 +6106,7 @@ import Observation
         case transformChooser
         case modelChooser
         case assistantChooser
+        case captureChooser
         case addContextMenu
         case recentChats
         case streaming
@@ -6005,6 +6131,7 @@ import Observation
         if isTransformChooserPresented { return .transformChooser }
         if isModelChooserPresented { return .modelChooser }
         if isAssistantChooserPresented { return .assistantChooser }
+        if isCaptureChooserPresented { return .captureChooser }
         if isAddContextMenuPresented { return .addContextMenu }
         if isRecentChatsPresented { return .recentChats }
         if isStreaming { return .streaming }
@@ -6040,6 +6167,8 @@ import Observation
             closeModelChooser()
         case .assistantChooser:
             closeAssistantChooser()
+        case .captureChooser:
+            closeCaptureChooser()
         case .addContextMenu:
             // The Link field goes back to the rows first.
             if attachmentTray.cancelLinkEntry() {
@@ -6269,14 +6398,14 @@ import Observation
             toggleAddContextMenu()
             return true
         }
-        // The two screenshot keys do the same as Add Context › Focused
-        // Window / Entire Screen, on whichever surface has the keyboard. The
-        // launcher's own panel takes them before the model sees them; the AI
-        // Chat window reaches them here.
+        // The window key opens the capture chooser: it never attaches
+        // anything on its own, so what rides the question is always the row
+        // the user highlighted. The panel takes it before the model sees it;
+        // the AI Chat window reaches it here.
         if canOpenAttachments, shortcuts.matches(
             .attachWindow, characters: characters, keyCode: keyCode, modifiers: modifiers
-        ), addContextOptions.contains(.focusedWindow) {
-            Task { @MainActor in await attachScreenshot(.window, clearingInput: false) }
+        ) {
+            openCaptureChooser()
             return true
         }
         if canOpenAttachments, shortcuts.matches(
@@ -9086,6 +9215,7 @@ import Observation
         // The card takes ↑↓ and Return, so no chooser stays open over it.
         isModelChooserPresented = false
         isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         // The composer was disabled while the model worked, so its focus
@@ -9298,6 +9428,7 @@ import Observation
         openQuickAI()
         isRecentChatsPresented = true
         isModelChooserPresented = false
+        isCaptureChooserPresented = false
         isAddContextMenuPresented = false
         // The composer is the list's search field now; a half-typed
         // follow-up would filter the list, so the list opens on all chats.

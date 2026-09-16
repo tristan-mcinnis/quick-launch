@@ -15,6 +15,7 @@ struct QuickAIFloatingChooser: View {
         if viewModel.isTransformChooserPresented
             || viewModel.isModelChooserPresented
             || viewModel.isAssistantChooserPresented
+            || viewModel.isCaptureChooserPresented
             || viewModel.isAddContextMenuPresented {
             Group {
                 if viewModel.isTransformChooserPresented {
@@ -23,6 +24,8 @@ struct QuickAIFloatingChooser: View {
                     ModelChooserPane(viewModel: viewModel)
                 } else if viewModel.isAssistantChooserPresented {
                     AssistantChooserPane(viewModel: viewModel)
+                } else if viewModel.isCaptureChooserPresented {
+                    CaptureChooserPane(viewModel: viewModel)
                 } else {
                     AddContextPane(viewModel: viewModel)
                 }

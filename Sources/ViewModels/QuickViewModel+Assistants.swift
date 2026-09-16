@@ -115,6 +115,7 @@ extension QuickViewModel {
         assistantChooserIndex = options.firstIndex { $0.assistantID == activeAssistant?.id } ?? 0
         isAssistantChooserPresented = true
         isModelChooserPresented = false
+        isCaptureChooserPresented = false
         isAddContextMenuPresented = false
         isTransformChooserPresented = false
         isActionPalettePresented = false

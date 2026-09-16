@@ -91,6 +91,7 @@ extension QuickViewModel {
         }
         isModelChooserPresented = false
         isAddContextMenuPresented = false
+        isCaptureChooserPresented = false
         actionPaletteSubmenu = submenu
         actionQuery = ""
     }

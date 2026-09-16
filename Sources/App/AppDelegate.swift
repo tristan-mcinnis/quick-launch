@@ -18,7 +18,8 @@ final class KeyablePanel: NSPanel {
     var bindings: (() -> ShortcutBindings)?
     var commandKHandler: (() -> Void)?
     var commandCHandler: (() -> Bool)?
-    /// ⌘⇧S captures the previous app's window, ⌘⇧D the display under the pointer.
+    /// ⌘⇧S opens the capture chooser, ⌘⇧D captures the display under the pointer.
+    var captureChooserHandler: (() -> Void)?
     var screenshotHandler: ((ScreenshotKind) -> Void)?
     /// Item shortcuts (⌘↩, ⌘E, ⌃X, ⌘⇧A…). Returns true when consumed.
     var shortcutHandler: ((String?, UInt16, NSEvent.ModifierFlags) -> Bool)?
@@ -106,17 +107,15 @@ final class KeyablePanel: NSPanel {
             commandKHandler?()
             return true
         }
-        if event.type == .keyDown, let screenshotHandler {
-            let kind: ScreenshotKind?
-            if shortcuts.matches(.attachWindow, keyCode: event.keyCode, modifiers: modifiers) {
-                kind = .window
-            } else if shortcuts.matches(.attachDisplay, keyCode: event.keyCode, modifiers: modifiers) {
-                kind = .display
-            } else {
-                kind = nil
+        if event.type == .keyDown {
+            if shortcuts.matches(.attachWindow, keyCode: event.keyCode, modifiers: modifiers),
+               let captureChooserHandler {
+                captureChooserHandler()
+                return true
             }
-            if let kind {
-                screenshotHandler(kind)
+            if shortcuts.matches(.attachDisplay, keyCode: event.keyCode, modifiers: modifiers),
+               let screenshotHandler {
+                screenshotHandler(.display)
                 return true
             }
         }
@@ -632,6 +631,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let viewModel, viewModel.catalogScope != nil else { return false }
             viewModel.copySelectedLauncherItem()
             return true
+        }
+        panel.captureChooserHandler = { [weak viewModel] in
+            viewModel?.openCaptureChooser()
         }
         panel.screenshotHandler = { [weak viewModel] kind in
             Task { @MainActor in
