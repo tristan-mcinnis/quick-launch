@@ -40,14 +40,14 @@ extension QuickViewModel {
     /// unavailable is simply not offered to the model.
     func isChatToolAvailable(_ kind: ChatToolKind) -> Bool {
         switch kind {
-        case .memory: memoryService != nil
+        case .memory, .tasks: memoryService != nil
         case .vault: vaultSearchService != nil
         case .skills: skillLibrary != nil
         case .web: webSearchService != nil
         }
     }
 
-    /// "Memory, Vault, Skills on", for the Tools row's detail.
+    /// "Memory, Tasks, Vault, Skills on", for the Tools row's detail.
     var chatToolsSummary: String {
         let on = ChatToolKind.allCases.filter { chatTools.contains($0) }
         return on.isEmpty ? "All off" : on.map(\.displayName).joined(separator: ", ") + " on"

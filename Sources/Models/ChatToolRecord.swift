@@ -11,7 +11,7 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case web
         /// `recall_memory`.
         case memory
-        /// `recall_today`.
+        /// A read of today's captures.
         case today
         /// `search_vault`.
         case vault
@@ -40,7 +40,8 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     var systemImage: String {
         switch kind {
         case .web: "globe"
-        case .memory, .today: "brain.head.profile"
+        case .memory: "brain.head.profile"
+        case .today: "checklist"
         case .vault: "archivebox"
         case .skill: "book"
         case .context: "scissors"
@@ -146,8 +147,8 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
 
 extension QuickSettings {
     /// The chat defaults: a chat's tools when it has not chosen its own, set
-    /// by the four switches in Settings › General › Chat. Memory, Vault,
-    /// and Skills are on out of the box; Web search is the one
+    /// by the five switches in Settings › General › Chat. Memory, Tasks,
+    /// Vault, and Skills are on out of the box; Web search is the one
     /// `modelWebSearchEnabled` switch, shared with the Translator.
     var newChatTools: Set<ChatToolKind> {
         Set(ChatToolKind.allCases.filter(isNewChatToolOn))
@@ -156,6 +157,7 @@ extension QuickSettings {
     func isNewChatToolOn(_ kind: ChatToolKind) -> Bool {
         switch kind {
         case .memory: newChatMemoryEnabled
+        case .tasks: newChatTasksEnabled
         case .vault: newChatVaultEnabled
         case .skills: newChatSkillsEnabled
         case .web: modelWebSearchEnabled
@@ -165,6 +167,7 @@ extension QuickSettings {
     mutating func setNewChatTool(_ kind: ChatToolKind, on: Bool) {
         switch kind {
         case .memory: newChatMemoryEnabled = on
+        case .tasks: newChatTasksEnabled = on
         case .vault: newChatVaultEnabled = on
         case .skills: newChatSkillsEnabled = on
         case .web: modelWebSearchEnabled = on
@@ -177,6 +180,7 @@ extension ChatToolKind {
     var systemImage: String {
         switch self {
         case .memory: "brain.head.profile"
+        case .tasks: "checklist"
         case .vault: "archivebox"
         case .skills: "book"
         case .web: "globe"
@@ -186,7 +190,8 @@ extension ChatToolKind {
     /// What the tool reads, for the `⌘K` › Tools rows.
     var detail: String {
         switch self {
-        case .memory: "Search ~/memory and today's tasks"
+        case .memory: "Search notes and today's captures in ~/memory"
+        case .tasks: "Read due, overdue, in-progress, and open tasks"
         case .vault: "Search project state on vault-vps"
         case .skills: "Read a skill from ~/.claude/skills"
         case .web: "Search the web with SearXNG"

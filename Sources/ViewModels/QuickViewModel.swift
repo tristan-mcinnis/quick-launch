@@ -643,7 +643,7 @@ import Observation
     var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
-    /// `recall_memory` and `recall_today`. Nil in tests that do not fake it.
+    /// Memory and task reads through `recall`. Nil in tests that do not fake it.
     var memoryService: (any MemoryRecalling)?
     /// Capture to Memory (`recall remember`), a user action only.
     var memoryCapture: (any MemoryCapturing)?

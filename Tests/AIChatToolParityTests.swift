@@ -37,7 +37,10 @@ struct AIChatToolParityTests {
             chat.input = "Look something else up"
             let after = try toolNames(chat, provider: provider)
             let expected: Set<String> = selection == nil
-                ? ["recall_memory", "recall_today", "search_vault", "read_skill", "search_web"]
+                ? [
+                    "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
+                    "search_vault", "read_skill", "search_web",
+                ]
                 : (selection?.contains(.web) == true ? ["search_web"] : [])
             #expect(before == expected)
             #expect(after == expected)

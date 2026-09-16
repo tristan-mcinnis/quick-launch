@@ -25,13 +25,22 @@ struct ChatToolboxTests {
         let memory = FakeMemory()
         let vault = FakeVault(outcome: .success(VaultSearchOutcome(text: "", resultCount: 0, sources: [])))
 
-        let all = ChatToolbox(enabled: [.memory, .vault, .skills], memory: memory, vault: vault, skills: skills)
-        #expect(Self.names(all.definitions) == ["recall_memory", "recall_today", "search_vault", "read_skill"])
-        #expect(all.toolNames == ["recall_memory", "recall_today", "search_vault", "read_skill"])
+        let all = ChatToolbox(enabled: [.memory, .tasks, .vault, .skills], memory: memory, vault: vault, skills: skills)
+        #expect(Self.names(all.definitions) == [
+            "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
+            "search_vault", "read_skill",
+        ])
+        #expect(all.toolNames == [
+            "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
+            "search_vault", "read_skill",
+        ])
 
-        // Off in the chat: not offered, even with a backend.
+        // Memory and Tasks are independent even though the same recall adapter
+        // implements both seams.
         let memoryOnly = ChatToolbox(enabled: [.memory], memory: memory, vault: vault, skills: skills)
-        #expect(Self.names(memoryOnly.definitions) == ["recall_memory", "recall_today"])
+        #expect(Self.names(memoryOnly.definitions) == ["recall_memory", "recall_captures_today"])
+        let tasksOnly = ChatToolbox(enabled: [.tasks], memory: memory, vault: vault, skills: skills)
+        #expect(Self.names(tasksOnly.definitions) == ["recall_tasks_today", "recall_open_tasks"])
 
         // On, but no backend on this Mac: not offered.
         let noBackends = ChatToolbox(enabled: [.memory, .vault, .skills])
@@ -49,7 +58,7 @@ struct ChatToolboxTests {
         let (skills, root) = try TemporarySkills.make()
         defer { try? FileManager.default.removeItem(at: root) }
         let toolbox = ChatToolbox(
-            enabled: [.memory, .vault, .skills],
+            enabled: [.memory, .tasks, .vault, .skills],
             memory: FakeMemory(),
             vault: FakeVault(outcome: .success(VaultSearchOutcome(text: "", resultCount: 0, sources: []))),
             skills: skills
@@ -125,43 +134,114 @@ struct ChatToolboxTests {
         #expect(outcome.content.contains("recall is not installed"))
     }
 
-    // MARK: - recall_today
+    // MARK: - captures and tasks
 
-    @Test func todayListsCapturesAndTasks() async throws {
+    @Test func capturesTodayReturnsOnlyMemoryCaptures() async throws {
         let today = MemoryToday(
+            schemaVersion: 2,
             captures: .init(readable: true, reason: nil, items: [
                 .init(time: "09:12", text: "Call Sam about pricing", kind: "task"),
             ]),
-            tasks: .init(readable: true, reason: nil, items: [
+            tasks: .init(readable: true, reason: nil, dueToday: [
                 .init(title: "File the NAR1 return", project: "china-snapshot", lane: "requires_action"),
+            ], overdue: [], inProgress: [])
+        )
+        let toolbox = ChatToolbox(enabled: [.memory], memory: FakeMemory(today: today))
+        let outcome = try #require(await toolbox.run("recall_captures_today", arguments: "{}"))
+        #expect(outcome.record.kind == .today)
+        #expect(outcome.record.summary == "Read today: 1 capture")
+        #expect(outcome.content.contains("Call Sam about pricing"))
+        #expect(!outcome.content.contains("NAR1"))
+    }
+
+    @Test func tasksTodayReturnsOnlyTasks() async throws {
+        let today = MemoryToday(
+            schemaVersion: 2,
+            captures: .init(readable: true, reason: nil, items: [
+                .init(time: "09:12", text: "Call Sam about pricing", kind: "task"),
+            ]),
+            tasks: .init(readable: true, reason: nil, dueToday: [
+                .init(title: "File the NAR1 return", project: "china-snapshot", lane: "requires_action"),
+            ], overdue: [], inProgress: [
                 .init(title: "Audit screenctx", project: "stack", lane: "in_progress"),
             ])
         )
-        let toolbox = ChatToolbox(enabled: [.memory], memory: FakeMemory(today: today))
-        let outcome = try #require(await toolbox.run("recall_today", arguments: "{}"))
+        let toolbox = ChatToolbox(enabled: [.tasks], memory: FakeMemory(today: today))
+        let outcome = try #require(await toolbox.run("recall_tasks_today", arguments: "{}"))
         #expect(outcome.record.kind == .today)
-        #expect(outcome.record.summary == "Read today: 1 capture, 2 open tasks")
-        #expect(outcome.content.contains("09:12 · task · Call Sam about pricing"))
+        #expect(outcome.record.summary == "Read today: 2 tasks")
+        #expect(!outcome.content.contains("Call Sam about pricing"))
         #expect(outcome.content.contains("File the NAR1 return (china-snapshot · requires_action)"))
     }
 
-    @Test func todaySaysWhenASectionCannotBeRead() async throws {
-        let today = MemoryToday(
-            captures: .init(readable: true, reason: nil, items: []),
-            tasks: .init(readable: false, reason: "no read interface", items: [])
-        )
-        let toolbox = ChatToolbox(enabled: [.memory], memory: FakeMemory(today: today))
-        let outcome = try #require(await toolbox.run("recall_today", arguments: ""))
-        #expect(outcome.content.contains("Open tasks: could not be read (no read interface)"))
-        #expect(outcome.content.contains("Captured today:\n(nothing yet)"))
+    @Test func openTasksReturnsTheCompleteBacklogWithoutTheOldFortyTaskCutoff() async throws {
+        let rows = (1...45).map { index in
+            RecalledTask(
+                id: "t\(index)",
+                title: "Task \(index)",
+                project: "project",
+                lane: "requires_action",
+                due: index == 45 ? "2026-09-30" : "",
+                source: "/vault/project/00-tasks.md"
+            )
+        }
+        let memory = FakeMemory()
+        await memory.setOpenTasksResult(.success(RecalledTaskList(
+            schemaVersion: 1,
+            readable: true,
+            reason: nil,
+            count: rows.count,
+            tasks: rows
+        )))
+        let toolbox = ChatToolbox(enabled: [.tasks], memory: memory)
+        let outcome = try #require(await toolbox.run("recall_open_tasks", arguments: "{}"))
+        #expect(outcome.record.kind == .today)
+        #expect(outcome.record.summary == "Read open tasks: 45")
+        #expect(outcome.content.contains("Task 1"))
+        #expect(outcome.content.contains("Task 45"))
+        #expect(outcome.content.contains("due 2026-09-30"))
+        #expect(!outcome.content.contains("more not shown"))
     }
 
-    @Test func todayTimeoutAnswersTheModel() async throws {
+    @Test func openTasksSayWhenTheBacklogCannotBeRead() async throws {
+        let memory = FakeMemory()
+        await memory.setOpenTasksResult(.success(RecalledTaskList(
+            schemaVersion: 1,
+            readable: false,
+            reason: "neither task backend answered",
+            count: 0,
+            tasks: []
+        )))
+        let toolbox = ChatToolbox(enabled: [.tasks], memory: memory)
+        let outcome = try #require(await toolbox.run("recall_open_tasks", arguments: "{}"))
+        #expect(outcome.record.summary == "Open tasks could not be read")
+        #expect(outcome.content.contains("Open tasks: could not be read (neither task backend answered)"))
+        #expect(!outcome.content.contains("Open tasks:\n(none)"))
+    }
+
+    @Test func todayTasksSayWhenTheyCannotBeRead() async throws {
+        let today = MemoryToday(
+            schemaVersion: 2,
+            captures: .init(readable: true, reason: nil, items: []),
+            tasks: .init(
+                readable: false,
+                reason: "no read interface",
+                dueToday: [],
+                overdue: [],
+                inProgress: []
+            )
+        )
+        let toolbox = ChatToolbox(enabled: [.tasks], memory: FakeMemory(today: today))
+        let outcome = try #require(await toolbox.run("recall_tasks_today", arguments: ""))
+        #expect(outcome.content.contains("Today's tasks: could not be read (no read interface)"))
+    }
+
+    @Test func todayTasksTimeoutAnswersTheModel() async throws {
         let memory = FakeMemory()
         await memory.setTodayResult(.failure(RecallError.timedOut))
-        let toolbox = ChatToolbox(enabled: [.memory], memory: memory)
-        let outcome = try #require(await toolbox.run("recall_today", arguments: "{}"))
-        #expect(outcome.record.summary == "Today's memory timed out")
+        let toolbox = ChatToolbox(enabled: [.tasks], memory: memory)
+        let outcome = try #require(await toolbox.run("recall_tasks_today", arguments: "{}"))
+        #expect(outcome.record.summary == "Today's tasks timed out")
         #expect(outcome.content.contains("timed out"))
     }
 
@@ -267,7 +347,7 @@ struct ChatToolboxTests {
         let (skills, root) = try TemporarySkills.make()
         defer { try? FileManager.default.removeItem(at: root) }
         let toolbox = ChatToolbox(
-            enabled: [.memory, .vault, .skills],
+            enabled: [.memory, .tasks, .vault, .skills],
             memory: FakeMemory(),
             vault: FakeVault(outcome: .failure(VaultSearchError.empty)),
             skills: skills

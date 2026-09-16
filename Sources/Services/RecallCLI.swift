@@ -38,7 +38,39 @@ struct MemorySearchResult: Sendable, Equatable, Decodable {
     var hits: [Hit]
 }
 
-/// `recall today --json`: two sections, each saying whether it could be read.
+/// One task from either canonical backend, as `recall` exposes it.
+struct RecalledTask: Sendable, Equatable, Decodable {
+    var id: String
+    var title: String
+    var lane: String
+    /// `YYYY-MM-DD`, or an empty string when undated.
+    var due: String
+    var project: String
+    var source: String
+    var backend: String
+
+    init(
+        id: String = "",
+        title: String,
+        project: String,
+        lane: String,
+        due: String = "",
+        source: String = "",
+        backend: String = "vault"
+    ) {
+        self.id = id
+        self.title = title
+        self.lane = lane
+        self.due = due
+        self.project = project
+        self.source = source
+        self.backend = backend
+    }
+}
+
+/// `recall today --json` schema 2: today's captures and three exclusive task
+/// sections. The app checks the schema so an older flat-backlog payload never
+/// masquerades as today's work.
 struct MemoryToday: Sendable, Equatable, Decodable {
     struct Section<Item: Sendable & Equatable & Decodable>: Sendable, Equatable, Decodable {
         var readable: Bool
@@ -52,14 +84,45 @@ struct MemoryToday: Sendable, Equatable, Decodable {
         var kind: String
     }
 
-    struct Task: Sendable, Equatable, Decodable {
-        var title: String
-        var project: String
-        var lane: String
+    struct TaskSections: Sendable, Equatable, Decodable {
+        var readable: Bool
+        var reason: String?
+        var dueToday: [RecalledTask]
+        var overdue: [RecalledTask]
+        var inProgress: [RecalledTask]
+
+        enum CodingKeys: String, CodingKey {
+            case readable, reason, overdue
+            case dueToday = "due_today"
+            case inProgress = "in_progress"
+        }
+
+        var all: [RecalledTask] { dueToday + overdue + inProgress }
     }
 
+    var schemaVersion: Int
     var captures: Section<Capture>
-    var tasks: Section<Task>
+    var tasks: TaskSections
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case captures, tasks
+    }
+}
+
+/// `recall tasks --json`: the complete open backlog from both canonical task
+/// backends. A partial read carries its reason instead of looking complete.
+struct RecalledTaskList: Sendable, Equatable, Decodable {
+    var schemaVersion: Int
+    var readable: Bool
+    var reason: String?
+    var count: Int
+    var tasks: [RecalledTask]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case readable, reason, count, tasks
+    }
 }
 
 enum RecallError: LocalizedError, Equatable {
@@ -101,6 +164,7 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
 
     static func searchArguments(_ query: String) -> [String] { ["search", query, "--json"] }
     static let todayArguments = ["today", "--json"]
+    static let tasksArguments = ["tasks", "--json"]
     static func rememberArguments(_ text: String) -> [String] { ["remember", text] }
 
     func search(_ query: String) async throws -> MemorySearchResult {
@@ -111,6 +175,11 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
     func today() async throws -> MemoryToday {
         let result = try await invoke(Self.todayArguments, timeout: Self.readTimeout)
         return try Self.parseToday(result)
+    }
+
+    func openTasks() async throws -> RecalledTaskList {
+        let result = try await invoke(Self.tasksArguments, timeout: Self.readTimeout)
+        return try Self.parseTasks(result)
     }
 
     func remember(_ text: String) async throws {
@@ -146,7 +215,20 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
 
     nonisolated static func parseToday(_ result: ProcessResult) throws -> MemoryToday {
         if result.status == 0,
-           let payload = try? JSONDecoder().decode(MemoryToday.self, from: result.stdout) {
+           let payload = try? JSONDecoder().decode(MemoryToday.self, from: result.stdout),
+           payload.schemaVersion == 2 {
+            return payload
+        }
+        throw RecallError.failed(errorMessage(in: result))
+    }
+
+    nonisolated static func parseTasks(_ result: ProcessResult) throws -> RecalledTaskList {
+        if let payload = try? JSONDecoder().decode(RecalledTaskList.self, from: result.stdout),
+           payload.schemaVersion == 1,
+           result.status == 0 || !payload.readable {
+            // `recall tasks` exits 1 when neither backend answered, but its
+            // typed payload still carries the useful reason. Keep that honest
+            // result instead of reducing it to "exit 1".
             return payload
         }
         throw RecallError.failed(errorMessage(in: result))

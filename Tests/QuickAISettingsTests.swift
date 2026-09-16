@@ -55,7 +55,7 @@ struct QuickAISettingsTests {
                 #"{"configurationVersion":21,"newConversationAfterMinutes":\#(stored)}"#
             )
             #expect(settings.newChatInterval == option, "\(stored) minutes")
-            #expect(settings.configurationVersion == 25)
+            #expect(settings.configurationVersion == 26)
         }
     }
 
@@ -72,7 +72,7 @@ struct QuickAISettingsTests {
     /// A blob with no version and no keys at all, the oldest shape there is.
     @Test func aVersionlessBlobStillDecodes() throws {
         let settings = try decode(#"{"autoCopy":false}"#)
-        #expect(settings.configurationVersion == 25)
+        #expect(settings.configurationVersion == 26)
         #expect(settings.autoCopy == false)
         #expect(settings.newChatInterval == .fiveMinutes)
         #expect(settings.quickAIPrimaryAction == .pasteToActiveApp)

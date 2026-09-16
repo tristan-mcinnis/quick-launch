@@ -129,7 +129,7 @@ struct FoldersAndCommandsTests {
         let data = try JSONEncoder().encode(old)
         let decoded = try JSONDecoder().decode(QuickSettings.self, from: data)
         #expect(decoded.launcherItemConfigurations.contains { $0.kind == .folder && $0.alias == "dl" })
-        #expect(decoded.configurationVersion == 25)
+        #expect(decoded.configurationVersion == 26)
         let again = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(decoded))
         #expect(again.launcherItemConfigurations.filter { $0.kind == .folder }.count == 2)
     }

@@ -81,10 +81,15 @@ struct ChatToolsViewModelTests {
             ],
             enabledTools: [.memory, .web]
         )
-        let data = try JSONEncoder().encode([conversation])
+        var withTasks = conversation
+        withTasks.enabledTools = [.memory, .tasks, .web]
+        let data = try JSONEncoder().encode([withTasks])
         let decoded = try JSONDecoder().decode([QuickConversation].self, from: data)
         #expect(decoded.first?.messages.last?.tools == [Self.memoryLine])
-        #expect(decoded.first?.enabledTools == [.memory, .web])
+        #expect(decoded.first?.enabledTools == [.memory, .tasks, .web])
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        #expect((json.first?["enabledTools"] as? [String])?.contains("tasks") == false)
+        #expect(json.first?["tasksEnabled"] as? Bool == true)
 
         // A chat saved before v1.5.0 has no lines and still loads.
         let legacy = #"{"id":"6E1C6C3A-6A5E-4F5A-9E0B-2B9B7E5E7B11","role":"assistant","content":"old"}"#
@@ -140,11 +145,11 @@ struct ChatToolsViewModelTests {
 
     // MARK: - The chat's tools
 
-    @Test func defaultsAreMemoryVaultAndSkillsWithWebPerTheSetting() {
+    @Test func defaultsAreMemoryTasksVaultAndSkillsWithWebPerTheSetting() {
         let on = make { $0.modelWebSearchEnabled = true }
-        #expect(on.chatTools == [.memory, .vault, .skills, .web])
+        #expect(on.chatTools == [.memory, .tasks, .vault, .skills, .web])
         let off = make { $0.modelWebSearchEnabled = false }
-        #expect(off.chatTools == [.memory, .vault, .skills])
+        #expect(off.chatTools == [.memory, .tasks, .vault, .skills])
     }
 
     @Test func toolsChosenBeforeTheFirstQuestionGoToTheChatItStarts() async {
@@ -154,15 +159,15 @@ struct ChatToolsViewModelTests {
         vm.toggleChatTool(.vault)
         vm.toggleChatTool(.web)
         #expect(vm.currentConversation == nil)
-        #expect(vm.chatTools == [.memory, .skills])
+        #expect(vm.chatTools == [.memory, .tasks, .skills])
 
         await ask(vm, mock, "hello", deltas: [StreamDelta(text: "Hi.", finishReason: "stop")])
-        #expect(vm.currentConversation?.enabledTools == [.memory, .skills])
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks, .skills])
         #expect(vm.pendingChatTools == nil)
 
         // A new chat starts on the defaults again.
         vm.startNewConversation()
-        #expect(vm.chatTools == [.memory, .vault, .skills, .web])
+        #expect(vm.chatTools == [.memory, .tasks, .vault, .skills, .web])
     }
 
     @Test func toolsChosenOnTheOpenChatCarryIntoTheChatTheNextQuestionStarts() async throws {
@@ -203,13 +208,18 @@ struct ChatToolsViewModelTests {
         let provider = try #require(settings.providers.first { $0.kind == .openAICompatible })
 
         let all = try #require(vm.makeService(provider: provider, model: "deepseek-flash") as? OpenAICompatibleService)
-        #expect(all.offeredToolNames == ["recall_memory", "recall_today", "search_vault", "read_skill", "search_web"])
+        #expect(all.offeredToolNames == [
+            "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
+            "search_vault", "read_skill", "search_web",
+        ])
         #expect(all.contextBudget == ContextBudget(contextWindow: ModelProfile.curated(forModelID: "deepseek-flash").contextWindow))
 
         vm.toggleChatTool(.vault)
         vm.toggleChatTool(.web)
         let fewer = try #require(vm.makeService(provider: provider, model: "deepseek-flash") as? OpenAICompatibleService)
-        #expect(fewer.offeredToolNames == ["recall_memory", "recall_today", "read_skill"])
+        #expect(fewer.offeredToolNames == [
+            "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks", "read_skill",
+        ])
 
         // The Translator gets web search per the setting and no chat tools.
         let translator = try #require(vm.makeService(provider: provider, model: "deepseek-flash", chatTools: false) as? OpenAICompatibleService)
@@ -246,7 +256,7 @@ struct ChatToolsViewModelTests {
         #expect(vm.performShortcut(characters: "k", keyCode: 40, modifiers: [.command, .option]))
         #expect(vm.isActionPalettePresented)
         #expect(vm.actionPaletteSubmenu == .tools)
-        #expect(vm.resultActionDetail(.tools) == "Memory, Vault, Skills, Web search on")
+        #expect(vm.resultActionDetail(.tools) == "Memory, Tasks, Vault, Skills, Web search on")
     }
 
     @Test func answerActionKeysStayUniqueAndOffThePanelsOwnKeys() {

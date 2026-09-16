@@ -52,6 +52,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned, enabledTools, assistantID
+        case tasksEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -66,7 +67,29 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         titleSource = try c.decodeIfPresent(String.self, forKey: .titleSource)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        if try c.decodeIfPresent(Bool.self, forKey: .tasksEnabled) == true {
+            enabledTools?.insert(.tasks)
+        }
         assistantID = try c.decodeIfPresent(UUID.self, forKey: .assistantID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(updatedAt, forKey: .updatedAt)
+        try c.encode(providerID, forKey: .providerID)
+        try c.encode(model, forKey: .model)
+        try c.encode(messages, forKey: .messages)
+        try c.encodeIfPresent(customTitle, forKey: .customTitle)
+        try c.encodeIfPresent(titleSource, forKey: .titleSource)
+        try c.encode(isPinned, forKey: .isPinned)
+        if var tools = enabledTools {
+            let tasksEnabled = tools.remove(.tasks) != nil
+            try c.encode(tools, forKey: .enabledTools)
+            try c.encode(tasksEnabled, forKey: .tasksEnabled)
+        }
+        try c.encodeIfPresent(assistantID, forKey: .assistantID)
     }
 
     /// The chat's name without the saved-prompt list, so no leading

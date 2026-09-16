@@ -88,21 +88,50 @@ struct RecallCLITests {
         #expect(await runner.calls.isEmpty)
     }
 
-    @Test func todayReadsBothSections() async throws {
-        let json = #"{"captures":{"items":[{"kind":"note","text":"Call Sam","time":"09:12"}],"readable":true},"schema_version":1,"tasks":{"items":[{"lane":"in_progress","project":"stack","title":"Audit screenctx after 24h live"}],"readable":true}}"#
+    @Test func todayReadsCapturesAndTheThreeExclusiveTaskSections() async throws {
+        let json = #"{"captures":{"items":[{"kind":"note","text":"Call Sam","time":"09:12"}],"readable":true},"schema_version":2,"tasks":{"readable":true,"due_today":[{"id":"d1","title":"File NAR1","lane":"requires_action","due":"2026-09-16","project":"china-snapshot","source":"/vault/china-snapshot/00-tasks.md","backend":"vault"}],"overdue":[],"in_progress":[{"id":"i1","title":"Audit screenctx","lane":"in_progress","due":"","project":"stack","source":"/vault/stack/00-tasks.md","backend":"vault"}]}}"#
         let runner = FakeRunner(.success(Self.output(json)))
         let today = try await Self.cli(runner).today()
         #expect(await runner.calls.map(\.arguments) == [["today", "--json"]])
         #expect(today.captures.items.map(\.text) == ["Call Sam"])
-        #expect(today.tasks.items.map(\.project) == ["stack"])
+        #expect(today.tasks.dueToday.map(\.project) == ["china-snapshot"])
+        #expect(today.tasks.inProgress.map(\.project) == ["stack"])
+        #expect(today.tasks.all.count == 2)
         #expect(today.tasks.readable)
     }
 
     @Test func todayCarriesAnUnreadableSectionsReason() async throws {
-        let json = #"{"captures":{"items":[],"readable":false,"reason":"no read interface"},"schema_version":1,"tasks":{"items":[],"readable":true}}"#
+        let json = #"{"captures":{"items":[],"readable":false,"reason":"no capture interface"},"schema_version":2,"tasks":{"readable":false,"reason":"no task interface","due_today":[],"overdue":[],"in_progress":[]}}"#
         let today = try await Self.cli(FakeRunner(.success(Self.output(json)))).today()
         #expect(!today.captures.readable)
-        #expect(today.captures.reason == "no read interface")
+        #expect(today.captures.reason == "no capture interface")
+        #expect(!today.tasks.readable)
+        #expect(today.tasks.reason == "no task interface")
+    }
+
+    @Test func todayRefusesTheOldFlatBacklogSchema() async throws {
+        let json = #"{"captures":{"items":[],"readable":true},"schema_version":1,"tasks":{"items":[],"readable":true}}"#
+        await #expect(throws: RecallError.failed("recall exited with status 0")) {
+            _ = try await Self.cli(FakeRunner(.success(Self.output(json)))).today()
+        }
+    }
+
+    @Test func openTasksReadsTheFullBacklog() async throws {
+        let json = #"{"schema_version":1,"readable":true,"count":1,"tasks":[{"id":"t1","title":"Ship it","lane":"agent_safe","due":"2026-09-20","project":"China-Dashboard","source":"/code/China-Dashboard/tasks.jsonl","backend":"memory"}]}"#
+        let runner = FakeRunner(.success(Self.output(json)))
+        let result = try await Self.cli(runner).openTasks()
+        #expect(await runner.calls.map(\.arguments) == [["tasks", "--json"]])
+        #expect(result.count == 1)
+        #expect(result.tasks.first?.due == "2026-09-20")
+        #expect(result.tasks.first?.backend == "memory")
+    }
+
+    @Test func unreadableOpenTasksKeepRecallsReasonDespiteExitOne() async throws {
+        let json = #"{"schema_version":1,"readable":false,"reason":"no read interface (taskTreeCLI disabled)","count":0,"tasks":[]}"#
+        let runner = FakeRunner(.success(Self.output(json, status: 1)))
+        let result = try await Self.cli(runner).openTasks()
+        #expect(!result.readable)
+        #expect(result.reason == "no read interface (taskTreeCLI disabled)")
     }
 
     @Test func rememberSendsTheTextAsOneArgument() async throws {

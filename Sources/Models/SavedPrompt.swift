@@ -117,6 +117,14 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
     /// library does not list is skipped.
     var contextRefs: [String]
 
+    /// Tasks is encoded beside the legacy tool set so a rollback build that
+    /// predates `ChatToolKind.tasks` can still decode every other setting.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, alias, prompt, providerID, model, outputBehavior, hotkey
+        case commandExecutable, commandArguments, systemPrompt, enabledTools, contextRefs
+        case tasksEnabled
+    }
+
     init(
         id: UUID = UUID(),
         name: String? = nil,
@@ -165,7 +173,31 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         commandArguments = try c.decodeIfPresent([String].self, forKey: .commandArguments)
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
         enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        if try c.decodeIfPresent(Bool.self, forKey: .tasksEnabled) == true {
+            enabledTools?.insert(.tasks)
+        }
         contextRefs = try c.decodeIfPresent([String].self, forKey: .contextRefs) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(alias, forKey: .alias)
+        try c.encode(prompt, forKey: .prompt)
+        try c.encodeIfPresent(providerID, forKey: .providerID)
+        try c.encodeIfPresent(model, forKey: .model)
+        try c.encode(outputBehavior, forKey: .outputBehavior)
+        try c.encodeIfPresent(hotkey, forKey: .hotkey)
+        try c.encodeIfPresent(commandExecutable, forKey: .commandExecutable)
+        try c.encodeIfPresent(commandArguments, forKey: .commandArguments)
+        try c.encodeIfPresent(systemPrompt, forKey: .systemPrompt)
+        if var tools = enabledTools {
+            let tasksEnabled = tools.remove(.tasks) != nil
+            try c.encode(tools, forKey: .enabledTools)
+            try c.encode(tasksEnabled, forKey: .tasksEnabled)
+        }
+        try c.encode(contextRefs, forKey: .contextRefs)
     }
 
     /// True for an assistant: instructions set, and no command to run.
@@ -293,7 +325,7 @@ extension SavedPrompt {
             Cite the source of every fact you use: the note path or the memory entry it came from. \
             If the vault and memory have nothing on it, say so. Do not fill the gap with a guess.
             """,
-            enabledTools: [.vault, .memory]
+            enabledTools: [.vault, .memory, .tasks]
         ),
         SavedPrompt(
             name: "STE editor",

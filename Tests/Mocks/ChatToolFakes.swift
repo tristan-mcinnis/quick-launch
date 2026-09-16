@@ -6,6 +6,7 @@ import Foundation
 actor FakeMemory: MemoryRecalling, MemoryCapturing {
     var searchResult: Result<MemorySearchResult, Error>
     var todayResult: Result<MemoryToday, Error>
+    var openTasksResult: Result<RecalledTaskList, Error>
     var rememberError: Error?
     var delay: Duration = .zero
     private(set) var queries: [String] = []
@@ -17,15 +18,24 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
     ) {
         searchResult = .success(MemorySearchResult(query: "", hits: hits))
         todayResult = .success(today)
+        openTasksResult = .success(RecalledTaskList(
+            schemaVersion: 1,
+            readable: true,
+            reason: nil,
+            count: today.tasks.all.count,
+            tasks: today.tasks.all
+        ))
     }
 
     static let emptyToday = MemoryToday(
+        schemaVersion: 2,
         captures: .init(readable: true, reason: nil, items: []),
-        tasks: .init(readable: true, reason: nil, items: [])
+        tasks: .init(readable: true, reason: nil, dueToday: [], overdue: [], inProgress: [])
     )
 
     func setSearchResult(_ result: Result<MemorySearchResult, Error>) { searchResult = result }
     func setTodayResult(_ result: Result<MemoryToday, Error>) { todayResult = result }
+    func setOpenTasksResult(_ result: Result<RecalledTaskList, Error>) { openTasksResult = result }
     func setRememberError(_ error: Error?) { rememberError = error }
     func setDelay(_ value: Duration) { delay = value }
 
@@ -38,6 +48,11 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
     func today() async throws -> MemoryToday {
         if delay != .zero { try await Task.sleep(for: delay) }
         return try todayResult.get()
+    }
+
+    func openTasks() async throws -> RecalledTaskList {
+        if delay != .zero { try await Task.sleep(for: delay) }
+        return try openTasksResult.get()
     }
 
     func remember(_ text: String) async throws {

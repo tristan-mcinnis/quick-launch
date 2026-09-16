@@ -26,7 +26,7 @@ struct ChatSettingsTests {
 
     // MARK: - Chat defaults
 
-    @Test func aNewInstallStartsWithAllFourChatDefaultsOn() {
+    @Test func aNewInstallStartsWithAllFiveChatDefaultsOn() {
         let settings = QuickSettings()
         #expect(settings.newChatTools == Set(ChatToolKind.allCases))
         for tool in ChatToolKind.allCases {
@@ -34,9 +34,14 @@ struct ChatSettingsTests {
         }
     }
 
-    @Test func anOldBlobKeepsMemoryVaultAndSkillsOnAndItsWebSearchChoice() throws {
+    @Test func anOldBlobSplitsTasksFromMemoryAndKeepsItsWebSearchChoice() throws {
         let off = try decode(#"{"configurationVersion":25,"modelWebSearchEnabled":false}"#)
-        #expect(off.newChatTools == [.memory, .vault, .skills])
+        #expect(off.newChatTools == [.memory, .tasks, .vault, .skills])
+        #expect(off.newChatMemoryEnabled)
+        #expect(off.newChatTasksEnabled)
+        let memoryOff = try decode(#"{"configurationVersion":25,"newChatMemoryEnabled":false}"#)
+        #expect(!memoryOff.newChatMemoryEnabled)
+        #expect(!memoryOff.newChatTasksEnabled, "the split preserves the old read scope")
         let bare = try decode(#"{"autoCopy":false}"#)
         #expect(bare.newChatTools == Set(ChatToolKind.allCases))
     }
@@ -49,10 +54,12 @@ struct ChatSettingsTests {
         #expect(settings.isNewChatToolOn(.web))
 
         settings.setNewChatTool(.memory, on: false)
+        settings.setNewChatTool(.tasks, on: false)
         settings.setNewChatTool(.skills, on: false)
         let back = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(settings))
         #expect(back.newChatTools == [.vault, .web])
         #expect(back.newChatMemoryEnabled == false)
+        #expect(back.newChatTasksEnabled == false)
         #expect(back.newChatSkillsEnabled == false)
     }
 
@@ -61,13 +68,13 @@ struct ChatSettingsTests {
             $0.newChatVaultEnabled = false
             $0.modelWebSearchEnabled = false
         }
-        #expect(vm.chatTools == [.memory, .skills])
-        #expect(vm.chatToolsSummary == "Memory, Skills on")
+        #expect(vm.chatTools == [.memory, .tasks, .skills])
+        #expect(vm.chatToolsSummary == "Memory, Tasks, Skills on")
         // The switch changes the next chat; a chat's own choice still wins.
         vm.settings.newChatVaultEnabled = true
-        #expect(vm.chatTools == [.memory, .vault, .skills])
+        #expect(vm.chatTools == [.memory, .tasks, .vault, .skills])
         vm.toggleChatTool(.memory)
-        #expect(vm.chatTools == [.vault, .skills])
+        #expect(vm.chatTools == [.tasks, .vault, .skills])
     }
 
     @Test func theModelIsOfferedOnlyTheChatDefaults() throws {
@@ -75,6 +82,7 @@ struct ChatSettingsTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var settings = QuickSettings()
         settings.newChatMemoryEnabled = false
+        settings.newChatTasksEnabled = false
         settings.modelWebSearchEnabled = true
         let vm = QuickViewModel(
             settings: settings,

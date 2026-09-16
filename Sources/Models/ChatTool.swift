@@ -3,8 +3,10 @@
 /// toggles, an assistant's tool set, and the request builder all speak the
 /// same keys.
 enum ChatToolKind: String, Codable, Sendable, CaseIterable, Hashable, Identifiable {
-    /// `recall_memory` and `recall_today`, over `~/memory`.
+    /// `recall_memory`, over `~/memory`.
     case memory
+    /// `recall_today` and `recall tasks`, over the canonical task backends.
+    case tasks
     /// `search_vault`, the SSH lane Vault Search already uses.
     case vault
     /// `read_skill`, the canonical `~/.claude/skills` folder.
@@ -17,6 +19,7 @@ enum ChatToolKind: String, Codable, Sendable, CaseIterable, Hashable, Identifiab
     var displayName: String {
         switch self {
         case .memory: "Memory"
+        case .tasks: "Tasks"
         case .vault: "Vault"
         case .skills: "Skills"
         case .web: "Web search"

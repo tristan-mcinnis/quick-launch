@@ -95,7 +95,7 @@ struct ToolLoopTests {
         #expect(await memory.queries == ["long deck"])
 
         let first = try Self.body(0)
-        #expect(Self.toolNames(in: first) == ["recall_memory", "recall_today"])
+        #expect(Self.toolNames(in: first) == ["recall_memory", "recall_captures_today"])
         #expect(first["tool_choice"] == nil)
         let second = try Self.body(1)
         let messages = try #require(second["messages"] as? [[String: Any]])

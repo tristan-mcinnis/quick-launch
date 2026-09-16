@@ -36,9 +36,13 @@ struct AssistantModelTests {
             enabledTools: [.vault, .memory],
             contextRefs: ["costing", "email-ops"]
         )
-        let back = try JSONDecoder().decode(SavedPrompt.self, from: JSONEncoder().encode(assistant))
+        let data = try JSONEncoder().encode(assistant)
+        let back = try JSONDecoder().decode(SavedPrompt.self, from: data)
         #expect(back == assistant)
         #expect(back.isAssistant)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((json["enabledTools"] as? [String])?.contains("tasks") == false)
+        #expect(json["tasksEnabled"] as? Bool == false)
         // An empty tool set is a choice (no tools), not the defaults.
         var none = assistant
         none.enabledTools = []
@@ -52,6 +56,20 @@ struct AssistantModelTests {
         #expect(!SavedPrompt(alias: "a", prompt: "p", commandExecutable: "recall", systemPrompt: "Rules").isAssistant)
         #expect(SavedPrompt(alias: "a", prompt: "p", commandExecutable: "", systemPrompt: "Rules").isAssistant)
         #expect(SavedPrompt(alias: "a", prompt: "p", systemPrompt: "Rules").isAssistant)
+    }
+
+    @Test func tasksRoundTripsOutsideTheLegacyToolSetForRollbackSafety() throws {
+        let assistant = SavedPrompt(
+            alias: "desk",
+            prompt: "",
+            systemPrompt: "Help.",
+            enabledTools: [.memory, .tasks]
+        )
+        let data = try JSONEncoder().encode(assistant)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((json["enabledTools"] as? [String])?.contains("tasks") == false)
+        #expect(json["tasksEnabled"] as? Bool == true)
+        #expect(try JSONDecoder().decode(SavedPrompt.self, from: data).enabledTools == [.memory, .tasks])
     }
 
     @Test func aChatWrittenBeforeAssistantsHasNone() throws {
@@ -81,7 +99,7 @@ struct AssistantModelTests {
         #expect(assistants.map(\.name) == ["Vault researcher", "STE editor"])
         let vault = assistants.first
         #expect(vault?.alias == "vault")
-        #expect(vault?.enabledTools == [.vault, .memory])
+        #expect(vault?.enabledTools == [.vault, .memory, .tasks])
         #expect(vault?.systemPrompt?.contains("Cite the source") == true)
         let ste = assistants.last
         #expect(ste?.alias == "ste")
@@ -104,13 +122,32 @@ struct AssistantModelTests {
     @Test func version25AddsTheAssistantsOnceAndNeverTwice() throws {
         let mine = [SavedPrompt(alias: "translate", prompt: "Translate:\n\n{selection}")]
         let upgraded = try JSONDecoder().decode(QuickSettings.self, from: v24Blob(prompts: mine))
-        #expect(upgraded.configurationVersion == 25)
+        #expect(upgraded.configurationVersion == 26)
         #expect(upgraded.savedPrompts.map(\.alias).filter { ["vault", "ste"].contains($0) } == ["vault", "ste"])
 
         // Decoding the upgraded blob again adds nothing.
         let again = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(upgraded))
         #expect(again.savedPrompts.count == upgraded.savedPrompts.count)
         #expect(again.savedPrompts.filter { $0.alias == "vault" }.count == 1)
+    }
+
+    @Test func version26GivesOnlyTheUntouchedVaultResearcherTheNewTasksTool() throws {
+        var stock = try #require(SavedPrompt.assistantDefaults.first { $0.alias == "vault" })
+        stock.enabledTools = [.vault, .memory]
+        let upgraded = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: v24Blob(prompts: [stock], version: 25)
+        )
+        #expect(upgraded.configurationVersion == 26)
+        #expect(upgraded.savedPrompts.first?.enabledTools == [.vault, .memory, .tasks])
+
+        var customized = stock
+        customized.setInstructions("My own research rules.")
+        let kept = try JSONDecoder().decode(
+            QuickSettings.self,
+            from: v24Blob(prompts: [customized], version: 25)
+        )
+        #expect(kept.savedPrompts.first?.enabledTools == [.vault, .memory])
     }
 
     @Test func version25KeepsTheUsersOwnAliasAndADeletedAssistantStaysDeleted() throws {
@@ -229,7 +266,7 @@ struct AssistantQuickAITests {
         #expect(vm.input.isEmpty)
         #expect(vm.activeAssistant?.id == vault.id)
         #expect(vm.currentConversation?.assistantID == vault.id)
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory], "its tools are the chat's toggles")
+        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks], "its tools are the chat's toggles")
         #expect(vm.currentConversation?.messages.isEmpty == true)
         #expect(vm.errorMessage == nil)
     }
@@ -260,7 +297,7 @@ struct AssistantQuickAITests {
 
         // The saved chat keeps the turns only.
         #expect(vm.currentConversation?.messages.map(\.role) == [.user, .assistant])
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory])
+        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks])
 
         // A follow-up carries it again, in front of the whole thread.
         await ask(vm, mock, "And for Q3?")
@@ -417,7 +454,7 @@ struct AssistantQuickAITests {
         await ask(vm, mock, "Second question")
         #expect(vm.currentConversation?.id != firstChat, "the interval started a new chat")
         #expect(vm.currentConversation?.assistantID == vault.id)
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory])
+        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks])
         #expect(vm.activeAssistant?.id == vault.id)
         let messages = await mock.lastMessages
         #expect(messages.map(\.role) == [.system, .user])
@@ -635,7 +672,7 @@ struct AssistantEditorTests {
         let edited = try #require(vm.settings.savedPrompts.first { $0.id == id })
         #expect(edited.isAssistant)
         #expect(edited.systemPrompt == "Explain like a patient teacher.")
-        #expect(edited.enabledTools == [.memory, .skills])
+        #expect(edited.enabledTools == [.memory, .tasks, .skills])
         #expect(edited.contextRefs == ["costing"])
 
         // What the editor saved is what the next launch reads.

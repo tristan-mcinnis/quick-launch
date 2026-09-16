@@ -121,7 +121,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 25
+    var configurationVersion: Int = 26
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -266,8 +266,9 @@ struct QuickSettings: Codable, Sendable {
     var webSearchProvider: WebSearchProvider = .automatic
     /// The tools a new chat starts with (Settings › General › Chat). Web
     /// search is `modelWebSearchEnabled`, which the Translator reads too;
-    /// `newChatTools` joins the four.
+    /// `newChatTools` joins the five.
     var newChatMemoryEnabled: Bool = true
+    var newChatTasksEnabled: Bool = true
     var newChatVaultEnabled: Bool = true
     var newChatSkillsEnabled: Bool = true
     /// Whether Quick AI offers the model the `ask_user_question` tool. Off by
@@ -295,7 +296,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 25
+        configurationVersion = 26
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -447,6 +448,8 @@ struct QuickSettings: Codable, Sendable {
         ) ?? true
         webSearchProvider = (try? c.decodeIfPresent(WebSearchProvider.self, forKey: .webSearchProvider)) ?? .automatic
         newChatMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatMemoryEnabled) ?? true
+        newChatTasksEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatTasksEnabled)
+            ?? (decodedConfigurationVersion < 26 ? newChatMemoryEnabled : true)
         newChatVaultEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatVaultEnabled) ?? true
         newChatSkillsEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatSkillsEnabled) ?? true
         // A blob from before the surface was resizable has no size: the
@@ -677,6 +680,18 @@ struct QuickSettings: Codable, Sendable {
             where !savedPrompts.contains(where: { $0.alias == seed.alias }) {
                 savedPrompts.append(seed)
             }
+        }
+        if decodedConfigurationVersion < 26,
+           let seed = SavedPrompt.assistantDefaults.first(where: { $0.alias == "vault" }),
+           let index = savedPrompts.firstIndex(where: {
+               $0.alias == seed.alias
+                   && $0.systemPrompt == seed.systemPrompt
+                   && $0.enabledTools == [.vault, .memory]
+           }) {
+            // Tasks became independent from Memory in v26. Only the untouched
+            // stock Vault researcher inherits the new switch; a customized
+            // assistant keeps exactly the tools the user chose.
+            savedPrompts[index].enabledTools?.insert(.tasks)
         }
     }
 

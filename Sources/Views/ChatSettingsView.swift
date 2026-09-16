@@ -4,7 +4,7 @@ import SwiftUI
 /// chat starts with, in Quick AI and in AI Chat), Keep AI Chat on top, and
 /// one status line each for Continue in pi and the tool backends.
 ///
-/// The four tool switches are `QuickSettings.newChatTools`; Web search is
+/// The five tool switches are `QuickSettings.newChatTools`; Web search is
 /// the one `modelWebSearchEnabled` setting the Translator reads too. Keep
 /// AI Chat on top is the AI Chat window's own `UserDefaults` key, so the
 /// window's `⌘K`, its menu, and this switch always agree. The status lines

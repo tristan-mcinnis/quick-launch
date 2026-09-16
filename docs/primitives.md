@@ -83,7 +83,7 @@ The same key means the same thing on every layer.
 | `⌘F` | Find in the AI Chat thread; `↩` or `⌘G` next, `⇧↩` or `⇧⌘G` previous |
 | `⌘1…9` | AI Chat: open the chat list's first nine chats, shown or not |
 | `⌘O` | Open the answer's source (memory and vault hits), or list them when there are several |
-| `⌥⌘K` | The chat's Tools in the ⌘K palette: Memory, Vault, Skills, Web search |
+| `⌥⌘K` | The chat's Tools in the ⌘K palette: Memory, Tasks, Vault, Skills, Web search |
 | `⌥⌘M` | Capture to Memory: send the answer on screen to `recall remember` |
 | `⌥⌘A` | Change Assistant, or back to a plain chat |
 | `⇧⌘O` / `⇧⌘R` | Change the model / ask the last question again on another model |

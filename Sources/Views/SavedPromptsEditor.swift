@@ -283,7 +283,7 @@ struct SavedPromptsEditor: View {
     }
 
     /// The Tools row's detail. "Chat defaults" is the name the Chat card in
-    /// General uses for the same four switches.
+    /// General uses for the same five switches.
     static let toolsDetail = "What the model may use in this assistant's chats. Chat defaults are the switches in General \u{203A} Chat."
 
     /// Tools and Context skills: what an assistant's chat may use and reads.
