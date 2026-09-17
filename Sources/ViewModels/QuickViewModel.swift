@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Observation
+import HouseChatCore
 
 @Observable @MainActor final class QuickViewModel {
 
@@ -192,7 +193,87 @@ import Observation
     /// in memory only, so a test run never reads, replaces, or deletes the
     /// user's chats.
     let historyFileURL: URL?
+    /// The durable, keep-all chat archive. The app passes a real root; nil
+    /// (the default, and every test) keeps the archive off, so a test run
+    /// never writes to or reads the user's Application Support folder.
+    let chatArchive: ChatArchive?
+    /// Whether chats are kept at all. With the canonical archive present the
+    /// answer is always yes: the legacy "Keep chat history" switch no longer
+    /// decides what is read or kept, and its key survives only as rollback
+    /// data and as the bound on the legacy cache. Without an archive (the
+    /// legacy store, and tests that keep history in memory) the old switch
+    /// still decides, because then that store is all there is.
+    var canonicalHistoryActive: Bool { chatArchive != nil || settings.historyEnabled }
     var currentConversation: QuickConversation?
+    /// The composer's explicit context override, observable and per chat. Nil
+    /// means the retrieval policy decides from the wording alone. `/new`,
+    /// `/clear`, and opening another chat reset it.
+    var contextOverride: ContextOverride?
+    /// Records the archive could not read. A non-zero badge tells the user a
+    /// chat is missing, instead of the list looking complete.
+    var archiveDamagedCount = 0
+    /// True while a confirmed "Delete All Chats" is running. The Settings row
+    /// reads it to disable its button and say the deletion is in progress.
+    private(set) var isClearingHistory = false
+    /// Why the last saved-chat operation could not finish. Non-nil is the
+    /// honest outcome on screen: the caller must not report success when this
+    /// is set. Cleared when a new confirmed operation starts.
+    private(set) var savedHistoryOperationError: String?
+    /// True only when a caller explicitly accepted reading a newly attached
+    /// image as text on this Mac because no vision route is available. False
+    /// is the default and the only value any view produces: the Settings and
+    /// composer surfaces have no affordance for it, so an image with no route
+    /// is refused rather than silently OCR'd. The explicit-consent path exists
+    /// for callers that decide to offer it.
+    var allowImageTextFallback = false
+    /// One-shot: the next submit bypasses the command router and sends the
+    /// typed text to the model. Set only by `sendRefusedCommandAsText`; a
+    /// repeated Return or ⌘Return never sets it.
+    @ObservationIgnored var sendAsTextOnce = false
+    /// The last slash line refused locally, if any. Observable, so the
+    /// composer can offer the explicit Send as Text action.
+    private(set) var refusedCommandText: String?
+    /// The chat's chosen route, frozen at the start of `submit` before any
+    /// async prepare/enrich. Streamed as the `chosen` side of the turn's
+    /// selection; the model that actually ran is the `effective` side.
+    @ObservationIgnored var pendingModelFreeze: FrozenChatModel?
+    /// The turn submitted durably before any external network. `stream`
+    /// consumes these ids so the archived turn and the live turn are one.
+    @ObservationIgnored var pendingSubmission: PendingSubmission?
+
+    /// Ids reserved for the durable submission of one question.
+    struct PendingSubmission: Sendable {
+        var conversationID: UUID
+        var messageID: UUID
+        var attachments: [AttachmentContent]
+        var startedAt: Date
+    }
+    /// Characters of the streaming answer at the last archive checkpoint, so
+    /// checkpoints are periodic rather than per-delta.
+    @ObservationIgnored private var archiveCheckpointCharacters = 0
+    /// The archived assistant turn id for the stream in flight, so every
+    /// path that persists the answer (completion, stop, error, resume) uses
+    /// one record.
+    @ObservationIgnored private var currentAssistantTurnID: UUID?
+    /// When the request started and when its first token arrived, for the
+    /// turn's real timings. Nil means the value was never measured.
+    @ObservationIgnored private var streamStartedAt: Date?
+    @ObservationIgnored private var streamFirstTokenAt: Date?
+    /// The phases of this turn, each captured only when it actually ran. A nil
+    /// phase is written as absent, never as a zero.
+    @ObservationIgnored private var turnEntryAt: Date?
+    @ObservationIgnored private var turnPrepareStartedAt: Date?
+    @ObservationIgnored private var turnPrepareFinishedAt: Date?
+    @ObservationIgnored private var turnPersistStartedAt: Date?
+    @ObservationIgnored private var turnPersistFinishedAt: Date?
+    @ObservationIgnored private var turnEnrichStartedAt: Date?
+    @ObservationIgnored private var turnEnrichFinishedAt: Date?
+    /// The tool rounds the in-flight turn has finished, and the token usage
+    /// the provider reported. Both empty for a turn that used neither.
+    @ObservationIgnored private var streamToolRounds: [ToolRound] = []
+    @ObservationIgnored private var streamUsage: TokenUsage?
+    /// Model requests the in-flight turn sent, from the snapshot recorder.
+    @ObservationIgnored private var streamRequestRounds = 0
     /// The store's copy of the open chat as this view last read or wrote
     /// it. The other view's writes since then are what a save merges in.
     @ObservationIgnored var openChatBase: StoredChatStamp?
@@ -846,6 +927,7 @@ import Observation
         screenshotTextIndex: ScreenshotTextIndex? = nil,
         pasteboard: (any PasteboardWriting)? = nil,
         historyFileURL: URL? = nil,
+        archiveRootURL: URL? = nil,
         workspace: (any WorkspaceOpening)? = nil,
         runningApplications: (any RunningApplicationsQuerying)? = nil,
         screenGeometry: (any ScreenGeometryProviding)? = nil,
@@ -893,6 +975,7 @@ import Observation
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
         self.pasteboard = pasteboard ?? InMemoryPasteboard()
         self.historyFileURL = historyFileURL
+        self.chatArchive = archiveRootURL.flatMap { try? ChatArchive.shared(root: $0) }
         self.workspace = workspace ?? SystemWorkspace()
         self.runningApplications = runningApplications ?? SystemRunningApplications()
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
@@ -1010,15 +1093,20 @@ import Observation
 
     private func scoredApplications(
         foldedQuery: String,
-        signals: [String: LauncherRankSignal]
+        signals: [String: LauncherRankSignal],
+        hiddenIDs: Set<String> = []
     ) -> [(LaunchableApplication, Int)] {
         guard let applicationCatalog else { return [] }
+        let hidden = hiddenIDs.isEmpty ? hiddenLauncherItemIDs() : hiddenIDs
         let aliases = settings.launcherItemConfigurations.reduce(into: [String: String]()) { map, entry in
             guard entry.kind == .application else { return }
             let alias = entry.alias.trimmingCharacters(in: .whitespacesAndNewlines)
             if !alias.isEmpty { map[entry.itemID] = alias }
         }
         return applicationCatalog.applications.compactMap { application in
+            // A hidden app stays out of search even when it has an alias,
+            // a pin, or a learned abbreviation.
+            guard !hidden.contains(LauncherSearchResult.application(application).id) else { return nil }
             guard let score = matchScore(
                 foldedQuery: foldedQuery,
                 title: application.name,
@@ -1640,9 +1728,10 @@ import Observation
     /// The rows of every chat list (the Chats catalog, Recent Chats, the AI
     /// Chat rail): one search (`ChatSearch`), ranked while a query is typed,
     /// with a snippet on rows found by their text. Read once per query: a
-    /// render that reads the rows again gets the cached rows.
+    /// render that reads the rows again gets the cached rows. Hidden chats
+    /// are filtered here, so one hide covers every Quick Launch list.
     func chatItems(matching query: String) -> [LauncherCatalogItem] {
-        searchedChatItems(matching: query)
+        visibleLauncherItems(searchedChatItems(matching: query))
     }
 
     /// One chat as a launcher row: its title, question count, and time,
@@ -1943,12 +2032,15 @@ import Observation
 
     var catalogMatches: [LauncherCatalogItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if catalogScope == .screenHistory { return Array(screenHistory.items.prefix(Self.maxLauncherRows)) }
+        if catalogScope == .screenHistory { return Array(visibleLauncherItems(screenHistory.items).prefix(Self.maxLauncherRows)) }
         // The Chats catalog is Recent Chats' list: the same order (pinned,
         // then newest), the same search (title and message text), every
-        // chat. Learned favourites never reorder it.
+        // chat. Learned favourites never reorder it. `chatItems` already
+        // drops hidden chats.
         if catalogScope == .chats { return chatItems(matching: query) }
-        let items = catalogItems
+        // Hidden rows leave before ranking, so row caps, learned favourites,
+        // and pins all see the same visible set.
+        let items = visibleLauncherItems(catalogItems)
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
         let rows = Self.maxRows(for: catalogScope)
         guard !query.isEmpty else {
@@ -2113,6 +2205,7 @@ import Observation
             return Array(ordered.prefix(Self.maxLauncherRows))
         }
         let signals = learnedSignals(query: query, scope: LauncherUsageStore.rootScope)
+        let hidden = hiddenLauncherItemIDs()
         let foldedQuery = FuzzyMatcher.fold(query)
         var scored: [(LauncherSearchResult, Int)] = []
 
@@ -2133,10 +2226,17 @@ import Observation
             guard let best else { continue }
             scored.append((root, best + LauncherRanker.boost(for: signals[root.id])))
         }
-        for (application, score) in scoredApplications(foldedQuery: foldedQuery, signals: signals) {
+        for (application, score) in scoredApplications(
+            foldedQuery: foldedQuery,
+            signals: signals,
+            hiddenIDs: hidden
+        ) {
             scored.append((.application(application), score))
         }
         for item in systemCommands + folderItems + snippets + quickLinks + settingsDestinationItems {
+            // A hidden row is gone from search even when an alias, pin, or
+            // learned abbreviation still points at it.
+            guard !hidden.contains(item.id) else { continue }
             guard let score = matchScore(
                 foldedQuery: foldedQuery,
                 title: item.title,
@@ -2233,6 +2333,10 @@ import Observation
     }
 
     private func rootResult(id: String) -> LauncherSearchResult? {
+        // A hidden row is never a favourite: an alias, pin, or use count
+        // must not resurface it on the empty query.
+        let hidden = hiddenLauncherItemIDs()
+        guard !hidden.contains(id) else { return nil }
         if id == LauncherCatalogItem(kind: .askAI, itemID: Self.askAIItemID, title: "", detail: "", value: "").id {
             return .item(askAIItem(query: ""))
         }
@@ -2470,17 +2574,20 @@ import Observation
         catalogScope?.rawValue ?? LauncherUsageStore.rootScope
     }
 
-    /// Remember that the user chose `result` for the current input.
-    func learn(_ result: LauncherSearchResult) {
-        noteActedQuery(input)
+    /// Remember that the user chose `result` for the current input. `query`
+    /// overrides the field for a path that clears it before recording (a
+    /// successful app launch), so the mnemonic keeps what was typed.
+    func learn(_ result: LauncherSearchResult, query explicitQuery: String? = nil) {
+        let query = explicitQuery ?? input
+        noteActedQuery(query)
         recordJournal(
             kind: .selectionAccepted,
             scope: learningScope,
             itemID: result.id,
-            query: input
+            query: query
         )
         guard settings.launcherLearningEnabled else { return }
-        launcherUsage.recordSelection(query: input, scope: learningScope, itemID: result.id)
+        launcherUsage.recordSelection(query: query, scope: learningScope, itemID: result.id)
         launcherRankingVersion += 1
     }
 
@@ -2902,7 +3009,14 @@ import Observation
     /// answer the next message (the vision model only while an image is
     /// attached), falling back to the id when the catalogue has no name.
     var activeModelDisplay: String {
-        if pendingImage != nil { return visionDisplayName }
+        // Derived from the same resolved route the pre-Send control and the
+        // send freeze read, so the header cannot name a different model than
+        // the one that will answer.
+        let route = resolvedNextRoute()
+        if route.hasImages {
+            guard route.canSendImages else { return "No vision model" }
+            return route.model.isEmpty ? visionDisplayName : ModelProfile.displayName(forModelID: route.model)
+        }
         guard let provider = activeProvider, let model = activeModelID else { return "No model" }
         return model.isEmpty ? provider.name : ModelProfile.displayName(forModelID: model)
     }
@@ -3093,6 +3207,22 @@ import Observation
             openSelectedRecentChat()
             return
         }
+        // A built-in command never queues behind a stream: /new and /clear
+        // run now, cancelling and resetting the chat before the follow-up
+        // queue can defer them.
+        if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let outcome = quickCommandOutcome(for: input) {
+            switch outcome {
+            case .newChat:
+                performNewChatCommand()
+                return
+            case .clearChat:
+                performClearChatCommand()
+                return
+            default:
+                break
+            }
+        }
         // The composer keeps focus while an answer streams; Return queues
         // what is typed and it is sent when the stream ends. A chooser
         // above still takes Return while the stream runs.
@@ -3186,15 +3316,26 @@ import Observation
     }
 
     func performLauncherResult(_ result: LauncherSearchResult) async {
-        learn(result)
         switch result {
         case .application(let application):
+            // Capture the typed query first: a successful launch clears the
+            // input, and the mnemonic must record what was actually typed.
+            // A launch that fails is not a choice, so it must not teach
+            // ranking. The attempt is still noted so dismissing the overlay
+            // afterwards is not logged as an abandoned search.
+            let typed = input
             let priorError = errorMessage
-            _ = launch(application: application)
-            noteActionFailure(itemID: result.id, scope: learningScope, priorError: priorError)
+            if launch(application: application) {
+                learn(result, query: typed)
+            } else {
+                noteActedQuery(typed)
+                noteActionFailure(itemID: result.id, scope: learningScope, priorError: priorError)
+            }
         case .catalog(let scope, _):
+            learn(result)
             enterCatalog(scope)
         case .item(let item):
+            learn(result)
             await performLauncherItem(item)
         }
     }
@@ -3604,19 +3745,32 @@ import Observation
     }
 
     func catalogCount(_ scope: LauncherCatalogScope) -> Int {
+        let hidden = hiddenLauncherItemIDs()
+        func visible(_ items: [LauncherCatalogItem]) -> Int {
+            hidden.isEmpty ? items.count : items.filter { !hidden.contains($0.id) }.count
+        }
         switch scope {
-        case .snippets: snippets.count
-        case .quickLinks: quickLinks.count
-        case .clipboard: clipboardEntries.count
-        case .emoji: EmojiCatalog.items.count
-        case .colors: colorItems.count
-        case .screenshots: screenshotItems.count
-        case .caffeinate: caffeinateItems.count
-        case .chats: history.count
-        case .commands: systemCommands.count
-        case .folders: folderItems.count
-        case .vaultSearch: vaultSearchItems.count
-        case .screenHistory: screenHistory.items.count
+        case .snippets: return visible(snippets)
+        case .quickLinks: return visible(quickLinks)
+        case .clipboard: return visible(clipboardEntries)
+        case .emoji: return visible(emojiItems)
+        case .colors: return visible(colorItems)
+        case .screenshots: return visible(screenshotItems)
+        case .caffeinate: return visible(caffeinateItems)
+        case .chats: return chatCount(excluding: hidden)
+        case .commands: return visible(systemCommands)
+        case .folders: return visible(folderItems)
+        case .vaultSearch: return vaultSearchItems.count
+        case .screenHistory: return visible(screenHistory.items)
+        }
+    }
+
+    /// Chats that are not hidden. Reading `conversationItems` here would build
+    /// every row on each keystroke, so the ids are matched directly.
+    private func chatCount(excluding hidden: Set<String>) -> Int {
+        guard !hidden.isEmpty else { return history.count }
+        return history.reduce(0) { total, conversation in
+            hidden.contains("conversation:\(conversation.id.uuidString)") ? total : total + 1
         }
     }
 
@@ -5911,6 +6065,17 @@ import Observation
         if aiChatOpener == nil || isAIChatWindow {
             actions.removeAll { $0.kind == .openInAIChat }
         }
+        // Hiding is row state, not part of the static catalog: it depends on
+        // whether the row is already hidden. A hidden row is filtered out of
+        // the list, so this is always the "hide me" direction. It sits just
+        // above Delete so the destructive action stays last.
+        if let hide = hideAction(for: result) {
+            if let deleteIndex = actions.firstIndex(where: { $0.kind == .delete }) {
+                actions.insert(hide, at: deleteIndex)
+            } else {
+                actions.append(hide)
+            }
+        }
         if case .item(let item) = result, item.kind == .screenHistory {
             if screenHistory.showsTimeline {
                 actions.removeAll { $0.kind == .showTimeline }
@@ -5956,6 +6121,25 @@ import Observation
             )
         }
         return actions
+    }
+
+    /// The "Hide from Quick Launch" row for a result, or nil when the row is
+    /// not hideable or already hidden.
+    private func hideAction(for result: LauncherSearchResult) -> ItemAction? {
+        switch result {
+        case .application(let application):
+            guard !isApplicationHidden(application) else { return nil }
+        case .item(let item):
+            guard item.canBeHidden, !isLauncherItemHidden(item) else { return nil }
+        case .catalog:
+            return nil
+        }
+        return ItemAction(
+            kind: .hideFromLauncher,
+            title: "Hide from Quick Launch",
+            systemImage: "eye.slash",
+            shortcut: nil
+        )
     }
 
     /// The pane's rows after the search filter, best match first — typing
@@ -6602,6 +6786,15 @@ import Observation
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
             controlRunningApplication(application, action: action.kind)
+        case .hideFromLauncher:
+            switch result {
+            case .application(let application):
+                hideApplication(application)
+            case .item(let item):
+                _ = hideLauncherItem(item)
+            case .catalog:
+                return true
+            }
         case .openInAIChat:
             guard case .item(let item) = result, item.kind == .conversation else { return true }
             openChatInAIChat(itemID: item.itemID)
@@ -6812,8 +7005,13 @@ import Observation
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
         history[index].isPinned.toggle()
         if currentConversation?.id == id { currentConversation?.isPinned = history[index].isPinned }
+        let pinned = history[index].isPinned
         saveHistory()
         invalidateLauncherRanking()
+        // The canonical record is the archive; the history is a cache.
+        if let chatArchive {
+            Task { try? await chatArchive.setPinned(id: id.uuidString, isPinned: pinned) }
+        }
     }
 
     func renameConversation(id: UUID, title: String) {
@@ -6821,8 +7019,13 @@ import Observation
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
         history[index].customTitle = clean.isEmpty ? nil : clean
         if currentConversation?.id == id { currentConversation?.customTitle = history[index].customTitle }
+        let custom = history[index].customTitle
+        let titleSource = history[index].titleSource
         saveHistory()
         invalidateLauncherRanking()
+        if let chatArchive {
+            Task { try? await chatArchive.rename(id: id.uuidString, customTitle: custom, titleSource: titleSource) }
+        }
     }
 
     func deleteConversation(id: UUID) {
@@ -6838,10 +7041,26 @@ import Observation
         saveHistory()
         invalidateLauncherRanking()
         applicationSelectionIndex = 0
+        // Delete the canonical record: the tombstone stops a late write from
+        // recreating the chat, and a failure is surfaced, never hidden.
+        if let chatArchive {
+            Task {
+                do {
+                    _ = try await chatArchive.delete(id: id.uuidString)
+                } catch {
+                    self.errorMessage = "Could not delete this chat from the archive: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func saveHistory() {
-        guard settings.historyEnabled, let historyFileURL else { return }
+        // The canonical archive is the authority for what is kept; the legacy
+        // file is only a bounded, rebuildable cache once that archive exists.
+        // Without one (a legacy fixture) the old switch still bounds this
+        // store, because then it is all there is.
+        if chatArchive == nil, !settings.historyEnabled { return }
+        guard let historyFileURL else { return }
         QuickHistoryStore.save(history, limit: settings.historyLimit, to: historyFileURL)
     }
 
@@ -7156,6 +7375,129 @@ import Observation
         noteInteraction()
     }
 
+    // MARK: - Hiding items
+
+    /// Stable ids ("kind:itemID") of every row the user hid.
+    func hiddenLauncherItemIDs() -> Set<String> {
+        Set(settings.launcherItemConfigurations.lazy.filter(\.isHidden).map(\.id))
+    }
+
+    func isLauncherItemHidden(_ item: LauncherCatalogItem) -> Bool {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.isHidden ?? false
+    }
+
+    func isApplicationHidden(_ application: LaunchableApplication) -> Bool {
+        settings.launcherItemConfiguration(kind: .application, itemID: application.id)?.isHidden ?? false
+    }
+
+    /// Drops hidden rows. Ranking and every catalog read through this, so a
+    /// hidden row can never come back through an alias, a pin, a learned
+    /// abbreviation, or a row cap.
+    func visibleLauncherItems(_ items: [LauncherCatalogItem]) -> [LauncherCatalogItem] {
+        let hidden = hiddenLauncherItemIDs()
+        guard !hidden.isEmpty else { return items }
+        return items.filter { !hidden.contains($0.id) }
+    }
+
+    /// Hide a row from launcher search and its catalog. Reversible; the
+    /// source, alias, hotkey, and pin are untouched, and a direct hotkey
+    /// keeps working because it resolves through `catalogItem` unfiltered.
+    @discardableResult
+    func hideLauncherItem(_ item: LauncherCatalogItem) -> Bool {
+        guard item.canBeHidden else { return false }
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { configuration in
+            configuration.isHidden = true
+            configuration.hiddenTitle = LauncherItemHiding.storedTitle(for: item)
+        }
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+        if isRecentChatsPresented {
+            recentChatsIndex = min(recentChatsIndex, max(recentChatItems.count - 1, 0))
+        }
+        closeItemActionPane()
+        noteInteraction()
+        return true
+    }
+
+    func hideApplication(_ application: LaunchableApplication) {
+        updateApplicationConfiguration(application) { configuration in
+            configuration.isHidden = true
+            configuration.hiddenTitle = String(application.name.prefix(120))
+        }
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+        closeItemActionPane()
+        noteInteraction()
+    }
+
+    /// Hidden records, in configuration order. Includes records whose item
+    /// is missing or uninstalled, which is why the label is stored at hide
+    /// time.
+    var hiddenLauncherItems: [LauncherItemConfiguration] {
+        settings.launcherItemConfigurations.filter(\.isHidden)
+    }
+
+    /// Whether the row a hidden record names still exists. The record
+    /// outlives an uninstalled app, a pruned clipboard entry, or a deleted
+    /// chat, and Settings marks those as unavailable instead of dropping them.
+    func hiddenLauncherItemExists(_ configuration: LauncherItemConfiguration) -> Bool {
+        switch configuration.kind {
+        case .application:
+            return applications.contains { $0.id == configuration.itemID }
+        case .conversation:
+            return history.contains { $0.id.uuidString == configuration.itemID }
+        case .clipboard:
+            return clipboardEntries.contains { $0.itemID == configuration.itemID }
+        case .screenshot:
+            return screenshotFiles.contains { $0.itemID == configuration.itemID }
+        case .color:
+            return colorItems.contains { $0.itemID == configuration.itemID }
+        case .emoji:
+            return emojiItems.contains { $0.itemID == configuration.itemID }
+        case .screenHistory:
+            return screenHistory.items.contains { $0.itemID == configuration.itemID }
+        case .answer:
+            return false
+        case .askAI, .snippet, .quickLink, .command, .folder:
+            return catalogItem(kind: configuration.kind, itemID: configuration.itemID) != nil
+        }
+    }
+
+    /// Bring one hidden row back. A record that carries nothing else is
+    /// dropped once it is visible again.
+    func restoreHiddenItem(_ configuration: LauncherItemConfiguration) {
+        guard let index = settings.launcherItemConfigurations.firstIndex(where: {
+            $0.id == configuration.id && $0.isHidden
+        }) else { return }
+        settings.launcherItemConfigurations[index].isHidden = false
+        settings.launcherItemConfigurations[index].hiddenTitle = nil
+        if settings.launcherItemConfigurations[index].isEmpty {
+            settings.launcherItemConfigurations.remove(at: index)
+        }
+        settings.save()
+        NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+    }
+
+    /// Bring every hidden row back, including records whose item is gone.
+    func restoreAllHiddenItems() {
+        var restored = false
+        settings.launcherItemConfigurations = settings.launcherItemConfigurations.compactMap { configuration in
+            guard configuration.isHidden else { return configuration }
+            restored = true
+            var visible = configuration
+            visible.isHidden = false
+            visible.hiddenTitle = nil
+            return visible.isEmpty ? nil : visible
+        }
+        guard restored else { return }
+        settings.save()
+        NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+    }
+
     /// Drops the alias, hotkey, and pin of an item that no longer exists.
     func removeLauncherItemConfiguration(for item: LauncherCatalogItem) {
         let before = settings.launcherItemConfigurations.count
@@ -7460,6 +7802,9 @@ import Observation
         /// asked, before a web search clears it: auto-copy then leaves the
         /// answer alone (`autoCopiesAnswer`).
         var chatShowedAnswer = false
+        /// The retrieval and tool gate resolved for this request: what may
+        /// be read, and which broad tools may be offered and run.
+        var contextEvaluation: ChatContextEvaluation?
 
         var submittedImage: QuickImageAttachment? { submittedImages.last }
 
@@ -7479,12 +7824,147 @@ import Observation
     /// `text` asks that question instead of the composer's (⌘R asking a
     /// turn again); the composer then keeps what is typed in it.
     private func submit(text: String?, reasksTurn: Bool = false) async {
+        beginTurnTelemetry()
+        // Freeze the chat's chosen route before any async work: prepare,
+        // enrich, and the model call all read this, so a model change while a
+        // page fetch or a search is in flight cannot move this turn.
+        if let provider = activeProvider, let model = activeModelID {
+            pendingModelFreeze = ChatModelFreeze.freeze(
+                provider: provider,
+                model: model,
+                thinking: modelPreferences.profile(providerID: provider.id, model: model).reasoningEffort,
+                supportsThinking: modelPreferences.profile(providerID: provider.id, model: model).supportsReasoningEffort
+            )
+        } else {
+            pendingModelFreeze = nil
+        }
         // Draft attachments belong to the next question, not to a turn
         // being retried. A retry never waits on or consumes that draft.
         if !reasksTurn, !(await waitForReadingAttachments()) { return }
+        turnPrepareStartedAt = Date()
         guard var request = await prepareRequest(text: text, reasksTurn: reasksTurn) else { return }
-        guard await enrich(&request) else { return }
+        turnPrepareFinishedAt = Date()
+        // The submitted material is durable before any external network: the
+        // page fetch and web search in enrich, and the model call, all come
+        // after this. A write failure keeps the draft and blocks send.
+        turnPersistStartedAt = Date()
+        let durable = await submitDurableMaterial(request)
+        turnPersistFinishedAt = Date()
+        guard durable else { return }
+        turnEnrichStartedAt = Date()
+        let enriched = await enrich(&request)
+        turnEnrichFinishedAt = Date()
+        guard enriched else {
+            pendingSubmission = nil
+            return
+        }
         await stream(request)
+    }
+
+    /// Starts a fresh turn's measurements. Every phase timestamp is cleared, so
+    /// a later turn can never inherit an earlier one's numbers.
+    private func beginTurnTelemetry() {
+        turnEntryAt = Date()
+        turnPrepareStartedAt = nil
+        turnPrepareFinishedAt = nil
+        turnPersistStartedAt = nil
+        turnPersistFinishedAt = nil
+        turnEnrichStartedAt = nil
+        turnEnrichFinishedAt = nil
+        streamToolRounds = []
+        streamUsage = nil
+        streamRequestRounds = 0
+    }
+
+    /// The timings this turn actually measured. A value that was never
+    /// measured stays absent rather than being written as a plausible zero.
+    func requestTimings(finishedAt: Date) -> RequestTimings {
+        var timings = RequestTimings()
+        if let started = streamStartedAt {
+            timings.totalSeconds = finishedAt.timeIntervalSince(started)
+            if let firstToken = streamFirstTokenAt {
+                timings.firstTokenSeconds = firstToken.timeIntervalSince(started)
+            }
+            if let entry = turnEntryAt {
+                timings.extra["entryToRequestSeconds"] = .number(started.timeIntervalSince(entry))
+            }
+        }
+        if !streamToolRounds.isEmpty {
+            timings.toolSeconds = streamToolRounds.compactMap(\.durationSeconds).reduce(0, +)
+        }
+        if let start = turnEnrichStartedAt, let end = turnEnrichFinishedAt {
+            timings.retrievalSeconds = end.timeIntervalSince(start)
+        }
+        if let start = turnPrepareStartedAt, let end = turnPrepareFinishedAt {
+            timings.extractionSeconds = end.timeIntervalSince(start)
+        }
+        if let start = turnPersistStartedAt, let end = turnPersistFinishedAt {
+            timings.extra["persistenceSeconds"] = .number(end.timeIntervalSince(start))
+        }
+        if streamRequestRounds > 0 {
+            timings.extra["modelRounds"] = .number(Double(streamRequestRounds))
+        }
+        return timings
+    }
+
+    /// Whether this request begins a new chat. Shared by `submit` (which
+    /// reserves the future chat's id) and `stream` (which uses it), so the
+    /// two can never disagree.
+    func willStartNewChat(for request: PreparedRequest) -> Bool {
+        !request.reasksTurn && (shouldStartNewConversation
+            || (request.action != nil && (isFollowUp || currentConversation?.assistantID != nil)))
+    }
+
+    /// The durable submission of the question and its bytes, before any
+    /// external network. The archived turn and the live turn share ids, so a
+    /// later commit merges rather than duplicates. False means the write
+    /// failed and no provider may be called.
+    func submitDurableMaterial(_ request: PreparedRequest) async -> Bool {
+        guard let chatArchive else { return true }
+        let startsNew = willStartNewChat(for: request)
+        let conversationID = startsNew ? UUID() : (currentConversation?.id ?? UUID())
+        let messageID = UUID()
+        var provisional: QuickConversation
+        if !startsNew, let current = currentConversation {
+            provisional = current
+        } else {
+            provisional = QuickConversation(
+                id: conversationID,
+                providerID: activeProvider?.id ?? currentConversation?.providerID ?? UUID(),
+                model: activeModelID ?? currentConversation?.model ?? ""
+            )
+        }
+        provisional.messages.append(QuickMessage(
+            id: messageID,
+            role: .user,
+            content: request.effectivePrompt,
+            attachments: request.attachmentRefs.isEmpty ? nil : request.attachmentRefs
+        ))
+        let tools = Array(chatTools)
+        do {
+            _ = try await chatArchive.submit(TurnSubmission(
+                conversation: provisional,
+                attachmentContents: request.attachments,
+                model: pendingModelFreeze?.selection,
+                tools: tools,
+                requestSnapshot: nil,
+                endpoint: pendingModelFreeze?.endpoint,
+                startedAt: Date()
+            ))
+            pendingSubmission = PendingSubmission(
+                conversationID: conversationID,
+                messageID: messageID,
+                attachments: request.attachments,
+                startedAt: Date()
+            )
+            return true
+        } catch {
+            pendingSubmission = nil
+            errorMessage = "Could not save this question: \(error.localizedDescription). Nothing was sent."
+            recordJournal(kind: .aiFailed, scope: learningScope, detail: "archive-write-failed")
+            requestInputFocus()
+            return false
+        }
     }
 
     /// Resolves saved-prompt aliases, runs command actions, expands
@@ -7499,12 +7979,48 @@ import Observation
             requestInputFocus()
             return nil
         }
+        // Built-in slash commands precede any saved-prompt alias: a prompt
+        // can never shadow /new or /clear, and an unknown slash line is
+        // handled locally instead of being sent to a model as prompt text.
+        // Ordinary Return keeps showing the local error; only the explicit
+        // Send as Text action (`sendAsTextOnce`) bypasses this.
+        if !reasksTurn, !sendAsTextOnce,
+           let outcome = quickCommandOutcome(for: submittedInput) {
+            switch outcome {
+            case .newChat:
+                performNewChatCommand()
+                return nil
+            case .clearChat:
+                performClearChatCommand()
+                return nil
+            case .unknownCommand(_, let message):
+                refusedCommandText = submittedInput
+                errorMessage = message
+                requestInputFocus()
+                return nil
+            case .appCommand, .notACommand:
+                break
+            }
+        }
+        sendAsTextOnce = false
+        refusedCommandText = nil
         // A turn asked again keeps its attachments; a new question takes
         // the screenshots and the chips that were read.
         let attachments: [AttachmentContent] = reasksTurn
             ? (reaskedAttachments ?? []).map { AttachmentContent(ref: $0) }
             : pendingAttachmentContents()
         let trayItemIDs = reasksTurn ? [] : attachmentTray.items.filter { $0.content != nil }.map(\.id)
+        // Resolve the retrieval and tool gate once, before any branch that
+        // might send. Both `enrich` and `stream` read this same evaluation.
+        let contextEvaluation = ChatContextGate.standard.evaluate(
+            enabledTools: chatTools,
+            hasCurrentSource: !attachments.isEmpty,
+            currentSourceCount: attachments.count,
+            historyTurnCount: currentConversation?.messages.count ?? 0,
+            historyHasSources: (currentConversation?.messages ?? []).contains { !$0.attachmentRefs.isEmpty },
+            question: submittedInput,
+            override: contextOverride
+        )
         guard !submittedInput.isEmpty || pendingImage != nil || !attachments.isEmpty else { return nil }
         // A new request supersedes any prior answer's replaceable selection.
         replaceableSelectionContext = nil
@@ -7542,7 +8058,8 @@ import Observation
                     settings.savedPrompts.first { $0.id == resolution.actionID }
                 },
                 effectivePrompt: submittedInput,
-                chatShowedAnswer: chatShowsAnswer
+                chatShowedAnswer: chatShowsAnswer,
+                contextEvaluation: contextEvaluation
             )
         }
 
@@ -7670,7 +8187,8 @@ import Observation
             action: action,
             actionDefinition: actionDefinition,
             effectivePrompt: effectivePrompt,
-            chatShowedAnswer: chatShowsAnswer
+            chatShowedAnswer: chatShowsAnswer,
+            contextEvaluation: contextEvaluation
         )
     }
 
@@ -7851,7 +8369,8 @@ import Observation
     /// Returns `false` when the search failed or the ask was stopped and
     /// the request must not reach the model.
     func enrich(_ request: inout PreparedRequest) async -> Bool {
-        if let query = webSearchQuery(
+        if ChatContextGate.allowsWebSearch(request.contextEvaluation),
+           let query = webSearchQuery(
             submittedInput: request.submittedInput,
             action: request.actionDefinition
         ) {
@@ -7914,7 +8433,8 @@ import Observation
             var sections: [String] = []
             for url in promptPageURLs {
                 do {
-                    let content = try await pageReader.read(url)
+                    let read = try await pageReader.readWithBody(url)
+                    let content = read.text
                     guard enrichmentContinues else {
                         restoreEnrichmentInput()
                         return false
@@ -7925,7 +8445,7 @@ import Observation
                     // already carries it in the section below.
                     if request.attachments.count < AttachmentLimits.attachmentsPerMessage,
                        !request.attachments.contains(where: { $0.ref.url == url }) {
-                        let page = Self.pageAttachment(url: url, text: content)
+                        let page = Self.pageAttachment(url: url, text: content, body: read.body)
                         request.attachments.append(page)
                         request.inlineAttachmentIDs.insert(page.ref.id)
                     }
@@ -7965,8 +8485,7 @@ import Observation
         // its own: after an answer, and in an assistant chat, it starts one.
         // ⌘R asks a turn of this chat again: it stays in this chat whatever
         // the Start New Chat interval says, and the composer keeps its text.
-        let startsNewChat = !request.reasksTurn && (shouldStartNewConversation
-            || (action != nil && (isFollowUp || currentConversation?.assistantID != nil)))
+        let startsNewChat = willStartNewChat(for: request)
         // Auto-copy takes a chat's first answer only: in a chat that already
         // showed one, this answer is a follow-up.
         let chatHadAnswer = !startsNewChat && request.chatShowedAnswer
@@ -7974,7 +8493,7 @@ import Observation
         // names. When the new-chat interval moves it to a fresh chat, the
         // assistant goes along. A transform never runs as an assistant.
         let requestAssistant = action == nil ? activeAssistant : nil
-        let newChatID = UUID()
+        let newChatID = pendingSubmission?.conversationID ?? UUID()
         // The assistant's instructions and context skills, the skill files
         // read once per chat.
         var assistantSystem: String?
@@ -7989,62 +8508,53 @@ import Observation
             return
         }
 
-        // Pictures move the request to the vision model: this turn's, a
-        // turn asked again with its own, or the thread's earlier ones still
-        // in memory. With no vision route, this turn's pictures are read as
-        // text on this Mac instead, and the chat's own model answers.
+        // One resolver decides the route for this turn, the same one the
+        // pre-Send label reads. Pictures on this turn, a turn asked again
+        // with its own, or the thread's earlier ones still in memory all go
+        // through it; a picture with no usable image route is refused, not
+        // silently read by OCR.
         var attachments = request.attachments
         let threadImages = startsNewChat ? [] : (currentConversation?.messages ?? [])
             .flatMap(\.attachmentRefs)
             .compactMap { attachmentStore.storedImage(for: $0) }
         let reaskedImages = attachments.compactMap { attachmentStore.storedImage(for: $0.ref) }
-        var visionImage = submittedImages.last ?? reaskedImages.last ?? threadImages.last
-        if !visionRouteWorks {
+        let candidateImage = submittedImages.last ?? reaskedImages.last ?? threadImages.last
+        let route = resolveChatRoute(
+            hasImages: candidateImage != nil,
+            hasNewImages: !submittedImages.isEmpty,
+            actionProviderID: usedWebSearch ? nil : action?.providerID,
+            actionModel: action?.model
+        )
+        var visionImage = candidateImage
+        switch route.imageMode {
+        case .inline:
+            break
+        case .textOnly:
+            // The images stay on this Mac and only their text reaches the
+            // model. Labelled, never silent.
             visionImage = nil
             attachments = await readImagesAsText(attachments)
             guard !Task.isCancelled else {
                 restoreEnrichmentInput()
                 return
             }
+        case .none:
+            visionImage = nil
         }
-        let routesToVision = visionImage != nil
-
-        guard let provider = provider(
-            for: usedWebSearch ? nil : action?.providerID,
-            image: visionImage
-        ),
-              let model = resolvedModel(
-                for: provider,
-                override: routesToVision
-                    ? (settings.visionModel.isEmpty ? nil : settings.visionModel)
-                    : (action?.model ?? chatModelOverride(for: provider))
-              )
-        else {
+        if let warning = route.warning {
             restoreEnrichmentInput()
-            errorMessage = routesToVision
-                ? "Choose a vision model in Settings › Models."
-                : "Choose a provider and model in Settings."
+            errorMessage = warning
             recordJournal(
                 kind: .aiFailed,
                 scope: learningScope,
-                detail: routesToVision ? "missing-vision-model" : "missing-model"
+                detail: visionImage != nil || candidateImage != nil ? "missing-vision-route" : "missing-route"
             )
             requestInputFocus()
             return
         }
-
-        // The injected `service` (tests) bypasses the key check; production
-        // never sets it.
-        if service == nil,
-           provider.kind == .openAICompatible,
-           provider.location == .cloud,
-           (apiKeyProvider(provider.id) ?? "").isEmpty {
-            restoreEnrichmentInput()
-            errorMessage = "\(provider.name) needs an API key. Add it under Settings › Models."
-            recordJournal(kind: .aiFailed, scope: learningScope, detail: "missing-api-key")
-            requestInputFocus()
-            return
-        }
+        let routesToVision = visionImage != nil
+        let provider = route.effective.provider
+        let model = route.effective.model
 
         // The tools chosen for the open chat carry into a chat this question
         // starts on its own (the new-chat interval, a saved-prompt follow-up).
@@ -8053,6 +8563,20 @@ import Observation
         let carriedTools = requestAssistant == nil && activeAssistant != nil
             ? pendingChatTools
             : currentConversation?.enabledTools ?? pendingChatTools
+        // Freeze the route for this turn: a later model change, provider
+        // edit, or vision fallback cannot rewrite what this turn used.
+        // `chosen` is the chat's route frozen at submit; `effective` is what
+        // actually ran, so a vision fallback is labelled, never hidden. The
+        // thinking recorded here is the same value the request body carries.
+        let effectiveModel = ChatModelFreeze.freeze(
+            provider: provider,
+            model: model,
+            thinking: route.thinking,
+            supportsThinking: route.thinkingSupported
+        )
+        let frozenModel = pendingModelFreeze ?? effectiveModel
+        let turnSelection = ModelSelection(chosen: frozenModel.choice, effective: effectiveModel.choice)
+        pendingModelFreeze = nil
         if startsNewChat {
             startNewConversation()
         }
@@ -8073,6 +8597,7 @@ import Observation
         // live in the session store, in memory.
         for content in attachments { attachmentStore.store(content) }
         let submittedMessage = QuickMessage(
+            id: pendingSubmission?.messageID ?? UUID(),
             role: .user,
             content: usedWebSearch || usedPageRead ? submittedInput : effectivePrompt,
             attachments: attachments.isEmpty ? nil : attachments.map(\.ref)
@@ -8086,6 +8611,10 @@ import Observation
         }
         currentConversation?.messages.append(submittedMessage)
         currentConversation?.updatedAt = Date()
+        // The durable submission already happened before `enrich`; the ids
+        // reserved there are the ids used here, so the archived turn and the
+        // live turn are one.
+        pendingSubmission = nil
         // A question left without an answer (stopped before any text, or a
         // provider error) stays in the thread, but the model gets the chat
         // as alternating turns: an unanswered question is left out.
@@ -8095,6 +8624,14 @@ import Observation
         if (usedWebSearch || usedPageRead), !requestMessages.isEmpty {
             requestMessages[requestMessages.count - 1].content = effectivePrompt
         }
+        // Enforce the retrieval decision on this request copy: an
+        // out-of-scope turn's attachment blocks are dropped, so a source-first
+        // question never silently reads a whole history of files. The saved
+        // chat keeps every reference.
+        requestMessages = ChatContextPipeline.scopedMessages(
+            requestMessages,
+            execution: request.contextEvaluation?.execution
+        )
         // Each turn's attachments in front of its question, fitted into
         // their share of the answering model's window first.
         if !routesToVision {
@@ -8107,17 +8644,37 @@ import Observation
         let availableImageIDs = routesToVision ? Set(requestMessages.flatMap(\.attachmentRefs)
             .filter { attachmentStore.storedImage(for: $0) != nil }.map(\.id)) : []
         let attachmentBudget = attachmentContextBudget(provider: provider, model: model)
+        let share = AttachmentRequestComposer.share(
+            characterLimit: attachmentBudget.characterLimit,
+            reserved: (requestMessages.last?.content.utf8.count ?? 0)
+                + settings.systemPrompt.utf8.count
+                + (assistantSystem?.utf8.count ?? 0)
+        )
+        // Passage selection: a document-backed source contributes cited
+        // chunks (or an honest no-match/partial line) inside the per-file,
+        // per-request, and model budgets, rather than its whole text.
+        let pipelineContents = requestMessages
+            .flatMap(\.attachmentRefs)
+            .compactMap { ref -> AttachmentContent? in
+                guard let stored = attachmentStore.text(for: ref),
+                      let document = stored.extractedDocument else { return nil }
+                return AttachmentContent(ref: ref, text: stored.text, extractedDocument: document)
+            }
+        let documentBlocks = ChatContextPipeline.blocks(
+            contents: pipelineContents,
+            question: effectivePrompt,
+            budget: ChatContextPipeline.documentBudget(
+                modelShare: share,
+                attachmentCount: max(1, pipelineContents.count)
+            )
+        )
         let composed = AttachmentRequestComposer.compose(
             messages: requestMessages,
             text: { [attachmentStore] ref in attachmentStore.text(for: ref) },
-            share: AttachmentRequestComposer.share(
-                characterLimit: attachmentBudget.characterLimit,
-                reserved: (requestMessages.last?.content.utf8.count ?? 0)
-                    + settings.systemPrompt.utf8.count
-                    + (assistantSystem?.utf8.count ?? 0)
-            ),
+            share: share,
             excluded: request.inlineAttachmentIDs,
-            availableImages: availableImageIDs
+            availableImages: availableImageIDs,
+            documentBlocks: documentBlocks
         )
         requestMessages = composed.messages
         let requestImages = routesToVision ? turnImages(for: requestMessages) : [:]
@@ -8159,7 +8716,17 @@ import Observation
         // A new question brings the reader back to the newest text.
         followThreadBottom()
         isStreaming = true
-        guard let service = makeService(provider: provider, model: model, attachmentTrim: composed.trim) else {
+        // The send path's per-round snapshot writer. Round 0's body is the
+        // submission's own snapshot; every later tool round's exact body is
+        // written through it before that round's network call.
+        let roundRecorder = chatArchive.map { ChatRoundRecorder(archive: $0) }
+        guard let service = makeService(
+            provider: provider,
+            model: model,
+            toolOverride: request.contextEvaluation?.gatedTools,
+            attachmentTrim: composed.trim,
+            roundRecorder: roundRecorder
+        ) else {
             isStreaming = false
             liveToolRecords = []
             // Only a question that came from the composer goes back there,
@@ -8186,10 +8753,71 @@ import Observation
         streamTask?.cancel()
         streamTask = nil
         discardStreamBuffer()
+        // The exact body this turn sends is archived before inference, with
+        // no credentials: the app's request snapshot, committed through the
+        // coordinator's lock. A failure blocks the provider.
+        let contextReceipt = request.contextEvaluation.map {
+            ChatContextGate.standard.receipt(for: $0, budgetCharacters: share)
+        }
+        // The exact provider body (or an explicit command-line input label),
+        // built by the same request builder the service sends with. The API
+        // key travels in a header this snapshot never includes.
+        let requestSnapshot = Self.requestSnapshotData(
+            service: service,
+            model: model,
+            messages: requestMessages,
+            turnImages: requestImages
+        )
+        if let chatArchive, let conversation = currentConversation {
+            do {
+                _ = try await chatArchive.submit(TurnSubmission(
+                    conversation: conversation,
+                    attachmentContents: attachments,
+                    model: turnSelection,
+                    context: contextReceipt,
+                    tools: Array(request.contextEvaluation?.gatedTools ?? []),
+                    requestSnapshot: requestSnapshot,
+                    requestSnapshotKind: "requestSansKey",
+                    endpoint: frozenModel.endpoint,
+                    startedAt: pendingSubmission?.startedAt ?? Date()
+                ))
+                // The round hook writes against the turn that submission just
+                // created, so it is attached before the stream can run.
+                await roundRecorder?.attach(
+                    conversationID: conversation.id.uuidString,
+                    turnID: submittedMessage.id.uuidString
+                )
+            } catch {
+                isStreaming = false
+                liveToolRecords = []
+                rollbackSubmission(
+                    messageID: submittedMessage.id,
+                    restoring: request.takesComposerText ? submittedInput : nil
+                )
+                if request.takesComposerText {
+                    pendingImages = sentPendingImages
+                    attachmentTray.adopt(takenChips)
+                }
+                errorMessage = "Could not save this question: \(error.localizedDescription). Nothing was sent."
+                recordJournal(kind: .aiFailed, scope: learningScope, detail: "archive-write-failed")
+                isFollowUpQueued = false
+                requestInputFocus()
+                return
+            }
+        }
         let stream = service.send(messages: requestMessages, turnImages: requestImages)
         streamGeneration &+= 1
         let generation = streamGeneration
         inFlightTurn = currentConversation.map { ($0.id, submittedMessage.id) }
+        // The archived assistant turn and the checkpoint cadence. The live
+        // assistant message reuses this id, so the projection and the
+        // checkpointed turn are one record.
+        let assistantTurnID = UUID()
+        currentAssistantTurnID = assistantTurnID
+        let archivedConversationID = currentConversation?.id.uuidString
+        archiveCheckpointCharacters = 0
+        streamStartedAt = pendingSubmission?.startedAt ?? Date()
+        streamFirstTokenAt = nil
 
         streamTask = Task {
             // A stream that ends for any reason cannot still be waiting on a
@@ -8209,9 +8837,37 @@ import Observation
                         // cover the wait for the next round.
                         streamingStatus = nil
                     }
+                    // One finished model-to-tools-to-model round, with its
+                    // calls, arguments, results, statuses, adapters and
+                    // timing; and the tokens the provider reported.
+                    if let toolRound = delta.toolRound {
+                        streamToolRounds.append(toolRound)
+                    }
+                    if let usage = delta.usage {
+                        streamUsage = usage
+                    }
                     if let text = delta.text {
-                        if !text.isEmpty { streamingStatus = nil }
+                        if !text.isEmpty {
+                            streamingStatus = nil
+                            if streamFirstTokenAt == nil { streamFirstTokenAt = Date() }
+                        }
                         appendStreamText(text)
+                    }
+                    // Periodic durable checkpoint of the answer in flight,
+                    // with the tool rounds finished so far.
+                    if let chatArchive, let archivedConversationID, !output.isEmpty,
+                       output.count - archiveCheckpointCharacters >= 800 {
+                        archiveCheckpointCharacters = output.count
+                        let partial = output
+                        let rounds = streamToolRounds
+                        try? await chatArchive.checkpoint(
+                            conversationID: archivedConversationID,
+                            turnID: assistantTurnID.uuidString,
+                            update: .checkpoint(
+                                text: partial,
+                                toolRounds: rounds.isEmpty ? nil : rounds
+                            )
+                        )
                     }
                 }
                 // Stopped: `cancel()` kept the turn and the text that arrived.
@@ -8225,12 +8881,44 @@ import Observation
                     let records = answerToolRecords(usedWebSearch: usedWebSearch)
                     currentConversation?.messages.append(
                         QuickMessage(
+                            id: assistantTurnID,
                             role: .assistant,
                             content: output,
                             toolRecords: records.isEmpty ? nil : records
                         )
                     )
                     currentConversation?.updatedAt = Date()
+                    // The answer is terminal in the archive first, with the
+                    // frozen route and the receipt the turn actually ran,
+                    // before the projection sync can rewrite the record.
+                    if let chatArchive, let archivedConversationID {
+                        let finishedAt = Date()
+                        let startedAt = streamStartedAt
+                        streamRequestRounds = await roundRecorder?.requestedRounds ?? 0
+                        let timings = requestTimings(finishedAt: finishedAt)
+                        let rounds = streamToolRounds.isEmpty ? nil : streamToolRounds
+                        let receipt = RequestReceipt(
+                            selection: turnSelection,
+                            status: .completed,
+                            context: contextReceipt,
+                            toolRounds: rounds ?? [],
+                            timings: timings,
+                            usage: streamUsage,
+                            endpoint: frozenModel.endpoint,
+                            startedAt: startedAt,
+                            finishedAt: finishedAt
+                        )
+                        try? await chatArchive.completeTurn(
+                            conversationID: archivedConversationID,
+                            turnID: assistantTurnID.uuidString,
+                            text: output,
+                            receipt: receipt,
+                            selection: turnSelection,
+                            timings: timings,
+                            usage: streamUsage,
+                            toolRounds: rounds
+                        )
+                    }
                     persistAnsweredConversation()
                     // The lines live on the answer now.
                     liveToolRecords = []
@@ -8280,6 +8968,21 @@ import Observation
                 // stays with the text that arrived, as Stop leaves it, and
                 // `waitForWebAnswer` shows the search results if none did.
                 keepStoppedAnswer()
+                // An interrupted answer is recorded as such, never left
+                // looking like it is still streaming.
+                if let chatArchive, let archivedConversationID {
+                    let finishedAt = Date()
+                    try? await chatArchive.failTurn(
+                        conversationID: archivedConversationID,
+                        turnID: assistantTurnID.uuidString,
+                        error: "Interrupted",
+                        status: .cancelled,
+                        text: output.isEmpty ? nil : output,
+                        timings: requestTimings(finishedAt: finishedAt),
+                        usage: streamUsage,
+                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                    )
+                }
                 liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
@@ -8297,6 +9000,20 @@ import Observation
                 isStreaming = false
                 inFlightTurn = nil
                 threadError = ThreadError(messageID: submittedMessage.id, message: error.localizedDescription)
+                // The failure is durable with the text that arrived.
+                if let chatArchive, let archivedConversationID {
+                    let finishedAt = Date()
+                    try? await chatArchive.failTurn(
+                        conversationID: archivedConversationID,
+                        turnID: assistantTurnID.uuidString,
+                        error: error.localizedDescription,
+                        status: .failed,
+                        text: output.isEmpty ? nil : output,
+                        timings: requestTimings(finishedAt: finishedAt),
+                        usage: streamUsage,
+                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                    )
+                }
                 isFollowUpQueued = false
                 recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
                 requestInputFocus()
@@ -8322,6 +9039,28 @@ import Observation
         // A follow-up queued while this answer streamed goes now, unless the
         // stream was stopped or failed (both drop the queue).
         if generation == streamGeneration { await sendQueuedFollowUp() }
+    }
+
+    /// The exact provider body when the service is HTTP, or an explicit
+    /// command-line input label when it is not. Built by the service's own
+    /// request builder, so the system prompt, image parts, tool schemas, and
+    /// reasoning fields are all present. Never a credential: the API key
+    /// travels in a header this snapshot does not include.
+    static func requestSnapshotData(
+        service: any QuickService,
+        model: String,
+        messages: [QuickMessage],
+        turnImages: [UUID: [QuickImageAttachment]]
+    ) -> Data? {
+        if let openAI = service as? OpenAICompatibleService,
+           let body = try? openAI.buildRequest(messages: messages, turnImages: turnImages).httpBody {
+            return body
+        }
+        return try? JSONSerialization.data(withJSONObject: [
+            "kind": "command-line",
+            "model": model,
+            "prompt": messages.last(where: { $0.role == .user })?.content ?? "",
+        ], options: [.sortedKeys])
     }
 
     /// The chat as the model gets it: every turn except a question that has
@@ -8350,7 +9089,12 @@ import Observation
         else { return }
         let records = answerToolRecords(usedWebSearch: webSearchNote != nil)
         currentConversation?.messages.append(
-            QuickMessage(role: .assistant, content: output, toolRecords: records.isEmpty ? nil : records)
+            QuickMessage(
+                id: currentAssistantTurnID ?? UUID(),
+                role: .assistant,
+                content: output,
+                toolRecords: records.isEmpty ? nil : records
+            )
         )
         currentConversation?.updatedAt = Date()
         persistAnsweredConversation()
@@ -8648,7 +9392,8 @@ import Observation
     func visibleModels(for provider: InferenceProvider) -> [String] {
         ModelCatalogService.visibleModels(
             for: provider,
-            currentModel: modelInUse(for: provider)
+            currentModel: modelInUse(for: provider),
+            preferences: modelPreferences
         )
     }
 
@@ -8732,7 +9477,7 @@ import Observation
                 // Land on the first model that is still offered, never on one
                 // the user turned off on Manage Models.
                 settings.providers[index].selectedModel = Self.refreshFallbackModel(
-                    for: settings.providers[index]
+                    for: settings.providers[index], preferences: modelPreferences
                 )
             }
             settings.save()
@@ -8747,8 +9492,11 @@ import Observation
     /// The model a refresh falls back to when the recorded one is gone or
     /// blank: the first model that is still offered, never one the user
     /// turned off on Manage Models.
-    static func refreshFallbackModel(for provider: InferenceProvider) -> String {
-        ModelCatalogService.visibleModels(for: provider).first ?? ""
+    static func refreshFallbackModel(
+        for provider: InferenceProvider,
+        preferences: ModelPreferenceStore = .shared
+    ) -> String {
+        ModelCatalogService.visibleModels(for: provider, preferences: preferences).first ?? ""
     }
 
     func refreshDetectedModels() async {
@@ -8756,26 +9504,6 @@ import Observation
             .filter { $0.discovery == .lmStudio || $0.discovery == .pi }
             .map(\.id)
         for id in ids { await refreshModels(providerID: id) }
-    }
-
-    private func provider(
-        for overrideID: UUID?,
-        image: QuickImageAttachment? = nil
-    ) -> InferenceProvider? {
-        if image != nil, let vision = visionProvider {
-            return vision
-        }
-        if let overrideID,
-           let provider = settings.providers.first(where: { $0.id == overrideID }) {
-            return provider
-        }
-        // The open chat's model, then the Quick AI default, only answer when
-        // nothing more specific applies: a saved action's own provider and
-        // an attachment's vision provider both win.
-        if overrideID == nil {
-            return activeProvider
-        }
-        return settings.selectedProvider
     }
 
     func resolvedModel(for provider: InferenceProvider, override: String?) -> String? {
@@ -8803,13 +9531,17 @@ import Observation
         provider: InferenceProvider,
         model: String,
         chatTools: Bool = true,
-        attachmentTrim: ContextBudget.Trim = ContextBudget.Trim()
+        toolOverride: Set<ChatToolKind>? = nil,
+        attachmentTrim: ContextBudget.Trim = ContextBudget.Trim(),
+        roundRecorder: ChatRoundRecorder? = nil
     ) -> (any QuickService)? {
         if let service { return service }
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
-            let tools = self.chatTools
+            // A source-grounded request passes the gated set; everything
+            // else uses the chat's own offered set.
+            let tools = toolOverride ?? self.chatTools
             // The model gets a search_web tool so it can look things up
             // mid-answer, using the same provider as explicit searches.
             var webSearch: (@Sendable (String) async throws -> String)?
@@ -8819,6 +9551,16 @@ import Observation
                 webSearch = { query in try await webSearchService.search(query, provider: searchProvider) }
             }
             let profile = modelPreferences.profile(providerID: provider.id, model: model)
+            // The per-round snapshot hook: the model client hands every
+            // request body here before it goes out, so a write failure stops
+            // the request. Nil for a service that has no archive (the
+            // Translator, and every test that injects its own service).
+            var beforeRequest: (@Sendable (ProviderRequestRound) async throws -> Void)?
+            if let roundRecorder {
+                beforeRequest = { round in
+                    try await roundRecorder.beforeRequest(round)
+                }
+            }
             // The question card is behind the Quick AI setting "Let the model
             // ask clarifying questions"; off, the tool is not offered at all.
             var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
@@ -8845,7 +9587,9 @@ import Observation
                     : ChatToolbox(),
                 contextBudget: ContextBudget(contextWindow: profile.contextWindow),
                 attachmentTrim: attachmentTrim,
-                reasoningEffort: profile.reasoningEffort
+                reasoningEffort: profile.reasoningEffort,
+                thinkingSupported: profile.supportsReasoningEffort,
+                beforeRequest: beforeRequest
             )
         case .commandLine:
             guard let command = provider.command else { return nil }
@@ -8878,6 +9622,21 @@ import Observation
             // Stop keeps the question and what the model said so far, as the
             // turn's answer; `⌘R` asks the same turn again.
             keepStoppedAnswer()
+            // A stopped answer is terminal in the archive, never left looking
+            // like it is still streaming.
+            if let chatArchive, let conversationID = currentConversation?.id.uuidString,
+               let assistantTurnID = currentAssistantTurnID {
+                let text = output.isEmpty ? nil : output
+                Task {
+                    try? await chatArchive.failTurn(
+                        conversationID: conversationID,
+                        turnID: assistantTurnID.uuidString,
+                        error: "Stopped by the user",
+                        status: .cancelled,
+                        text: text
+                    )
+                }
+            }
         } else {
             discardStreamBuffer()
             output = ""
@@ -9776,11 +10535,86 @@ import Observation
     }
 
     func loadHistory() {
+        // With the canonical archive present the archive is the authority: a
+        // legacy "Keep chat history" switch or "Chats to keep" count no
+        // longer decides what is read or kept. Their keys stay in the
+        // settings blob for rollback, but they gate only the legacy cache.
+        if chatArchive != nil {
+            loadCanonicalHistory()
+            return
+        }
         guard settings.historyEnabled, let historyFileURL else {
             history = []
             return
         }
-        history = QuickHistoryStore.load(from: historyFileURL)
+        switch QuickHistoryStore.loadResult(from: historyFileURL) {
+        case .loaded(let legacy):
+            history = legacy
+        case .missing:
+            history = []
+        case .corrupt:
+            // A damaged legacy cache is rollback evidence: never read as
+            // empty and never overwritten.
+            AppLog.persistence.error("Chat history cache is damaged; keeping it as rollback data.")
+            history = []
+        }
+    }
+
+    /// Reads the canonical archive as the chat list, whatever the legacy
+    /// retention settings say.
+    private func loadCanonicalHistory() {
+        // The legacy file is read once, as a migration source, and never as
+        // the authority. A damaged one defers to the archive.
+        var legacy: [QuickConversation] = []
+        if let historyFileURL, case .loaded(let cached) = QuickHistoryStore.loadResult(from: historyFileURL) {
+            legacy = cached
+        }
+        cutoverToArchive(legacy: legacy)
+    }
+
+    /// The one-time cutover to the durable archive. The legacy cache is
+    /// backed up for rollback, its chats are imported (idempotent), and the
+    /// migration must be clean and verified readable before the archive
+    /// becomes the canonical, unbounded list. The legacy file is left in
+    /// place and is only ever rewritten as a bounded cache.
+    func cutoverToArchive(legacy: [QuickConversation]) {
+        guard let chatArchive else { return }
+        let appVersion = currentVersion
+        let historyFileURL = historyFileURL
+        let limit = settings.historyLimit
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                if let historyFileURL {
+                    _ = try QuickHistoryStore.backupForRollback(from: historyFileURL)
+                }
+                let report = await chatArchive.migrate(legacy: legacy, appVersion: appVersion)
+                guard report.isClean else {
+                    AppLog.persistence.error(
+                        "Chat archive migration was not clean: \(report.failures.joined(separator: "; "))"
+                    )
+                    return
+                }
+                // Verified readable. Damaged records are surfaced, never
+                // silently dropped, and the cache is not rewritten from a
+                // partial list.
+                let projection = try await chatArchive.projectReadable()
+                self.history = QuickHistoryStore.ordered(projection.conversations)
+                self.archiveDamagedCount = projection.damaged.count
+                if projection.damaged.isEmpty, let historyFileURL {
+                    QuickHistoryStore.rebuildCache(self.history, limit: limit, to: historyFileURL)
+                } else if !projection.damaged.isEmpty {
+                    AppLog.persistence.error(
+                        "Chat archive has \(projection.damaged.count) unreadable records; the cache was left untouched."
+                    )
+                }
+                AppLog.persistence.info(
+                    "Chat archive cutover: \(report.imported) imported, \(report.alreadyPresent) already present, \(projection.conversations.count) canonical"
+                )
+            } catch {
+                AppLog.persistence.error("Chat archive cutover failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func startNewConversation() {
@@ -9788,7 +10622,56 @@ import Observation
         reset([.thread, .input])
         requestInputFocus()
     }
+    /// Confirmed deletion of every saved chat.
+    ///
+    /// The view calls this **only** after the user confirms in the delete
+    /// alert; it is never inferred from a toggle, never run at startup, and
+    /// never runs twice at once. It stops requests that are in flight or still
+    /// being prepared first, so nothing prepared before the deletion can write
+    /// a chat back into the store, then tombstones and removes every owned
+    /// chat and reclaims the bytes no record still references.
+    ///
+    /// A failure is `savedHistoryOperationError` and the list is left as it
+    /// was: the canonical archive preflights every record, so "could not read
+    /// one chat" never turns into "deleted everything".
     func clearHistory() {
+        guard !isClearingHistory else { return }
+        savedHistoryOperationError = nil
+        guard let chatArchive else {
+            clearLegacyHistory()
+            return
+        }
+        // Nothing prepared or streaming may write into the store we are
+        // emptying. `cancel()` also keeps the text that already arrived.
+        cancel()
+        cancelAttachmentWait()
+        isClearingHistory = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let report = try await chatArchive.deleteAll()
+                if report.isComplete {
+                    self.applyClearedHistory()
+                    self.savedHistoryOperationError = report.gcIssue.map {
+                        "Saved chats were deleted, but their stored files could not all be reclaimed: \($0)"
+                    }
+                } else {
+                    self.savedHistoryOperationError =
+                        "Some saved chats could not be deleted (\(report.failedIDs.count)). Nothing else was removed."
+                    self.refreshHistoryFromArchive()
+                }
+            } catch {
+                // Fail closed: nothing was deleted, so the list stays.
+                self.savedHistoryOperationError = "Could not delete saved chats: \(error.localizedDescription)"
+            }
+            self.isClearingHistory = false
+            self.requestInputFocus()
+        }
+    }
+
+    /// The legacy store when no canonical archive exists: this is all there
+    /// is, and the old retention settings still bound it.
+    private func clearLegacyHistory() {
         store.deletedChatIDs.formUnion(history.map(\.id))
         history = []
         // The attachments' text goes with the chats: it lived in memory only.
@@ -9801,6 +10684,33 @@ import Observation
         vaultSearchAnchor = nil
     }
 
+    /// Everything the deletion removed, as the UI now shows it.
+    private func applyClearedHistory() {
+        store.deletedChatIDs.formUnion(history.map(\.id))
+        history = []
+        archiveDamagedCount = 0
+        attachmentStore.removeAll()
+        currentConversation = nil
+        if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
+        output = ""
+        errorMessage = nil
+        activeVaultSearchMode = nil
+        vaultSearchAnchor = nil
+    }
+
+    /// After a partial failure: the list is exactly what the archive still
+    /// holds, so the user is not shown a chat that is gone or hidden from one
+    /// that is not.
+    private func refreshHistoryFromArchive() {
+        guard let chatArchive else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let projection = try? await chatArchive.projectReadable() else { return }
+            self.history = QuickHistoryStore.ordered(projection.conversations)
+            self.archiveDamagedCount = projection.damaged.count
+        }
+    }
+
     func loadConversation(id: UUID) {
         guard let conversation = history.first(where: { $0.id == id }) else { return }
         loadConversation(conversation)
@@ -9810,6 +10720,9 @@ import Observation
     /// or the one a hand-off carried when history is off.
     func loadConversation(_ conversation: QuickConversation) {
         currentConversation = conversation
+        // A new chat starts from the policy's own decision, not the one
+        // chat's override.
+        contextOverride = nil
         openChatBase = history.first { $0.id == conversation.id }.map(StoredChatStamp.init)
         expandedTranscriptMessageIDs.removeAll()
         output = conversation.messages.last(where: { $0.role == .assistant })?.content ?? ""
@@ -9831,21 +10744,129 @@ import Observation
         followThreadBottom()
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
+        resumeRetainedAttachments(for: conversation)
+    }
+
+    /// Loads a reopened chat's attachment text and images back into the
+    /// session store from the durable archive, so a follow-up or a reopen
+    /// works without re-reading a source that may have changed. The archive
+    /// is the only source here; a role that was never archived stays missing
+    /// and is never fetched again.
+    func resumeRetainedAttachments(for conversation: QuickConversation) {
+        guard chatArchive != nil else { return }
+        let refs = conversation.messages.flatMap(\.attachmentRefs)
+        let conversationID = conversation.id.uuidString
+        Task { [weak self] in
+            guard let self, let chatArchive = self.chatArchive else { return }
+            // A turn in flight when the app quit is marked interrupted, so it
+            // never reads as still streaming in the archive.
+            if let record = try? await chatArchive.load(id: conversationID) {
+                for turn in record.turns where turn.role == .assistant {
+                    let status = turn.request?.status
+                    if status == .streaming || status == .pending {
+                        try? await chatArchive.failTurn(
+                            conversationID: conversationID,
+                            turnID: turn.id,
+                            error: "Interrupted before completion",
+                            status: .cancelled,
+                            text: turn.text.isEmpty ? nil : turn.text
+                        )
+                    }
+                }
+            }
+            for ref in refs {
+                if self.attachmentStore.isLoaded(ref) { continue }
+                do {
+                    guard let source = try await chatArchive.retainedSource(
+                        conversationID: conversationID,
+                        attachmentID: ref.id.uuidString
+                    ) else { continue }
+                    if source.extractedText != nil {
+                        // The versioned extraction artifact: the model text and
+                        // the structured document both come from here, never
+                        // from the raw UTF-8 blob.
+                        if let text = try await chatArchive.retainedText(
+                            conversationID: conversationID,
+                            attachmentID: ref.id.uuidString
+                        ), !text.isEmpty {
+                            let document = try await chatArchive.retainedDocument(
+                                conversationID: conversationID,
+                                attachmentID: ref.id.uuidString
+                            )
+                            self.attachmentStore.storeText(
+                                AttachmentSessionStore.Text(
+                                    text: text,
+                                    kindLabel: ref.kind.displayName,
+                                    notes: [],
+                                    extractedDocument: document
+                                ),
+                                for: ref
+                            )
+                        }
+                    }
+                    if ref.kind.isImage, let imageRef = source.normalizedImage {
+                        let imageData = try await chatArchive.readArtifact(imageRef)
+                        let ext = imageRef.fileExtension?.lowercased()
+                        let mime = (ext == "jpg" || ext == "jpeg") ? "image/jpeg" : "image/png"
+                        self.attachmentStore.storeImage(
+                            QuickImageAttachment(
+                                data: imageData,
+                                mimeType: mime,
+                                pixelWidth: ref.pixelWidth ?? 0,
+                                pixelHeight: ref.pixelHeight ?? 0
+                            ),
+                            for: ref
+                        )
+                    }
+                } catch {
+                    // A missing or damaged artifact stays missing: it is never
+                    // re-read from the source or re-fetched.
+                    AppLog.persistence.error(
+                        "Retained attachment could not be read: \(error.localizedDescription)"
+                    )
+                }
+            }
+        }
     }
 
     func persistCurrentConversation() {
-        guard settings.historyEnabled, let local = currentConversation,
+        // The canonical archive keeps every chat whatever the legacy
+        // retention settings say. Without one, the old switch bounds the
+        // only store there is.
+        if chatArchive == nil, !settings.historyEnabled { return }
+        guard let local = currentConversation,
               let conversation = conversationToStore(local)
         else { return }
         currentConversation = conversation
-        history = QuickHistoryStore.upserting(
-            conversation,
-            into: history,
-            limit: settings.historyLimit
-        )
+        // The canonical in-memory list is never capped; only the on-disk
+        // cache is bounded by the "Chats to keep" setting.
+        var merged = history.filter { $0.id != conversation.id }
+        merged.append(conversation)
+        history = QuickHistoryStore.ordered(merged)
         openChatBase = StoredChatStamp(conversation)
         saveHistory()
+        syncConversationToArchive(conversation)
     }
+
+    /// Best-effort durability for the latest turn in the structured archive.
+    /// The question was already committed before Send; this captures the
+    /// answer. It never blocks the UI, never changes the frozen model, and
+    /// never removes anything: a failure is logged and the legacy projection
+    /// still holds the chat.
+    func syncConversationToArchive(_ conversation: QuickConversation) {
+        guard let chatArchive, conversation.messages.contains(where: { $0.role == .assistant }) else { return }
+        Task {
+            do {
+                try await chatArchive.syncConversation(conversation)
+            } catch {
+                AppLog.persistence.error("Chat archive answer sync failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Clears the local slash-command refusal (the composer's Send as Text,
+    /// `/new`, `/clear`).
+    func clearRefusedCommand() { refusedCommandText = nil }
 
     /// A question that became a turn but could not go out leaves the
     /// thread. `submittedInput` goes back in the composer when given and

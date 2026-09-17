@@ -1,4 +1,6 @@
 import Foundation
+import HouseChatCore
+import HouseChatDocuments
 
 /// Where one attachment comes from. Every way to attach (Add Context, `@`,
 /// a drop, `⌘V`, a URL in the question, a capture) resolves to one of these
@@ -50,12 +52,26 @@ enum AttachmentSource: Sendable, Equatable {
 }
 
 /// What reading one source gave: the reference the history keeps, the text
-/// the model reads (nil for an image), and an image's pixels, which stay in
-/// memory only.
+/// the model reads (nil for an image), and the normalized image bytes.
+///
+/// The pipeline owns these three payload fields; the archive worker and the
+/// UI worker bind to them:
+/// - `originalBytes`: the bytes exactly as read (a link keeps its raw body).
+/// - `normalizedImage`: the metadata-free image bytes a model may receive.
+/// - `extractedDocument`: the shared `HouseChatCore` extraction, which drives
+///   passage selection and citations.
 struct AttachmentContent: Sendable, Equatable {
     var ref: ChatAttachmentRef
     var text: String?
-    var image: QuickImageAttachment?
+    /// The bytes exactly as they were read. Handed to the archive so it
+    /// never re-reads a path that may have changed underneath it; a
+    /// fetched link keeps the raw body here, not only its extracted text.
+    var originalBytes: Data?
+    /// The normalized, metadata-free image the shared reader produced.
+    var normalizedImage: DocumentImageBytes?
+    /// The shared extraction, when the shared reader produced it. Drives
+    /// passage selection and citations; nil for a link or a selection.
+    var extractedDocument: ExtractedDocument?
     /// The kind the model block names ("PDF", "Swift source"); nil falls
     /// back to the kind's own name.
     var kindLabel: String?
@@ -63,16 +79,38 @@ struct AttachmentContent: Sendable, Equatable {
     /// said to the model inside the block.
     var notes: [AttachmentNote]
 
+    /// The Quick Launch in-memory image, derived from `normalizedImage` so
+    /// the two can never disagree.
+    var image: QuickImageAttachment? {
+        get {
+            normalizedImage.map {
+                QuickImageAttachment(data: $0.data, mimeType: $0.mimeType, pixelWidth: $0.pixelWidth, pixelHeight: $0.pixelHeight)
+            }
+        }
+        set {
+            normalizedImage = newValue.map {
+                DocumentImageBytes(data: $0.data, mimeType: $0.mimeType, pixelWidth: $0.pixelWidth, pixelHeight: $0.pixelHeight)
+            }
+        }
+    }
+
     init(
         ref: ChatAttachmentRef,
         text: String? = nil,
         image: QuickImageAttachment? = nil,
         kindLabel: String? = nil,
-        notes: [AttachmentNote] = []
+        notes: [AttachmentNote] = [],
+        originalBytes: Data? = nil,
+        normalizedImage: DocumentImageBytes? = nil,
+        extractedDocument: ExtractedDocument? = nil
     ) {
         self.ref = ref
         self.text = text
-        self.image = image
+        self.originalBytes = originalBytes
+        self.normalizedImage = normalizedImage ?? image.map {
+            DocumentImageBytes(data: $0.data, mimeType: $0.mimeType, pixelWidth: $0.pixelWidth, pixelHeight: $0.pixelHeight)
+        }
+        self.extractedDocument = extractedDocument
         self.kindLabel = kindLabel
         self.notes = notes
     }

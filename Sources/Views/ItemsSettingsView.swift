@@ -8,14 +8,21 @@ import UniformTypeIdentifiers
 /// separated by house dividers and lit by the house hover fill.
 struct ItemsSettingsView: View {
     @Bindable var viewModel: QuickViewModel
-    @State private var filter: Filter = .all
+    @State private var filter: Filter
     @State private var query = ""
     @State private var hoveredRow: String?
     /// A custom folder or app waiting for the remove confirmation.
     @State private var pendingRemoval: Row?
 
+    /// `initialFilter` lets a render proof open straight on Hidden; the app
+    /// always starts on All.
+    init(viewModel: QuickViewModel, initialFilter: Filter = .all) {
+        self.viewModel = viewModel
+        _filter = State(initialValue: initialFilter)
+    }
+
     enum Filter: String, CaseIterable, Identifiable {
-        case all, apps, folders, snippets, quickLinks, windows, commands
+        case all, apps, folders, snippets, quickLinks, windows, commands, hidden
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -26,6 +33,7 @@ struct ItemsSettingsView: View {
             case .quickLinks: "Quicklinks"
             case .windows: "Windows"
             case .commands: "Commands"
+            case .hidden: "Hidden"
             }
         }
     }
@@ -34,11 +42,15 @@ struct ItemsSettingsView: View {
     enum Row: Identifiable {
         case application(LaunchableApplication)
         case item(LauncherCatalogItem)
+        /// A hidden record from settings. Its item may be missing or
+        /// uninstalled, so the label comes from what was stored at hide time.
+        case hidden(LauncherItemConfiguration)
 
         var id: String {
             switch self {
             case .application(let application): "application:" + application.id
             case .item(let item): item.id
+            case .hidden(let configuration): "hidden:" + configuration.id
             }
         }
 
@@ -46,52 +58,77 @@ struct ItemsSettingsView: View {
             switch self {
             case .application(let application): application.name
             case .item(let item): item.title
+            case .hidden(let configuration):
+                configuration.hiddenTitle ?? LauncherItemHiding.placeholderTitle(for: configuration.kind)
             }
         }
 
         var typeLabel: String {
             switch self {
             case .application: "App"
-            case .item(let item):
-                switch item.kind {
-                case .snippet: "Snippet"
-                case .quickLink: "Quicklink"
-                case .command: item.value.hasPrefix("window.") ? "Window" : "Command"
-                case .clipboard: "Clipboard"
-                case .emoji: "Emoji"
-                case .screenshot: "Screenshot"
-                case .conversation: "Chat"
-                case .askAI: "AI"
-                case .folder: "Folder"
-                case .answer: "Answer"
-                case .screenHistory: "Screen History"
-                case .color: "Color"
-                case .application: "App"
-                }
+            case .item(let item): Row.typeLabel(for: item.kind, value: item.value)
+            case .hidden(let configuration): Row.typeLabel(for: configuration.kind, value: nil)
+            }
+        }
+
+        /// One label table for live and hidden rows, so a kind reads the
+        /// same in both lists.
+        static func typeLabel(for kind: LauncherItemKind, value: String?) -> String {
+            switch kind {
+            case .snippet: "Snippet"
+            case .quickLink: "Quicklink"
+            case .command: (value?.hasPrefix("window.") ?? false) ? "Window" : "Command"
+            case .clipboard: "Clipboard"
+            case .emoji: "Emoji"
+            case .screenshot: "Screenshot"
+            case .conversation: "Chat"
+            case .askAI: "AI"
+            case .folder: "Folder"
+            case .answer: "Answer"
+            case .screenHistory: "Screen History"
+            case .color: "Color"
+            case .application: "App"
             }
         }
     }
 
     private var rows: [Row] {
         var all: [Row] = []
-        if filter == .all || filter == .apps {
-            all += viewModel.applications.map(Row.application)
-        }
-        if filter == .all || filter == .folders {
-            all += viewModel.folderItems.map(Row.item)
-        }
-        if filter == .all || filter == .snippets {
-            all += viewModel.snippets.map(Row.item)
-        }
-        if filter == .all || filter == .quickLinks {
-            all += viewModel.quickLinks.map(Row.item)
-        }
-        if filter == .all || filter == .windows {
-            all += viewModel.systemCommands.filter { $0.value.hasPrefix("window.") }.map(Row.item)
-        }
-        if filter == .all || filter == .commands {
-            all += [Row.item(viewModel.askAIItem(query: ""))]
-            all += viewModel.systemCommands.filter { !$0.value.hasPrefix("window.") }.map(Row.item)
+        if filter == .hidden {
+            all += viewModel.hiddenLauncherItems.map(Row.hidden)
+        } else {
+            if filter == .all || filter == .apps {
+                all += viewModel.applications
+                    .filter { !viewModel.isApplicationHidden($0) }
+                    .map(Row.application)
+            }
+            if filter == .all || filter == .folders {
+                all += viewModel.folderItems
+                    .filter { !viewModel.isLauncherItemHidden($0) }
+                    .map(Row.item)
+            }
+            if filter == .all || filter == .snippets {
+                all += viewModel.snippets
+                    .filter { !viewModel.isLauncherItemHidden($0) }
+                    .map(Row.item)
+            }
+            if filter == .all || filter == .quickLinks {
+                all += viewModel.quickLinks
+                    .filter { !viewModel.isLauncherItemHidden($0) }
+                    .map(Row.item)
+            }
+            if filter == .all || filter == .windows {
+                all += viewModel.systemCommands
+                    .filter { $0.value.hasPrefix("window.") && !viewModel.isLauncherItemHidden($0) }
+                    .map(Row.item)
+            }
+            if filter == .all || filter == .commands {
+                let askAI = viewModel.askAIItem(query: "")
+                if !viewModel.isLauncherItemHidden(askAI) { all += [Row.item(askAI)] }
+                all += viewModel.systemCommands
+                    .filter { !$0.value.hasPrefix("window.") && !viewModel.isLauncherItemHidden($0) }
+                    .map(Row.item)
+            }
         }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return all }
@@ -99,6 +136,7 @@ struct ItemsSettingsView: View {
         return all.filter { row in
             FuzzyMatcher.score(foldedQuery: folded, foldedCandidate: FuzzyMatcher.fold(row.name)) != nil
                 || FuzzyMatcher.score(foldedQuery: folded, foldedCandidate: FuzzyMatcher.fold(alias(for: row))) != nil
+                || row.typeLabel.localizedCaseInsensitiveContains(trimmed)
         }
     }
 
@@ -121,7 +159,7 @@ struct ItemsSettingsView: View {
             .raisedCard()
             .settingsAnchor("items.list")
 
-            Text("\(rows.count) items. Aliases are words you type to reach an item first. Hotkeys run the item from anywhere.")
+            Text(footerText)
                 .font(AQDesign.TypeToken.caption)
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
         }
@@ -146,26 +184,53 @@ struct ItemsSettingsView: View {
         }
     }
 
+    private var footerText: String {
+        if filter == .hidden {
+            if viewModel.hiddenLauncherItems.isEmpty {
+                return "Nothing is hidden. Use \u{201C}Hide from Quick Launch\u{201D} in a result\u{2019}s actions."
+            }
+            return "\(rows.count) hidden \(rows.count == 1 ? "item" : "items"). Restoring puts the item back without deleting anything."
+        }
+        return "\(rows.count) items. Aliases are words you type to reach an item first. Hotkeys run the item from anywhere."
+    }
+
     private var toolbar: some View {
-        HStack(spacing: House.Spacing.sm) {
+        VStack(alignment: .leading, spacing: House.Spacing.sm) {
+            // The whole filter strip gets its own row: eight segments with
+            // their labels need the pane width, and sharing the row with Add
+            // and Search truncated every title.
             InkSegmentedControl(
                 selection: $filter,
                 options: Filter.allCases.map { InkSegment(value: $0, title: $0.title) }
             )
-            .frame(maxWidth: 520)
-            Spacer()
-            Menu {
-                Button("Add Folder…") { addFolder() }
-                Button("Add App…") { addApplication() }
-            } label: {
-                Label("Add", systemImage: "plus")
-                    .font(AQDesign.TypeToken.label)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            .frame(maxWidth: .infinity)
+            HStack(spacing: House.Spacing.sm) {
+                if filter == .hidden, !viewModel.hiddenLauncherItems.isEmpty {
+                    Button {
+                        viewModel.restoreAllHiddenItems()
+                    } label: {
+                        Label("Restore All", systemImage: "arrow.uturn.backward")
+                            .font(AQDesign.TypeToken.label)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .help("Bring every hidden item back into Quick Launch")
+                }
+                Spacer()
+                Menu {
+                    Button("Add Folder…") { addFolder() }
+                    Button("Add App…") { addApplication() }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Add a folder or an app that is not in the list")
+                searchField
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Add a folder or an app that is not in the list")
-            searchField
         }
     }
 
@@ -233,8 +298,10 @@ struct ItemsSettingsView: View {
         HStack(spacing: House.Spacing.sm) {
             SectionLabel(text: "Name").frame(maxWidth: .infinity, alignment: .leading)
             SectionLabel(text: "Type").frame(width: 84, alignment: .leading)
-            SectionLabel(text: "Alias").frame(width: 150, alignment: .leading)
-            SectionLabel(text: "Hotkey").frame(width: 150, alignment: .leading)
+            if filter != .hidden {
+                SectionLabel(text: "Alias").frame(width: 150, alignment: .leading)
+                SectionLabel(text: "Hotkey").frame(width: 150, alignment: .leading)
+            }
         }
         .padding(.horizontal, House.Spacing.sm)
         .frame(minHeight: House.Control.chip)
@@ -243,51 +310,11 @@ struct ItemsSettingsView: View {
     @ViewBuilder
     private func rowView(_ row: Row) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: House.Spacing.sm) {
-                HStack(spacing: AQDesign.Space.standard) {
-                    IconTile(fillsTile: isApplication(row)) { icon(for: row) }
-                    Text(row.name)
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Text(row.typeLabel)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                    .frame(width: 84, alignment: .leading)
-                TextField("None", text: aliasBinding(for: row))
-                    .textFieldStyle(.plain)
-                    .font(AQDesign.TypeToken.body)
-                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    .padding(.horizontal, AQDesign.Space.standard)
-                    .frame(width: 150, height: AQDesign.tileSize)
-                    .background(
-                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
-                            .fill(AQDesign.ColorToken.surfaceFill)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
-                            .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
-                    )
-                CompactHotkeyRecorder(hotkey: hotkeyBinding(for: row))
-                    .frame(width: 150, alignment: .leading)
-                if isCustom(row) {
-                    Button {
-                        pendingRemoval = row
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(AQDesign.TypeToken.caption)
-                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(removeHelp(for: row))
-                    .accessibilityLabel(removeHelp(for: row))
-                }
+            if case .hidden(let configuration) = row {
+                hiddenRowView(row, configuration: configuration)
+            } else {
+                editingRowView(row)
             }
-            .padding(.horizontal, House.Spacing.sm)
-            .frame(minHeight: House.Control.railRow)
             if let conflict = conflict(for: row) {
                 Text(conflict)
                     .font(AQDesign.TypeToken.caption)
@@ -306,6 +333,95 @@ struct ItemsSettingsView: View {
         }
     }
 
+    /// A hidden record: name, kind, availability, and Restore. Its item may
+    /// be gone, so there is no alias or hotkey control to show.
+    private func hiddenRowView(_ row: Row, configuration: LauncherItemConfiguration) -> some View {
+        let isAvailable = viewModel.hiddenLauncherItemExists(configuration)
+        return HStack(spacing: House.Spacing.sm) {
+            HStack(spacing: AQDesign.Space.standard) {
+                IconTile(fillsTile: false) { icon(for: row) }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.name)
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if !isAvailable {
+                        Text("Source unavailable")
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(row.typeLabel)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .frame(width: 84, alignment: .leading)
+            Button {
+                viewModel.restoreHiddenItem(configuration)
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            }
+            .buttonStyle(.plain)
+            .help("Bring \(row.name) back into Quick Launch")
+            .accessibilityLabel("Restore \(row.name)")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, House.Spacing.sm)
+        .frame(minHeight: House.Control.railRow)
+    }
+
+    private func editingRowView(_ row: Row) -> some View {
+        HStack(spacing: House.Spacing.sm) {
+            HStack(spacing: AQDesign.Space.standard) {
+                IconTile(fillsTile: isApplication(row)) { icon(for: row) }
+                Text(row.name)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(row.typeLabel)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .frame(width: 84, alignment: .leading)
+            TextField("None", text: aliasBinding(for: row))
+                .textFieldStyle(.plain)
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                .padding(.horizontal, AQDesign.Space.standard)
+                .frame(width: 150, height: AQDesign.tileSize)
+                .background(
+                    RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                        .fill(AQDesign.ColorToken.surfaceFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AQDesign.fieldCornerRadius, style: .continuous)
+                        .strokeBorder(AQDesign.ColorToken.tileStroke, lineWidth: AQDesign.hairline)
+                )
+            CompactHotkeyRecorder(hotkey: hotkeyBinding(for: row))
+                .frame(width: 150, alignment: .leading)
+            if isCustom(row) {
+                Button {
+                    pendingRemoval = row
+                } label: {
+                    Image(systemName: "trash")
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help(removeHelp(for: row))
+                .accessibilityLabel(removeHelp(for: row))
+            }
+        }
+        .padding(.horizontal, House.Spacing.sm)
+        .frame(minHeight: House.Control.railRow)
+    }
+
     private func isApplication(_ row: Row) -> Bool {
         if case .application = row { return true }
         return false
@@ -322,6 +438,8 @@ struct ItemsSettingsView: View {
         case .item(let item):
             return item.kind == .folder
                 && !FolderLocationService.builtIn.contains { $0.id == item.itemID }
+        case .hidden:
+            return false
         }
     }
 
@@ -335,6 +453,8 @@ struct ItemsSettingsView: View {
             viewModel.removeCustomApplication(application)
         case .item(let item):
             viewModel.removeCustomFolder(item)
+        case .hidden:
+            break
         }
     }
 
@@ -348,6 +468,16 @@ struct ItemsSettingsView: View {
             Image(systemName: item.systemImage)
                 .font(AQDesign.TypeToken.caption)
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
+        case .hidden(let configuration):
+            Image(systemName: LauncherCatalogItem(
+                kind: configuration.kind,
+                itemID: configuration.itemID,
+                title: "",
+                detail: "",
+                value: ""
+            ).systemImage)
+            .font(AQDesign.TypeToken.caption)
+            .foregroundStyle(AQDesign.ColorToken.textSecondary)
         }
     }
 
@@ -355,6 +485,7 @@ struct ItemsSettingsView: View {
         switch row {
         case .application(let application): viewModel.applicationAlias(for: application)
         case .item(let item): viewModel.launcherItemAlias(for: item)
+        case .hidden: ""
         }
     }
 
@@ -365,6 +496,7 @@ struct ItemsSettingsView: View {
                 switch row {
                 case .application(let application): viewModel.setApplicationAlias(value, for: application)
                 case .item(let item): viewModel.setLauncherItemAlias(value, for: item)
+                case .hidden: break
                 }
             }
         )
@@ -376,12 +508,14 @@ struct ItemsSettingsView: View {
                 switch row {
                 case .application(let application): viewModel.applicationHotkey(for: application)
                 case .item(let item): viewModel.launcherItemHotkey(for: item)
+                case .hidden: nil
                 }
             },
             set: { value in
                 switch row {
                 case .application(let application): viewModel.setApplicationHotkey(value, for: application)
                 case .item(let item): viewModel.setLauncherItemHotkey(value, for: item)
+                case .hidden: break
                 }
             }
         )
@@ -391,6 +525,7 @@ struct ItemsSettingsView: View {
         switch row {
         case .application(let application): viewModel.applicationConfigurationConflict(for: application)
         case .item(let item): viewModel.launcherItemConfigurationConflict(for: item)
+        case .hidden: nil
         }
     }
 }

@@ -253,6 +253,9 @@ struct AIChatRail: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var renameFocused: Bool
     @FocusState private var actionSearchFocused: Bool
+    /// The archive's size for the footer, and the last export's outcome.
+    @State private var storageLine: String?
+    @State private var actionNotice: String?
 
     var body: some View {
         let items = model.railItems
@@ -295,9 +298,11 @@ struct AIChatRail: View {
             if model.railActionsPresented {
                 rowActions
             }
+            railFooter
         }
         .background(AQDesign.ColorToken.sidebarSurface)
         .clipped()
+        .task(id: model.railItems.count) { await refreshStorage() }
         .onAppear { if model.focus == .rail { FocusRequest.apply($searchFocused) } }
         .onChange(of: model.railFocusRequest) { _, _ in FocusRequest.apply($searchFocused) }
         .onChange(of: model.renameFocusRequest) { _, _ in FocusRequest.apply($renameFocused) }
@@ -537,6 +542,103 @@ struct AIChatRail: View {
         .padding(House.Spacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chat actions")
+    }
+
+    // MARK: - Export and storage
+
+    /// Export and storage sit under the rows: the rail stays the one chat
+    /// library, and nothing here duplicates it. Export writes the archived
+    /// record, not the in-memory projection.
+    private var railFooter: some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+            Rectangle()
+                .fill(AQDesign.ColorToken.divider)
+                .frame(height: AQDesign.hairline)
+            Button {
+                exportChat()
+            } label: {
+                HStack(spacing: House.Spacing.xs) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .frame(width: House.Control.keyCap)
+                        .accessibilityHidden(true)
+                    Text("Export Chat")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, House.Spacing.xs)
+                .frame(height: House.Control.railRow)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(exportableChatID == nil)
+            .accessibilityLabel("Export Chat")
+            .help("Export the highlighted chat as JSON")
+            if let storageLine {
+                Text(storageLine)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, House.Spacing.xs)
+            }
+            if let actionNotice {
+                Text(actionNotice)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, House.Spacing.xs)
+            }
+        }
+        .padding(.bottom, House.Spacing.xs)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chat storage")
+    }
+
+    private var exportableChatID: String? {
+        model.highlightedRailItem?.itemID ?? model.openChatItemID
+    }
+
+    private func exportChat() {
+        guard let archive = model.chat.chatArchive, let id = exportableChatID else {
+            actionNotice = "No chat to export."
+            return
+        }
+        let title = (model.highlightedRailItem ?? model.railItems.first { $0.itemID == id })?.title ?? "Chat"
+        Task {
+            do {
+                let data = try await archive.export(id: id)
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "\(title).json"
+                panel.canCreateDirectories = true
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                try data.write(to: url, options: .atomic)
+                actionNotice = "Exported \(panel.nameFieldStringValue)"
+            } catch {
+                actionNotice = "Could not export: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func refreshStorage() async {
+        guard let archive = model.chat.chatArchive else {
+            storageLine = nil
+            return
+        }
+        guard let usage = try? await archive.usage() else {
+            storageLine = "Storage unavailable"
+            return
+        }
+        var parts = ["\(usage.conversationCount) chat\(usage.conversationCount == 1 ? "" : "s")"]
+        if usage.artifactBytes > 0 {
+            parts.append(usage.artifactBytes.formatted(.byteCount(style: .file)))
+        }
+        if usage.damagedConversationCount > 0 {
+            parts.append("\(usage.damagedConversationCount) damaged")
+        }
+        storageLine = parts.joined(separator: " · ")
     }
 }
 

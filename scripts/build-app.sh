@@ -67,6 +67,11 @@ fi
 /usr/libexec/PlistBuddy -c "Add :QuickLaunchBuiltFromCommit string ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Set :QuickLaunchBuiltFromCommit ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null
 
+# RTI consumes this same package from a different repository. Record the
+# source fingerprint as well as the app commit so either installed app can
+# identify the shared implementation it contains.
+python3 "$ROOT_DIR/scripts/chat-core-provenance.py" --plist "$APP_BUNDLE/Contents/Info.plist"
+
 [[ -f "$ICON_SOURCE" ]] && cp "$ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]] && cp "$ROOT_DIR/PrivacyInfo.xcprivacy" "$APP_BUNDLE/Contents/Resources/"
 

@@ -198,8 +198,14 @@ struct ProcessRunnerTests {
 
     @Test func serviceRemoteCommandsArePinned() {
         #expect(
-            SSHVaultSearchService.remoteArguments(remoteScript: "/r/vs.py", mode: .history)
-                == ["python3", "/r/vs.py", "history", "--stdin", "--limit", "10", "--json"]
+            SSHVaultSearchService.remoteArguments(remoteScript: "/r/vs.py", mode: .current)
+                == ["python3", "/r/vs.py", "current", "--stdin", "--limit", "10", "--json"]
+        )
+        // History declares --project required, so its call carries the slug the
+        // server-side scope resolver returned.
+        #expect(
+            SSHVaultSearchService.remoteArguments(remoteScript: "/r/vs.py", mode: .history, project: "acme-launch")
+                == ["python3", "/r/vs.py", "history", "--stdin", "--limit", "10", "--json", "--project", "acme-launch"]
         )
         #expect(
             WebPageReader.remoteCommand(for: URL(string: "https://a.example/p?q=it's")!)

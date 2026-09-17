@@ -1,4 +1,5 @@
 import Foundation
+import HouseChatCore
 
 /// How a chosen reasoning effort is written into a chat-completions body.
 ///
@@ -29,18 +30,54 @@ enum ReasoningEffortWireFormat: Sendable, Hashable, CaseIterable {
     /// The body fields a chosen effort adds. Empty when there is no effort to
     /// send, which is what leaves the request body exactly as it was before
     /// the setting existed.
-    func fields(for effort: ReasoningEffort?) -> [String: Any] {
-        guard let effort, effort != .modelDefault else { return [:] }
-        switch self {
-        case .openAI:
-            return ["reasoning_effort": effort.rawValue]
-        case .deepSeek:
-            return [
-                "thinking": ["type": "enabled"],
-                "reasoning_effort": effort.rawValue,
-            ]
+    ///
+    /// `thinkingSupported` is what a known thinking-capable model adds: with
+    /// the model default and no directive, DeepSeek's own default is a
+    /// judgement the app does not want to make silently, so "Fast" travels as
+    /// an explicit `thinking.type = disabled`. Every endpoint that does not
+    /// take the directive keeps sending nothing, and an unset effort sends
+    /// nothing at all, so nothing global is retuned.
+    func fields(for effort: ReasoningEffort?, thinkingSupported: Bool = false) -> [String: Any] {
+        guard let effort else { return [:] }
+        switch effort {
+        case .modelDefault:
+            guard thinkingSupported else { return [:] }
+            switch self {
+            case .deepSeek:
+                return ["thinking": ["type": "disabled"]]
+            case .openAI:
+                // The OpenAI shape has no "off" directive: omitting the
+                // parameter is how a caller asks for no extended reasoning.
+                return [:]
+            }
+        case .low, .high:
+            switch self {
+            case .openAI:
+                return ["reasoning_effort": effort.rawValue]
+            case .deepSeek:
+                return [
+                    "thinking": ["type": "enabled"],
+                    "reasoning_effort": effort.rawValue,
+                ]
+            }
         }
     }
+}
+
+/// One model request the tool loop is about to send, handed to
+/// `beforeRequest` before the network call so the caller can make the exact
+/// body durable first. A throw from the hook cancels the turn before the
+/// request goes out, which is what makes a failed snapshot block the send.
+///
+/// The body is the same bytes the provider receives; credentials are never in
+/// it, because the API key travels in a header.
+struct ProviderRequestRound: Sendable, Equatable {
+    /// 0 for the turn's first request, then one per tool round.
+    var round: Int
+    /// The exact HTTP body this round will send.
+    var body: Data
+    /// What the caller files the body under ("requestSansKey").
+    var kind: String
 }
 
 /// Streaming OpenAI Chat Completions client. One instance per request;
@@ -92,6 +129,13 @@ struct OpenAICompatibleService: QuickService, Sendable {
     /// How this endpoint spells that effort. Defaults to the endpoint's own
     /// shape, so a caller only has to pass the effort itself.
     let reasoningEffortFormat: ReasoningEffortWireFormat
+    /// Whether the provider takes an explicit thinking directive for this
+    /// model. False keeps an unset effort out of the body entirely, which is
+    /// the shape every endpoint accepted before this existed.
+    let thinkingSupported: Bool
+    /// Called with the exact body of each round before that round's request
+    /// goes out. A throw stops the loop before the network call.
+    let beforeRequest: (@Sendable (ProviderRequestRound) async throws -> Void)?
     private let session: URLSession
 
     static let systemPrompt = QuickSettings.defaultSystemPrompt
@@ -128,6 +172,8 @@ struct OpenAICompatibleService: QuickService, Sendable {
         toolTimeBudget: Duration = OpenAICompatibleService.defaultToolTimeBudget,
         reasoningEffort: ReasoningEffort? = nil,
         reasoningEffortFormat: ReasoningEffortWireFormat? = nil,
+        thinkingSupported: Bool = false,
+        beforeRequest: (@Sendable (ProviderRequestRound) async throws -> Void)? = nil,
         session: URLSession = .shared
     ) {
         self.baseURL = baseURL
@@ -142,6 +188,8 @@ struct OpenAICompatibleService: QuickService, Sendable {
         self.toolTimeBudget = toolTimeBudget
         self.reasoningEffort = reasoningEffort
         self.reasoningEffortFormat = reasoningEffortFormat ?? .forEndpoint(baseURL)
+        self.thinkingSupported = thinkingSupported
+        self.beforeRequest = beforeRequest
         self.session = session
     }
 
@@ -253,7 +301,10 @@ struct OpenAICompatibleService: QuickService, Sendable {
         }
         // Nothing is added when there is no effort to send, so an unset
         // effort produces the same body this service always produced.
-        for (key, value) in reasoningEffortFormat.fields(for: reasoningEffort) {
+        for (key, value) in reasoningEffortFormat.fields(
+            for: reasoningEffort,
+            thinkingSupported: thinkingSupported
+        ) {
             body[key] = value
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -388,6 +439,12 @@ struct OpenAICompatibleService: QuickService, Sendable {
         var reportedTrim = attachmentTrim
         var answerNow = false
         var round = 0
+        // How many model requests this turn has sent, 0 for the first. It is
+        // the round the snapshot hook files the exact body under.
+        var requestIndex = 0
+        // Tokens the provider reported across this turn's requests. Empty
+        // when none did: nothing is invented.
+        var reportedUsage = TokenUsage()
 
         while true {
             let fitted = contextBudget.fit(transcript)
@@ -397,19 +454,35 @@ struct OpenAICompatibleService: QuickService, Sendable {
             let toolCalls = try await streamOneRound(
                 transcript: transcript,
                 answerNow: answerNow,
+                round: requestIndex,
+                usage: &reportedUsage,
                 continuation: continuation
             )
+            requestIndex += 1
             // A final round that asks for tools anyway ends the loop: the
             // model had its chance to answer.
             guard !toolCalls.isEmpty, !answerNow else { return }
             round += 1
             transcript.append(Self.assistantToolCallMessage(toolCalls))
+            let roundStarted = clock.now
+            let roundStartedAt = Date()
+            var calls: [ToolCall] = []
             for call in toolCalls {
                 try Task.checkCancellation()
                 if call.name == "ask_user_question" {
                     let waitStarted = clock.now
-                    transcript.append(await askResult(for: call, continuation: continuation))
+                    let (content, status) = await askResult(for: call, continuation: continuation)
                     waitedOnUser += clock.now - waitStarted
+                    transcript.append(Self.toolResult(call, content: content))
+                    // The wait on the user is theirs, not the tool's: the
+                    // call records only that it was answered or dismissed.
+                    calls.append(Self.toolCall(
+                        call,
+                        status: status,
+                        summary: nil,
+                        elapsed: .zero,
+                        adapter: self.askUserQuestion == nil ? "unavailable" : "question"
+                    ))
                     continue
                 }
                 let left = remaining()
@@ -417,20 +490,102 @@ struct OpenAICompatibleService: QuickService, Sendable {
                     let outcome = ChatToolbox.outOfTime(call.name)
                     continuation.yield(StreamDelta(text: nil, finishReason: nil, toolRecord: outcome.record))
                     transcript.append(Self.toolResult(call, content: outcome.content))
+                    calls.append(Self.toolCall(
+                        call,
+                        status: .cancelled,
+                        summary: outcome.record.summary,
+                        elapsed: .zero
+                    ))
                     continue
                 }
+                let callStarted = clock.now
                 let outcome = await run(call, within: left, continuation: continuation)
+                let elapsed = clock.now - callStarted
                 if let record = outcome.record {
                     continuation.yield(StreamDelta(text: nil, finishReason: nil, toolRecord: record))
                 }
                 transcript.append(Self.toolResult(call, content: outcome.content))
+                calls.append(Self.toolCall(
+                    call,
+                    status: outcome.status,
+                    summary: outcome.record?.summary,
+                    elapsed: elapsed,
+                    adapter: outcome.adapter
+                ))
             }
+            // One round is one model-to-tools-to-model step: its calls, how
+            // it ended, and how long it took. It is emitted when it is
+            // complete, so a checkpoint never records a half-run round.
+            let roundFinished = clock.now
+            continuation.yield(StreamDelta(
+                text: nil,
+                finishReason: nil,
+                toolRound: ToolRound(
+                    index: round,
+                    calls: calls,
+                    status: Self.roundStatus(of: calls),
+                    startedAt: roundStartedAt,
+                    finishedAt: Date(),
+                    durationSeconds: (roundFinished - roundStarted).secondsValue
+                )
+            ))
             try Task.checkCancellation()
             if round >= Self.maxToolRounds || remaining() <= .zero {
                 answerNow = true
                 Self.appendAnswerNowNote(to: &transcript)
             }
         }
+    }
+
+    /// How a round ended, from its calls: any cancellation wins, then every
+    /// call refused, then any failure, otherwise the round succeeded.
+    static func roundStatus(of calls: [ToolCall]) -> ToolRoundStatus {
+        if calls.contains(where: { $0.status == .cancelled }) { return .cancelled }
+        if !calls.isEmpty, calls.allSatisfy({ $0.status == .refused }) { return .refused }
+        if calls.contains(where: { $0.status == .failed }) { return .failed }
+        return .succeeded
+    }
+
+    /// One call's telemetry. `arguments` and the result summary keep the
+    /// model's own text, with credential-shaped content redacted by the
+    /// shared helper; the user's originals are never rewritten.
+    private static func toolCall(
+        _ call: PendingToolCall,
+        status: ToolRoundStatus,
+        summary: String?,
+        elapsed: Duration,
+        adapter: String? = nil
+    ) -> ToolCall {
+        ToolCall(
+            id: call.id,
+            name: call.name,
+            arguments: SecretRedactor.redact(call.arguments),
+            resultSummary: summary.map(SecretRedactor.redact),
+            status: status,
+            durationSeconds: elapsed.secondsValue,
+            error: status == .failed ? summary.map(SecretRedactor.redact) : nil,
+            extra: adapterFields(for: adapter ?? adapterName(for: call.name))
+        )
+    }
+
+    /// Which backend ran the call, as a fact about the adapter rather than a
+    /// guess from the result's prose.
+    static func adapterName(for toolName: String) -> String {
+        switch toolName {
+        case "search_web": "web"
+        case "ask_user_question": "question"
+        case ChatToolbox.Name.recallMemory, ChatToolbox.Name.recallCapturesToday: "memory"
+        case ChatToolbox.Name.recallTasksToday, ChatToolbox.Name.recallOpenTasks: "tasks"
+        case ChatToolbox.Name.searchVault: "vault"
+        case ChatToolbox.Name.readSkill: "skills"
+        default: "unavailable"
+        }
+    }
+
+    private static func adapterFields(for adapter: String) -> ExtraFields {
+        var fields = ExtraFields()
+        fields["adapter"] = JSONValue.string(adapter)
+        return fields
     }
 
     /// Reports a trim the thread has not heard about yet. The record is
@@ -460,10 +615,14 @@ struct OpenAICompatibleService: QuickService, Sendable {
         transcript[last]["content"] = content + "\n\n" + answerNowNote
     }
 
-    /// One call's result text, and its thread line when it has one.
+    /// One call's result text, its thread line, and how it ended.
     private struct CallOutcome: Sendable {
         let content: String
         let record: ChatToolRecord?
+        var status: ToolRoundStatus = .succeeded
+        /// Which backend actually answered. Nil falls back to the tool name's
+        /// own adapter; an unoffered tool resolves to "unavailable".
+        var adapter: String? = nil
     }
 
     /// Runs one non-question call, raced against the loop's remaining time
@@ -489,13 +648,18 @@ struct OpenAICompatibleService: QuickService, Sendable {
         }
         if let result { return result }
         let outOfTime = ChatToolbox.outOfTime(call.name)
-        return CallOutcome(content: outOfTime.content, record: outOfTime.record)
+        return CallOutcome(content: outOfTime.content, record: outOfTime.record, status: .cancelled)
     }
 
     private func execute(_ call: PendingToolCall) async -> CallOutcome {
         if call.name == "search_web" {
             guard let webSearch else {
-                return CallOutcome(content: "The search_web tool is unavailable.", record: nil)
+                return CallOutcome(
+                    content: "The search_web tool is unavailable.",
+                    record: nil,
+                    status: .refused,
+                    adapter: "unavailable"
+                )
             }
             let query = Self.queryArgument(from: call.arguments)
             do {
@@ -507,30 +671,39 @@ struct OpenAICompatibleService: QuickService, Sendable {
             } catch {
                 return CallOutcome(
                     content: Self.wrappedSearchResult("Search failed: \(error.localizedDescription)"),
-                    record: ChatToolRecord(kind: .web, summary: "Web search failed")
+                    record: ChatToolRecord(kind: .web, summary: "Web search failed"),
+                    status: .failed
                 )
             }
         }
         if let outcome = await tools.run(call.name, arguments: call.arguments) {
-            return CallOutcome(content: outcome.content, record: outcome.record)
+            // The toolbox's own status, never a guess from the result's
+            // prose: a vault or memory failure is recorded as failed.
+            return CallOutcome(content: outcome.content, record: outcome.record, status: outcome.status)
         }
-        return CallOutcome(content: "The \(call.name) tool is unavailable.", record: nil)
+        return CallOutcome(
+            content: "The \(call.name) tool is unavailable.",
+            record: nil,
+            status: .refused,
+            adapter: "unavailable"
+        )
     }
 
     /// The question card: a malformed call, or one with fewer than two
     /// usable options, never ends the turn: the reason goes back and the
-    /// model answers.
+    /// model answers. The call is `succeeded` when the user picked, and
+    /// `refused` when it was unusable or dismissed.
     private func askResult(
         for call: PendingToolCall,
         continuation: AsyncThrowingStream<StreamDelta, Error>.Continuation
-    ) async -> [String: Any] {
+    ) async -> (content: String, status: ToolRoundStatus) {
         guard let askUserQuestion else {
-            return Self.toolResult(call, content: AskUserQuestionResult.unusable("the tool is unavailable"))
+            return (AskUserQuestionResult.unusable("the tool is unavailable"), .refused)
         }
         guard let question = AskUserQuestionParser.parse(arguments: call.arguments) else {
-            return Self.toolResult(
-                call,
-                content: AskUserQuestionResult.unusable("it needs a question and at least two options with labels")
+            return (
+                AskUserQuestionResult.unusable("it needs a question and at least two options with labels"),
+                .refused
             )
         }
         continuation.yield(StreamDelta(
@@ -540,20 +713,34 @@ struct OpenAICompatibleService: QuickService, Sendable {
             question: question
         ))
         let answer = await askUserQuestion(question)
-        return Self.toolResult(
-            call,
-            content: answer.map { AskUserQuestionResult.picked($0, in: question) } ?? AskUserQuestionResult.dismissed
-        )
+        guard let answer else {
+            return (AskUserQuestionResult.dismissed, .refused)
+        }
+        return (AskUserQuestionResult.picked(answer, in: question), .succeeded)
     }
 
     /// Streams one chat-completions round into `continuation` and returns
     /// the tool calls the model requested (empty when it answered directly).
+    ///
+    /// The exact body of the round is handed to `beforeRequest` before the
+    /// request goes out; a throw there stops the loop before any network
+    /// call. Usage the provider reports is accumulated into `usage` and
+    /// yielded as it arrives; nothing is invented when it reports none.
     private func streamOneRound(
         transcript: [[String: Any]],
         answerNow: Bool,
+        round: Int,
+        usage: inout TokenUsage,
         continuation: AsyncThrowingStream<StreamDelta, Error>.Continuation
     ) async throws -> [PendingToolCall] {
         let request = try buildRequest(wireMessages: transcript, answerNow: answerNow)
+        if let beforeRequest {
+            try await beforeRequest(ProviderRequestRound(
+                round: round,
+                body: request.httpBody ?? Data(),
+                kind: "requestSansKey"
+            ))
+        }
         let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw QuickServiceError.connectionFailed("Invalid HTTP response")
@@ -570,8 +757,20 @@ struct OpenAICompatibleService: QuickService, Sendable {
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
             guard let data = payload.data(using: .utf8),
-                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = object["choices"] as? [[String: Any]],
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            // A provider that reports usage gets it recorded; one that does
+            // not leaves the turn's usage explicitly absent. The report may
+            // arrive on a final chunk with no choices, so it is read before
+            // the choices guard below.
+            if let reported = object["usage"] as? [String: Any] {
+                let parsed = Self.tokenUsage(from: reported)
+                if !parsed.isEmpty {
+                    usage = usage.adding(parsed)
+                    continuation.yield(StreamDelta(text: nil, finishReason: nil, usage: usage))
+                }
+            }
+            guard let choices = object["choices"] as? [[String: Any]],
                   let choice = choices.first
             else { continue }
             let delta = choice["delta"] as? [String: Any]
@@ -638,6 +837,22 @@ struct OpenAICompatibleService: QuickService, Sendable {
               let query = object["query"] as? String
         else { return arguments }
         return query
+    }
+
+    /// The token counts a provider reported for one request, in the shape
+    /// OpenAI-compatible servers use. A field the provider did not send stays
+    /// absent rather than being filled with a guess; a report with nothing in
+    /// it returns an empty usage, which the caller ignores.
+    static func tokenUsage(from object: [String: Any]) -> TokenUsage {
+        var usage = TokenUsage()
+        if let value = object["prompt_tokens"] as? Int { usage.inputTokens = value }
+        if let value = object["completion_tokens"] as? Int { usage.outputTokens = value }
+        if let value = object["total_tokens"] as? Int { usage.totalTokens = value }
+        if let details = object["prompt_tokens_details"] as? [String: Any],
+           let cached = details["cached_tokens"] as? Int {
+            usage.cachedInputTokens = cached
+        }
+        return usage
     }
 
     static func wrappedSearchResult(_ result: String) -> String {

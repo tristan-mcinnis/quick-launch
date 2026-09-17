@@ -36,6 +36,12 @@ check-clean:
 
 install: check-clean build-app
 	-osascript -e 'tell application "Quick Launch" to quit'
+	@for attempt in $$(seq 1 20); do \
+		pgrep -x quick-launch >/dev/null || break; sleep 0.5; \
+	done; \
+	if pgrep -x quick-launch >/dev/null; then \
+		echo "Quick Launch did not quit; refusing to replace the running app." >&2; exit 1; \
+	fi
 	rm -rf "/Applications/Quick Launch.app"
 	/usr/bin/ditto "build/Quick Launch.app" "/Applications/Quick Launch.app"
 	codesign --verify --deep --strict --verbose=2 "/Applications/Quick Launch.app"

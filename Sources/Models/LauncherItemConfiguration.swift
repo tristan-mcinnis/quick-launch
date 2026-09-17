@@ -31,16 +31,28 @@ struct LauncherItemConfiguration: Codable, Equatable, Hashable, Identifiable, Se
     /// Pinned items sit at the top of their catalog (snippets, quick links,
     /// screenshots). Clipboard entries and chats keep their pin in their own store.
     var isPinned: Bool = false
+    /// Hidden from launcher search and every catalog. The record stays so
+    /// the item can be restored, and a hidden item keeps its alias, hotkey,
+    /// and pin. Hiding is reversible; it never deletes the source.
+    var isHidden: Bool = false
+    /// The label captured when the item was hidden, so Settings › Items ›
+    /// Hidden can list a record whose item is missing or uninstalled. A
+    /// clipboard or chat row titles itself from the user's own text, so its
+    /// hidden record keeps no title and Settings shows a neutral label.
+    var hiddenTitle: String?
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
     /// Nothing set: the record can be dropped from settings.
     var isEmpty: Bool {
-        alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hotkey == nil && !isPinned
+        alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && hotkey == nil
+            && !isPinned
+            && !isHidden
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, itemID, alias, hotkey, isPinned
+        case kind, itemID, alias, hotkey, isPinned, isHidden, hiddenTitle
     }
 }
 
@@ -53,5 +65,7 @@ extension LauncherItemConfiguration {
         alias = try c.decodeIfPresent(String.self, forKey: .alias) ?? ""
         hotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .hotkey)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        hiddenTitle = try c.decodeIfPresent(String.self, forKey: .hiddenTitle)
     }
 }

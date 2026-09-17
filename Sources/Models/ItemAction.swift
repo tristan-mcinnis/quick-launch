@@ -166,7 +166,11 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case quickLook
     case quit
     case forceQuit
+    /// Hide every window of a running app (macOS Hide).
     case hide
+    /// Hide the row itself from launcher search and its catalog. Reversible
+    /// in Settings › Items › Hidden; it never deletes the source.
+    case hideFromLauncher
     case relaunch
     case copyCleanLink
     case showTimeline
@@ -215,7 +219,7 @@ enum ItemActionCatalog {
             ]
             if isRunning {
                 actions += [
-                    ItemAction(kind: .hide, title: "Hide", systemImage: "eye.slash", shortcut: .commandOption("h")),
+                    ItemAction(kind: .hide, title: "Hide Windows", systemImage: "eye.slash", shortcut: .commandOption("h")),
                     ItemAction(kind: .quit, title: "Quit", systemImage: "xmark.circle", shortcut: .commandShift("q")),
                     ItemAction(kind: .relaunch, title: "Relaunch", systemImage: "arrow.clockwise.circle", shortcut: .commandShift("r")),
                     ItemAction(kind: .forceQuit, title: "Force Quit", systemImage: "exclamationmark.octagon", shortcut: .commandOption("q"), isDestructive: true),

@@ -145,7 +145,7 @@ struct ChatListsTests {
     @Test func everyChatRowOffersOpenInAIChatWithCommandJ() throws {
         let rig = makeRig()
         rig.launcher.history = threeChats()
-        let expected = ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Unpin", "Delete Chat"]
+        let expected = ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Unpin", "Hide from Quick Launch", "Delete Chat"]
 
         // The root Chats catalog.
         rig.launcher.input = ""

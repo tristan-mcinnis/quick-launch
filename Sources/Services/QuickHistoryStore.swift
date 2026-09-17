@@ -5,9 +5,24 @@ import Foundation
 /// Earlier builds kept the same array as a JSON blob under a UserDefaults
 /// key. The first load that finds no file copies that blob into the file
 /// and removes the key.
+/// How a legacy history file loaded.
+///
+/// `corrupt` is distinct from `missing` on purpose: a damaged legacy file is
+/// rollback evidence, and it must never be treated as an empty store (which a
+/// later save would overwrite). The archive is the authority; this file is
+/// only the UI cache.
+enum QuickHistoryLoad: Sendable, Equatable {
+    case loaded([QuickConversation])
+    case missing
+    case corrupt
+}
+
 enum QuickHistoryStore {
     static let defaultsKey = "QuickConversationHistory"
     static let fileName = "chat-history.json"
+    /// The pre-archive copy kept beside the cache, for rolling the cutover
+    /// back. The archive never deletes it.
+    static let rollbackFileName = "chat-history.pre-archive.json"
     static let schemaVersion = 1
     /// Settings › History › "Chats to keep": how many unpinned chats stay.
     /// Pinned chats are never counted and never pruned.
@@ -33,14 +48,57 @@ enum QuickHistoryStore {
         from fileURL: URL = defaultFileURL(),
         migratingFrom defaults: UserDefaults? = .standard
     ) -> [QuickConversation] {
+        switch loadResult(from: fileURL, migratingFrom: defaults) {
+        case .loaded(let conversations): return ordered(conversations)
+        case .missing, .corrupt: return []
+        }
+    }
+
+    /// Loads the legacy cache and says which of the three cases it was. A
+    /// corrupt file is reported, never silently read as empty.
+    static func loadResult(
+        from fileURL: URL = defaultFileURL(),
+        migratingFrom defaults: UserDefaults? = .standard
+    ) -> QuickHistoryLoad {
         let store = store(for: fileURL)
         if let conversations = store.load() {
-            return ordered(conversations)
+            return .loaded(ordered(conversations))
         }
-        guard !store.exists, let defaults, let migrated = migrate(from: defaults, into: store) else {
-            return []
+        guard !store.exists else {
+            AppLog.persistence.error(
+                "Chat history at \(fileName, privacy: .public) is damaged; keeping it as rollback data."
+            )
+            return .corrupt
         }
-        return ordered(migrated)
+        guard let defaults, let migrated = migrate(from: defaults, into: store) else {
+            return .missing
+        }
+        return .loaded(ordered(migrated))
+    }
+
+    /// Copies the legacy file aside once, before the archive becomes the
+    /// authority. Returns the backup URL when it made one, nil when there was
+    /// nothing to back up or the copy already exists. The legacy file itself
+    /// is left untouched: it is the rollback path until the cutover is
+    /// verified.
+    @discardableResult
+    static func backupForRollback(from fileURL: URL = defaultFileURL()) throws -> URL? {
+        let backup = fileURL.deletingLastPathComponent().appendingPathComponent(rollbackFileName)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        guard !FileManager.default.fileExists(atPath: backup.path) else { return backup }
+        try FileManager.default.copyItem(at: fileURL, to: backup)
+        return backup
+    }
+
+    /// Writes the archive's projection back into the legacy file as a cache.
+    /// The `limit` bounds only this UI cache; the canonical archive is never
+    /// capped, and the full history reads from the archive, not here.
+    static func rebuildCache(
+        _ conversations: [QuickConversation],
+        limit: Int = defaultLimit,
+        to fileURL: URL = defaultFileURL()
+    ) {
+        save(conversations, limit: limit, to: fileURL)
     }
 
     /// Moves the UserDefaults blob into the file. Returns what was moved.
@@ -84,10 +142,7 @@ enum QuickHistoryStore {
 
     /// Pinned chats first, then newest first.
     static func ordered(_ conversations: [QuickConversation]) -> [QuickConversation] {
-        conversations.sorted { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
-            return lhs.updatedAt > rhs.updatedAt
-        }
+        QuickHistoryOrdering.ordered(conversations)
     }
 
     /// The one chat search every chat list uses (the Chats catalog, Recent

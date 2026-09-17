@@ -28,6 +28,10 @@ struct QuickAIThread: View {
     /// scroll waiting for its message to be laid out. Not observed: a
     /// geometry report must never redraw the thread.
     @State private var turnGeometry = TurnGeometry()
+    /// The open chat's durable record, read for the answer details under the
+    /// thread. Read-only: the view model owns the archive, and nothing here
+    /// writes to it.
+    @State private var archiveProjection = ChatArchiveProjection.unavailable
 
     /// The thread's content, where `scrollTo(y:)` measures from.
     private nonisolated static let contentSpace = "quick-ai-thread-content"
@@ -239,6 +243,30 @@ struct QuickAIThread: View {
             scroll(to: request.target)
         }
         .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
+        .task(id: archiveLoadKey) { await reloadArchiveProjection() }
+    }
+
+    /// What re-reads the archive: the chat, its turn count, and whether an
+    /// answer just stopped streaming (the answer's receipt is written then).
+    private struct ArchiveLoadKey: Equatable {
+        var conversationID: UUID?
+        var turnCount: Int
+        var isStreaming: Bool
+    }
+
+    private var archiveLoadKey: ArchiveLoadKey {
+        ArchiveLoadKey(
+            conversationID: viewModel.currentConversation?.id,
+            turnCount: viewModel.conversationMessages.count,
+            isStreaming: viewModel.isStreaming
+        )
+    }
+
+    private func reloadArchiveProjection() async {
+        archiveProjection = await ChatArchiveProjection.load(
+            from: viewModel.chatArchive,
+            conversationID: viewModel.currentConversation?.id
+        )
     }
 
     /// What the thread's scroll view reports: where its view is, how tall
@@ -367,6 +395,36 @@ struct QuickAIThread: View {
             )
             if !sources.isEmpty {
                 sourceList(sources)
+            }
+            // The durable receipt and the material the question carried,
+            // drawn only once the archive holds this answer: a chat with no
+            // archive (history off, every test) gains no line here.
+            if let archived = archiveProjection.turn(message.id) {
+                let conversationID = viewModel.currentConversation?.id.uuidString
+                ChatAnswerContextRecord(
+                    summary: ChatAnswerReceiptSummary(
+                        answer: archived,
+                        question: archiveProjection.question(before: message.id),
+                        projection: archiveProjection
+                    ),
+                    archiveFailure: nil,
+                    onOpen: {
+                        await ChatRetainedMaterialIO.open(
+                            $0,
+                            conversationID: conversationID,
+                            archive: viewModel.chatArchive
+                        )
+                    },
+                    onExport: {
+                        await ChatRetainedMaterialIO.export(
+                            $0,
+                            conversationID: conversationID,
+                            archive: viewModel.chatArchive
+                        )
+                    }
+                )
+            } else if let failure = archiveProjection.loadFailure {
+                ChatAnswerContextRecord(summary: .unrecorded, archiveFailure: failure)
             }
             ForEach(Array(records.filter { !$0.drawsAboveAnswer }.enumerated()), id: \.offset) { _, record in
                 toolLine(record.summary, symbol: record.systemImage)

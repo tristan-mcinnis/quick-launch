@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (2026-09-17)
+
+- Source-first questions share one context policy with RTI. Broader retrieval needs an explicit request or scope choice; the request record states what was actually sent.
+- Submitted chats, original files, normalized images, extraction and provider request snapshots are retained locally until explicit deletion. Canonical history is unlimited; the old JSON history file is a compatibility cache. Unsent attachment drafts are not archived.
+- Chat models stay per-chat. The selected known image-capable model takes priority; a fallback is labelled before Send. Answers retain their effective route, tool rounds, measured timings and any provider-reported usage.
+- Quick AI and AI Chat share source controls and explicit slash-command handling. `/new` cancels pending work without erasing saved chats; unknown commands stay local until Send as Text.
+- Settings explains keep-all retention and confirms deletion. Corrupt owners block cleanup, and shared source copies survive while another chat references them.
+- Launcher learning records only successful launches against the typed query. Hide from Quick Launch is separate from Hide Windows, with Restore and Restore All in Settings.
+- Vault retrieval distinguishes no match, degraded results and backend failure. History resolves a canonical project before searching it.
+- RTI consumes `HouseChatCore` and `HouseChatDocuments` from this repository. Both app build paths stamp the shared source hash before signing. Histories, settings and credentials remain separate.
+
 ## Unreleased — 2026-09-15
 
 - **Memory and Tasks are separate chat tools.** Memory searches notes and reads today's captures. Tasks reads the due-today, overdue, and in-progress sections or, when asked, the complete open backlog across both canonical task backends. Existing installs preserve the old Memory switch's read scope when the new Tasks switch first appears.

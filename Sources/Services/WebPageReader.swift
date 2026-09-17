@@ -91,6 +91,12 @@ actor WebPageReader: WebPageReading {
 
     private func readDirect(_ url: URL) async throws -> String {
         let (data, response) = try await session.data(from: url)
+        return try Self.interpret(data: data, response: response).text
+    }
+
+    /// The readable text of one direct response and the raw body it came
+    /// from. Throws for a non-2xx status or an unsupported content type.
+    nonisolated static func interpret(data: Data, response: URLResponse) throws -> (text: String, body: Data) {
         guard let http = response as? HTTPURLResponse else {
             throw PageReadError.httpStatus(-1)
         }
@@ -102,16 +108,45 @@ actor WebPageReader: WebPageReading {
         if contentType.contains("html") || contentType.contains("xml") {
             let html = String(data: data, encoding: .utf8)
                 ?? String(decoding: data, as: UTF8.self)
-            return HTMLTextExtractor.text(from: html)
+            return (HTMLTextExtractor.text(from: html), data)
         }
         if contentType.hasPrefix("text/")
             || contentType.contains("json")
             || contentType.isEmpty
         {
-            return String(data: data, encoding: .utf8)
-                ?? String(decoding: data, as: UTF8.self)
+            return (String(data: data, encoding: .utf8)
+                ?? String(decoding: data, as: UTF8.self), data)
         }
         throw PageReadError.unsupportedContentType(contentType)
+    }
+
+    /// The page text and the raw body when the direct fetch won. The VPS
+    /// fallback returns derived text only: no body was kept.
+    func readWithBody(_ url: URL) async throws -> (text: String, body: Data?) {
+        guard url.scheme == "http" || url.scheme == "https" else {
+            throw PageReadError.invalidURL
+        }
+        var direct: (text: String, body: Data?) = ("", nil)
+        do {
+            let (data, response) = try await session.data(from: url)
+            let interpreted = try Self.interpret(data: data, response: response)
+            direct = (interpreted.text.trimmingCharacters(in: .whitespacesAndNewlines), interpreted.body)
+        } catch is CancellationError {
+            throw PageReadError.timedOut
+        } catch {
+            direct = ("", nil)
+        }
+        if direct.text.count >= 200 || vpsHost == nil {
+            guard !direct.text.isEmpty else { throw PageReadError.empty }
+            return (Self.bounded(direct.text), direct.body)
+        }
+        let remoteText = try await readViaVPS(url)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if remoteText.count > direct.text.count {
+            return (Self.bounded(remoteText), nil)
+        }
+        guard !direct.text.isEmpty else { throw PageReadError.empty }
+        return (Self.bounded(direct.text), direct.body)
     }
 
     // MARK: - VPS fallback

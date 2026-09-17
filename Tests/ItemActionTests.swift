@@ -67,7 +67,7 @@ struct ItemActionTests {
         vm.handleCommandK()
         #expect(vm.isItemActionPanePresented)
         #expect(vm.activeItemActionForm == nil)
-        #expect(vm.focusedItemActions.count == 8)
+        #expect(vm.focusedItemActions.count == 9)
         vm.handleCommandK()
         #expect(!vm.isItemActionPanePresented)
     }

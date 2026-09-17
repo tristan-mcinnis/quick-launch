@@ -36,7 +36,14 @@ extension AttachmentExtractor: AttachmentExtracting {
             pixelWidth: image.pixelWidth,
             pixelHeight: image.pixelHeight
         )
-        return AttachmentContent(ref: ref, image: image, kindLabel: kind == .screenshot ? "Screenshot" : "Image")
+        // The captured or pasted bytes are the exact original submission, so
+        // the archive keeps them rather than re-reading anything.
+        return AttachmentContent(
+            ref: ref,
+            image: image,
+            kindLabel: kind == .screenshot ? "Screenshot" : "Image",
+            originalBytes: image.data
+        )
     }
 
     /// Text selected in another app, as a text attachment: NFKC, the
@@ -63,7 +70,8 @@ extension AttachmentContent {
             text: extracted.text,
             image: extracted.image,
             kindLabel: extracted.kindLabel,
-            notes: extracted.notes
+            notes: extracted.notes,
+            originalBytes: extracted.originalBytes
         )
     }
 }

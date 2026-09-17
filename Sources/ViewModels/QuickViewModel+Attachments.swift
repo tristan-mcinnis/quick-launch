@@ -171,29 +171,106 @@ extension QuickViewModel {
 
     /// A page read for a URL typed in the question, kept as a Link
     /// attachment of that message so follow-ups still have it.
-    static func pageAttachment(url: URL, text: String) -> AttachmentContent {
+    static func pageAttachment(url: URL, text: String, body: Data? = nil) -> AttachmentContent {
         let ref = ChatAttachmentRef(
             kind: .link,
             name: url.host() ?? url.absoluteString,
-            byteCount: text.utf8.count,
+            byteCount: body?.count ?? text.utf8.count,
             characterCount: text.count,
-            contentHash: AttachmentExtractor.sha256(Data(text.utf8)),
+            contentHash: AttachmentExtractor.sha256(body ?? Data(text.utf8)),
             extractorVersion: AttachmentExtractor.version,
             url: url
         )
-        return AttachmentContent(ref: ref, text: text, kindLabel: "Web page")
+        return AttachmentContent(
+            ref: ref,
+            text: text,
+            kindLabel: "Web page",
+            originalBytes: body
+        )
     }
 
-    /// Whether an image can go to a vision model: one is chosen with a
-    /// model, and a cloud one has its key. Otherwise images are read as text
-    /// on this Mac (OCR) and the chat's own model answers.
-    var visionRouteWorks: Bool {
-        guard let visionProvider, !visionModelName.isEmpty else { return false }
-        if service == nil, visionProvider.kind == .openAICompatible, visionProvider.location == .cloud,
-           (apiKeyProvider(visionProvider.id) ?? "").isEmpty {
-            return false
+    /// Whether an endpoint can actually run: a model is chosen, and a cloud
+    /// OpenAI-compatible provider has its key. The injected service (tests)
+    /// bypasses the key check; production never sets it.
+    func isRouteUsable(_ endpoint: ChatRouteEndpoint) -> Bool {
+        guard !endpoint.model.isEmpty else { return false }
+        if service != nil { return true }
+        guard endpoint.provider.kind == .openAICompatible,
+              endpoint.provider.location == .cloud
+        else { return true }
+        return !(apiKeyProvider(endpoint.provider.id) ?? "").isEmpty
+    }
+
+    /// What the app knows about one model's image input, from the curated
+    /// profile. Unknown stays unknown: never guessed either way.
+    func imageCapability(of endpoint: ChatRouteEndpoint) -> ModelImageCapability {
+        modelPreferences.profile(providerID: endpoint.provider.id, model: endpoint.model).imageCapability
+    }
+
+    /// The one route resolver. The pre-Send label and the send path both call
+    /// this, so the label cannot describe a different route than the one
+    /// that runs.
+    func resolveChatRoute(
+        hasImages: Bool,
+        hasNewImages: Bool = false,
+        actionProviderID: UUID? = nil,
+        actionModel: String? = nil
+    ) -> ResolvedChatRoute {
+        let selectedProvider = actionProviderID.flatMap { id in
+            settings.providers.first { $0.id == id }
+        } ?? activeProvider
+        guard let selectedProvider else {
+            return Self.noRouteConfigured()
         }
-        return true
+        let selected = ChatRouteEndpoint(
+            provider: selectedProvider,
+            model: resolvedModel(
+                for: selectedProvider,
+                override: actionModel ?? chatModelOverride(for: selectedProvider)
+            ) ?? ""
+        )
+        let vision = visionProvider.map { provider in
+            ChatRouteEndpoint(
+                provider: provider,
+                model: resolvedModel(
+                    for: provider,
+                    override: settings.visionModel.isEmpty ? nil : settings.visionModel
+                ) ?? ""
+            )
+        }
+        return ChatRouteResolver.resolve(ChatRouteRequest(
+            selected: selected,
+            vision: vision,
+            hasImages: hasImages,
+            hasNewImages: hasNewImages,
+            allowsTextOnlyFallback: allowImageTextFallback,
+            capability: { [self] endpoint in imageCapability(of: endpoint) },
+            isUsable: { [self] endpoint in isRouteUsable(endpoint) },
+            effort: { [self] endpoint in
+                modelPreferences.profile(providerID: endpoint.provider.id, model: endpoint.model).reasoningEffort
+            },
+            supportsThinking: { [self] endpoint in
+                modelPreferences.profile(providerID: endpoint.provider.id, model: endpoint.model)
+                    .supportsReasoningEffort
+            }
+        ))
+    }
+
+    /// Nothing is configured at all: a route that cannot run, named the way
+    /// the header and the label have always named it.
+    private static func noRouteConfigured() -> ResolvedChatRoute {
+        let placeholder = InferenceProvider(name: "the model", kind: .openAICompatible, location: .local)
+        let endpoint = ChatRouteEndpoint(provider: placeholder, model: "")
+        return ResolvedChatRoute(
+            chosen: endpoint,
+            effective: endpoint,
+            imageMode: .none,
+            isVisionFallback: false,
+            chosenRejectsImages: false,
+            thinking: .modelDefault,
+            thinkingSupported: false,
+            warning: "Choose a provider and model in Settings."
+        )
     }
 
     /// No vision route: use existing OCR text, or read current/session pixels
@@ -262,14 +339,62 @@ extension QuickViewModel {
     /// pictures ("Sent to DeepSeek API", or "Sent as text (read on this
     /// Mac)" with no vision route), "Only on this Mac" or "Sent to …" for
     /// documents, and "Will be cut to fit …" when they are over the share.
+    /// The route the next request would resolve to, computed once. The
+    /// pre-Send label and the request path both read this, so the label
+    /// cannot disagree with what is actually sent.
+    struct NextChatRoute: Equatable, Sendable {
+        var providerName: String
+        var model: String
+        var isCloud: Bool
+        var hasImages: Bool
+        var canSendImages: Bool
+        var isUsable: Bool
+        var label: String
+        /// True only when the route is a labelled vision fallback: the model
+        /// the user picked cannot read images, so this turn goes elsewhere.
+        var usedVisionFallback: Bool
+        /// Non-nil when the chosen route cannot actually send this request.
+        var warning: String?
+    }
+
+    func resolvedNextRoute() -> NextChatRoute {
+        let trayImages = attachmentTray.items.filter { !$0.isFailed && $0.kind.isImage }
+        let hasNewImages = !pendingImages.isEmpty || !trayImages.isEmpty
+        let threadImages = (currentConversation?.messages ?? [])
+            .flatMap(\.attachmentRefs)
+            .filter(\.kind.isImage)
+            .compactMap { attachmentStore.storedImage(for: $0) }
+        let hasImages = hasNewImages || !threadImages.isEmpty
+        let route = resolveChatRoute(hasImages: hasImages, hasNewImages: hasNewImages)
+        return NextChatRoute(
+            providerName: route.effective.provider.name,
+            model: route.effective.model,
+            isCloud: route.effective.provider.location == .cloud,
+            hasImages: hasImages,
+            canSendImages: route.canSendImages,
+            isUsable: route.isUsable,
+            label: route.label,
+            usedVisionFallback: route.isVisionFallback && route.chosenRejectsImages,
+            warning: route.warning
+        )
+    }
+
+    /// The pre-Send destination label and its cloud/local nature, from the
+    /// real resolved route. The composer's control and the header read these;
+    /// no view-side heuristics.
+    var chatDestinationLabel: String { resolvedNextRoute().label }
+    var chatDestinationIsCloud: Bool { resolvedNextRoute().isCloud }
+    /// Non-nil only when the chosen route is actually blocked or unusable.
+    var chatRouteWarning: String? { resolvedNextRoute().warning }
+
+    var nextRouteLabel: String { resolvedNextRoute().label }
+    var nextRouteHasImages: Bool { resolvedNextRoute().hasImages }
+    var nextRouteIsUsable: Bool { resolvedNextRoute().isUsable }
+
     var attachmentRoutingLine: String? {
+        let route = resolvedNextRoute()
+        if route.hasImages { return route.label }
         let live = attachmentTray.items.filter { !$0.isFailed }
-        let hasImage = !pendingImages.isEmpty || live.contains { $0.kind.isImage }
-        if hasImage {
-            return visionRouteWorks
-                ? visionRoutingNote.replacingOccurrences(of: "Sent ", with: "Will send ")
-                : Self.pendingImageAsTextLine
-        }
         guard !live.isEmpty, let provider = activeProvider else { return nil }
         let model = resolvedModel(for: provider, override: chatModelOverride(for: provider)) ?? ""
         let budget = attachmentContextBudget(provider: provider, model: model)

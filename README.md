@@ -382,50 +382,57 @@ field scrolls. `⇧↩` inserts a new line; `↩` sends. Paste keeps paragraphs,
 code indentation, and a trailing `@` intact. Regenerating an old answer with
 `⌘R` keeps any new draft and attachments you have prepared.
 
-**What you can attach.** PDF; Word (docx, doc, rtf, odt); PowerPoint (pptx);
+**What you can attach.** PDF; DOCX, RTF/RTFD and ODT; PowerPoint (pptx);
 Excel (xlsx); HTML; plain text, Markdown, and code; web pages; and images
 (PNG, JPEG, HEIC, TIFF, GIF, WebP). Pages, Numbers, Keynote, archives, audio,
 video, and folders are refused with a line that says why. A scanned PDF is read
 with on-device OCR (the first 10 pages without text).
 
 **Limits.** 10 attachments and 6 images a question. 50 MB a document, 20 MB an
-image, 5 MB a text file. 200,000 characters of text a file (100,000 for a web
-page) and 400,000 a question; a cut is said on the chip and to the model. A
-link is one fetch: http or https, 15 seconds, 5 MB.
+image, 5 MB a text file. File extraction retains up to 2 million characters;
+a request carries at most 200,000 characters per source and 400,000 in total,
+further reduced to the model's context budget. Long documents use bounded,
+location-labelled passage selection, not an unlabelled prefix. Partial reads
+and unmatched questions are reported. A link is one fetch: http or https,
+15 seconds, 5 MB.
 
-**How it reaches the model.** Each attachment goes in front of its question as
-one block the model is told is data, never instructions. Later questions in the
-same chat send it again, so you never re-attach for a follow-up. Pictures go to
-the vision model with their own question; with no vision model available, they
-are read as text on this Mac instead. Long attachments are cut to fit the
-model's window (older ones first), and the thread names what was cut or left
-out.
+**How it reaches the model.** Source questions use the attached or retained
+material first. The Attached sources / Broader search control shows whether
+memory, vault, web and skills can run. The same rule gates offered tools,
+execution and the conversation context sent to the model. Follow-ups can use
+saved sources after a restart without reattaching the original file.
 
-**What is stored.** Chat history keeps a reference to each attachment (its
-name, kind, size, a content hash, and the file path or link), never its text
-and never a picture. The text is held in memory while the app runs, bounded,
-oldest out first; Clear History empties it. After a relaunch an old
-attachment's chip reads "Not loaded" with Re-attach: the file is read again,
-or the link fetched again, only when you choose it, and a file that changed
-since is not used in its place. Pictures read "Image not kept". Continue in pi
-writes each attachment's line and its text into the hand-off file; pictures
-are named, never written. No attachment is written to the Clipboard History.
+The composer names the effective destination before Send. Images require a
+usable image route; missing capability or credentials block Send rather than
+silently changing the request. Each answer retains its chosen and effective
+model. Changing a model does not relabel earlier answers.
+
+**What is stored.** Submitted sources keep their original bytes, normalized
+inference images, extraction and location data, hashes and source metadata in
+`~/Library/Application Support/Quick Launch/chat-assets/`. A structured record
+per chat under the adjacent `chats/` directory refers to those immutable blobs.
+Request records contain provider input, not authentication headers.
+
+Saved chats and submitted sources have no age or count limit. Unsent attachment
+drafts are not archived. Deletion is explicit and reference-aware; an unreadable
+owner blocks cleanup rather than risking the last copy. Original user files
+are never deleted. Old missing attachments stay visibly missing and are never
+silently reread or fetched. To use a changed source, attach it as a new version;
+the old saved copy stays intact. No attachment is written to Clipboard History.
 
 ## Privacy boundary
 
 - Math and LM Studio stay local.
-- Screenshots go to the Vision model in Settings › Models: DeepSeek
-  `deepseek-flash`, a cloud API, by default, or the local MLX server at
-  `127.0.0.1:8078` when you choose it. They stay in memory for the thread and are
-  never written to history or settings.
+- Screenshots may go to a cloud model, including DeepSeek `deepseek-flash`.
+  The composer names the effective destination before Send and the saved answer
+  records it. Submitted screenshots are retained locally for follow-up. Local
+  capture and storage do not imply local inference.
 - There is no Apple on-device provider; it was removed on 2026-08-22 (see "Removed").
 - API and CLI subscription providers receive everything a question sends: the
-  question, every earlier question and answer of the chat, the app's
-  instruction, a saved command's or an assistant's instructions and context
-  skills, any Add Context or selected text that went with this or an earlier
-  question, the text of files and links attached to the chat (while this
-  session holds it; see "Attachments"), web search snippets, and the text of a
-  page whose address you typed. An OpenAI-compatible provider also receives
+  question, the conversation context allowed by the source policy, the app's
+  instruction, a saved command's or assistant's instructions, selected source
+  passages and images, and any permitted tool results. Source-only turns do
+  not silently widen to unrelated history, memory, vault, web or skills. An OpenAI-compatible provider also receives
   what the chat's tools return; the Claude Code CLI provider runs with no
   tools.
 - The memory and skill tools read local files only. The vault tool sends its
@@ -433,13 +440,14 @@ are named, never written. No attachment is written to the Clipboard History.
   the chat's model while it writes that answer, so a cloud model sees the lines
   it found; the answer then stays in the chat. Turn a tool off for one chat in
   `⌘K` › Tools, or for new chats in Settings › General › Chat.
-- Chat history is local, optional, and owner-only
-  (`~/Library/Application Support/Quick Launch/chat-history.json`, `0600`). Each
-  question is saved with any Add Context or selected text in front of it; web
-  search snippets and page text are not saved. An attachment is saved as a
-  reference only (name, kind, size, hash, path or URL), never its text. A new install keeps 100 chats
-  (20, 50, 100, or 200 in Settings › General › History); pinned chats are never
-  pruned.
+- Chat history and source blobs are local and owner-only (directories `0700`,
+  files `0600`). Submitted material is saved before provider execution; a save
+  failure keeps the draft and blocks Send. The old `chat-history.json` is a
+  bounded compatibility cache, not the history owner or a retention limit.
+  Migration retains a rollback copy and verifies records before cutover.
+  Settings explains keep-all retention and asks for confirmation before deleting
+  saved chats. No new cloud sync or automatic vault indexing is added; ordinary
+  local backups remain possible.
 - Continue in pi writes the thread's text (never its screenshots) to
   `~/Library/Application Support/Quick Launch/pi-handoff/`, owner-only (folder
   `0700`, files `0600`), keeping the 20 newest files. pi then sends it to pi's

@@ -54,6 +54,23 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
             && !itemID.hasPrefix("typed:")
     }
 
+    /// Whether "Hide from Quick Launch" applies to this row. A local answer,
+    /// the Ask AI row, a typed web address, the fixed emoji grid, and a
+    /// time-stamped screen moment are computed, fixed, or short-lived, so
+    /// hiding one would be a lie. Every user-owned catalog row (apps,
+    /// snippets, Quicklinks, commands, clipboard entries, folders,
+    /// screenshots, colors, and chats) can be hidden.
+    var canBeHidden: Bool {
+        switch kind {
+        case .answer, .askAI, .emoji, .screenHistory:
+            return false
+        case .quickLink:
+            return !itemID.hasPrefix("typed:")
+        default:
+            return true
+        }
+    }
+
     /// The launcher row that toggles Caffeinate.
     static let caffeinateToggleValue = "caffeinate.toggle"
 
@@ -147,6 +164,33 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .answer: return "equal.circle"
         case .screenHistory: return "clock.arrow.circlepath"
         case .color: return "eyedropper"
+        }
+    }
+}
+
+/// The one rule for what a hidden record may keep. Identity is the
+/// configuration's `kind` + `itemID`; the optional title is the most a
+/// hidden record stores, and it is never a clipboard or chat body.
+enum LauncherItemHiding {
+    /// The label safe to store beside a hidden item, or nil when the row's
+    /// title is derived from the user's own text (clipboard and chats).
+    static func storedTitle(for item: LauncherCatalogItem) -> String? {
+        switch item.kind {
+        case .clipboard, .conversation:
+            return nil
+        default:
+            let trimmed = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(120))
+        }
+    }
+
+    /// What Settings › Items › Hidden shows for a record whose item is gone
+    /// and whose stored title is deliberately empty.
+    static func placeholderTitle(for kind: LauncherItemKind) -> String {
+        switch kind {
+        case .clipboard: "Hidden clipboard entry"
+        case .conversation: "Hidden chat"
+        default: "Hidden item"
         }
     }
 }

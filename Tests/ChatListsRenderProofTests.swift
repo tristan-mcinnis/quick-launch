@@ -92,7 +92,7 @@ struct ChatListsRenderProofTests {
             vm.handleCommandK()
             #expect(vm.isCatalogActionPanePresented)
             #expect(vm.focusedItemActions.map(\.title)
-                == ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Delete Chat"])
+                == ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Hide from Quick Launch", "Delete Chat"])
             try Self.save(try Self.render(vm, appearance: appearance), name: "g1-chats-catalog-row-actions-\(suffix).png")
         }
     }
@@ -106,7 +106,7 @@ struct ChatListsRenderProofTests {
             vm.handleCommandK()
             #expect(vm.isCatalogActionPanePresented)
             #expect(vm.focusedItemActions.map(\.title)
-                == ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Delete Chat"])
+                == ["Continue Chat", "Open in AI Chat", "Copy Last Answer", "Rename Chat", "Pin to Top", "Hide from Quick Launch", "Delete Chat"])
             try Self.save(try Self.render(vm, appearance: appearance), name: "g1-recent-chats-row-actions-\(suffix).png")
         }
     }

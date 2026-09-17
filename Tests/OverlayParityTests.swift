@@ -217,8 +217,8 @@ struct OverlayParityTests {
         let kept = provider.models.first { $0 != hidden }
         let stillOffered = try! #require(kept)
 
-        ModelPreferenceStore.shared.setEnabled(false, providerID: provider.id, model: hidden)
-        defer { ModelPreferenceStore.shared.reset() }
+        vm.modelPreferences = ModelPreferenceStore(fileURL: nil)
+        vm.modelPreferences.setEnabled(false, providerID: provider.id, model: hidden)
 
         let visible = vm.visibleModels(for: provider)
         #expect(!visible.contains(hidden))
@@ -464,11 +464,11 @@ struct OverlayParityTests {
         let provider = try! #require(vm.settings.providers.first { $0.models.count > 1 })
         let hidden = provider.models[1]
 
-        ModelPreferenceStore.shared.setEnabled(false, providerID: provider.id, model: hidden)
-        defer { ModelPreferenceStore.shared.reset() }
+        vm.modelPreferences = ModelPreferenceStore(fileURL: nil)
+        vm.modelPreferences.setEnabled(false, providerID: provider.id, model: hidden)
 
         #expect(!vm.visibleModels(for: provider).contains(hidden))
-        #expect(ModelCatalogService.visibleModels(for: provider).contains(hidden) == false)
+        #expect(ModelCatalogService.visibleModels(for: provider, preferences: vm.modelPreferences).contains(hidden) == false)
     }
 
     @Test func aRefreshNeverLandsOnADisabledModel() async {
@@ -481,12 +481,14 @@ struct OverlayParityTests {
         vm.settings.providers[index].models = ["model-a", "model-b"]
         vm.settings.providers[index].selectedModel = "model-a"
 
-        ModelPreferenceStore.shared.setEnabled(false, providerID: providerID, model: "model-a")
-        defer { ModelPreferenceStore.shared.reset() }
+        vm.modelPreferences = ModelPreferenceStore(fileURL: nil)
+        vm.modelPreferences.setEnabled(false, providerID: providerID, model: "model-a")
 
         // The refresh fallback reads the visible list, so the disabled model
         // at the head of the provider's list is never the one it lands on.
-        #expect(QuickViewModel.refreshFallbackModel(for: vm.settings.providers[index]) == "model-b")
+        #expect(QuickViewModel.refreshFallbackModel(
+            for: vm.settings.providers[index], preferences: vm.modelPreferences
+        ) == "model-b")
         // A picker still lists the current model, so it can render what is on.
         #expect(vm.visibleModels(for: vm.settings.providers[index]) == ["model-b", "model-a"])
     }

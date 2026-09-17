@@ -19,6 +19,11 @@ enum QuickAIComposerEditing {
                 editor.insertNewlineIgnoringFieldEditor(nil)
                 return true
             }
+            // ⌘↩ always sends; ↩ keeps the empty-composer Paste/Copy rule.
+            if modifiers == [.command] {
+                model.submitFromComposer()
+                return true
+            }
             if modifiers.isEmpty {
                 model.submitFromComposer()
                 return true

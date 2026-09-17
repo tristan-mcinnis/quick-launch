@@ -106,30 +106,83 @@ struct AttachmentIntegrationRenderProofTests {
 
     @Test func rendersTheTrimLineNamingTheFile() async throws {
         for (appearance, suffix) in Self.appearances {
-            let extractor = FakeAttachmentExtractor()
-            let big = String(repeating: "Budget line. ", count: 3_000)
-            await extractor.set(.content(AttachmentFlowTests.document("Budget.xlsx", text: big, pages: 3)), for: "Budget.xlsx")
-            await extractor.set(.content(AttachmentFlowTests.document("Deck.pptx", text: big, pages: 12)), for: "Deck.pptx")
-            let service = MockQuickService()
-            let vm = Self.viewModel(appearance, extractor: extractor, service: service)
-            vm.openQuickAI()
-            vm.attachmentTray.add(.file(AttachmentFlowTests.file("Budget.xlsx")))
-            await vm.attachmentTray.waitUntilRead()
-            await service.setResponses([StreamDelta(text: "The budget holds **four** teams.", finishReason: "stop")])
-            vm.input = "What does the budget cover?"
-            await vm.submit()
-            vm.attachmentTray.add(.file(AttachmentFlowTests.file("Deck.pptx")))
-            await vm.attachmentTray.waitUntilRead()
-            await service.setResponses([StreamDelta(text: "The deck rounds growth to 10%; the budget has the detail by team.", finishReason: "stop")])
-            vm.input = "Does the deck agree?"
-            await vm.submit()
+            // A neutral follow-up is source-first: only the file this
+            // question carries is in scope, so the trim line names the one
+            // the budget cut, and the earlier file is not sent at all. The
+            // comparison below is what asks for the earlier file back.
+            let withheld = try await Self.trimmedThread(appearance, followUp: "Does the deck agree?")
+            let withheldLine = try #require(withheld.line)
+            #expect(withheldLine.contains("Deck.pptx"), "the carried file is named: \(withheldLine)")
+            #expect(
+                !withheldLine.contains("Budget.xlsx"),
+                "the earlier file is withheld, not reported: \(withheldLine)"
+            )
+            #expect(
+                withheld.request.contains(#"name="Deck.pptx""#),
+                "the carried file's block rides the request"
+            )
+            #expect(
+                !withheld.request.contains("Budget.xlsx"),
+                "the withheld file is not restated on a neutral follow-up"
+            )
+            try Self.save(try Self.renderQuickAI(withheld.vm, appearance: appearance), name: "wpd-trim-line-quick-ai-\(suffix).png")
+            let withheldWindow = AIChatWindowModel(chat: withheld.vm, defaults: Self.defaults())
+            try Self.save(try Self.renderAIChat(withheldWindow, appearance: appearance), name: "wpd-trim-line-ai-chat-\(suffix).png")
 
-            let line = try #require(vm.conversationMessages.last?.tools.first { $0.kind == .context }?.summary)
-            #expect(line.contains("Budget.xlsx"))
-            try Self.save(try Self.renderQuickAI(vm, appearance: appearance), name: "wpd-trim-line-quick-ai-\(suffix).png")
-            let window = AIChatWindowModel(chat: vm, defaults: Self.defaults())
-            try Self.save(try Self.renderAIChat(window, appearance: appearance), name: "wpd-trim-line-ai-chat-\(suffix).png")
+            // Naming the earlier file brings the history back into scope: it
+            // is in the request again, where the neutral follow-up dropped it
+            // entirely. The budget then stubs it, least wanted source first,
+            // and the trim line says so.
+            let compared = try await Self.trimmedThread(
+                appearance,
+                followUp: "Compare the deck with Budget.xlsx"
+            )
+            let comparedLine = try #require(compared.line)
+            #expect(comparedLine.contains("Budget.xlsx"), "the named history is named: \(comparedLine)")
+            #expect(
+                compared.request.contains("Budget.xlsx"),
+                "the requested earlier file is in the request, not dropped"
+            )
+            #expect(
+                compared.request.contains(#"name="Deck.pptx""#),
+                "the current source still rides the request"
+            )
+            try Self.save(try Self.renderQuickAI(compared.vm, appearance: appearance), name: "wpd-trim-line-compared-quick-ai-\(suffix).png")
+            let comparedWindow = AIChatWindowModel(chat: compared.vm, defaults: Self.defaults())
+            try Self.save(try Self.renderAIChat(comparedWindow, appearance: appearance), name: "wpd-trim-line-compared-ai-chat-\(suffix).png")
         }
+    }
+
+    /// Two files read into one chat: Budget.xlsx on the first question, then
+    /// Deck.pptx on `followUp`, whose window geometry cuts the shared budget.
+    /// Returns the trim line the thread shows, and the last request the
+    /// service saw (the composed user turn with its attachment blocks).
+    private static func trimmedThread(
+        _ appearance: NSAppearance.Name,
+        followUp: String
+    ) async throws -> (vm: QuickViewModel, line: String?, request: String) {
+        let extractor = FakeAttachmentExtractor()
+        let big = String(repeating: "Budget line. ", count: 3_000)
+        await extractor.set(.content(AttachmentFlowTests.document("Budget.xlsx", text: big, pages: 3)), for: "Budget.xlsx")
+        await extractor.set(.content(AttachmentFlowTests.document("Deck.pptx", text: big, pages: 12)), for: "Deck.pptx")
+        let service = MockQuickService()
+        let vm = Self.viewModel(appearance, extractor: extractor, service: service)
+        vm.openQuickAI()
+        vm.attachmentTray.add(.file(AttachmentFlowTests.file("Budget.xlsx")))
+        await vm.attachmentTray.waitUntilRead()
+        await service.setResponses([StreamDelta(text: "The budget holds **four** teams.", finishReason: "stop")])
+        vm.input = "What does the budget cover?"
+        await vm.submit()
+        vm.attachmentTray.add(.file(AttachmentFlowTests.file("Deck.pptx")))
+        await vm.attachmentTray.waitUntilRead()
+        await service.setResponses([StreamDelta(text: "The deck rounds growth to 10%; the budget has the detail by team.", finishReason: "stop")])
+        vm.input = followUp
+        await vm.submit()
+        return (
+            vm,
+            vm.conversationMessages.last?.tools.first { $0.kind == .context }?.summary,
+            await service.lastPrompt ?? ""
+        )
     }
 
     // MARK: - Add Context with every row

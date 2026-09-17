@@ -286,6 +286,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             screenshotTextIndex: screenshotTextIndex,
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
+            archiveRootURL: AppPaths.applicationSupportDirectory,
+            attachmentExtractor: SharedDocumentExtractor(),
             // What every other house app can do, read from the manifests they
             // publish. Without this the catalog is nil, every house-command
             // path returns at its `guard let`, and no row can ever appear —
@@ -1714,6 +1716,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             screenAwareness: screenAwareness,
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
+            archiveRootURL: AppPaths.applicationSupportDirectory,
+            attachmentExtractor: SharedDocumentExtractor(),
             currentVersion: Bundle.main.shortVersion
         )
         chat.memoryService = recall

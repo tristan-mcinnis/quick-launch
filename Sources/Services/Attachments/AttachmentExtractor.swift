@@ -158,6 +158,9 @@ struct ExtractedAttachment: Equatable, Sendable {
     /// The kind the model block names: "PDF", "Word document", "Swift source".
     var kindLabel: String
     var notes: [AttachmentNote]
+    /// The bytes as read, for the archive. A fetched link keeps the raw body
+    /// here, not only its extracted text. Nil when only text is available.
+    var originalBytes: Data? = nil
 
     /// The chip's detail lines beyond the size: the cut, then the notes.
     var chipNotes: [String] {

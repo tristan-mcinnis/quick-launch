@@ -365,7 +365,7 @@ extension QuickViewModel {
     /// answer with no chat behind it, and the thread says so. The next
     /// question starts a new chat.
     func persistAnsweredConversation() {
-        guard settings.historyEnabled,
+        guard canonicalHistoryActive,
               let local = currentConversation,
               !history.contains(where: { $0.id == local.id }),
               store.deletedChatIDs.contains(local.id)
@@ -387,7 +387,7 @@ extension QuickViewModel {
     /// and a chat deleted meanwhile keeps its answer on screen, unsaved
     /// (`persistAnsweredConversation`).
     func refreshOpenChatFromStore() {
-        guard settings.historyEnabled, !isStreaming, let local = currentConversation else { return }
+        guard canonicalHistoryActive, !isStreaming, let local = currentConversation else { return }
         guard let stored = history.first(where: { $0.id == local.id }) else {
             if store.deletedChatIDs.contains(local.id) {
                 expandedTranscriptMessageIDs.removeAll()

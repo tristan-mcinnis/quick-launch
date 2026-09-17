@@ -46,10 +46,17 @@ struct QuickAIResizeRenderProofTests {
         #expect(vm.currentPanelWidth == 750)
         #expect(vm.estimatedWindowHeight == 475)
         let standard = try Self.render(vm, appearance: appearance)
-        try Self.save(standard, name: "b1-quick-ai-750x475-\(suffix).png")
+        try Self.save(standard.image, name: "b1-quick-ai-750x475-\(suffix).png")
         await Task.yield()
-        #expect(standard.size == CGSize(width: 750, height: 475))
-        let standardInk = try #require(Self.threadInkRange(in: standard))
+        #expect(standard.image.size == CGSize(width: 750, height: 475))
+        #expect(
+            standard.composerHeight > QuickAIView.composerRowHeight,
+            "the composer is its pre-send controls plus the pill row: \(standard.composerHeight)"
+        )
+        let standardInk = try #require(Self.threadInkRange(
+            in: standard.image,
+            composerHeight: standard.composerHeight
+        ))
         // The column is the standard surface's: 20 pt gutters, answer
         // text from the left gutter, the pill ending at the right one.
         #expect(abs(standardInk.lowerBound - House.Spacing.lg) <= 3, "left ink at \(standardInk.lowerBound)")
@@ -61,10 +68,13 @@ struct QuickAIResizeRenderProofTests {
         #expect(vm.currentPanelWidth == 1100)
         #expect(vm.estimatedWindowHeight == 760)
         let wide = try Self.render(vm, appearance: appearance)
-        try Self.save(wide, name: "b1-quick-ai-1100x760-\(suffix).png")
+        try Self.save(wide.image, name: "b1-quick-ai-1100x760-\(suffix).png")
         await Task.yield()
-        #expect(wide.size == Self.large)
-        let wideInk = try #require(Self.threadInkRange(in: wide))
+        #expect(wide.image.size == Self.large)
+        let wideInk = try #require(Self.threadInkRange(
+            in: wide.image,
+            composerHeight: wide.composerHeight
+        ))
         // The same column, centred: the gutters grow, the lines do not.
         let gutter = (Self.large.width - QuickAIView.threadColumnWidth) / 2
         #expect(abs(wideInk.lowerBound - gutter) <= 3, "left ink at \(wideInk.lowerBound), gutter \(gutter)")
@@ -81,7 +91,7 @@ struct QuickAIResizeRenderProofTests {
         vm.actionQuery = "reset size"
         #expect(vm.paletteSurfaceActions == [.resetSize])
         try Self.save(
-            try Self.render(vm, appearance: appearance),
+            try Self.render(vm, appearance: appearance).image,
             name: "b1-quick-ai-1100x760-actions-\(suffix).png"
         )
         vm.closeActionPalette()
@@ -93,7 +103,7 @@ struct QuickAIResizeRenderProofTests {
         #expect(vm.isRecentChatsPresented)
         #expect(vm.currentPanelWidth == 1100)
         try Self.save(
-            try Self.render(vm, appearance: appearance),
+            try Self.render(vm, appearance: appearance).image,
             name: "b1-quick-ai-1100x760-recent-chats-\(suffix).png"
         )
     }
@@ -117,8 +127,16 @@ struct QuickAIResizeRenderProofTests {
         return vm
     }
 
+    /// One rendered surface, with the geometry the band's far edge needs.
+    private struct Rendered {
+        let image: NSImage
+        /// The bottom chrome's height in points: the pre-send controls plus
+        /// the pill row. The thread never draws under it.
+        let composerHeight: CGFloat
+    }
+
     /// The window as it draws at the view model's size.
-    private static func render(_ vm: QuickViewModel, appearance: NSAppearance.Name) throws -> NSImage {
+    private static func render(_ vm: QuickViewModel, appearance: NSAppearance.Name) throws -> Rendered {
         let size = CGSize(width: vm.currentPanelWidth, height: vm.estimatedWindowHeight)
         let root = OverlayView(viewModel: vm)
             .dynamicTypeSize(.large)
@@ -133,24 +151,52 @@ struct QuickAIResizeRenderProofTests {
         host.cacheDisplay(in: host.bounds, to: rep)
         let image = NSImage(size: host.bounds.size)
         image.addRepresentation(rep)
-        return image
+        return Rendered(
+            image: image,
+            composerHeight: composerHeight(of: vm, width: size.width, appearance: appearance)
+        )
+    }
+
+    /// The composer's own height, from the view the surface draws at the
+    /// bottom of its column. The surface reports the same value through
+    /// `onComposerHeightChange`, which the harness cannot reach through
+    /// `OverlayView`; measuring the view is the same number.
+    private static func composerHeight(
+        of vm: QuickViewModel,
+        width: CGFloat,
+        appearance: NSAppearance.Name
+    ) -> CGFloat {
+        let root = QuickAIComposer(viewModel: vm).frame(width: width)
+        let host = NSHostingView(rootView: root)
+        host.appearance = NSAppearance(named: appearance)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 1)
+        host.layoutSubtreeIfNeeded()
+        return host.fittingSize.height
     }
 
     /// The leftmost and rightmost points, in points, where the thread draws
     /// anything (text, the pill's fill) in the band between the header and
-    /// the composer. Each row is compared with its own ground at the far
-    /// left of the panel, so the glass's vertical shading never counts.
+    /// the composer. The band stops at the composer's own top edge
+    /// (`composerHeight`), not at the pill row's fixed height: the pre-send
+    /// controls make the composer taller than the pill row, and its chrome
+    /// (a scope chip on the left, the destination line on the right) spans
+    /// almost the whole window, which on the wide surface would read as the
+    /// widest thread line. Each row is compared with its own ground at the
+    /// far left of the panel, so the glass's vertical shading never counts.
     ///
     /// Reads the bitmap's bytes directly: `colorAt` made an `NSColor` per
     /// pixel and held the main actor for seconds on the wide surface.
-    private static func threadInkRange(in image: NSImage) -> ClosedRange<CGFloat>? {
+    private static func threadInkRange(
+        in image: NSImage,
+        composerHeight: CGFloat
+    ) -> ClosedRange<CGFloat>? {
         guard let rep = image.representations.first as? NSBitmapImageRep,
               rep.bitsPerSample == 8, !rep.isPlanar, rep.samplesPerPixel >= 3,
               let data = rep.bitmapData
         else { return nil }
         let scale = CGFloat(rep.pixelsWide) / image.size.width
         let top = Int((QuickAIView.headerHeight + House.Spacing.xs) * scale)
-        let bottom = Int((image.size.height - QuickAIView.composerRowHeight - House.Spacing.xs) * scale)
+        let bottom = Int((image.size.height - composerHeight) * scale)
         let groundX = Int(House.Spacing.xs * scale)
         let edge = Int(House.Spacing.xxs * scale)
         let stride = rep.samplesPerPixel

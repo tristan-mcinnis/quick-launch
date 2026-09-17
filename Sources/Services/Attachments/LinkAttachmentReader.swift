@@ -207,7 +207,8 @@ actor LinkAttachmentReader {
             text: finished.text,
             image: nil,
             kindLabel: kindLabel,
-            notes: document.notes
+            notes: document.notes,
+            originalBytes: fetched.data
         )
     }
 

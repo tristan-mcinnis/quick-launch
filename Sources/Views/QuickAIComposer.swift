@@ -79,6 +79,11 @@ struct QuickAIComposer: View {
                 LaunchSelectionStrip(viewModel: viewModel)
             }
             ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray)
+            // What this Send will read and where it will go. Recent Chats
+            // uses the field to search, so the control stays out of its way.
+            if !viewModel.isRecentChatsPresented {
+                ChatPreSendControls(viewModel: viewModel)
+            }
             composerRow
         }
         .fixedSize(horizontal: false, vertical: true)

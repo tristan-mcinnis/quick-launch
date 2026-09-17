@@ -52,10 +52,17 @@ struct SavedPromptIntegrationTests {
         #expect(sent?.contains("hello world") == true)
     }
 
-    @Test func testUnknownAliasIsSentAsRawText() async {
+    @Test func testUnknownAliasStaysLocalAndTheExplicitActionSendsIt() async {
         let (vm, service) = makeViewModel()
         vm.input = "/unknown"
         await vm.submit()
+        let none = await service.waitForPrompt(timeoutMs: 50, expectingNone: true)
+        #expect(none == nil, "an unknown slash line is never forwarded to the model")
+        #expect(vm.errorMessage?.contains("/unknown") == true)
+
+        // The line stays in the composer; the explicit Send as Text action
+        // is what sends it.
+        vm.sendRefusedCommandAsText()
         let sent = await service.waitForPrompt()
         #expect(sent == "/unknown")
     }

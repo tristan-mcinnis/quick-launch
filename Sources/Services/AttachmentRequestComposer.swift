@@ -58,6 +58,7 @@ enum AttachmentRequestComposer {
         share: Int,
         excluded: Set<UUID> = [],
         availableImages: Set<UUID> = [],
+        documentBlocks: [UUID: String] = [:],
         timeZone: TimeZone = .current
     ) -> Result {
         guard let current = messages.lastIndex(where: { $0.role == .user }),
@@ -72,6 +73,34 @@ enum AttachmentRequestComposer {
             for (position, ref) in message.attachmentRefs.enumerated() {
                 if messageIndex == current, excluded.contains(ref.id) { continue }
                 if ref.kind.isImage, availableImages.contains(ref.id) { continue }
+                // A document-backed source uses the passage plan (cited
+                // chunks, or an honest no-match/partial line) instead of the
+                // whole session text.
+                if let planned = documentBlocks[ref.id] {
+                    var body = planned
+                    var messageCut: Int?
+                    let allowed = max(0, AttachmentLimits.charactersPerMessage - used)
+                    if body.count > allowed {
+                        messageCut = body.count
+                        body = String(body.prefix(allowed))
+                    }
+                    used += body.count
+                    guard !body.isEmpty else {
+                        stubs[ref.id] = leftOutStub(for: ref)
+                        continue
+                    }
+                    entries.append(Entry(
+                        messageIndex: messageIndex,
+                        position: position + 1,
+                        ref: ref,
+                        stored: AttachmentSessionStore.Text(text: body, kindLabel: nil, notes: []),
+                        body: body,
+                        fullCount: body.count,
+                        messageCutFrom: messageCut,
+                        isCurrent: messageIndex == current
+                    ))
+                    continue
+                }
                 guard let stored = lookup(ref) else {
                     stubs[ref.id] = notLoadedStub(for: ref)
                     continue

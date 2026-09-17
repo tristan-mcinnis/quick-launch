@@ -50,6 +50,13 @@ struct AttachmentImageLifecycleTests {
         var settings = QuickSettings()
         settings.autoCopy = false
         settings.historyEnabled = false
+        // The chat answers on a model the app knows nothing about, and the
+        // configured image route names it too. This test is about what
+        // happens when that route is taken away; a model the catalogue knows
+        // reads images would keep the route on its own.
+        if let index = settings.providers.firstIndex(where: { $0.id == InferenceProvider.deepSeekID }) {
+            settings.providers[index].selectedModel = "vision-test"
+        }
         settings.visionProviderID = InferenceProvider.deepSeekID
         settings.visionModel = "vision-test"
         let service = MockQuickService()
@@ -84,7 +91,7 @@ struct AttachmentImageLifecycleTests {
         #expect(vm.attachmentStore.text(for: ref) == nil)
         vm.recognizeImageText = { _ in "RECEIPT TOTAL 42" }
         removeVisionRoute(vm)
-        #expect(!vm.visionRouteWorks)
+        #expect(!vm.resolveChatRoute(hasImages: true).canSendImages)
         if retry {
             await vm.regenerateLastAnswer()
         } else {

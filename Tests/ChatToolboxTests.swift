@@ -278,9 +278,34 @@ struct ChatToolboxTests {
     @Test func vaultSearchTimeoutIsAShortToolResult() async throws {
         let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .failure(VaultSearchError.timedOut)))
         let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"current"}"#))
-        #expect(outcome.record.summary == "Vault search timed out")
-        #expect(outcome.content.hasPrefix("Vault search timed out."))
+        // The timeout keeps its reason on the record instead of a generic line.
+        #expect(outcome.record.summary == "Searched vault · current: unavailable — no response within the request deadline")
+        #expect(outcome.content.contains("no response within the request deadline"))
         #expect(outcome.record.sources.isEmpty)
+    }
+
+    @Test func vaultSearchFailureSurfacesTheAdapterReason() async throws {
+        // A nested project path the backend refuses to resolve: the reason
+        // must reach the record, not collapse into "Vault search failed".
+        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .failure(
+            VaultSearchError.failed("slug validation rejected personal/stack")
+        )))
+        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"stack","mode":"current"}"#))
+        #expect(outcome.record.summary.contains("slug validation rejected personal/stack"))
+        #expect(outcome.content.contains("slug validation rejected personal/stack"))
+        #expect(!outcome.content.contains("Vault search failed:"))
+    }
+
+    @Test func vaultSearchDegradedKeepsTheDiagnostic() async throws {
+        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .success(VaultSearchOutcome(
+            text: "partial rows",
+            resultCount: 1,
+            sources: [],
+            status: .degraded(reason: "nested slug not resolved")
+        ))))
+        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"current"}"#))
+        #expect(outcome.record.summary == "Searched vault · current: partial — nested slug not resolved")
+        #expect(outcome.content.contains("partial rows"))
     }
 
     @Test func vaultSearchWithNoEvidenceSaysNoResults() async throws {

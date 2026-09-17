@@ -47,6 +47,11 @@ credential type without echoing the value, then rotate the credential.
 
 AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi.
 
+`Packages/HouseChatCore` owns the shared chat policy, archival schema and
+attachment interfaces consumed by Quick Launch and RTI. Keep it compatible
+with Swift 6.0 and macOS 14. Histories and app defaults remain separate;
+sharing an implementation must not create a global chat or settings owner.
+
 Preserve:
 
 - the configurable global launcher hotkey;
@@ -60,18 +65,32 @@ Preserve:
 
 Finder automation, document workflows, and autonomous file changes remain
 outside the core until they have explicit interaction, permission, and safety
-designs. Screen capture exists only as the owned Screen History capture: opt-in,
-off by default, enabled by "Enable owned screen capture" in its own Settings
-tab, local only, and hard-locked in the current build until its privacy review
-and soak test pass. A user-copied screenshot attached to an AI request is
-ephemeral: it is routed locally and never persisted in settings or conversation
-history. Attachment text is held in memory for the session only; chat history
-keeps a reference (name, kind, size, hash, path or URL), never the text. The
-single local exception is the Clipboard History, which may keep the
-user's copy (text, image, rich text, or a file URL) on this Mac so it can be
-restored later; it honours concealed/transient pasteboard markers, stays
-owner-only, and is bounded by the history limit plus a total-byte budget. AI
-request attachments are never written to the Clipboard History.
+designs. Background Screen History remains opt-in, off by default, local,
+and hard-locked until its own privacy review and soak test pass. Explicit
+screen/window capture for a chat is a separate action, not permission for
+background capture.
+
+**Chat retention and routing, approved 2026-09-17:** a submitted attachment
+(document, image, screenshot, selection or fetched page) is retained with its
+original bytes, extracted content, hashes and source metadata for follow-up.
+Abandoned draft attachments are not retained. Local `chat-assets/` owns the
+content-addressed bytes; structured conversation records reference them.
+Retain saved chats and attachments until explicit deletion, not a count or
+age threshold. Keep files owner-only and eligible for ordinary local backups;
+do not add cloud sync, vault ingestion or Git copies. Delete only unreferenced
+owned assets, never original source files. Existing legacy missing content
+must stay labelled missing rather than being silently fetched again.
+
+Screenshots may be sent directly to the selected cloud vision model, currently
+DeepSeek by default. Show the effective destination before Send and record it
+per answer. Local capture or storage does not mean local inference. Source-only
+questions must not silently fetch memory, vault, web or skills. The approved
+implementation contract is `docs/chat-harmonization-plan-20260917.md`.
+
+Clipboard History remains separate: it may retain the user's clipboard copy,
+honours concealed/transient markers, stays owner-only and retains its existing
+count/byte budgets. AI request attachments are never written to Clipboard
+History.
 
 ## Development
 

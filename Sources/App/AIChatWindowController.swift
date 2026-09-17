@@ -34,6 +34,10 @@ final class AIChatWindow: NSWindow {
         if modifiers.isEmpty {
             return model.handleReturn()
         }
+        if modifiers == [.command] {
+            // ⌘↩ always sends, whatever the composer holds.
+            return model.handleReturn()
+        }
         if modifiers == [.shift] {
             switch model.handleShiftReturn() {
             case .insertNewline:

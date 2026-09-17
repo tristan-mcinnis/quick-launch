@@ -1,4 +1,5 @@
 import Foundation
+import HouseChatCore
 import Observation
 
 /// Where attachment text lives: in memory, for this app session only.
@@ -31,12 +32,28 @@ final class AttachmentSessionStore {
     /// history), after the contract text is approved.
     static let attachmentCacheEnabled = false
 
-    /// One attachment's text as the request needs it.
+    /// One attachment's text as the request needs it, plus the shared
+    /// extraction when there is one, so a follow-up in this session can
+    /// select passages from it again.
     struct Text: Equatable, Sendable {
         var text: String
         /// "PDF", "Swift source"; nil means the kind's own name.
         var kindLabel: String?
         var notes: [AttachmentNote]
+        /// The shared extraction, when the shared reader produced it.
+        var extractedDocument: ExtractedDocument?
+
+        init(
+            text: String,
+            kindLabel: String? = nil,
+            notes: [AttachmentNote] = [],
+            extractedDocument: ExtractedDocument? = nil
+        ) {
+            self.text = text
+            self.kindLabel = kindLabel
+            self.notes = notes
+            self.extractedDocument = extractedDocument
+        }
     }
 
     let characterLimit: Int
@@ -80,7 +97,15 @@ final class AttachmentSessionStore {
             storeImage(image, for: content.ref)
         }
         if let text = content.text {
-            storeText(Text(text: text, kindLabel: content.kindLabel, notes: content.notes), for: content.ref)
+            storeText(
+                Text(
+                    text: text,
+                    kindLabel: content.kindLabel,
+                    notes: content.notes,
+                    extractedDocument: content.extractedDocument
+                ),
+                for: content.ref
+            )
         }
     }
 

@@ -25,6 +25,12 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
     var supportsReasoningEffort: Bool
     /// The chosen effort. `.modelDefault` lets the provider decide.
     var reasoningEffort: ReasoningEffort
+    /// Whether the model takes image input. `nil` is a third state: the app
+    /// ships no evidence either way, so the route resolver reads it as
+    /// unknown rather than guessing "text only" or "reads images". Optional
+    /// so a profile stored by an older build still decodes, and so a curated
+    /// fact added later reaches every existing install.
+    var supportsImages: Bool?
 
     init(
         enabled: Bool = true,
@@ -33,7 +39,8 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
         intelligence: ModelRating? = nil,
         contextWindow: Int? = nil,
         supportsReasoningEffort: Bool = false,
-        reasoningEffort: ReasoningEffort = .modelDefault
+        reasoningEffort: ReasoningEffort = .modelDefault,
+        supportsImages: Bool? = nil
     ) {
         self.enabled = enabled
         self.displayName = displayName
@@ -42,6 +49,29 @@ struct ModelProfile: Codable, Sendable, Equatable, Hashable {
         self.contextWindow = contextWindow
         self.supportsReasoningEffort = supportsReasoningEffort
         self.reasoningEffort = reasoningEffort
+        self.supportsImages = supportsImages
+    }
+}
+
+/// What the app knows about one model's ability to read images. `unknown` is
+/// a real answer, never a guess in either direction.
+enum ModelImageCapability: Sendable, Equatable, Hashable {
+    /// The model is known to accept image content.
+    case acceptsImages
+    /// The model is known to reject image content.
+    case textOnly
+    /// No evidence either way.
+    case unknown
+
+    var canSendImages: Bool { self == .acceptsImages }
+
+    /// From the profile's curated fact. A missing fact is unknown.
+    init(supportsImages: Bool?) {
+        switch supportsImages {
+        case .some(true): self = .acceptsImages
+        case .some(false): self = .textOnly
+        case .none: self = .unknown
+        }
     }
 }
 
@@ -101,7 +131,8 @@ extension ModelProfile {
             speed: .five,
             intelligence: .four,
             contextWindow: 1_000_000,
-            supportsReasoningEffort: true
+            supportsReasoningEffort: true,
+            supportsImages: true
         ),
         "deepseek-v4-pro": ModelProfile(
             displayName: "DeepSeek V4 Pro",
@@ -118,7 +149,8 @@ extension ModelProfile {
             speed: .five,
             intelligence: .four,
             contextWindow: 1_000_000,
-            supportsReasoningEffort: true
+            supportsReasoningEffort: true,
+            supportsImages: true
         ),
         "deepseek-v4-flash-vision-exp": ModelProfile(
             enabled: false,
@@ -126,7 +158,8 @@ extension ModelProfile {
             speed: .four,
             intelligence: .four,
             contextWindow: 1_000_000,
-            supportsReasoningEffort: true
+            supportsReasoningEffort: true,
+            supportsImages: true
         ),
         // Moonshot / Kimi API (platform.moonshot.ai). K3 is the 1M-context
         // flagship and takes a reasoning effort. K2.6 and K2.7 Code steer
@@ -155,7 +188,13 @@ extension ModelProfile {
         // vendor's published figure for the open-weight family; no reasoning
         // effort is offered, because the daemon documents no such parameter.
         // `s1-mini` is left unknown: the name covers more than one family.
-        "qwen3-vl": ModelProfile(displayName: "Qwen3 VL", speed: .four, intelligence: .three, contextWindow: 256_000),
+        "qwen3-vl": ModelProfile(
+            displayName: "Qwen3 VL",
+            speed: .four,
+            intelligence: .three,
+            contextWindow: 256_000,
+            supportsImages: true
+        ),
         "qwen3.5": ModelProfile(displayName: "Qwen3.5", speed: .four, intelligence: .three, contextWindow: 256_000),
         "gemma-it": ModelProfile(displayName: "Gemma IT", speed: .five, intelligence: .two, contextWindow: 128_000),
         "s1-mini": ModelProfile(),
@@ -165,6 +204,12 @@ extension ModelProfile {
     /// app ships no data for it.
     static func curated(forModelID modelID: String) -> ModelProfile {
         curatedTable[modelID.lowercased()] ?? ModelProfile()
+    }
+
+    /// What the app knows about this model's image input. A model the
+    /// catalogue does not list is `unknown`, never guessed either way.
+    var imageCapability: ModelImageCapability {
+        ModelImageCapability(supportsImages: supportsImages)
     }
 }
 

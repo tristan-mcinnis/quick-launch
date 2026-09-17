@@ -1,50 +1,47 @@
 import SwiftUI
 
-/// The History card in the General pane: whether chats are kept, how many
-/// unpinned chats stay (`QuickSettings.historyLimit`, bounded by
-/// `QuickHistoryStore`; pinned chats are never pruned), Clear history, and
-/// how long the launcher keeps its place after closing.
+/// Canonical chat retention is keep-all. Legacy history flags and cache
+/// limits remain decodable for rollback, but are not retention controls.
 struct HistorySettingsView: View {
     @Bindable var viewModel: QuickViewModel
+    @State private var confirmsDeletion = false
 
     var body: some View {
         SettingsCard("History") {
             SettingsRow(
-                title: "Keep chat history",
-                detail: "Chats from Quick AI and AI Chat, kept on this Mac.",
+                title: "Saved chats and sources",
+                detail: "Submitted chats and sources stay on this Mac until you delete them. Unsent attachments are not saved.",
                 isFirst: true
             ) {
-                Toggle(
-                    "Keep chat history",
-                    isOn: viewModel.settingsBinding(\.historyEnabled) { enabled in
-                        if enabled {
-                            viewModel.loadHistory()
-                        } else {
-                            viewModel.history = []
-                        }
-                    }
-                )
-                .toggleStyle(InkToggleStyle())
+                Text("Keep all")
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textSecondary)
+            }
+
+            if viewModel.archiveDamagedCount > 0 {
+                SettingsRow(
+                    title: "Saved chats need attention",
+                    detail: "\(viewModel.archiveDamagedCount) records could not be fully read. Their files are kept; nothing is silently replaced."
+                ) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(House.ColorToken.warning)
+                }
             }
 
             SettingsRow(
-                title: "Chats to keep",
-                detail: "The newest chats stay. Pinned chats are always kept and do not count."
+                title: "Delete saved chats",
+                detail: "Removes saved chats and their unshared copies. Original files and Clipboard History are kept."
             ) {
-                Picker("Chats to keep", selection: historyLimit) {
-                    ForEach(viewModel.historyLimitChoices, id: \.self) { limit in
-                        Text("\(limit)").tag(limit)
-                    }
+                Button(viewModel.isClearingHistory ? "Deleting…" : "Delete all saved chats…", role: .destructive) {
+                    confirmsDeletion = true
                 }
-                .labelsHidden()
-                .frame(width: 140)
-                .disabled(!viewModel.settings.historyEnabled)
-                .accessibilityLabel("Chats to keep")
+                .disabled(viewModel.isClearingHistory)
             }
 
-            SettingsRow(title: "Saved history") {
-                Button("Clear history", role: .destructive) {
-                    viewModel.clearHistory()
+            if let error = viewModel.savedHistoryOperationError {
+                SettingsRow(title: "Could not finish deletion", detail: error) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(House.ColorToken.danger)
                 }
             }
 
@@ -60,13 +57,13 @@ struct HistorySettingsView: View {
                 .frame(width: 140)
             }
         }
-    }
-
-    /// Chats to keep: a lower limit prunes the oldest unpinned chats now.
-    private var historyLimit: Binding<Int> {
-        Binding(
-            get: { viewModel.settings.historyLimit },
-            set: { viewModel.setHistoryLimit($0) }
-        )
+        .alert("Delete all saved chats?", isPresented: $confirmsDeletion) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete all saved chats", role: .destructive) {
+                viewModel.clearHistory()
+            }
+        } message: {
+            Text("This deletes Quick AI and AI Chat history and the saved sources no other chat uses. It cannot be undone here. Original files and Clipboard History are not deleted.")
+        }
     }
 }

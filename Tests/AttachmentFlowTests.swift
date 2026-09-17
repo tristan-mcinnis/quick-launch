@@ -462,29 +462,41 @@ struct AttachmentFlowTests {
         #expect(wire[3]["content"] as? String == "again", "not on the last")
     }
 
-    @Test func withNoVisionRouteAPictureIsReadAsTextOnThisMac() async throws {
+    @Test func withNoVisionRouteAPictureIsRefusedUnlessTheFallbackIsAccepted() async throws {
         let rig = make { settings in
-            // A vision provider with no model: no vision route.
+            // No image route at all: the chat's own model is not one the app
+            // knows reads images, and the configured vision route has no model.
+            // A model the catalogue knows reads images would keep the route on
+            // its own, which is the approved preference.
+            for index in settings.providers.indices {
+                settings.providers[index].selectedModel = "not-a-known-vision-model"
+            }
             let index = settings.providers.firstIndex { $0.id == InferenceProvider.mlxVisionID } ?? 0
             settings.providers[index].selectedModel = ""
             settings.visionProviderID = settings.providers[index].id
             settings.visionModel = ""
         }
         rig.vm.recognizeImageText = { _ in "INVOICE 42" }
-        #expect(!rig.vm.visionRouteWorks)
+        #expect(!rig.vm.resolveChatRoute(hasImages: true, hasNewImages: true).canSendImages)
         rig.vm.openQuickAI()
         rig.vm.attachmentTray.add(.image(Self.image, name: "Pasted image", kind: .image))
         await settle(rig.vm)
-        #expect(rig.vm.attachmentRoutingLine == QuickViewModel.pendingImageAsTextLine)
+        // The route is blocked, not silently read by OCR.
+        #expect(rig.vm.chatRouteWarning != nil)
+        #expect(rig.vm.attachmentRoutingLine == "No vision model: this image cannot be sent")
+        #expect(!rig.vm.nextRouteIsUsable)
 
         await ask(rig, "what is the number")
+        #expect(await rig.service.lastPrompt == nil, "a blocked image never reaches the provider")
+        #expect(rig.vm.errorMessage?.contains("vision model") == true)
 
-        #expect(await rig.service.lastImages.isEmpty, "no pixels sent")
+        // The explicit consented fallback reads it as text on this Mac.
+        rig.vm.allowImageTextFallback = true
+        await ask(rig, "what is the number")
         let prompt = try #require(await rig.service.lastPrompt)
         #expect(prompt.contains("INVOICE 42"))
         #expect(prompt.contains(#"kind="Text read from the image on this Mac""#))
-        let question = try #require(rig.vm.conversationMessages.first)
-        #expect(rig.vm.attachmentChips(for: question).first?.detail == QuickViewModel.imageAsTextLine)
+        #expect(await rig.service.lastImages.isEmpty, "no pixels sent")
     }
 
     // MARK: - Budget
@@ -507,7 +519,10 @@ struct AttachmentFlowTests {
         await ask(rig, "first")
         rig.vm.attachmentTray.add(.file(Self.file("Deck.pptx")))
         await settle(rig.vm)
-        await ask(rig, "second")
+        // A neutral follow-up is source-first: the older file is withheld until
+        // the question asks for it. Naming both brings history into scope, so
+        // the older one is the one stubbed under the budget.
+        await ask(rig, "compare Budget.xlsx with Deck.pptx")
 
         let answer = try #require(rig.vm.conversationMessages.last)
         let line = try #require(answer.tools.first { $0.kind == .context }?.summary)
