@@ -89,7 +89,7 @@ struct RecallCLITests {
     }
 
     @Test func todayReadsCapturesAndTheThreeExclusiveTaskSections() async throws {
-        let json = #"{"captures":{"items":[{"kind":"note","text":"Call Sam","time":"09:12"}],"readable":true},"schema_version":2,"tasks":{"readable":true,"due_today":[{"id":"d1","title":"File NAR1","lane":"requires_action","due":"2026-09-16","project":"china-snapshot","source":"/vault/china-snapshot/00-tasks.md","backend":"vault"}],"overdue":[],"in_progress":[{"id":"i1","title":"Audit screenctx","lane":"in_progress","due":"","project":"stack","source":"/vault/stack/00-tasks.md","backend":"vault"}]}}"#
+        let json = #"{"captures":{"items":[{"kind":"note","text":"Call Sam","time":"09:12"}],"readable":true},"schema_version":3,"tasks":{"readable":true,"open_count":2,"lane_counts":{"requires_action":1,"in_progress":1},"due_today":[{"id":"d1","title":"File NAR1","lane":"requires_action","due":"2026-09-16","project":"china-snapshot","source":"/vault/china-snapshot/00-tasks.md","backend":"vault"}],"overdue":[],"in_progress":[{"id":"i1","title":"Audit screenctx","lane":"in_progress","due":"","project":"stack","source":"/vault/stack/00-tasks.md","backend":"vault"}]},"triage":{"readable":true,"count":0,"oldest":""}}"#
         let runner = FakeRunner(.success(Self.output(json)))
         let today = try await Self.cli(runner).today()
         #expect(await runner.calls.map(\.arguments) == [["today", "--json"]])
@@ -101,12 +101,19 @@ struct RecallCLITests {
     }
 
     @Test func todayCarriesAnUnreadableSectionsReason() async throws {
-        let json = #"{"captures":{"items":[],"readable":false,"reason":"no capture interface"},"schema_version":2,"tasks":{"readable":false,"reason":"no task interface","due_today":[],"overdue":[],"in_progress":[]}}"#
+        let json = #"{"captures":{"items":[],"readable":false,"reason":"no capture interface"},"schema_version":3,"tasks":{"readable":false,"reason":"no task interface","open_count":0,"lane_counts":{},"due_today":[],"overdue":[],"in_progress":[]},"triage":{"readable":false,"reason":"no capture interface","count":0,"oldest":""}}"#
         let today = try await Self.cli(FakeRunner(.success(Self.output(json)))).today()
         #expect(!today.captures.readable)
         #expect(today.captures.reason == "no capture interface")
         #expect(!today.tasks.readable)
         #expect(today.tasks.reason == "no task interface")
+    }
+
+    @Test func todayRefusesThePreviousDaySectionsSchema() async throws {
+        let json = #"{"captures":{"items":[],"readable":true},"schema_version":2,"tasks":{"readable":true,"due_today":[],"overdue":[],"in_progress":[]}}"#
+        await #expect(throws: RecallError.failed("recall exited with status 0")) {
+            _ = try await Self.cli(FakeRunner(.success(Self.output(json)))).today()
+        }
     }
 
     @Test func todayRefusesTheOldFlatBacklogSchema() async throws {

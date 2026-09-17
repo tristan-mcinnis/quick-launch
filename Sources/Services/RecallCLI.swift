@@ -68,9 +68,10 @@ struct RecalledTask: Sendable, Equatable, Decodable {
     }
 }
 
-/// `recall today --json` schema 2: today's captures and three exclusive task
-/// sections. The app checks the schema so an older flat-backlog payload never
-/// masquerades as today's work.
+/// `recall today --json` schema 3: today's captures, backlog health,
+/// unresolved triage, and three exclusive task sections. This consumer uses
+/// the capture and day-section fields; unknown v3 health fields decode safely.
+/// The app checks the schema so an older payload never masquerades as current.
 struct MemoryToday: Sendable, Equatable, Decodable {
     struct Section<Item: Sendable & Equatable & Decodable>: Sendable, Equatable, Decodable {
         var readable: Bool
@@ -216,7 +217,7 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
     nonisolated static func parseToday(_ result: ProcessResult) throws -> MemoryToday {
         if result.status == 0,
            let payload = try? JSONDecoder().decode(MemoryToday.self, from: result.stdout),
-           payload.schemaVersion == 2 {
+           payload.schemaVersion == 3 {
             return payload
         }
         throw RecallError.failed(errorMessage(in: result))
