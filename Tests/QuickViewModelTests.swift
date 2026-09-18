@@ -416,6 +416,25 @@ struct QuickViewModelTests {
         #expect(keychainReads == 0)
     }
 
+    /// The route resolver is read several times per body pass (the composer's
+    /// destination label, the attachment routing line, the pre-send
+    /// controls). Each check used to read the Keychain, so a body evaluated a
+    /// few times a second produced hundreds of SecItem reads a second and
+    /// held the main thread. One read per provider, until a key changes.
+    @Test func testRouteChecksReadTheKeychainOncePerProvider() {
+        let vm = QuickViewModel(service: nil)
+        var keychainReads = 0
+        vm.apiKeyProvider = { _ in keychainReads += 1; return "test-key" }
+        for _ in 0..<20 {
+            _ = vm.chatDestinationLabel
+            _ = vm.attachmentRoutingLine
+        }
+        #expect(keychainReads == 1, "one Keychain read per provider, not one per body pass")
+        vm.invalidateAPIKeyPresence()
+        _ = vm.chatDestinationLabel
+        #expect(keychainReads == 2, "a changed key is read again")
+    }
+
     @Test func testMissingKeyMessageNamesTheProvider() async throws {
         let vm = QuickViewModel(service: nil)
         vm.apiKeyProvider = { _ in "" }

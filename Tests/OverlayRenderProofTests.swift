@@ -55,6 +55,47 @@ struct OverlayRenderProofTests {
         #expect(image.size.height >= vm.estimatedWindowHeight - 1)
     }
 
+    /// A laptop display caps the hung frame to the room under the anchor, so
+    /// the Clipboard History plus Screenshots two-pane block must shrink to
+    /// it. A fixed preview block pushed the footer (and the last rows) past
+    /// the window's bottom edge, where nothing could reach them.
+    @Test func clipboardCatalogKeepsTheFooterOnAShortDisplay() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clipboard-short-display-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ClipboardHistoryStore(
+            fileURL: directory.appendingPathComponent("clipboard-history.json")
+        )
+        for index in 1...14 {
+            store.record("clipboard entry number \(index) with some text to show in the list", limit: 40)
+        }
+        var settings = QuickSettings()
+        settings.appearance = .dark
+        settings.clipboardHistoryEnabled = true
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, clipboardHistory: store)
+        vm.enterCatalog(.clipboard)
+        // What a 14-inch display's visible frame leaves below the anchor: the
+        // full estimate (~621) cannot fit, so the window is capped here.
+        let shortHeight: CGFloat = 487
+        #expect(vm.estimatedWindowHeight > shortHeight, "the bug needs content taller than the display's room")
+
+        let image = try Self.renderFixedHeight(
+            viewModel: vm,
+            appearance: .darkAqua,
+            height: shortHeight
+        )
+        try Self.save(image, name: "overlay-clipboard-short-display-dark.png")
+        // The footer's key caps sit in the window's bottom-right corner. With
+        // the fixed block they were below the frame; the corner held a clipped
+        // list row instead and no footer at all.
+        #expect(try Self.brightPixelCount(
+            in: image,
+            region: CGRect(x: 720, y: shortHeight - 32, width: 28, height: 28)
+        ) > 0, "the footer must stay inside the frame on a short display")
+    }
+
     @Test func rendersDarkAnswerState() async throws {
         let vm = Self.makeViewModel(appearance: .dark)
         let mock = MockQuickService()

@@ -47,5 +47,8 @@ extension QuickViewModel {
     func updateSettings(_ mutation: (inout QuickSettings) -> Void) {
         mutation(&settings)
         settings.save()
+        // A provider may have been added, removed, or repointed; the cached
+        // key presence is no longer trustworthy.
+        invalidateAPIKeyPresence()
     }
 }

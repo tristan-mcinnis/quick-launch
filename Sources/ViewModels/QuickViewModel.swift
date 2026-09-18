@@ -800,6 +800,13 @@ import HouseChatCore
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
     /// Keychain lookup, replaceable in tests so they never touch the real Keychain.
     @ObservationIgnored var apiKeyProvider: (UUID) -> String? = { APIKeyStore.load(providerID: $0) }
+    /// Whether a provider has a key, remembered for this session. The route
+    /// resolver runs several times per body pass (`chatDestinationLabel`,
+    /// `attachmentRoutingLine`, the pre-send controls), and each check read
+    /// the Keychain: a heavy body re-evaluated three times a second produced
+    /// hundreds of `SecItemCopyMatching` calls a second and most of the CPU
+    /// the app burned. Cleared whenever a key or a provider setting changes.
+    @ObservationIgnored private var apiKeyPresence: [UUID: Bool] = [:]
 
     // How long the "just copied" flag stays true after auto-copy.
     @ObservationIgnored var justCopiedTimeout: Duration = .seconds(2)
@@ -873,6 +880,22 @@ import HouseChatCore
     /// The chips waiting to ride the next question: files, links, pictures,
     /// and selections, one tray per view. Every way to attach lands here.
     let attachmentTray: AttachmentTray
+    /// Whether `providerID` has an API key, from the cache after the first
+    /// read. The Keychain itself is the source; this only stops one body pass
+    /// from reading it repeatedly.
+    func hasAPIKey(_ providerID: UUID) -> Bool {
+        if let cached = apiKeyPresence[providerID] { return cached }
+        let has = !(apiKeyProvider(providerID) ?? "").isEmpty
+        apiKeyPresence[providerID] = has
+        return has
+    }
+
+    /// A key or a provider was added, removed, or edited: the next check
+    /// reads the Keychain again.
+    func invalidateAPIKeyPresence() {
+        apiKeyPresence.removeAll()
+    }
+
     /// Reads a source for Re-attach; the tray reads through the same one.
     @ObservationIgnored let attachmentReader: any AttachmentExtracting
     /// File…'s open panel. The app sets the system one; nil in tests unless
@@ -9458,6 +9481,7 @@ import HouseChatCore
                 ?? InferenceProvider.deepSeekID
         }
         try? APIKeyStore.delete(providerID: id)
+        invalidateAPIKeyPresence()
         settings.save()
         NotificationCenter.default.post(name: .providerChanged, object: nil)
     }

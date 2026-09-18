@@ -198,7 +198,7 @@ extension QuickViewModel {
         guard endpoint.provider.kind == .openAICompatible,
               endpoint.provider.location == .cloud
         else { return true }
-        return !(apiKeyProvider(endpoint.provider.id) ?? "").isEmpty
+        return hasAPIKey(endpoint.provider.id)
     }
 
     /// What the app knows about one model's image input, from the curated

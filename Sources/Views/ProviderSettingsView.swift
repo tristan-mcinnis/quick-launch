@@ -158,6 +158,7 @@ struct ProviderSettingsView: View {
                     Button("Save") { saveKey(provider.id) }
                     Button("Remove") {
                         try? APIKeyStore.delete(providerID: provider.id)
+                        viewModel.invalidateAPIKeyPresence()
                         apiKey = ""
                         keyStatus = "Key removed"
                     }
@@ -283,6 +284,7 @@ struct ProviderSettingsView: View {
     private func saveKey(_ providerID: UUID) {
         do {
             try APIKeyStore.save(apiKey, providerID: providerID)
+            viewModel.invalidateAPIKeyPresence()
             keyStatus = "Key saved in Keychain"
         } catch {
             keyStatus = error.localizedDescription

@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
@@ -309,6 +310,61 @@ enum PendingCaptureChips {
     }
 }
 
+// MARK: - Chip thumbnails
+
+/// The tiny thumbnail a picture chip draws, decoded once per attachment.
+///
+/// `AttachmentChip.leading` used to build an `NSImage` from the full PNG
+/// inside the body. A screenshot can be several megabytes, and
+/// `ChipFlowLayout` asks each chip for its size several times per layout
+/// pass, so a thread holding a few screenshots re-decoded every PNG on
+/// every pass. A bounded cache (48 pt thumbnails, the size the chip draws)
+/// decodes each one once.
+@MainActor
+enum AttachmentThumbnailCache {
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 128
+        cache.totalCostLimit = 16 * 1_024 * 1_024
+        return cache
+    }()
+
+    /// The thumbnail for `data`, keyed by the chip's own id plus a cheap
+    /// sample of the bytes. `key` alone is not enough for a composer chip
+    /// (pending screenshots are numbered by position, and a removal shifts
+    /// those), and hashing a multi-megabyte PNG per lookup would cost as
+    /// much as the decode. A re-render is a lookup, never a decode.
+    static func thumbnail(for data: Data, key: String) -> NSImage? {
+        var hasher = Hasher()
+        hasher.combine(key)
+        hasher.combine(data.count)
+        if let first = data.first { hasher.combine(first) }
+        if let last = data.last { hasher.combine(last) }
+        if data.count > 8 {
+            let step = max(1, data.count / 8)
+            for offset in stride(from: 0, to: data.count, by: step) {
+                hasher.combine(data[data.startIndex + offset])
+            }
+        }
+        let cacheKey = "\(key):\(hasher.finalize())" as NSString
+        if let cached = cache.object(forKey: cacheKey) { return cached }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 48,
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        let image = NSImage(
+            cgImage: thumbnail,
+            size: NSSize(width: thumbnail.width, height: thumbnail.height)
+        )
+        cache.setObject(image, forKey: cacheKey, cost: thumbnail.bytesPerRow * thumbnail.height)
+        return image
+    }
+}
+
 // MARK: - Chip
 
 /// One attachment: the glyph (or a thumbnail), the name, the detail, and in
@@ -426,7 +482,8 @@ struct AttachmentChip: View {
     private var leading: some View {
         if case .failed = model.phase {
             glyph
-        } else if model.kind.isImage, let data = model.imageData, let image = NSImage(data: data) {
+        } else if model.kind.isImage, let data = model.imageData,
+                  let image = AttachmentThumbnailCache.thumbnail(for: data, key: model.id) {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()

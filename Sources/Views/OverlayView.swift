@@ -195,8 +195,12 @@ struct OverlayView: View {
                          : "No matches. Try a different search.")
                         .font(House.TypeToken.body)
                         .foregroundStyle(House.ColorToken.textSecondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: PanelSizing.launcherListMaximumHeight)
+                        // Same guardrail as the list block: fill the preview
+                        // space when the display has it, shrink to the room
+                        // when it does not, so the footer stays on screen.
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
+                        .layoutPriority(1)
                 } else if viewModel.isGridCatalog {
                     EmojiGridView(viewModel: viewModel)
                 } else {
@@ -215,8 +219,17 @@ struct OverlayView: View {
                             }
                         }
                     }
-                    .frame(height: viewModel.isHistoryCatalog && viewModel.showsDetailPane
-                           ? PanelSizing.launcherListMaximumHeight : nil)
+                    // A fixed height here pushed the footer past the window's
+                    // bottom edge on a short display, where the hung frame is
+                    // capped to the room under the anchor. A flexible block
+                    // takes what is left, so the list scrolls and the footer
+                    // keeps the bottom edge.
+                    .frame(
+                        minHeight: 0,
+                        maxHeight: viewModel.isHistoryCatalog && viewModel.showsDetailPane
+                            ? PanelSizing.launcherListMaximumHeight : nil
+                    )
+                    .layoutPriority(1)
                 }
             }
 
