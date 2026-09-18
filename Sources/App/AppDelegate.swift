@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private let selectedTextService = SelectedTextService()
     private let applicationCatalog = ApplicationCatalogService()
-    private let launcherCatalog = TunaCatalogService()
+    private let launcherCatalog = LauncherCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let colorHistory = ColorHistoryStore()
     private let colorSampler = ScreenColorSampler()

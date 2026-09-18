@@ -4,6 +4,7 @@ import Foundation
 protocol LauncherCatalogServicing: AnyObject {
     var snippets: [LauncherCatalogItem] { get }
     var quickLinks: [LauncherCatalogItem] { get }
+    var loadErrorMessage: String? { get }
     func reload()
     func updateSnippet(_ item: LauncherCatalogItem, title: String, value: String) throws
     func deleteSnippet(_ item: LauncherCatalogItem) throws
@@ -11,8 +12,8 @@ protocol LauncherCatalogServicing: AnyObject {
     func createSnippet(title: String, value: String) throws -> LauncherCatalogItem
     /// Adds a fixed Quick Link to the store and returns the stored item.
     func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem
-    /// Renames a stored Quick Link or points it somewhere else. Smart Links
-    /// come from a file this app only reads, so they are never editable.
+    /// Renames a stored Quicklink or points it somewhere else. Legacy Smart
+    /// Links become ordinary editable items after their one-time import.
     func updateQuickLink(_ item: LauncherCatalogItem, title: String, value: String) throws
     func deleteQuickLink(_ item: LauncherCatalogItem) throws
 }
@@ -30,6 +31,8 @@ enum LauncherCatalogError: LocalizedError {
 }
 
 extension LauncherCatalogServicing {
+    var loadErrorMessage: String? { nil }
+
     func createSnippet(title: String, value: String) throws -> LauncherCatalogItem {
         throw LauncherCatalogError.creationUnsupported
     }

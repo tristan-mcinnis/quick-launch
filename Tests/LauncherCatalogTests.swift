@@ -5,11 +5,12 @@ import Testing
 @Suite("Launcher catalogs", .serialized)
 @MainActor
 struct LauncherCatalogTests {
-    @Test func tunaCustomItemsAndSmartLinksAreLoadedWithoutMigration() throws {
+    @Test func tunaCustomItemsAndSmartLinksAreMigratedOnce() throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-catalog-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
+        let store = folder.appendingPathComponent("launcher-catalog.json")
         let preferences = folder.appendingPathComponent("Tuna.plist")
         let config = folder.appendingPathComponent("config.toml")
         let records: [[String: Any]] = [
@@ -32,10 +33,33 @@ struct LauncherCatalogTests {
         template = "https://example.com/search?q={{input}}"
         """.write(to: config, atomically: true, encoding: .utf8)
 
-        let service = TunaCatalogService(preferencesURL: preferences, configURL: config)
+        let service = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
         #expect(service.snippets.map(\.title) == ["Greeting"])
         #expect(service.quickLinks.count == 2)
         #expect(service.quickLinks.contains { $0.title == "Search" && $0.requiresInput })
+        #expect(FileManager.default.fileExists(atPath: store.path))
+
+        try service.deleteSnippet(try #require(service.snippets.first))
+        let afterDeletion = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
+        #expect(afterDeletion.snippets.isEmpty, "a deleted import is not recreated from legacy Tuna")
+
+        try FileManager.default.removeItem(at: preferences)
+        try FileManager.default.removeItem(at: config)
+        let reloaded = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
+        #expect(reloaded.snippets.isEmpty)
+        #expect(reloaded.quickLinks.count == 2)
     }
 
     @Test func clipboardHistoryDeduplicatesBoundsPersistsAndClears() {
@@ -117,6 +141,7 @@ struct LauncherCatalogTests {
             .appendingPathComponent("quick-launch-mutation-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
+        let store = folder.appendingPathComponent("launcher-catalog.json")
         let preferences = folder.appendingPathComponent("Tuna.plist")
         let config = folder.appendingPathComponent("config.toml")
         let records: [[String: Any]] = [
@@ -130,7 +155,11 @@ struct LauncherCatalogTests {
             fromPropertyList: ["CustomItemsCatalogItems": nested], format: .binary, options: 0
         )
         try root.write(to: preferences)
-        let service = TunaCatalogService(preferencesURL: preferences, configURL: config)
+        let service = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
         let snippet = try #require(service.snippets.first)
         try service.updateSnippet(snippet, title: "After", value: "Updated")
         #expect(service.snippets.first?.title == "After")
@@ -138,9 +167,7 @@ struct LauncherCatalogTests {
         try service.deleteSnippet(try #require(service.snippets.first))
         #expect(service.snippets.isEmpty)
         #expect(service.quickLinks.count == 1)
-        #expect((try FileManager.default.contentsOfDirectory(atPath: folder.path)).contains {
-            $0.contains("quick-launch-backup")
-        })
+        #expect(FileManager.default.fileExists(atPath: store.path))
     }
 
     @Test func catalogReturnsToRootAfterIdle() async {

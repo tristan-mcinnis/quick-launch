@@ -4,20 +4,24 @@ import Testing
 
 /// Creating, editing, and deleting snippets and Quicklinks, and the
 /// placeholders they expand on the way out. Every store test runs against a
-/// throwaway plist in the temporary directory; nothing here reads or writes
-/// the real Tuna store.
+/// throwaway Quick Launch catalog and legacy fixture in the temporary
+/// directory; nothing here reads or writes the real user store.
 @Suite("Snippet and Quicklink authoring", .serialized)
 @MainActor
 struct SnippetAuthoringTests {
-    /// A temporary copy of Tuna's record shape: a root dictionary whose
-    /// `CustomItemsCatalogItems` key holds a nested binary plist.
+    /// A temporary Quick Launch store plus a legacy Tuna fixture for migration.
     private struct Fixture {
         let folder: URL
+        let store: URL
         let preferences: URL
         let config: URL
 
-        @MainActor func service() -> TunaCatalogService {
-            TunaCatalogService(preferencesURL: preferences, configURL: config)
+        @MainActor func service() -> LauncherCatalogService {
+            LauncherCatalogService(
+                storeURL: store,
+                legacyPreferencesURL: preferences,
+                legacyConfigURL: config
+            )
         }
 
         func remove() {
@@ -32,6 +36,7 @@ struct SnippetAuthoringTests {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-authoring-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = folder.appendingPathComponent("launcher-catalog.json")
         let preferences = folder.appendingPathComponent("Tuna.plist")
         let config = folder.appendingPathComponent("config.toml")
         let nested = try PropertyListSerialization.data(
@@ -42,10 +47,27 @@ struct SnippetAuthoringTests {
         )
         try root.write(to: preferences)
         try smartLinks.write(to: config, atomically: true, encoding: .utf8)
-        return Fixture(folder: folder, preferences: preferences, config: config)
+        return Fixture(folder: folder, store: store, preferences: preferences, config: config)
     }
 
     // MARK: - The store
+
+    @Test func aSnippetCanBeCreatedAfterTunaHasBeenRemoved() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-no-tuna-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let service = LauncherCatalogService(
+            storeURL: folder.appendingPathComponent("launcher-catalog.json"),
+            legacyPreferencesURL: folder.appendingPathComponent("missing-Tuna.plist"),
+            legacyConfigURL: folder.appendingPathComponent("missing-config.toml")
+        )
+
+        let created = try service.createSnippet(title: "Sign-off", value: "Kind regards")
+        #expect(created.title == "Sign-off")
+        #expect(service.snippets.map(\.value) == ["Kind regards"])
+    }
 
     @Test func aSnippetCanBeCreatedEditedAndDeletedFromNothing() throws {
         let fixture = try Self.makeFixture()
@@ -68,9 +90,10 @@ struct SnippetAuthoringTests {
 
         let created = try service.createQuickLink(title: "Docs", value: "https://example.com")
         #expect(service.quickLinks.map(\.title) == ["Docs"])
-        try service.updateQuickLink(created, title: "Handbook", value: "https://example.com/handbook")
+        try service.updateQuickLink(created, title: "Handbook", value: "https://example.com/handbook?q={query}")
         #expect(service.quickLinks.first?.title == "Handbook")
-        #expect(service.quickLinks.first?.value == "https://example.com/handbook")
+        #expect(service.quickLinks.first?.value == "https://example.com/handbook?q={query}")
+        #expect(service.quickLinks.first?.requiresInput == true)
         try service.deleteQuickLink(#require(service.quickLinks.first))
         #expect(service.quickLinks.isEmpty)
     }
@@ -88,12 +111,36 @@ struct SnippetAuthoringTests {
         #expect(service.snippets.map(\.title) == ["Note"])
     }
 
-    @Test func everyWriteLeavesATimestampedBackup() throws {
+    @Test func everyWritePersistsToAnOwnerOnlyQuickLaunchFile() throws {
         let fixture = try Self.makeFixture()
         defer { fixture.remove() }
         _ = try fixture.service().createSnippet(title: "One", value: "x")
-        let files = try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path)
-        #expect(files.contains { $0.contains("quick-launch-backup") })
+        let attributes = try FileManager.default.attributesOfItem(atPath: fixture.store.path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+
+        let reloaded = fixture.service()
+        #expect(reloaded.snippets.map(\.title) == ["One"])
+    }
+
+    @Test func aCorruptQuickLaunchStoreIsNeverOverwritten() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-launch-corrupt-catalog-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = folder.appendingPathComponent("launcher-catalog.json")
+        let corrupt = Data("not-json".utf8)
+        try corrupt.write(to: store)
+
+        let service = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: folder.appendingPathComponent("missing-Tuna.plist"),
+            legacyConfigURL: folder.appendingPathComponent("missing-config.toml")
+        )
+        #expect(service.loadErrorMessage != nil)
+        #expect(throws: LauncherCatalogService.MutationError.unreadableStore) {
+            _ = try service.createSnippet(title: "Do not write", value: "x")
+        }
+        #expect(try Data(contentsOf: store) == corrupt)
     }
 
     @Test func theStoreRefusesEmptyAndMalformedItems() throws {
@@ -101,26 +148,26 @@ struct SnippetAuthoringTests {
         defer { fixture.remove() }
         let service = fixture.service()
 
-        #expect(throws: TunaCatalogService.MutationError.invalidSnippet) {
+        #expect(throws: LauncherCatalogService.MutationError.invalidSnippet) {
             _ = try service.createSnippet(title: "  ", value: "text")
         }
-        #expect(throws: TunaCatalogService.MutationError.invalidSnippet) {
+        #expect(throws: LauncherCatalogService.MutationError.invalidSnippet) {
             _ = try service.createSnippet(title: "Name", value: "")
         }
-        #expect(throws: TunaCatalogService.MutationError.invalidQuickLink) {
+        #expect(throws: LauncherCatalogService.MutationError.invalidQuickLink) {
             _ = try service.createQuickLink(title: "Name", value: "not a web address")
         }
-        #expect(throws: TunaCatalogService.MutationError.invalidQuickLink) {
+        #expect(throws: LauncherCatalogService.MutationError.invalidQuickLink) {
             _ = try service.createQuickLink(title: "Name", value: "ftp://example.com")
         }
-        #expect(throws: TunaCatalogService.MutationError.invalidQuickLink) {
+        #expect(throws: LauncherCatalogService.MutationError.invalidQuickLink) {
             _ = try service.createQuickLink(title: " ", value: "https://example.com")
         }
         #expect(service.snippets.isEmpty)
         #expect(service.quickLinks.isEmpty)
     }
 
-    @Test func aSmartLinkIsNeverEditedOrDeleted() throws {
+    @Test func anImportedSmartLinkCanBeEditedAndDeletedLocally() throws {
         let fixture = try Self.makeFixture(smartLinks: """
         [[smartLinks.entries]]
         enabled = true
@@ -132,14 +179,15 @@ struct SnippetAuthoringTests {
         let service = fixture.service()
         let smart = try #require(service.quickLinks.first { $0.itemID.hasPrefix("tuna-smart-") })
 
-        #expect(!smart.isEditableQuickLink)
-        #expect(throws: TunaCatalogService.MutationError.smartLinkIsReadOnly) {
-            try service.updateQuickLink(smart, title: "New", value: "https://example.com")
-        }
-        #expect(throws: TunaCatalogService.MutationError.smartLinkIsReadOnly) {
-            try service.deleteQuickLink(smart)
-        }
-        // The config file itself is never rewritten.
+        #expect(smart.isEditableQuickLink)
+        try service.updateQuickLink(smart, title: "New", value: "https://example.com?q={query}")
+        let updated = try #require(service.quickLinks.first)
+        #expect(updated.title == "New")
+        #expect(updated.requiresInput)
+        try service.deleteQuickLink(updated)
+        #expect(service.quickLinks.isEmpty)
+
+        // The legacy config is an import source and is never rewritten.
         let config = try String(contentsOf: fixture.config, encoding: .utf8)
         #expect(config.contains("[[smartLinks.entries]]"))
     }
@@ -195,15 +243,15 @@ struct SnippetAuthoringTests {
         ])
     }
 
-    @Test func aSmartLinkKeepsTheReadOnlyActions() {
+    @Test func anImportedSmartLinkKeepsInputAndGainsLocalEditActions() {
         let smart = LauncherCatalogItem(
             kind: .quickLink, itemID: "tuna-smart-abc", title: "Search",
             detail: "example.com", value: "https://example.com/?q={{input}}",
             requiresInput: true
         )
         let titles = ItemActionCatalog.actions(for: .item(smart), pasteTarget: nil).map(\.title)
-        #expect(!titles.contains("Edit Quicklink"))
-        #expect(!titles.contains("Delete Quicklink"))
+        #expect(titles.contains("Edit Quicklink"))
+        #expect(titles.contains("Delete Quicklink"))
         #expect(titles.first == "Enter Input")
     }
 
@@ -381,7 +429,7 @@ struct SnippetAuthoringTests {
     // MARK: - Placeholders on the way out
 
     private func pinnedViewModel(
-        _ catalog: TunaCatalogService,
+        _ catalog: LauncherCatalogService,
         clipboard: String? = nil
     ) -> (QuickViewModel, FakePasteboard) {
         let pasteboard = FakePasteboard(string: clipboard)

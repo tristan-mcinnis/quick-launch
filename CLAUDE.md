@@ -36,10 +36,11 @@ This is a private repository, but treat Git history as durable and potentially
 exposed. Never commit API keys, tokens, passwords, private keys, personal
 snippet exports, `.env` files, credentials, or local launcher data.
 
-Provider API keys belong in macOS Keychain through `APIKeyStore`. Personal Tuna
-snippets and Quick Links are read live from their external stores; do not copy
-their values into this repository, settings, fixtures, logs, screenshots, or
-tests. Preserve and extend `.gitignore` when introducing new local-data paths.
+Provider API keys belong in macOS Keychain through `APIKeyStore`. Personal
+snippets and Quicklinks belong in Quick Launch's owner-only Application Support
+catalog; legacy Tuna items are imported once when available. Never copy their
+values into this repository, settings, fixtures, logs, screenshots, or tests.
+Preserve and extend `.gitignore` when introducing new local-data paths.
 If a suspected secret appears in Git history, report the affected file and
 credential type without echoing the value, then rotate the credential.
 

@@ -267,9 +267,9 @@ enum SettingsDestinationIndex {
         group("clipboard.quicklinks", .clipboard, "clipboard.quicklinks", "Quicklinks",
               "Which browser opens Quick Links",
               ["quicklink", "quick link", "browser", "link", "open", "url"]),
-        group("clipboard.tuna", .clipboard, "clipboard.tuna", "Tuna stores",
-              "Where snippets and Quick Links are read from",
-              ["tuna", "snippets", "smart links", "stores", "external", "files"]),
+        group("clipboard.catalog", .clipboard, "clipboard.catalog", "Snippets & Quicklinks",
+              "Private local items owned by Quick Launch",
+              ["snippets", "quicklinks", "quick links", "catalog", "local", "files"]),
 
         // Screen History
         group("screenHistory.sources", .screenHistory, "screenHistory.sources", "Sources",

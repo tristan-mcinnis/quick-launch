@@ -29,7 +29,7 @@ fork was built around was removed on 2026-08-22 (see "Removed" below).
 - Raycast-style footer in root search and the catalogs with the keys that work right now, and Sol-style hotkey badges on rows that have a global hotkey. Quick AI and AI Chat have no footer: the composer names what Return does
 - Escape steps back one layer at a time (a `⌘K` pane, a chooser, a running answer, typed text, an attachment, Quick AI, a mode, a catalog) and closes the launcher at root search; Backspace on an empty field steps back too but never closes the launcher; after the Keep my place interval (10 seconds by default) reopening starts at root search
 - Finder indexing through the macOS CoreServices application catalog
-- Live Tuna Snippets and Quick Links, with aliases, optional per-item global hotkeys, and pin to top (`⌘⇧P`)
+- Private local Snippets and Quicklinks, with aliases, optional per-item global hotkeys, and pin to top (`⌘⇧P`)
 - Emoji & Symbols catalog as a grid: Frequently Used first, 1 500+ emoji, flags, arrows, math, currency, punctuation, and key symbols, searched by name or plain words (`fire`, `thumbs up`, `command`), pasted with Return or copied with `⌘↩`; one skin tone setting applies to every emoji that takes one
 - Colors: Pick Color from Screen magnifies any pixel on any display with the system loupe (no screen recording permission), copies it in your chosen notation, and closes; the pick is kept in the local Colors catalog. Pick Color and Paste sends it straight to the app behind the panel. Rows show a swatch with Hex, RGB, HSL, HSB, and a colour name; `⌘1`…`⌘4` copy the other notations, `⌘⇧P` pins, `⌃X` deletes
 - Translator window (`⇧⌘T`, or the Translate item): opens with selected text or a fresh input field, focused for typing and `⌘A`. Translation waits for a 600 ms pause; typing cancels the previous response. The target and language pair stay as you chose them. `⌘T` chooses the target; `⌘S` swaps the pair and moves the completed translation into the input. If the answer is unfinished, Swap keeps your source text and translates it in the new direction. `⌘↩` copies and closes, `⇧⌘↩` pastes back, `⇧⌘V` uses the clipboard; Chinese output includes pinyin. Escape closes the language list, then clears the text, then closes the window (`⌘W` closes it at once); committed translations are kept locally (500). `⇧↩` in the launcher still translates one-shot; `/zh` and `/translate` act on selected text
@@ -171,12 +171,12 @@ files. It is bounded to 50 items by default and by a total byte budget, and you
 can turn it off or clear it in **Settings › Clipboard & Capture**. Copies of AI
 answers are marked transient, so Clipboard History skips them.
 
-The main launcher also contains Snippets and Quick Links. These catalogs read
-the existing Tuna stores live. Highlight an item and press `Command+K` to give
-it a search alias or global hotkey, or use the keyboard action pane to Paste,
-Copy, or Copy & Paste. Paste targets the topmost external window directly
-behind Quick Launch. Quick Launch does not duplicate snippet or link values
-into its settings.
+The main launcher also contains Snippets and Quicklinks. Quick Launch keeps
+these items locally in its owner-only Application Support catalog and imports
+surviving legacy Tuna items once. Highlight an item and press `Command+K` to
+give it a search alias or global hotkey, or use the keyboard action pane to
+Paste, Copy, or Copy & Paste. Paste targets the topmost external window
+directly behind Quick Launch. Values are not duplicated into app settings.
 
 Copy a screenshot before opening Quick Launch and it appears as a removable
 attachment. Submitting it sends the prompt and image to the Vision model set in
@@ -291,9 +291,9 @@ global hotkey. You can also highlight an app in the launcher and press
 `Command+K` to open its action pane, then edit the same alias and hotkey there.
 Finder is included as an app through `/System/Library/CoreServices`.
 
-Open **Settings › Clipboard & Capture** to reload the Tuna Snippets and
-Quicklinks and to configure or clear Clipboard History. Their aliases and global
-hotkeys are in **Settings › Items**.
+Open **Settings › Clipboard & Capture** to reload the local Snippets and
+Quicklinks catalog and to configure or clear Clipboard History. Their aliases
+and global hotkeys are in **Settings › Items**.
 
 ## Web search and Pi skills
 
@@ -469,8 +469,9 @@ the old saved copy stays intact. No attachment is written to Clipboard History.
   recording permission and captures no image.
 - Text read from a screen area is recognised on this Mac with Vision and goes to
   the clipboard. The captured pixels are not saved.
-- Tuna snippet and Quick Link values are read at runtime and are not logged or
-  copied into Quick Launch settings.
+- Snippet and Quicklink values are stored owner-only in
+  `~/Library/Application Support/Quick Launch/launcher-catalog.json`; they are
+  not logged or copied into Quick Launch settings.
 - Selected-text actions use macOS Accessibility only to read or replace the
   current selection. They do not record the screen.
 - The interaction journal is local and bounded: outcome rows only (identifiers,
@@ -505,7 +506,7 @@ OverlayView (launcher panel)
   → QuickViewModel
       → QuickStore: settings and chat history, shared with AI Chat
       → cached local application catalogue, including Finder
-      → live Tuna snippet and Quick Link catalogues
+      → owner-only local snippet and Quicklink catalog
       → bounded local clipboard history
       → bounded SearXNG snippet bundle
       → OpenAI-compatible SSE service

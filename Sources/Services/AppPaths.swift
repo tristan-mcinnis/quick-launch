@@ -31,6 +31,12 @@ enum AppPaths {
         applicationSupportDirectory.appendingPathComponent(name, isDirectory: true)
     }
 
+    /// User-owned snippets and Quicklinks. The file is private local data and
+    /// never belongs in the source repository.
+    static var launcherCatalogFile: URL {
+        file("launcher-catalog.json")
+    }
+
     /// Per-model profiles: which models are on, and their reasoning effort.
     static var modelPreferencesFile: URL {
         file("model-preferences.json")

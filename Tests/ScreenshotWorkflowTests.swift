@@ -199,11 +199,12 @@ struct ScreenshotWorkflowTests {
         #expect(QuickViewModel.searchQuery(from: "- First point\nsecond") == "First point")
     }
 
-    @Test func tunaStoreCreatesSnippetsWithABackup() throws {
+    @Test func quickLaunchStoreMigratesAndPersistsSnippets() throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-create-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
+        let store = folder.appendingPathComponent("launcher-catalog.json")
         let preferences = folder.appendingPathComponent("Tuna.plist")
         let config = folder.appendingPathComponent("config.toml")
         let nested = try PropertyListSerialization.data(
@@ -216,19 +217,25 @@ struct ScreenshotWorkflowTests {
         try plist.write(to: preferences)
         try "".write(to: config, atomically: true, encoding: .utf8)
 
-        let service = TunaCatalogService(preferencesURL: preferences, configURL: config)
+        let service = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
         let created = try service.createSnippet(title: "Sign-off", value: "Best regards")
         #expect(created.kind == .snippet)
         #expect(created.title == "Sign-off")
         #expect(service.snippets.map(\.title) == ["Greeting", "Sign-off"])
 
-        let reloaded = TunaCatalogService(preferencesURL: preferences, configURL: config)
+        let reloaded = LauncherCatalogService(
+            storeURL: store,
+            legacyPreferencesURL: preferences,
+            legacyConfigURL: config
+        )
         #expect(reloaded.snippets.contains { $0.title == "Sign-off" && $0.value == "Best regards" })
-        let backups = try FileManager.default.contentsOfDirectory(atPath: folder.path)
-            .filter { $0.contains("quick-launch-backup") }
-        #expect(backups.count == 1)
+        #expect(FileManager.default.fileExists(atPath: store.path))
 
-        #expect(throws: TunaCatalogService.MutationError.self) {
+        #expect(throws: LauncherCatalogService.MutationError.self) {
             try service.createSnippet(title: " ", value: "x")
         }
     }

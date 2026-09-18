@@ -45,13 +45,11 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
 
     var id: String { "\(kind.rawValue):\(itemID)" }
 
-    /// A Quicklink Quick Launch may rename, repoint, or delete: one kept in
-    /// Tuna's own records. A Smart Link is defined in a config file this app
-    /// only reads, and a typed address is never stored at all.
+    /// A stored Quicklink Quick Launch may rename, repoint, or delete,
+    /// including a legacy Smart Link after one-time import. A typed address is
+    /// never stored at all.
     var isEditableQuickLink: Bool {
-        kind == .quickLink
-            && !itemID.hasPrefix("tuna-smart-")
-            && !itemID.hasPrefix("typed:")
+        kind == .quickLink && !itemID.hasPrefix("typed:")
     }
 
     /// Whether "Hide from Quick Launch" applies to this row. A local answer,

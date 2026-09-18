@@ -15,7 +15,7 @@ struct ClipboardLinksSettingsView: View {
                 emojiCard.settingsAnchor("clipboard.emoji")
                 screenTextCard.settingsAnchor("clipboard.screenText")
                 quicklinksCard.settingsAnchor("clipboard.quicklinks")
-                tunaCard.settingsAnchor("clipboard.tuna")
+                catalogCard.settingsAnchor("clipboard.catalog")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)
@@ -165,14 +165,14 @@ struct ClipboardLinksSettingsView: View {
         }
     }
 
-    private var tunaCard: some View {
-        SettingsCard("Tuna stores") {
+    private var catalogCard: some View {
+        SettingsCard("Snippets & Quicklinks") {
             CardNote(isFirst: true) {
                 HStack(spacing: House.Spacing.md) {
                     Label("\(viewModel.snippets.count) snippets", systemImage: "text.quote")
                     Label("\(viewModel.quickLinks.count) Quicklinks", systemImage: "link")
                     Spacer(minLength: House.Spacing.sm)
-                    Button("Reload") { viewModel.reloadTunaCatalogs() }
+                    Button("Reload") { viewModel.reloadLauncherCatalog() }
                 }
                 .font(AQDesign.TypeToken.label)
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
@@ -180,7 +180,13 @@ struct ClipboardLinksSettingsView: View {
             }
 
             CardNote {
-                CardText("Snippets and Quicklinks are read live from Tuna. Edits are written back with a backup.")
+                if let loadError = viewModel.launcherCatalogErrorMessage {
+                    Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                        .font(AQDesign.TypeToken.body)
+                        .foregroundStyle(AQDesign.ColorToken.warning)
+                } else {
+                    CardText("Stored privately on this Mac by Quick Launch. Legacy Tuna items are imported once when available.")
+                }
             }
         }
     }

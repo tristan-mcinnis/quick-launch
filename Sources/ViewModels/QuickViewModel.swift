@@ -3797,8 +3797,15 @@ import HouseChatCore
         }
     }
 
-    func reloadTunaCatalogs() {
+    var launcherCatalogErrorMessage: String? {
+        launcherCatalog?.loadErrorMessage
+    }
+
+    func reloadLauncherCatalog() {
         launcherCatalog?.reload()
+        if let loadError = launcherCatalog?.loadErrorMessage {
+            errorMessage = loadError
+        }
         applicationSelectionIndex = 0
     }
 

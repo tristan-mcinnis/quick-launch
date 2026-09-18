@@ -2,6 +2,7 @@
 
 ## Unreleased — 2026-09-18
 
+- **Snippets and Quicklinks now belong to Quick Launch.** They are stored in an owner-only local catalog instead of depending on Tuna. A surviving Tuna catalog is imported once, missing Tuna files no longer block edits, and unreadable local data is left untouched and shown as an error.
 - **Clipboard History and Screenshots keep the footer on a laptop display.** The hung panel is capped to the room under the search field, and the two-pane preview block was a fixed 522 pt, so on a shorter display it pushed the footer and the last rows past the window's bottom edge. The block now shrinks to the room and the list scrolls; the preview space is unchanged where the display has it.
 - **Several large screenshots no longer wedge the chat.** Two per-body-pass costs are gone: a picture chip decodes one 48 pt thumbnail per attachment instead of rebuilding an `NSImage` from the full PNG inside the body (and the chip layout asked several times per pass), and the route resolver remembers whether a provider has an API key instead of reading the Keychain on every pass. A heavy chat surface was re-evaluated a few times a second and produced hundreds of `SecItemCopyMatching` reads a second, which held the main thread at 100% CPU. The key cache is cleared when a key or a provider setting changes.
 
