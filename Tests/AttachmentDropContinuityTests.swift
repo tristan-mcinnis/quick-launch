@@ -54,7 +54,10 @@ struct AttachmentDropContinuityTests {
     }
 
     private func eventually(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(3)
+        // Generous on purpose: the full suite runs thousands of tests in
+        // parallel, and a MainActor state change can be starved past a short
+        // deadline under load. A real failure still fails, just later.
+        let deadline = ContinuousClock.now + .seconds(15)
         while !condition(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(5))
         }
