@@ -93,6 +93,19 @@ struct MathCalculatorTests {
         #expect(abs(result - (54.34 * 6 - 435353)) < 1e-6)
     }
 
+    @Test func testGroupedThousandsAreNotDecimalCommas() throws {
+        #expect(try MathCalculator.evaluate("1,000 + 5") == 1005.0)
+        #expect(try MathCalculator.evaluate("1,234,567") == 1_234_567.0)
+        #expect(try MathCalculator.evaluate("1,000.5") == 1000.5)
+    }
+
+    @Test func testShortDigitRunsStayDecimalCommas() throws {
+        #expect(try MathCalculator.evaluate("1,5 + 1") == 2.5)
+        // 1.2345 + 1 is not exactly representable, so compare the result.
+        #expect(abs(try MathCalculator.evaluate("1,2345 + 1") - 2.2345) < 1e-9)
+        #expect(try MathCalculator.evaluate("1.5 + 1") == 2.5)
+    }
+
     // MARK: — Unary minus
 
     @Test func testUnaryMinus() throws {

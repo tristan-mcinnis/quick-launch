@@ -1,4 +1,5 @@
 import Foundation
+import HouseChatDocuments
 
 /// What an attachment is. Decides the extractor, the chip's glyph and
 /// detail, and the `kind` the model block names.
@@ -229,7 +230,12 @@ enum AttachmentLimits {
 
     // MARK: Text
 
-    /// Hard cap for one attachment's text (about 60 k tokens).
+    /// Extracted characters retained per file, before the request ceilings.
+    /// The shared reader's own cap is the single source of truth
+    /// (`docs/chat-harmonization-plan-20260917.md`: retain up to 2 million
+    /// characters per file, then trim to the request ceilings below).
+    static let charactersPerFile = DocumentExtractionConfiguration.standard.maximumCharacters
+    /// Hard cap for one attachment's text *in one request* (about 60 k tokens).
     static let charactersPerAttachment = 200_000
     /// Hard cap across one message's attachments.
     static let charactersPerMessage = 400_000

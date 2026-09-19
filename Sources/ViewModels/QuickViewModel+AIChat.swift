@@ -391,7 +391,9 @@ extension QuickViewModel {
         guard let stored = history.first(where: { $0.id == local.id }) else {
             if store.deletedChatIDs.contains(local.id) {
                 expandedTranscriptMessageIDs.removeAll()
-                reset([.thread])
+                // This can run at the top of `submit`; do not cancel the
+                // submit handle that is calling it.
+                reset([.thread], cancelingSubmitTasks: false)
                 setThreadNotice(Self.deletedChatNotice, symbol: Self.chatNoticeSymbol)
             }
             return

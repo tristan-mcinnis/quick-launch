@@ -597,6 +597,18 @@ struct QuickAIKeyboardTests {
         #expect(overlay.pasteboard.string == answer)
     }
 
+    /// A ⇧↩ with no handler installed is not swallowed: routing answers
+    /// false, so the key falls through to the responder chain instead of
+    /// being consumed with nothing to do. Regression for AppDelegate's
+    /// shift-Return branch returning true when both handlers were nil.
+    @Test func shiftReturnWithNoHandlerFallsThrough() throws {
+        let overlay = KeyboardOverlay(service: MockQuickService())
+        overlay.panel.translateHandler = nil
+        overlay.panel.returnHandler = nil
+
+        #expect(try overlay.press("\r", keyCode: VirtualKey.return.rawValue, [.shift]) == false)
+    }
+
     // MARK: - 7. Show more and Collapse
 
     private func longAnswer(lines: Int) -> String {

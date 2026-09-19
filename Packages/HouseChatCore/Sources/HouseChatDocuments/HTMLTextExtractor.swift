@@ -35,18 +35,33 @@ enum HTMLTextExtractor {
         return decoded.isEmpty ? nil : decoded
     }
 
+    /// The readable text, plus the non-content blocks whose body was left out.
+    ///
+    /// `droppedUnclosedBlocks` names any non-content block whose close tag was
+    /// absent and whose body was therefore dropped: a caller records that as a
+    /// partial read so a thinned page is never presented as the whole one.
+    struct Result: Equatable {
+        var text: String
+        var droppedUnclosedBlocks: [String]
+    }
+
     /// Extracts readable plain text from an HTML document.
-    static func text(from html: String) -> String {
+    static func text(from html: String) -> Result {
         var working = html
+        var dropped: [String] = []
 
         // Comments and elements that never carry readable content.
         working = replace("<!--.*?-->", in: working, with: " ")
         for tag in ["script", "style", "noscript", "template", "svg", "head", "nav"] {
             working = replace("<\(tag)\\b[^>]*>.*?</\(tag)\\s*>", in: working, with: " ")
             // A truncated body can cut a block before its close tag (a fetched
-            // page cut mid-script). Discard that block to the end of the input
-            // so its raw source never reaches the model.
-            working = droppingUnclosedBlock(tag, in: working)
+            // page cut mid-script). Discard that block's body so its raw source
+            // never reaches the model, but stop at the next block so an
+            // unclosed inline `<svg>`/`<nav>` on a complete page does not
+            // swallow everything after it.
+            let binned = droppingUnclosedBlock(tag, in: working)
+            working = binned.text
+            if binned.dropped { dropped.append(tag) }
         }
 
         // Prefer the main content block when the page has one.
@@ -89,19 +104,49 @@ enum HTMLTextExtractor {
                 .trimmingCharacters(in: .whitespaces)
             }
             .filter { !$0.isEmpty }
-        return lines.joined(separator: "\n")
+        return Result(text: lines.joined(separator: "\n"), droppedUnclosedBlocks: dropped)
     }
 
-    /// Cuts everything from an unclosed `<tag …` to the end of the text. Used
-    /// after paired blocks are removed, so what remains is an opener with no
-    /// close: a body truncated mid-block. The lookahead keeps `<header>` from
-    /// matching `<head`.
-    private static func droppingUnclosedBlock(_ tag: String, in text: String) -> String {
+    /// Bounds an unclosed block's body. A self-closing opener (`<svg … />`)
+    /// has no body and is removed alone. An opener without a close is dropped
+    /// only up to the next block-level element (or the end of the input), so
+    /// the rest of a complete page survives. Reports whether a body was
+    /// dropped.
+    private static func droppingUnclosedBlock(_ tag: String, in text: String) -> (text: String, dropped: Bool) {
         let pattern = regex("<\(tag)(?=[\\s/>])")
         guard let match = pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let range = Range(match.range, in: text)
-        else { return text }
-        return String(text[..<range.lowerBound])
+        else { return (text, false) }
+        // A self-closing tag carries no body to drop. Remove the whole tag,
+        // not just the name the pattern matched, so no attributes leak into
+        // the text.
+        if let tagEnd = text[range.lowerBound...].firstIndex(of: ">"),
+           text[range.lowerBound...tagEnd].hasSuffix("/>") {
+            let tagRange = range.lowerBound..<text.index(after: tagEnd)
+            return (text.replacingCharacters(in: tagRange, with: " "), false)
+        }
+        let rest = text[range.upperBound...]
+        if let next = nextBlockStart(in: rest) {
+            return (String(text[..<range.lowerBound]) + String(text[next...]), true)
+        }
+        return (String(text[..<range.lowerBound]), true)
+    }
+
+    /// The next block-level element opener after an unclosed block, where the
+    /// dropped body ends. Returned as an index into the caller's string.
+    private static func nextBlockStart(in text: Substring) -> String.Index? {
+        let haystack = String(text)
+        let pattern = regex(
+            "<(?:p|div|section|article|header|footer|main|figure|figcaption|h[1-6]|li|tr|blockquote|pre|table|ul|ol|nav|svg|body|html|form|aside|details|summary|dl|dt|dd|td|th|thead|tbody|video|audio|iframe|canvas)(?=[\\s/>])"
+        )
+        guard let match = pattern.firstMatch(
+            in: haystack,
+            range: NSRange(haystack.startIndex..., in: haystack)
+        ), let range = Range(match.range, in: haystack) else {
+            return nil
+        }
+        let offset = haystack.distance(from: haystack.startIndex, to: range.lowerBound)
+        return text.index(text.startIndex, offsetBy: offset)
     }
 
     private static let namedEntities: [String: String] = [

@@ -209,6 +209,8 @@ public struct TextTruncation: Codable, Sendable, Equatable, Hashable {
                 } else {
                     coverage = sorted.isEmpty ? "none" : sorted.map(Self.count).joined(separator: ", ")
                 }
+            } else if kept == 1 {
+                coverage = "1"
             } else {
                 coverage = kept > 0 ? "1-\(Self.count(kept))" : "none"
             }
@@ -544,9 +546,13 @@ public struct ExtractedDocument: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyCodingKey.self)
-        self.kind = try c.decodeIfPresent(AttachmentKind.self, forKey: AnyCodingKey("kind")) ?? .text
+        // Identity is required: a stored document with no kind or no name is
+        // damaged, not an empty `.text` record named "". A foreign-typed
+        // `kind` (a number, an object) fails the decode too; a missing or
+        // empty `name` fails closed.
+        self.kind = try c.decode(AttachmentKind.self, forKey: AnyCodingKey("kind"))
         self.kindLabel = try c.decodeIfPresent(String.self, forKey: AnyCodingKey("kindLabel")) ?? self.kind.rawValue
-        self.name = try c.decodeIfPresent(String.self, forKey: AnyCodingKey("name")) ?? ""
+        self.name = try c.decodeNonEmptyString(forKey: AnyCodingKey("name"))
         self.sections = try c.decodeIfPresent([DocumentSection].self, forKey: AnyCodingKey("sections")) ?? []
         self.sectionUnit = try c.decodeIfPresent(DocumentUnit.self, forKey: AnyCodingKey("sectionUnit"))
         self.unitCount = try c.decodeIfPresent(Int.self, forKey: AnyCodingKey("unitCount"))

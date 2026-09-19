@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Foundation
+import HouseChatDocuments
 import Synchronization
 import Testing
 @testable import QuickLaunch
@@ -59,6 +60,14 @@ struct AttachmentExtractorTests {
 
     private func file(_ name: String, text: String) -> URL {
         file(name, Data(text.utf8))
+    }
+
+    @MainActor @Test func theDefaultReaderIsTheSharedProductionOne() {
+        // Without an injected extractor the view model must use the shared
+        // reader, not the app-side OOXML copy that has drifted from the
+        // package's.
+        let vm = QuickViewModel(service: nil)
+        #expect(vm.attachmentReader is SharedDocumentExtractor)
     }
 
     private func read(_ url: URL, with extractor: AttachmentExtractor? = nil) async throws -> ExtractedAttachment {
@@ -470,16 +479,43 @@ struct AttachmentExtractorTests {
 
     // MARK: Caps and cuts
 
-    @Test("Over 200,000 characters: the head is kept and the cut is said twice")
+    @Test("Over 2,000,000 characters: the head is kept and the cut is said twice")
     func characterCap() async throws {
-        let text = String(repeating: "abcdefghij", count: 25_000)
+        let text = String(repeating: "abcdefghij", count: 250_000)
         let result = try await read(file("long.txt", text: text))
-        #expect(result.text?.count == AttachmentLimits.charactersPerAttachment)
-        #expect(result.text == String(text.prefix(AttachmentLimits.charactersPerAttachment)))
-        #expect(result.ref.characterCount == 250_000)
-        #expect(result.ref.truncation?.summary == "first 200,000 of 250,000 characters")
-        #expect(result.ref.truncation?.modelNote == "[Truncated: the first 200,000 of 250,000 characters.]")
-        #expect(result.chipNotes == ["first 200,000 of 250,000 characters"])
+        #expect(result.text?.count == AttachmentLimits.charactersPerFile)
+        #expect(result.text == String(text.prefix(AttachmentLimits.charactersPerFile)))
+        #expect(result.ref.characterCount == 2_500_000)
+        #expect(result.ref.truncation?.summary == "first 2,000,000 of 2,500,000 characters")
+        #expect(result.ref.truncation?.modelNote == "[Truncated: the first 2,000,000 of 2,500,000 characters.]")
+        #expect(result.chipNotes == ["first 2,000,000 of 2,500,000 characters"])
+    }
+
+    /// The app-side document caps are copies of the shared reader's, so this
+    /// fails the suite the moment either side drifts.
+    @Test func theAppDocumentCapsMatchTheSharedConfiguration() {
+        let shared = DocumentExtractionConfiguration.standard
+        #expect(AttachmentLimits.documentBytes == shared.maximumDocumentBytes)
+        #expect(AttachmentLimits.textFileBytes == shared.maximumTextFileBytes)
+        #expect(AttachmentLimits.imageBytes == shared.maximumImageBytes)
+        #expect(AttachmentLimits.charactersPerFile == shared.maximumCharacters)
+        #expect(AttachmentLimits.pdfPages == shared.pdfPageLimit)
+        #expect(AttachmentLimits.ocrPages == shared.ocrPageLimit)
+        #expect(AttachmentLimits.scannedPageCharacters == shared.ocrPageCharacterThreshold)
+        #expect(AttachmentLimits.ocrRenderPixels == shared.ocrRenderPixels)
+        #expect(AttachmentLimits.slides == shared.slideLimit)
+        #expect(AttachmentLimits.sheets == shared.sheetLimit)
+        #expect(AttachmentLimits.rowsPerSheet == shared.rowLimit)
+        #expect(AttachmentLimits.columnsPerSheet == shared.columnLimit)
+        #expect(AttachmentLimits.zipEntries == shared.zipEntryLimit)
+        #expect(AttachmentLimits.zipEntryOutputBytes == shared.zipEntryOutputBytes)
+        #expect(AttachmentLimits.zipArchiveOutputBytes == shared.zipArchiveOutputBytes)
+        #expect(AttachmentLimits.binaryCheckBytes == shared.binaryCheckBytes)
+        #expect(AttachmentLimits.imageLongSidePixels == shared.imageLongSidePixels)
+        #expect(AttachmentLimits.imagePNGBytes == shared.imagePNGBytes)
+        #expect(AttachmentLimits.extractionTimeout == shared.timeout)
+        // The request ceiling stays deliberately tighter than retention.
+        #expect(AttachmentLimits.charactersPerAttachment < shared.maximumCharacters)
     }
 
     @Test("A cut in a paged document names the pages it kept")

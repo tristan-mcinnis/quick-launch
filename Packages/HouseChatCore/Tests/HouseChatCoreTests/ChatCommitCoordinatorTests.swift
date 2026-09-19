@@ -108,6 +108,58 @@ struct ChatCommitCoordinatorTests {
         #expect(await attachments.contains(existing), "cleanup must not touch a referenced artifact")
     }
 
+    @Test("The same bytes under another kind are not mistaken for a pre-existing file")
+    func sameBytesDifferentKindAreCreated() async throws {
+        let temp = try TempDirectory(prefix: "commit")
+        let attachments = try AttachmentArchive(root: temp.appending("attachments"))
+        let conversationRoot = temp.appending("conversations")
+        try FileManager.default.createDirectory(at: conversationRoot, withIntermediateDirectories: true)
+        let conversations = try ConversationArchive(root: conversationRoot)
+        let coordinator = ChatCommitCoordinator(attachments: attachments, conversations: conversations)
+
+        // The bytes already exist on disk, but only as `.original`.
+        let shared = Data("same bytes, another kind".utf8)
+        _ = try await attachments.store(shared, kind: .original)
+
+        let attachment = AttachmentRecord(id: "a1", kind: .text, name: "notes.txt")
+        let turn = TurnRecord(role: .user, text: "hi", attachments: [attachment])
+        let conversation = ConversationRecord(id: "c1", turns: [turn])
+
+        // Make the conversation root unwritable so the save fails.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: conversationRoot.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: conversationRoot.path)
+        }
+
+        var thrown: ChatCommitError?
+        do {
+            _ = try await coordinator.commit(
+                conversation: conversation,
+                turnIndex: 0,
+                artifacts: [
+                    PendingArtifact(role: .original, data: shared, attachmentIndex: 0),
+                    PendingArtifact(role: .extractedText, data: shared, fileExtension: "txt", attachmentIndex: 0),
+                ]
+            )
+            Issue.record("Expected the commit to fail")
+        } catch let error as ChatCommitError {
+            thrown = error
+        }
+
+        guard case .commitFailed(_, _, _, let orphans)? = thrown else {
+            Issue.record("Expected commitFailed, got \(String(describing: thrown))")
+            return
+        }
+        // The `.extractedText` file is new. A digest-only pre-existing set
+        // would hide it, so the caller's cleanup would never be offered it.
+        #expect(orphans.map(\.kind) == [.extractedText], "only the newly created kind is an orphan")
+        #expect(await attachments.contains(ArtifactRef(
+            kind: .extractedText,
+            sha256: SHA256Digest.hex(shared),
+            byteCount: shared.count
+        )))
+    }
+
     @Test("A commit refuses a turn or attachment that is not there")
     func refusesBadIndices() async throws {
         let temp = try TempDirectory(prefix: "commit")

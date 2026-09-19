@@ -223,7 +223,7 @@ struct DocumentText: Sendable {
     /// joined, then the head kept up to `characterCap`. The cut is said in
     /// `truncation`. Throws `empty` when no section has readable text.
     func finished(
-        characterCap: Int = AttachmentLimits.charactersPerAttachment
+        characterCap: Int = AttachmentLimits.charactersPerFile
     ) throws -> (text: String, characterCount: Int, truncation: AttachmentTruncation?) {
         var pieces: [String] = []
         var sectionStarts: [Int] = []

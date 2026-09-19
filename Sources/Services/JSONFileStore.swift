@@ -144,6 +144,21 @@ final class JSONFileStore<Value: Codable & Sendable>: @unchecked Sendable {
         }
     }
 
+    /// Removes the file on the store's own queue, synchronously. A caller that
+    /// runs this from a shared queue keeps its ordering against the writes it
+    /// already handed that queue.
+    func deleteNow() {
+        queue.sync { [self] in
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+            } catch {
+                if !AppLog.isMissingFile(error) {
+                    AppLog.persistence.error("Could not delete \(self.fileName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
     /// Blocks until every queued write or delete has finished.
     func flush() {
         queue.sync {}

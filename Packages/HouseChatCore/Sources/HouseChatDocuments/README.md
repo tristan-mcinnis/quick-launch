@@ -67,12 +67,17 @@ tests inject their own. The default is on-device Apple Vision.
   `DocumentNote` (`ocr`, `spreadsheetSerialDates`, `linkBodyCut`,
   `partialExtraction`). `isComplete` is false for any of these. A scanned PDF
   whose OCR cap skips pages carries a page-range limit line even though no
-  characters were cut, so it is never presented as fully read.
+  characters were cut, so it is never presented as fully read. When the page
+  cap and the OCR cap both cut one read, the skipped pages are named in a
+  `partialExtraction` note, so the page-cap line is not read as a contiguous
+  text-bearing head.
 - **Malformed HTML keeps its source but not its script.** Block elements
-  (`script`, `style`, `nav`, and the rest) are removed when closed, and an
-  opener with no close (a body a caller cut mid-script) is discarded to the
-  end of the input, so no raw JavaScript reaches the model. `originalBytes`
-  still holds the page byte for byte.
+  (`script`, `style`, `nav`, and the rest) are removed when closed. An opener
+  with no close is dropped only as far as the next block-level element (or the
+  end of input, for a body a caller cut mid-script), so an unclosed inline
+  `<svg>`/`<nav>` cannot discard the rest of a complete page; the drop is
+  recorded as a `partialExtraction` note. `originalBytes` still holds the page
+  byte for byte.
 - **Cancellation** is checked between pages, slides, entries, and rows.
 - **Time is a cooperative deadline, not a hard wall-clock stop.** A read is
   wrapped in a structured 20-second deadline (configurable). At the deadline
@@ -129,7 +134,9 @@ A `.rtfd` folder is read as a package. A flat regular file named `.rtfd` is
 the flat RTFD form, which is RTF, so it is decoded with the RTF document type;
 junk in a flat `.rtfd` is still refused. A package's bytes are capped on the
 bytes actually read, so a file that grows between the metadata check and the
-read cannot be returned over the cap.
+read cannot be returned over the cap. The package is also stat'd once more
+immediately before `NSAttributedString` opens it and refused with `.tooLarge`
+if it has grown past the cap, because that native read cannot be interrupted.
 
 The only non-HTTP file operation that can touch the network is macOS iCloud
 coordination inside the gate (`startDownloadingUbiquitousItem`), preserved from

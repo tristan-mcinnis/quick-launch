@@ -90,8 +90,14 @@ actor AVFoundationScreenHistoryMediaSegmentWriter: ScreenHistoryMediaSegmentWrit
     private let mediaRootURL: URL
     private let stagingRootURL: URL
     private let segmentsRootURL: URL
+    private let quarantineRootURL: URL
     private let configuration: ScreenHistoryMediaSegmentConfiguration
     private var activeManifest: Manifest?
+    /// Recovery attempts per stage. A stage that keeps failing to finalize is
+    /// quarantined rather than failing every later capture tick forever.
+    private var finalizeFailures: [String: Int] = [:]
+
+    private static let finalizeFailureLimit = 3
 
     init(
         mediaRootURL: URL,
@@ -103,6 +109,7 @@ actor AVFoundationScreenHistoryMediaSegmentWriter: ScreenHistoryMediaSegmentWrit
         self.mediaRootURL = mediaRootURL.standardizedFileURL
         stagingRootURL = self.mediaRootURL.appendingPathComponent(".segment-staging", isDirectory: true)
         segmentsRootURL = self.mediaRootURL.appendingPathComponent("Segments", isDirectory: true)
+        quarantineRootURL = self.mediaRootURL.appendingPathComponent("Segment Quarantine", isDirectory: true)
         self.configuration = configuration
     }
 
@@ -213,15 +220,60 @@ actor AVFoundationScreenHistoryMediaSegmentWriter: ScreenHistoryMediaSegmentWrit
                 try FileManager.default.removeItem(at: url)
                 continue
             }
-            let manifest = try readManifest(at: manifestURL)
-            guard manifest.identifier == url.lastPathComponent,
-                  !manifest.frames.isEmpty
-            else {
-                throw ScreenHistoryMediaSegmentWriterError.corruptManifest(url.lastPathComponent)
+            let manifest: Manifest
+            do {
+                manifest = try readManifest(at: manifestURL)
+            } catch {
+                try handleRecoveryFailure(for: url, error: error)
+                continue
             }
-            recovered.append(try await finalize(manifest))
+            guard manifest.identifier == url.lastPathComponent else {
+                try handleRecoveryFailure(
+                    for: url,
+                    error: ScreenHistoryMediaSegmentWriterError.corruptManifest(url.lastPathComponent)
+                )
+                continue
+            }
+            guard !manifest.frames.isEmpty else {
+                // `makeStage` writes an empty-frames manifest before the first
+                // JPEG lands, so this stage is the crash (or write failure)
+                // window between the two, not corruption. There is nothing to
+                // encode: remove it instead of failing every later tick.
+                try FileManager.default.removeItem(at: url)
+                finalizeFailures[url.lastPathComponent] = nil
+                continue
+            }
+            do {
+                recovered.append(try await finalize(manifest))
+                finalizeFailures[url.lastPathComponent] = nil
+            } catch {
+                try handleRecoveryFailure(for: url, error: error)
+            }
         }
         return recovered
+    }
+
+    /// A stage that fails recovery is retried, but one that keeps failing is
+    /// set aside in the quarantine root so one bad stage cannot stop capture.
+    private func handleRecoveryFailure(for url: URL, error: Error) throws {
+        let identifier = url.lastPathComponent
+        let attempts = (finalizeFailures[identifier] ?? 0) + 1
+        guard attempts >= Self.finalizeFailureLimit else {
+            finalizeFailures[identifier] = attempts
+            throw error
+        }
+        try quarantineStage(url)
+    }
+
+    private func quarantineStage(_ url: URL) throws {
+        try ensurePrivateDirectory(quarantineRootURL)
+        let destination = quarantineRootURL.appendingPathComponent(url.lastPathComponent, isDirectory: true)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: url)
+        } else {
+            try FileManager.default.moveItem(at: url, to: destination)
+        }
+        finalizeFailures[url.lastPathComponent] = nil
     }
 
     private func finalize(_ manifest: Manifest) async throws -> ScreenHistoryFinalizedMediaSegment {

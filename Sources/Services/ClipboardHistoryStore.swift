@@ -222,7 +222,12 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         storedEntries.removeAll()
         entries.removeAll()
         if fileURL.path.hasSuffix("/clipboard-history.json") {
-            file.delete()
+            // The metadata file shares no write ordering with the blob queue,
+            // so a save already queued there could otherwise land after a
+            // plain delete and recreate pre-clear entries. Delete on the same
+            // queue, after those writes.
+            let fileStore = file
+            blobs.afterPendingWrites { [fileStore] in fileStore.deleteNow() }
         }
         blobs.clear()
     }

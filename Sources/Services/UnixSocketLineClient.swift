@@ -52,11 +52,27 @@ enum UnixSocketLineClient {
         }
     }
 
+    /// A stream socket no child process can inherit. The app spawns
+    /// python3/ssh/qlmanage while an exchange can be in flight, so the
+    /// descriptor is marked close-on-exec the moment it exists. Darwin has no
+    /// `SOCK_CLOEXEC` type flag (that is Linux), so the flag goes on through
+    /// `fcntl` instead, and a socket whose flag could not be set is refused
+    /// rather than handed out inheritable.
+    static func makeSocket() -> Int32 {
+        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return descriptor }
+        guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) != -1 else {
+            close(descriptor)
+            return -1
+        }
+        return descriptor
+    }
+
     // MARK: - Internals
 
     /// Blocking, on a global queue. Descriptors are closed on every path.
     private static func exchange(line: String, path: String, timeout: TimeInterval) throws -> String {
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = makeSocket()
         guard descriptor >= 0 else { throw Failure.cannotConnect }
         defer { close(descriptor) }
 
@@ -88,7 +104,7 @@ enum UnixSocketLineClient {
         guard connected == 0 else { throw Failure.cannotConnect }
 
         // One request per line.
-        var request = Array((line + "\n").utf8)
+        let request = Array((line + "\n").utf8)
         var written = 0
         while written < request.count {
             let sent = request.withUnsafeBytes { raw -> Int in

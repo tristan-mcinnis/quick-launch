@@ -459,6 +459,11 @@ public enum RetrievalScope: String, Codable, Sendable, CaseIterable {
 /// What retrieval the request was allowed to do, and what it did.
 public struct ContextReceipt: Codable, Sendable, Equatable, Hashable {
     public var scope: RetrievalScope?
+    /// The literal scope string when the stored value is not one this build
+    /// knows. `scope` is nil then, so a consumer reads the receipt as "not
+    /// stated" instead of the meaningful `.none`, and re-encoding writes the
+    /// original string back rather than `"none"`.
+    public var scopeRaw: String?
     public var sourceFirst: Bool?
     public var historyIncluded: Bool?
     public var budgetCharacters: Int?
@@ -474,6 +479,7 @@ public struct ContextReceipt: Codable, Sendable, Equatable, Hashable {
 
     public init(
         scope: RetrievalScope? = nil,
+        scopeRaw: String? = nil,
         sourceFirst: Bool? = nil,
         historyIncluded: Bool? = nil,
         budgetCharacters: Int? = nil,
@@ -486,6 +492,7 @@ public struct ContextReceipt: Codable, Sendable, Equatable, Hashable {
         extra: ExtraFields = ExtraFields()
     ) {
         self.scope = scope
+        self.scopeRaw = scopeRaw
         self.sourceFirst = sourceFirst
         self.historyIncluded = historyIncluded
         self.budgetCharacters = budgetCharacters
@@ -505,7 +512,20 @@ public struct ContextReceipt: Codable, Sendable, Equatable, Hashable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyCodingKey.self)
-        self.scope = try c.decodeIfPresent(RetrievalScope.self, forKey: AnyCodingKey("scope"))
+        // An unrecognized scope is "not stated", not `.none`: the raw string
+        // is kept so a newer build's receipt survives a round trip.
+        if let raw = try c.decodeIfPresent(String.self, forKey: AnyCodingKey("scope")) {
+            if let known = RetrievalScope(rawValue: raw) {
+                self.scope = known
+                self.scopeRaw = nil
+            } else {
+                self.scope = nil
+                self.scopeRaw = raw
+            }
+        } else {
+            self.scope = nil
+            self.scopeRaw = nil
+        }
         self.sourceFirst = try c.decodeIfPresent(Bool.self, forKey: AnyCodingKey("sourceFirst"))
         self.historyIncluded = try c.decodeIfPresent(Bool.self, forKey: AnyCodingKey("historyIncluded"))
         self.budgetCharacters = try c.decodeIfPresent(Int.self, forKey: AnyCodingKey("budgetCharacters"))
@@ -520,7 +540,7 @@ public struct ContextReceipt: Codable, Sendable, Equatable, Hashable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: AnyCodingKey.self)
-        try c.encodeIfPresent(scope, forKey: AnyCodingKey("scope"))
+        try c.encodeIfPresent(scope?.rawValue ?? scopeRaw, forKey: AnyCodingKey("scope"))
         try c.encodeIfPresent(sourceFirst, forKey: AnyCodingKey("sourceFirst"))
         try c.encodeIfPresent(historyIncluded, forKey: AnyCodingKey("historyIncluded"))
         try c.encodeIfPresent(budgetCharacters, forKey: AnyCodingKey("budgetCharacters"))

@@ -37,7 +37,9 @@ actor ScreenHistorySoakReceiptService: ScreenHistorySoakReceipting {
         lastSequence = loaded.lastSequence
         lastHash = loaded.lastHash
         lastRecordedAt = loaded.lastRecordedAt
-        pendingReceiptResume = loaded.lastSequence > 0
+        // Only an interrupted tail or a crash marker is a resume; a clean
+        // relaunch with history is not an interruption.
+        pendingReceiptResume = loaded.sawIncompleteTail || loaded.lastProcessEvent == .crashRecovery
 
         let current = Self.summary(
             cumulative: loaded.cumulative,
@@ -237,6 +239,11 @@ private extension ScreenHistorySoakReceiptService {
         let lastSequence: Int
         let lastHash: String
         let lastRecordedAt: Date?
+        /// The event the last complete entry declared, so a crash marker in
+        /// the log is distinguishable from a clean relaunch.
+        let lastProcessEvent: ScreenHistorySoakProcessEvent
+        /// True when the log ended in a line the process died writing.
+        let sawIncompleteTail: Bool
         let historicalSummaries: [Int: ScreenHistorySoakReceiptSummary]
     }
 
@@ -423,13 +430,15 @@ private extension ScreenHistorySoakReceiptService {
     }
 
     static func load(logURL: URL) throws -> LoadResult {
-        let data = try Data(contentsOf: logURL)
+        var data = try Data(contentsOf: logURL)
         guard !data.isEmpty else {
             return LoadResult(
                 cumulative: CumulativeState(),
                 lastSequence: 0,
                 lastHash: genesisHash,
                 lastRecordedAt: nil,
+                lastProcessEvent: .none,
+                sawIncompleteTail: false,
                 historicalSummaries: [
                     0: summary(
                         cumulative: CumulativeState(),
@@ -440,8 +449,35 @@ private extension ScreenHistorySoakReceiptService {
                 ]
             )
         }
-        guard data.last == 0x0A else {
-            throw ScreenHistorySoakReceiptError.receiptCorruption
+        // A final line without its newline is an append the process died
+        // inside. Drop it and remember it: the rest of the log is usable and
+        // the record counts as a resume, not as corruption.
+        var sawIncompleteTail = false
+        if data.last != 0x0A {
+            sawIncompleteTail = true
+            if let lastNewline = data.lastIndex(of: 0x0A) {
+                data = Data(data[data.startIndex...lastNewline])
+            } else {
+                data = Data()
+            }
+        }
+        guard !data.isEmpty else {
+            return LoadResult(
+                cumulative: CumulativeState(),
+                lastSequence: 0,
+                lastHash: genesisHash,
+                lastRecordedAt: nil,
+                lastProcessEvent: .none,
+                sawIncompleteTail: sawIncompleteTail,
+                historicalSummaries: [
+                    0: summary(
+                        cumulative: CumulativeState(),
+                        sequence: 0,
+                        hash: genesisHash,
+                        recordedAt: nil
+                    )
+                ]
+            )
         }
 
         let lines = data.split(separator: 0x0A, omittingEmptySubsequences: true)
@@ -449,6 +485,7 @@ private extension ScreenHistorySoakReceiptService {
         var expectedPreviousHash = genesisHash
         var cumulative = CumulativeState()
         var lastRecordedAt: Date?
+        var lastProcessEvent: ScreenHistorySoakProcessEvent = .none
         var historical: [Int: ScreenHistorySoakReceiptSummary] = [
             0: summary(
                 cumulative: CumulativeState(),
@@ -475,6 +512,7 @@ private extension ScreenHistorySoakReceiptService {
 
             cumulative = entry.payload.cumulative
             lastRecordedAt = entry.payload.recordedAt
+            lastProcessEvent = entry.payload.processEvent
             expectedPreviousHash = entry.hash
             historical[expectedSequence] = summary(
                 cumulative: cumulative,
@@ -490,6 +528,8 @@ private extension ScreenHistorySoakReceiptService {
             lastSequence: expectedSequence - 1,
             lastHash: expectedPreviousHash,
             lastRecordedAt: lastRecordedAt,
+            lastProcessEvent: lastProcessEvent,
+            sawIncompleteTail: sawIncompleteTail,
             historicalSummaries: historical
         )
     }

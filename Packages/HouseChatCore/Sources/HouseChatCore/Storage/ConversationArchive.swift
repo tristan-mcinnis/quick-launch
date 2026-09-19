@@ -187,6 +187,16 @@ public actor ConversationArchive {
         savedAt: Date = Date()
     ) throws -> ConversationSummary {
         try Self.validate(id: conversation.id)
+        // Refuse a record this build could not read back: `load`/`list` reject
+        // a newer conversation version, so writing one would leave a file that
+        // every reader reports as unsupported (and a permanent
+        // `referenceScanIncomplete`). Never write what we cannot read.
+        guard conversation.schemaVersion <= HouseChatCoding.schemaVersion else {
+            throw ConversationArchiveError.unsupportedSchema(
+                id: conversation.id,
+                version: conversation.schemaVersion
+            )
+        }
         guard !AtomicFile.isSymlink(root) else {
             throw ConversationArchiveError.unsafeRoot(path: root.path)
         }
@@ -349,10 +359,14 @@ public actor ConversationArchive {
     }
 
     /// Every readable conversation in one bundle, for a whole-app export.
+    ///
+    /// A file `list()` vouched for that then fails to load is an error, not a
+    /// silent omission: a short bundle must never look like a complete export.
     public func exportAll(prettyPrinted: Bool = true) throws -> Data {
         var conversations: [ConversationRecord] = []
-        for summary in try list() where summary.issue == nil {
-            if let record = try? load(id: summary.id) { conversations.append(record) }
+        for summary in try list() {
+            guard summary.issue == nil else { continue }
+            conversations.append(try load(id: summary.id))
         }
         let bundle = ConversationBundle(exportedAt: Date(), conversations: conversations)
         return try HouseChatCoding.makeEncoder(prettyPrinted: prettyPrinted).encode(bundle)

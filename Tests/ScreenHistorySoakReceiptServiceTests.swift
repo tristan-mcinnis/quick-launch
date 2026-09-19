@@ -97,8 +97,56 @@ struct ScreenHistorySoakReceiptServiceTests {
         #expect(resumed?.totals.duplicateSkips == 1)
         #expect(resumed?.totals.exclusionSkips == 1)
         #expect(resumed?.cleanRestarts == 1)
+        // A clean restart with history is not an interruption.
+        #expect(resumed?.receiptResumes == 0)
+        #expect(resumed?.lastSequence == 2)
+    }
+
+    @Test func aCrashMarkerOrATornTailCountsAsAReceiptResume() async throws {
+        let fixture = try Fixture()
+        var service: ScreenHistorySoakReceiptService? = try ScreenHistorySoakReceiptService(
+            directoryURL: fixture.directory,
+            calendar: Self.utcCalendar
+        )
+        _ = try await service?.record(Self.snapshot(
+            day: 0,
+            counters: .init(cycles: 1),
+            processEvent: .crashRecovery
+        ))
+        service = nil
+
+        service = try ScreenHistorySoakReceiptService(
+            directoryURL: fixture.directory,
+            calendar: Self.utcCalendar
+        )
+        let resumed = try await service?.record(Self.snapshot(day: 1, counters: .init(cycles: 1)))
         #expect(resumed?.receiptResumes == 1)
         #expect(resumed?.lastSequence == 2)
+    }
+
+    @Test func aTornFinalLineLoadsAsAResumeNotCorruption() async throws {
+        let fixture = try Fixture()
+        var service: ScreenHistorySoakReceiptService? = try ScreenHistorySoakReceiptService(
+            directoryURL: fixture.directory,
+            calendar: Self.utcCalendar
+        )
+        _ = try await service?.record(Self.snapshot(day: 0, counters: .init(cycles: 1)))
+        let logURL = try #require(service?.logURL)
+        service = nil
+
+        // The append the process died inside: no trailing newline.
+        var data = try Data(contentsOf: logURL)
+        data.append(contentsOf: Data("{\"payload\":{\"sequence\":2".utf8))
+        try data.write(to: logURL)
+
+        let resumedService = try ScreenHistorySoakReceiptService(
+            directoryURL: fixture.directory,
+            calendar: Self.utcCalendar
+        )
+        let resumed = try await resumedService.record(Self.snapshot(day: 1, counters: .init(cycles: 1)))
+        #expect(resumed.lastSequence == 2, "the torn line was never an entry")
+        #expect(resumed.receiptResumes == 1)
+        #expect(resumed.crashRecoveries == 0)
     }
 
     @Test func crashesFailuresAndResolutionsRemainContentFreeAndExplicit() async throws {

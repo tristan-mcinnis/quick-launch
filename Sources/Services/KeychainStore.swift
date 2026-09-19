@@ -69,7 +69,10 @@ struct SystemKeychainStore: KeychainStoring {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw KeychainError(status: status) }
-        return item as? Data ?? Data()
+        // Fail closed: a non-Data item must never read as an empty key, or
+        // `hasAPIKey` would say yes while no Authorization header is sent.
+        guard let data = item as? Data else { throw KeychainError(status: errSecDecode) }
+        return data
     }
 
     func add(_ data: Data, service: String, account: String, options: KeychainItemOptions) throws(KeychainError) {

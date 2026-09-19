@@ -432,7 +432,7 @@ struct DocumentFileGate: Sendable {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    private static func packageSize(_ url: URL) -> Int {
+    static func packageSize(_ url: URL) -> Int {
         packageFiles(url).reduce(0) { total, file in
             total + ((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         }

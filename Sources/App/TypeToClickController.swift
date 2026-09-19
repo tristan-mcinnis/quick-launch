@@ -170,6 +170,21 @@ private struct PendingTypeToClickAction {
     let queryWasEmpty: Bool
 }
 
+/// A status line and the tone its dot carries. The controller names both, so
+/// the view never has to infer a tone by matching the wording.
+private struct TypeToClickNotice {
+    let text: String
+    let tone: TypeToClickStatusTone
+}
+
+/// Key codes the overlay handles that `VirtualKey` does not name. One place
+/// for the numbers, each matched with the modifier that gives it meaning.
+private enum TypeToClickShortcutKey {
+    static let controlN: UInt16 = 45
+    static let controlP: UInt16 = 35
+    static let commandR: UInt16 = 15
+}
+
 /// Coordinates the Type to Click search overlay. Input fuzzy-searches labels,
 /// roles, and the active application's menu hierarchy. Return acts on the best
 /// match, then rescans and stays open so several UI steps can be chained.
@@ -221,7 +236,7 @@ final class TypeToClickController {
     private var openedMenuRetryDeadline: Date?
     private var wasTruncated = false
     private var accessibilityTrusted = false
-    private var notice: String?
+    private var notice: TypeToClickNotice?
 
     init(service: TypeToClickServicing = TypeToClickService()) {
         self.service = service
@@ -247,12 +262,15 @@ final class TypeToClickController {
         guard !isActive else { return }
         preparePresentation(pid: pid)
         logger.info("Starting Type to Click for pid \(pid, privacy: .public) on \(self.surfaces.count, privacy: .public) display(s)")
-        notice = "Finding controls and menu commands…"
+        notice = TypeToClickNotice(text: "Finding controls and menu commands…", tone: .busy)
         render()
         accessibilityTrusted = service.isAccessibilityTrusted(prompt: true)
         guard accessibilityTrusted else {
             isAwaitingAccessibilityPermission = true
-            notice = "Allow Quick Launch in Privacy & Security › Accessibility, then press the shortcut again"
+            notice = TypeToClickNotice(
+                text: "Allow Quick Launch in Privacy & Security › Accessibility, then press the shortcut again",
+                tone: .alert
+            )
             render()
             presentAndCaptureKeyboard()
             return
@@ -287,7 +305,7 @@ final class TypeToClickController {
     func presentMessage(_ message: String) {
         guard !isActive else { return }
         preparePresentation(pid: 0)
-        notice = message
+        notice = TypeToClickNotice(text: message, tone: .alert)
         render()
         presentAndCaptureKeyboard()
     }
@@ -383,7 +401,10 @@ final class TypeToClickController {
         scanTask = nil
         loadTask = nil
         notice = targets.isEmpty
-            ? "No controls or menu commands found in the active app"
+            ? TypeToClickNotice(
+                text: "No controls or menu commands found in the active app",
+                tone: .alert
+            )
             : nil
         updateMatches(resetSelection: true)
         if let previousSelection,
@@ -401,7 +422,12 @@ final class TypeToClickController {
         if let pending = pendingAction {
             pendingAction = nil
             if pending.target == nil, pending.queryWasEmpty {
-                if notice == nil { notice = "Type a control or menu command" }
+                if notice == nil {
+                    notice = TypeToClickNotice(
+                        text: "Type a control or menu command",
+                        tone: .ready
+                    )
+                }
                 render()
             } else {
                 performSelected(pending.action, preferredTarget: pending.target)
@@ -429,11 +455,17 @@ final class TypeToClickController {
         guard let deadline = openedMenuRetryDeadline, Date() < deadline else {
             awaitingOpenedMenuLabel = nil
             openedMenuRetryDeadline = nil
-            notice = "\(menuLabel) commands are not visible yet · ⌘R refresh"
+            notice = TypeToClickNotice(
+                text: "\(menuLabel) commands are not visible yet · ⌘R refresh",
+                tone: .alert
+            )
             return false
         }
 
-        notice = "Waiting for \(menuLabel) menu commands…"
+        notice = TypeToClickNotice(
+            text: "Waiting for \(menuLabel) menu commands…",
+            tone: .busy
+        )
         postActionRefreshTask?.cancel()
         postActionRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.openedMenuRetryDelay)
@@ -541,9 +573,10 @@ final class TypeToClickController {
         }
     }
 
-    private func setStatus(_ text: String?) {
+    private func setStatus(_ status: TypeToClickNotice?) {
         for surface in surfaces {
-            surface.view.statusText = surface.panel === keyPanel ? text : nil
+            surface.view.statusText = surface.panel === keyPanel ? status?.text : nil
+            surface.view.statusTone = status?.tone ?? .ready
             if surface.panel === keyPanel {
                 // Native app and File menus occupy the top edge. Keep status
                 // at the bottom so it never hides the newly exposed commands.
@@ -708,15 +741,15 @@ final class TypeToClickController {
         case .tab where !modifiers.contains(.command):
             moveSelection(by: modifiers.contains(.shift) ? -1 : 1)
             return true
-        case _ where keyCode == 45 && modifiers.contains(.control): // Ctrl-N
+        case _ where keyCode == TypeToClickShortcutKey.controlN && modifiers.contains(.control): // Ctrl-N
             moveSelection(by: 1)
             return true
-        case _ where keyCode == 35 && modifiers.contains(.control): // Ctrl-P
+        case _ where keyCode == TypeToClickShortcutKey.controlP && modifiers.contains(.control): // Ctrl-P
             moveSelection(by: -1)
             return true
-        case _ where keyCode == 15 && modifiers.contains(.command): // Cmd-R
+        case _ where keyCode == TypeToClickShortcutKey.commandR && modifiers.contains(.command): // Cmd-R
             pendingAction = nil
-            notice = "Refreshing controls and menu commands…"
+            notice = TypeToClickNotice(text: "Refreshing controls and menu commands…", tone: .busy)
             requestScan(force: true)
             return true
         default:
@@ -755,7 +788,7 @@ final class TypeToClickController {
                 target: selectedTarget,
                 queryWasEmpty: TypeToClickSearch.normalize(query).isEmpty
             )
-            notice = "Waiting for the active app…"
+            notice = TypeToClickNotice(text: "Waiting for the active app…", tone: .busy)
             render()
             return
         }
@@ -765,7 +798,7 @@ final class TypeToClickController {
                 target: selectedTarget,
                 queryWasEmpty: TypeToClickSearch.normalize(query).isEmpty
             )
-            notice = "Refreshing before acting…"
+            notice = TypeToClickNotice(text: "Refreshing before acting…", tone: .busy)
             requestScan(force: true)
             return
         }
@@ -778,8 +811,8 @@ final class TypeToClickController {
     ) {
         guard !matches.isEmpty else {
             notice = query.isEmpty
-                ? "Type a control or menu command"
-                : "No match for “\(query)”"
+                ? TypeToClickNotice(text: "Type a control or menu command", tone: .ready)
+                : TypeToClickNotice(text: "No match for “\(query)”", tone: .alert)
             render()
             return
         }
@@ -788,7 +821,10 @@ final class TypeToClickController {
             guard let refreshedTarget = matches.first(where: {
                 CFEqual($0.element, preferredTarget.element)
             }) else {
-                notice = "The selected target changed. Choose it again or press ⌘R to refresh."
+                notice = TypeToClickNotice(
+                    text: "The selected target changed. Choose it again or press ⌘R to refresh.",
+                    tone: .alert
+                )
                 lastScanFinishedAt = nil
                 render()
                 return
@@ -810,7 +846,7 @@ final class TypeToClickController {
             Self.syntheticClickSuppressionInterval
         )
         pulsingTarget = target
-        notice = "Clicking \(target.label)…"
+        notice = TypeToClickNotice(text: "Clicking \(target.label)…", tone: .busy)
         render()
         actionTask = Task { @MainActor [weak self] in
             // Keep the bright pulse visible for one beat before dispatching the
@@ -847,7 +883,10 @@ final class TypeToClickController {
                     self.dismiss(reactivateTarget: false)
                 }
             } else {
-                self.notice = "That target changed or could not be actioned. Press ⌘R to refresh."
+                self.notice = TypeToClickNotice(
+                    text: "That target changed or could not be actioned. Press ⌘R to refresh.",
+                    tone: .alert
+                )
                 self.lastScanFinishedAt = nil
                 self.render()
             }
@@ -878,9 +917,12 @@ final class TypeToClickController {
         }
         lastScanFinishedAt = nil
         wasTruncated = false
-        notice = nextQuery.isEmpty
-            ? "Updating controls and menu commands…"
-            : "“\(nextQuery)” · updating matches…"
+        notice = TypeToClickNotice(
+            text: nextQuery.isEmpty
+                ? "Updating controls and menu commands…"
+                : "“\(nextQuery)” · updating matches…",
+            tone: .busy
+        )
         render()
         recaptureKeyboard()
 
@@ -895,10 +937,13 @@ final class TypeToClickController {
 
     // MARK: - Search and rendering
 
-    private var findingNotice: String {
-        query.isEmpty
-            ? "Finding controls and menu commands…"
-            : "“\(query)” · finding matches…"
+    private var findingNotice: TypeToClickNotice {
+        TypeToClickNotice(
+            text: query.isEmpty
+                ? "Finding controls and menu commands…"
+                : "“\(query)” · finding matches…",
+            tone: .busy
+        )
     }
 
     private func rebuildSearchIndex() {
@@ -963,16 +1008,24 @@ final class TypeToClickController {
         setStatus(interactionStatus(selected: selected))
     }
 
-    private func interactionStatus(selected: TypeToClickTarget?) -> String? {
+    private func interactionStatus(selected: TypeToClickTarget?) -> TypeToClickNotice? {
         if let notice { return notice }
-        guard !targets.isEmpty else { return "Finding controls and menu commands…" }
+        guard !targets.isEmpty else {
+            return TypeToClickNotice(text: "Finding controls and menu commands…", tone: .busy)
+        }
         guard !matches.isEmpty else {
             let warning = wasTruncated ? " · partial scan" : ""
             if query.isEmpty {
                 let visibleCount = targets.count(where: { $0.frame != nil })
-                return "\(visibleCount) named targets · type to narrow · Esc exits\(warning)"
+                return TypeToClickNotice(
+                    text: "\(visibleCount) named targets · type to narrow · Esc exits\(warning)",
+                    tone: .ready
+                )
             }
-            return "No match for “\(query)” · Delete to edit · ⌘R refresh"
+            return TypeToClickNotice(
+                text: "No match for “\(query)” · Delete to edit · ⌘R refresh",
+                tone: .alert
+            )
         }
         let warning = wasTruncated ? " · partial scan" : ""
         let label = selected?.label ?? ""
@@ -980,7 +1033,10 @@ final class TypeToClickController {
         let returnHint = continuation == .continuous
             ? "Return acts and continues"
             : "Return acts once and closes"
-        return "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · Selected: \(clipped) · \(returnHint)\(warning)"
+        return TypeToClickNotice(
+            text: "“\(query)” · \(matches.count) match\(matches.count == 1 ? "" : "es") · Selected: \(clipped) · \(returnHint)\(warning)",
+            tone: .ready
+        )
     }
 
     /// Converts an AX frame (global top-left origin, y down) to one display

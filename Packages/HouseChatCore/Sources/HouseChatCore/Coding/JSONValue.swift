@@ -7,6 +7,10 @@ public enum JSONValue: Codable, Sendable, Equatable, Hashable {
     case null
     case bool(Bool)
     case number(Double)
+    /// An integral value that a `Double` cannot hold exactly (above 2^53),
+    /// kept as its own case so a nanosecond timestamp or a large id is
+    /// re-encoded as the same literal.
+    case integer(Int64)
     case string(String)
     case array([JSONValue])
     case object([String: JSONValue])
@@ -17,6 +21,9 @@ public enum JSONValue: Codable, Sendable, Equatable, Hashable {
             self = .null
         } else if let value = try? container.decode(Bool.self) {
             self = .bool(value)
+        } else if let value = try? container.decode(Int64.self), Double(exactly: value) == nil {
+            // An integer too large for a Double round trip stays exact.
+            self = .integer(value)
         } else if let value = try? container.decode(Double.self) {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
@@ -39,6 +46,7 @@ public enum JSONValue: Codable, Sendable, Equatable, Hashable {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
         case .object(let value): try container.encode(value)
@@ -56,13 +64,21 @@ public enum JSONValue: Codable, Sendable, Equatable, Hashable {
     }
 
     public var doubleValue: Double? {
-        if case .number(let value) = self { return value }
-        return nil
+        switch self {
+        case .number(let value): return value
+        case .integer(let value): return Double(value)
+        default: return nil
+        }
     }
 
     public var intValue: Int? {
-        guard case .number(let value) = self, value.rounded() == value else { return nil }
-        return Int(exactly: value)
+        switch self {
+        case .integer(let value): return Int(exactly: value)
+        case .number(let value):
+            guard value.rounded() == value else { return nil }
+            return Int(exactly: value)
+        default: return nil
+        }
     }
 
     public var arrayValue: [JSONValue]? {

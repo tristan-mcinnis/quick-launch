@@ -1338,11 +1338,14 @@ private extension ScreenHistoryCoastFreezeReceiptService {
             contents: nil,
             attributes: [.posixPermissions: 0o600]
         ) else { throw ScreenHistoryCoastFreezeReceiptError.unsafeReceiptStorage }
+        var wroteCompleteTemporary = false
         do {
             let handle = try FileHandle(forWritingTo: temporary)
             try handle.write(contentsOf: data)
             try handle.synchronize()
             try handle.close()
+            // The payload is durable in the temporary from here on.
+            wroteCompleteTemporary = true
             if manager.fileExists(atPath: url.path) {
                 _ = try manager.replaceItemAt(url, withItemAt: temporary)
             } else {
@@ -1350,8 +1353,12 @@ private extension ScreenHistoryCoastFreezeReceiptService {
             }
             try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
-            // Keep a failed owner-only temporary file for inspection. There is
-            // intentionally no file-removal operation anywhere in this service.
+            // A partial write has nothing to inspect, so remove it: a failed
+            // receipt must not leave `.freeze-*.tmp` debris behind. A complete
+            // temporary that could not be published is kept for inspection.
+            if !wroteCompleteTemporary {
+                try? manager.removeItem(at: temporary)
+            }
             throw error
         }
     }

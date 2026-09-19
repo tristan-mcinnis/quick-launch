@@ -76,6 +76,20 @@ struct KeychainStoreTests {
         }
     }
 
+    @Test func apiKeyLoadResultSeparatesNoKeyFromAKeychainFailure() throws {
+        let provider = UUID()
+        let empty = InMemoryKeychainStore()
+        #expect(try APIKeyStore.loadResult(providerID: provider, keychain: empty).get() == nil)
+
+        let locked = InMemoryKeychainStore()
+        try APIKeyStore.save("sk-test", providerID: provider, keychain: locked)
+        locked.failureStatus = errSecAuthFailed
+        // The key exists; the failure to read it must not read as "no key".
+        let result = APIKeyStore.loadResult(providerID: provider, keychain: locked)
+        #expect((try? result.get()) == nil)
+        #expect(result == .failure(KeychainError(status: errSecAuthFailed)))
+    }
+
     @Test func coastIntegrityKeyIsCreatedOnceAndReused() throws {
         let keychain = InMemoryKeychainStore()
         let folder = FileManager.default.temporaryDirectory

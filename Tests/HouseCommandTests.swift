@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Synchronization
 import Testing
@@ -714,6 +715,16 @@ struct HouseCommandDispatcherTests {
         await #expect(throws: UnixSocketLineClient.Failure.cannotConnect) {
             try await UnixSocketLineClient.send("status", to: long, timeout: 0.2)
         }
+    }
+
+    @Test func theSocketDescriptorIsNotInheritedByChildren() {
+        let descriptor = UnixSocketLineClient.makeSocket()
+        #expect(descriptor >= 0)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        let flags = fcntl(descriptor, F_GETFD)
+        #expect(flags != -1)
+        #expect(flags & FD_CLOEXEC != 0)
     }
 }
 

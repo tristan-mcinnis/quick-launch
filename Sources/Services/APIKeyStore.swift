@@ -11,25 +11,62 @@ enum APIKeyStore {
     ]
 
     static func load(providerID: UUID, keychain: any KeychainStoring = SystemKeychainStore()) -> String? {
-        if let value = load(providerID: providerID, service: service, keychain: keychain) {
+        switch loadResult(providerID: providerID, keychain: keychain) {
+        case .success(let value):
             return value
+        case .failure(let error):
+            // A locked, denied, or undecodable item is not "no key". Leave the
+            // real status in the log rather than reporting a missing key.
+            AppLog.persistence.error(
+                "Read provider key from Keychain failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
         }
-        for legacyService in legacyServices {
-            guard let value = load(providerID: providerID, service: legacyService, keychain: keychain) else { continue }
-            // Migrate forward. Leave the legacy item alone so older builds keep working.
-            AppLog.attempt("Migrate provider key to the current Keychain service") {
-                try save(value, providerID: providerID, keychain: keychain)
-            }
-            return value
-        }
-        return nil
     }
 
-    private static func load(providerID: UUID, service: String, keychain: any KeychainStoring) -> String? {
-        guard let data = AppLog.attempt("Read provider key from Keychain", {
-            try keychain.read(service: service, account: providerID.uuidString)
-        }) ?? nil else { return nil }
-        return String(data: data, encoding: .utf8)
+    /// Reads a provider key, separating "nothing stored" from a real Keychain
+    /// failure, so a caller can show `errSecAuthFailed` instead of asking for
+    /// a key that already exists. `load` keeps its value-only shape for
+    /// presence checks.
+    static func loadResult(
+        providerID: UUID,
+        keychain: any KeychainStoring = SystemKeychainStore()
+    ) -> Result<String?, KeychainError> {
+        switch loadValue(providerID: providerID, service: service, keychain: keychain) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let value):
+            if let value { return .success(value) }
+        }
+        for legacyService in legacyServices {
+            switch loadValue(providerID: providerID, service: legacyService, keychain: keychain) {
+            case .failure(let error):
+                return .failure(error)
+            case .success(let value):
+                guard let value else { continue }
+                // Migrate forward. Leave the legacy item alone so older builds keep working.
+                AppLog.attempt("Migrate provider key to the current Keychain service") {
+                    try save(value, providerID: providerID, keychain: keychain)
+                }
+                return .success(value)
+            }
+        }
+        return .success(nil)
+    }
+
+    private static func loadValue(
+        providerID: UUID,
+        service: String,
+        keychain: any KeychainStoring
+    ) -> Result<String?, KeychainError> {
+        do {
+            guard let data = try keychain.read(service: service, account: providerID.uuidString) else {
+                return .success(nil)
+            }
+            return .success(String(data: data, encoding: .utf8))
+        } catch {
+            return .failure(error)
+        }
     }
 
     static func save(_ apiKey: String, providerID: UUID, keychain: any KeychainStoring = SystemKeychainStore()) throws {

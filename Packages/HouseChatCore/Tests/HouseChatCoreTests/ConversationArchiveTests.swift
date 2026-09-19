@@ -184,6 +184,45 @@ struct ConversationArchiveTests {
         #expect(bundle.format == "house-chat-bundle")
     }
 
+    @Test("Saving a conversation newer than this build is refused, not written")
+    func saveRefusesNewerConversationVersion() async throws {
+        let temp = try TempDirectory(prefix: "conversations")
+        let archive = try ConversationArchive(root: temp.appending("chat"))
+        var record = Fixtures.conversation(id: "future")
+        record.schemaVersion = HouseChatCoding.schemaVersion + 1
+
+        await #expect(throws: ConversationArchiveError.unsupportedSchema(
+            id: "future",
+            version: HouseChatCoding.schemaVersion + 1
+        )) {
+            try await archive.save(record)
+        }
+        #expect(archive.contains("future") == false)
+        #expect(try await archive.list().isEmpty)
+    }
+
+    @Test("exportAll throws rather than silently omitting a file list vouched for")
+    func exportAllFailsClosedOnALoadFailure() async throws {
+        let temp = try TempDirectory(prefix: "conversations")
+        let root = temp.appending("chat")
+        let archive = try ConversationArchive(root: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // list() reports this record under its own id ("mismatched"); load(that
+        // id) looks for a different file and cannot find it. The old `try?`
+        // swallowed it and exported a bundle quietly short a chat.
+        let envelope = ConversationEnvelope(conversation: Fixtures.conversation(id: "mismatched"))
+        let data = try HouseChatCoding.makeEncoder(prettyPrinted: false).encode(envelope)
+        try data.write(to: archive.fileURL(for: "asked-for"))
+
+        let summaries = try await archive.list()
+        #expect(summaries.map(\.id) == ["mismatched"])
+        #expect(summaries.first?.issue == nil)
+
+        await #expect(throws: ConversationArchiveError.missing(id: "mismatched")) {
+            try await archive.exportAll()
+        }
+    }
+
     @Test("IDs that look like paths stay inside the root")
     func pathLikeIDs() async throws {
         let temp = try TempDirectory(prefix: "conversations")

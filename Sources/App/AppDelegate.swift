@@ -125,8 +125,10 @@ final class KeyablePanel: NSPanel {
             // ⇧↩ translates when a direction is set; otherwise it submits
             // like a plain Return instead of silently doing nothing.
             if translateHandler?() == true { return true }
-            returnHandler?()
-            return true
+            if let returnHandler {
+                returnHandler()
+                return true
+            }
         }
         if event.type == .keyDown,
            !modifiers.isEmpty,
@@ -164,7 +166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var typeToClickController: TypeToClickController?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
     private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
-    private var localMonitor: Any?
     private var mouseMonitor: Any?
     private var statusItem: NSStatusItem?
     private var overlayClearTask: Task<Void, Never>?
@@ -386,12 +387,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         globalHotKey?.invalidate()
         clipboardHistoryHotKey?.invalidate()
         translatorHotKey?.invalidate()
+        typeToClickHotKey?.invalidate()
         clipboardHistory.stopMonitoring()
+        doubleTapMonitor.stop()
         actionHotKeys.values.forEach { $0.invalidate() }
         actionHotKeys.removeAll()
         launcherItemHotKeys.values.forEach { $0.invalidate() }
         launcherItemHotKeys.removeAll()
-        if let monitor = localMonitor  { NSEvent.removeMonitor(monitor) }
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         caffeinateManager.releaseForQuit()
         Task { await screenHistoryCaptureService?.stop() }

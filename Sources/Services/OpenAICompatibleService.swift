@@ -746,11 +746,19 @@ struct OpenAICompatibleService: QuickService, Sendable {
             throw QuickServiceError.connectionFailed("Invalid HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw QuickServiceError.serverError("HTTP \(http.statusCode)")
+            // Read a bounded prefix so 401/429/400 stay distinguishable and
+            // the provider's own message reaches the user. Breaking out of the
+            // byte sequence cancels the rest of the body.
+            let body = await Self.boundedErrorBody(bytes)
+            throw QuickServiceError.serverError(
+                Self.httpFailureDescription(status: http.statusCode, body: body)
+            )
         }
 
         var pending: [Int: PendingToolCall] = [:]
         var sawToolFinish = false
+        var sawText = false
+        var sawUsage = false
         for try await line in bytes.lines {
             try Task.checkCancellation()
             guard line.hasPrefix("data:") else { continue }
@@ -767,6 +775,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
                 let parsed = Self.tokenUsage(from: reported)
                 if !parsed.isEmpty {
                     usage = usage.adding(parsed)
+                    sawUsage = true
                     continuation.yield(StreamDelta(text: nil, finishReason: nil, usage: usage))
                 }
             }
@@ -791,6 +800,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
             let text = delta?["content"] as? String
             let finishReason = choice["finish_reason"] as? String
             if finishReason == "tool_calls" { sawToolFinish = true }
+            if text != nil { sawText = true }
             if text != nil || finishReason != nil {
                 // A tool_calls finish is loop plumbing, not an answer end.
                 continuation.yield(StreamDelta(
@@ -799,12 +809,58 @@ struct OpenAICompatibleService: QuickService, Sendable {
                 ))
             }
         }
+        // A 200 whose stream carried no parseable choice, usage, or tool call
+        // would otherwise complete the turn with nothing at all.
+        guard sawText || sawUsage || !pending.isEmpty else {
+            throw QuickServiceError.serverError("The provider returned no content")
+        }
         guard sawToolFinish || !pending.isEmpty else { return [] }
         // Every named call with an id is answered, an unknown or unoffered
         // name with "unavailable", so the model always gets its results.
         return pending.sorted { $0.key < $1.key }
             .map(\.value)
             .filter { !$0.name.isEmpty && !$0.id.isEmpty }
+    }
+
+    /// Reads at most `limit` bytes of a failed response, then stops (which
+    /// cancels the rest of the sequence) so an error body is shown without
+    /// draining or leaking it.
+    private static func boundedErrorBody(
+        _ bytes: URLSession.AsyncBytes,
+        limit: Int = 4_096
+    ) async -> Data {
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= limit { break }
+            }
+        } catch {
+            // A body that dies mid-read still yields what it said so far.
+        }
+        return data
+    }
+
+    /// "HTTP 401: Invalid API key", the status plus the provider's own
+    /// `error.message` when the body carries one.
+    private static func httpFailureDescription(status: Int, body: Data) -> String {
+        guard let message = providerErrorMessage(from: body), !message.isEmpty else {
+            return "HTTP \(status)"
+        }
+        return "HTTP \(status): \(String(message.prefix(300)))"
+    }
+
+    private static func providerErrorMessage(from body: Data) -> String? {
+        let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        if let error = object?["error"] as? [String: Any],
+           let message = error["message"] as? String {
+            return message
+        }
+        if let error = object?["error"] as? String { return error }
+        if let message = object?["message"] as? String { return message }
+        let text = String(data: body, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text?.isEmpty == false ? text : nil
     }
 
     /// One tool result message. Every tool answers with plain text; the

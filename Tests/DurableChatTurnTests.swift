@@ -92,4 +92,30 @@ struct DurableChatTurnTests {
         #expect(answer.request?.status == .failed)
         #expect(answer.request?.error != nil)
     }
+
+    @Test func theNewChatDecisionIsFrozenBeforeItReachesTheArchive() async throws {
+        let directory = root()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let vm = QuickViewModel(service: MockQuickService(), archiveRootURL: directory)
+        vm.settings.newChatInterval = .always
+        let existingID = UUID()
+        vm.currentConversation = QuickConversation(
+            id: existingID,
+            providerID: UUID(),
+            model: "test-model"
+        )
+        let request = QuickViewModel.PreparedRequest(
+            submittedInput: "hello",
+            submittedImages: [],
+            action: nil,
+            actionDefinition: nil,
+            effectivePrompt: "hello"
+        )
+        // `.always` would start a new chat if the decision were re-derived,
+        // but `submit` froze it false before the persist await; the durable
+        // write must reserve the frozen chat's id.
+        #expect(vm.willStartNewChat(for: request))
+        #expect(await vm.submitDurableMaterial(request, startsNewChat: false))
+        #expect(vm.pendingSubmission?.conversationID == existingID)
+    }
 }

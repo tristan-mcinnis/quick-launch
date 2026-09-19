@@ -45,18 +45,29 @@ enum MathCalculator {
 
     // MARK: — Comma normalisation
 
-    /// Replaces European decimal commas (digit,digit) with dots.
+    /// A comma between digits is a thousands separator when the digit run
+    /// after it is exactly three, and a European decimal comma otherwise.
+    /// `1,000 + 5` is 1005, `1,234,567` is 1234567, and `1,5 + 1` is 2.5.
     private static func normalizeCommas(_ expr: String) -> String {
         var result = ""
         let chars = Array(expr)
         for (i, ch) in chars.enumerated() {
-            if ch == "," {
-                let prevDigit = i > 0 && chars[i - 1].isNumber
-                let nextDigit = i + 1 < chars.count && chars[i + 1].isNumber
-                result.append(prevDigit && nextDigit ? "." : ch)
-            } else {
+            guard ch == ",", i > 0, chars[i - 1].isNumber else {
                 result.append(ch)
+                continue
             }
+            var trailingDigits = 0
+            var j = i + 1
+            while j < chars.count, chars[j].isNumber {
+                trailingDigits += 1
+                j += 1
+            }
+            guard trailingDigits > 0 else {
+                result.append(ch)
+                continue
+            }
+            // Exactly three digits is a grouped number, not a decimal comma.
+            if trailingDigits != 3 { result.append(".") }
         }
         return result
     }

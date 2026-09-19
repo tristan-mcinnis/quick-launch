@@ -342,6 +342,27 @@ struct ChatSearchTests {
             == ["Kyoto notes", "Trip plan"])
     }
 
+    @Test func aLargeBatchDuringABuildIsParkedNotFoldedOnTheMainActor() async {
+        let index = ChatSearchIndex(backgroundThreshold: 10)
+        let first = chat("First build", answer: String(repeating: "Kyoto temple. ", count: 40))
+        index.update([ChatSearchSource(first, title: first.title)])
+        #expect(index.isBuilding)
+
+        let second = chat("Second batch", answer: "Osaka in spring, then Nara.")
+        index.update([ChatSearchSource(second, title: second.title)])
+        // The batch is parked for the next background build, so its body text
+        // is not folded inline while the first build is in flight.
+        #expect(QuickHistoryStore.matching(
+            [first, second], query: "osaka", title: { $0.title }, index: index
+        ).isEmpty)
+
+        await index.waitForBuild()
+        #expect(!index.isBuilding)
+        #expect(QuickHistoryStore.matching(
+            [first, second], query: "osaka", title: { $0.title }, index: index
+        ).map(\.title) == ["Second batch"])
+    }
+
     /// The spec's worst case: 200 chats × 12 messages, 300-character
     /// questions and 4,500-character answers (about 6.5 MB). A query must
     /// stay under 10 ms once the index is built.

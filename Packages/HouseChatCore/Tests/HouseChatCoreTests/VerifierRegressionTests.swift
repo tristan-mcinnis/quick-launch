@@ -498,6 +498,59 @@ struct VerifierRegressionTests {
         #expect(!String(decoding: try HouseChatCoding.makeEncoder().encode(endpoint), as: UTF8.self).contains("?"))
     }
 
+    @Test("Quoted credential pairs are redacted, whatever the key's quote style")
+    func quotedCredentialPairsAreRedacted() {
+        #expect(SecretRedactor.redact(#"{"api_key":"abc123456"}"#) == #"{"api_key":"[redacted]"}"#)
+        #expect(SecretRedactor.redact(#"{"api_key": "abc123456"}"#) == #"{"api_key": "[redacted]"}"#)
+        #expect(SecretRedactor.redact(#""token": "abc123456""#) == #""token": "[redacted]""#)
+        // The unquoted forms still match, and `password` keeps working.
+        #expect(SecretRedactor.redact("token=abc123456") == "token=[redacted]")
+        #expect(SecretRedactor.redact("api_key=abc123456") == "api_key=[redacted]")
+        #expect(SecretRedactor.redact(#"password: "hunter2""#) == #"password: "[redacted]""#)
+        #expect(SecretRedactor.containsCredentialShapedText(#"{"api_key":"abc123456"}"#))
+    }
+
+    @Test("An integral unknown number above 2^53 round trips verbatim")
+    func integralUnknownNumberStaysExact() throws {
+        let fields = try HouseChatCoding.makeDecoder().decode(
+            ExtraFields.self,
+            from: Data(#"{"future":9007199254740993}"#.utf8)
+        )
+        #expect(fields["future"]?.intValue == 9_007_199_254_740_993)
+
+        let encoded = try HouseChatCoding.makeEncoder().encode(fields)
+        #expect(String(decoding: encoded, as: UTF8.self).contains("9007199254740993"))
+        #expect(try HouseChatCoding.makeDecoder().decode(ExtraFields.self, from: encoded) == fields)
+
+        // A small integer is still an ordinary `.number`, so existing equality holds.
+        let small = try HouseChatCoding.makeDecoder().decode(
+            ExtraFields.self,
+            from: Data(#"{"small":7}"#.utf8)
+        )
+        #expect(small["small"] == .number(7))
+    }
+
+    @Test("An unrecognized retrieval scope is not `.none`; its raw string is preserved")
+    func unknownRetrievalScopeIsNotNone() throws {
+        let json = #"{"scope":"futureScope","matched":true}"#
+        let receipt = try HouseChatCoding.makeDecoder().decode(ContextReceipt.self, from: Data(json.utf8))
+        #expect(receipt.scope == nil, "an unknown scope is not stated, never the meaningful .none")
+        #expect(receipt.scopeRaw == "futureScope")
+        #expect(receipt.matched == true)
+
+        let encoded = try HouseChatCoding.makeEncoder().encode(receipt)
+        #expect(String(decoding: encoded, as: UTF8.self).contains("futureScope"))
+        #expect(try HouseChatCoding.makeDecoder().decode(ContextReceipt.self, from: encoded) == receipt)
+
+        // A known scope still decodes to its case.
+        let none = try HouseChatCoding.makeDecoder().decode(
+            ContextReceipt.self,
+            from: Data(#"{"scope":"none"}"#.utf8)
+        )
+        #expect(none.scope == RetrievalScope.none)
+        #expect(none.scopeRaw == nil)
+    }
+
     @Test("A plan's text is exactly the contributing selections joined, and nothing else")
     func planTextIsExact() {
         let context = DocumentContext.standard

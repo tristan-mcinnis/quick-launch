@@ -258,14 +258,24 @@ enum ExtractionArtifact {
         return try? HouseChatCoding.makeDecoder().decode(ExtractedDocument.self, from: json)
     }
 
+    /// True when the bytes are a structured envelope whose document no longer
+    /// decodes. The bytes are here and hash-clean; the document is not, so a
+    /// caller reports the extraction role as damaged rather than present. An
+    /// envelope written by an older build whose schema this one refuses (or a
+    /// name it now requires) reads this way.
+    static func isDamaged(_ data: Data) -> Bool {
+        isEnvelope(data) && document(in: data) == nil
+    }
+
     /// The text a model may receive: the document's own text when it has one,
-    /// the joined section text when it does not, or the plain UTF-8 body.
+    /// the joined section text when it does not, or the plain UTF-8 body. A
+    /// well-formed envelope whose document does not decode returns nil: the
+    /// raw envelope JSON must never be served as the document's text.
     static func text(in data: Data) -> String? {
-        if let document = document(in: data) {
-            if let text = document.text { return text }
-            return document.sections.map(\.text).joined()
-        }
-        return String(data: data, encoding: .utf8)
+        guard isEnvelope(data) else { return String(data: data, encoding: .utf8) }
+        guard let document = document(in: data) else { return nil }
+        if let text = document.text { return text }
+        return document.sections.map(\.text).joined()
     }
 }
 
@@ -281,6 +291,11 @@ struct RetainedSource: Sendable, Equatable {
     var extractedText: ArtifactRef?
     /// The role names with no archived bytes, in a stable order.
     var missingRoles: [String]
+    /// The role names whose bytes are archived but unusable: a structured
+    /// extraction envelope that no longer decodes. The bytes exist, so the
+    /// role is not missing, but the model never sees a document, so the
+    /// storage surface must not call the role present either.
+    var damagedRoles: [String] = []
 
     var hasBytes: Bool {
         original != nil || normalizedImage != nil || extractedText != nil

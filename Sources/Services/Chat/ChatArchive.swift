@@ -476,13 +476,24 @@ actor ChatArchive {
         return merged
     }
 
+    /// Every attachment survives. A live attachment that matches a stored one
+    /// is merged onto the stored record; a live-only attachment is kept in
+    /// live order; a stored-only attachment is kept too, at its stored
+    /// position. The live projection can never drop a stored reference.
     static func mergeAttachments(live: [AttachmentRecord], stored: [AttachmentRecord]) -> [AttachmentRecord] {
         var byID: [String: AttachmentRecord] = [:]
         for attachment in stored { byID[attachment.id] = attachment }
-        return live.map { attachment in
+        var storedIndex: [String: Int] = [:]
+        for (index, attachment) in stored.enumerated() { storedIndex[attachment.id] = index }
+        var result = live.map { attachment in
             guard let existing = byID[attachment.id] else { return attachment }
             return merge(liveAttachment: attachment, into: existing)
         }
+        let liveIDs = Set(live.map(\.id))
+        for (index, attachment) in stored.enumerated() where !liveIDs.contains(attachment.id) {
+            result.insert(attachment, at: Self.insertionPoint(forStoredIndex: index, in: result, storedIndex: storedIndex))
+        }
+        return result
     }
 
     static func merge(liveAttachment live: AttachmentRecord, into stored: AttachmentRecord) -> AttachmentRecord {
@@ -502,13 +513,43 @@ actor ChatArchive {
         return merged
     }
 
+    /// Every turn survives. `merge` only enriches turns present on both sides,
+    /// so this unions instead of following the live array: a live turn that
+    /// matches a stored one is merged onto the stored record, a live-only turn
+    /// is kept in live order, and a stored-only turn is kept too. A thin live
+    /// projection (the re-derived-new-chat path) can therefore never overwrite
+    /// the archive with fewer turns than it already holds.
     static func mergeTurns(live: [TurnRecord], stored: [TurnRecord]) -> [TurnRecord] {
         var byID: [String: TurnRecord] = [:]
         for turn in stored { byID[turn.id] = turn }
-        return live.map { turn in
+        var storedIndex: [String: Int] = [:]
+        for (index, turn) in stored.enumerated() { storedIndex[turn.id] = index }
+        var result = live.map { turn in
             guard let existing = byID[turn.id] else { return turn }
             return merge(liveTurn: turn, into: existing)
         }
+        let liveIDs = Set(live.map(\.id))
+        for (index, turn) in stored.enumerated() where !liveIDs.contains(turn.id) {
+            result.insert(turn, at: Self.insertionPoint(forStoredIndex: index, in: result, storedIndex: storedIndex))
+        }
+        return result
+    }
+
+    /// Where a stored-only element belongs in the merged result: after the
+    /// last element whose stored position precedes it, so stored-only turns
+    /// keep their order instead of being appended past newer ones.
+    private static func insertionPoint<Element: Identifiable>(
+        forStoredIndex index: Int,
+        in result: [Element],
+        storedIndex: [String: Int]
+    ) -> Int where Element.ID == String {
+        var insertion = 0
+        for (offset, element) in result.enumerated() {
+            if let position = storedIndex[element.id], position < index {
+                insertion = offset + 1
+            }
+        }
+        return insertion
     }
 
     /// The live payload wins for the keys this app owns; every other stored
@@ -586,13 +627,15 @@ actor ChatArchive {
         try await attachments.read(ref)
     }
 
-    /// What one attachment retained and what it is missing, without reading
-    /// any bytes.
+    /// What one attachment retained and what it is missing. The ref list comes
+    /// from the record alone; the extracted text is checked too, so a damaged
+    /// envelope is reported here rather than as present-and-usable while the
+    /// resume path silently drops it.
     func retainedSource(conversationID: String, attachmentID: String) async throws -> RetainedSource? {
         guard let record = try await storedRecord(id: conversationID) else { return nil }
         for turn in record.turns {
             for attachment in turn.attachments where attachment.id == attachmentID {
-                return Self.retainedSource(for: attachment)
+                return await inspectingExtraction(Self.retainedSource(for: attachment))
             }
         }
         return nil
@@ -601,7 +644,11 @@ actor ChatArchive {
     /// Every retained source in a conversation, for the storage surface.
     func retainedSources(conversationID: String) async throws -> [RetainedSource] {
         guard let record = try await storedRecord(id: conversationID) else { return [] }
-        return record.attachments.map(Self.retainedSource(for:))
+        var sources: [RetainedSource] = []
+        for attachment in record.attachments {
+            sources.append(await inspectingExtraction(Self.retainedSource(for: attachment)))
+        }
+        return sources
     }
 
     /// The bytes for one role of one attachment, or nil when that role was
@@ -624,8 +671,10 @@ actor ChatArchive {
 
     /// The model-ready text for one attachment, decoding the versioned
     /// extraction artifact when the shared reader wrote one. Nil when no text
-    /// was archived. A resume reads this; it never re-extracts and never
-    /// touches the original external path.
+    /// was archived, or when the envelope no longer decodes: the storage view
+    /// reports that role as damaged rather than lending it a text. A resume
+    /// reads this; it never re-extracts and never touches the original
+    /// external path.
     func retainedText(conversationID: String, attachmentID: String) async throws -> String? {
         guard let data = try await retainedBytes(
             conversationID: conversationID,
@@ -659,6 +708,22 @@ actor ChatArchive {
             extractedText: attachment.artifacts?.extractedText,
             missingRoles: missing
         )
+    }
+
+    /// The ref-only source with an unusable extraction reported. The bytes are
+    /// read to answer the one question the refs cannot: does the stored
+    /// envelope still decode as the document it was written as? A read failure
+    /// is left to the byte paths, which already distinguish missing from
+    /// damaged; only an envelope that no longer decodes is marked here, so the
+    /// storage view and the resume path agree that the text is not there.
+    private func inspectingExtraction(_ source: RetainedSource) async -> RetainedSource {
+        guard let ref = source.extractedText,
+              let data = try? await attachments.read(ref),
+              ExtractionArtifact.isDamaged(data)
+        else { return source }
+        var inspected = source
+        inspected.damagedRoles.append("extractedText")
+        return inspected
     }
 
     /// One conversation exactly as stored.

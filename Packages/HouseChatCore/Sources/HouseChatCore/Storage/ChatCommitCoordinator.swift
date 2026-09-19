@@ -200,12 +200,17 @@ public actor ChatCommitCoordinator {
         }
 
         // Which files already exist, so only the files this commit wrote are
-        // reported as orphans if it fails.
+        // reported as orphans if it fails. Keyed by kind **and** digest: the
+        // same bytes archived under another kind is not this kind's file, and
+        // treating it as pre-existing would hide bytes this commit wrote from
+        // the caller's `removeArtifactsIfUnreferenced` cleanup.
         var preexisting = Set<String>()
         for artifact in artifacts {
             let digest = SHA256Digest.hex(artifact.data)
             let probe = ArtifactRef(kind: artifact.artifactKind, sha256: digest, byteCount: artifact.data.count)
-            if await attachments.contains(probe) { preexisting.insert(digest) }
+            if await attachments.contains(probe) {
+                preexisting.insert(Self.artifactKey(kind: artifact.artifactKind, digest: digest))
+            }
         }
 
         var refs: [ArtifactRef] = []
@@ -218,7 +223,9 @@ public actor ChatCommitCoordinator {
                     fileExtension: artifact.fileExtension
                 )
                 refs.append(ref)
-                if !preexisting.contains(ref.sha256) { created.append(ref) }
+                if !preexisting.contains(Self.artifactKey(kind: ref.kind, digest: ref.sha256)) {
+                    created.append(ref)
+                }
             }
 
             var updated = conversation
@@ -261,6 +268,10 @@ public actor ChatCommitCoordinator {
                 retainedOrphans: created
             )
         }
+    }
+
+    static func artifactKey(kind: ArtifactRef.Kind, digest: String) -> String {
+        "\(kind.rawValue):\(digest)"
     }
 
     // MARK: Reference checks

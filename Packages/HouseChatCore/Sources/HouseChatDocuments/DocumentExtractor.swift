@@ -205,10 +205,24 @@ public actor DocumentExtractor {
         case .odt:
             documentText = try OOXMLTextExtractor.openDocument(data: data, configuration: configuration)
         case .doc, .rtf, .rtfd:
-            documentText = try AttributedDocumentReader.read(route: confirmed, data: data, packageURL: packageURL)
+            documentText = try AttributedDocumentReader.read(
+                route: confirmed,
+                data: data,
+                packageURL: packageURL,
+                packageByteLimit: configuration.maximumDocumentBytes
+            )
         case .html:
             let html = PlainTextReader.decodeHTML(data)
-            documentText = DocumentText(text: htmlText(html))
+            let extracted = HTMLTextExtractor.text(from: html)
+            if !extracted.droppedUnclosedBlocks.isEmpty {
+                let names = extracted.droppedUnclosedBlocks.joined(separator: ">, <")
+                notes.append(DocumentNote(
+                    kind: .partialExtraction,
+                    modelLine: "[Part of this page was unreadable and left out: an unclosed <\(names)> block.]",
+                    detailLine: "unclosed <\(names)> left out"
+                ))
+            }
+            documentText = DocumentText(text: htmlText(html, extracted: extracted))
         case .plainText(let kind, _):
             let text: String
             do {
@@ -263,7 +277,13 @@ public actor DocumentExtractor {
 
     /// An HTML document as a title line, then its readable text.
     static func htmlText(_ html: String) -> String {
-        let body = HTMLTextExtractor.text(from: html)
+        htmlText(html, extracted: HTMLTextExtractor.text(from: html))
+    }
+
+    /// The same, with an extraction that already carries the dropped-block
+    /// list, so the read reports a partial page once.
+    static func htmlText(_ html: String, extracted: HTMLTextExtractor.Result) -> String {
+        let body = extracted.text
         guard let title = HTMLTextExtractor.title(from: html) else { return body }
         return body.isEmpty ? title : "\(title)\n\n\(body)"
     }

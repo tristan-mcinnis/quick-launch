@@ -8,10 +8,6 @@ import Foundation
 /// references; after a relaunch a sent attachment's chip reads "Not loaded"
 /// and is read again only when the user chooses Re-attach.
 extension QuickViewModel {
-    /// The app's one reader. An actor that holds only its configuration, so
-    /// both views share it.
-    static let sharedAttachmentExtractor = AttachmentExtractor()
-
     /// The session's attachment text and pictures, shared with the other view.
     var attachmentStore: AttachmentSessionStore { store.attachments }
 

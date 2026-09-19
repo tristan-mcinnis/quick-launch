@@ -692,7 +692,6 @@ enum SheetParser {
     ) throws -> Parsed {
         var parsed = Parsed()
         var cells: [Int: String] = [:]
-        var rowNumber = 0
         var nextColumn = 0
         var cellType = ""
         var cellStyle: Int?
@@ -723,7 +722,6 @@ enum SheetParser {
                         parsed.totalRows = CellReference.row(String(end))
                     }
                 case "row":
-                    rowNumber = attributes["r"].flatMap(Int.init) ?? rowNumber + 1
                     nextColumn = 0
                     cells = [:]
                 case "c":

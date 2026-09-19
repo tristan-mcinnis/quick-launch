@@ -48,6 +48,13 @@ final class GlobalHotKey {
         Self.registry[identifier] = nil
     }
 
+    /// A hot key that is only dropped, never invalidated, still unregisters.
+    /// `isolated` keeps the main-actor state (`hotKeyRef`, the shared
+    /// registry) reachable from the deinitializer under Swift 6.
+    isolated deinit {
+        invalidate()
+    }
+
     nonisolated static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         var modifiers: UInt32 = 0
         if flags.contains(.command) { modifiers |= UInt32(cmdKey) }

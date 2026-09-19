@@ -59,7 +59,9 @@ public struct ConversationRecord: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = try c.decodeIfPresent(Date.self, forKey: AnyCodingKey("createdAt"))
         self.updatedAt = try c.decodeIfPresent(Date.self, forKey: AnyCodingKey("updatedAt"))
         self.sessionLinks = try c.decodeIfPresent([SessionLink].self, forKey: AnyCodingKey("sessionLinks")) ?? []
-        self.turns = try c.decodeIfPresent([TurnRecord].self, forKey: AnyCodingKey("turns")) ?? []
+        // `turns` is content: an absent key or an explicit null is a damaged
+        // record, never a silently empty history. An empty array is legal.
+        self.turns = try c.decode([TurnRecord].self, forKey: AnyCodingKey("turns"))
         self.appVersion = try c.decodeIfPresent(String.self, forKey: AnyCodingKey("appVersion"))
         self.appPayload = try c.decodeIfPresent(AppPayload.self, forKey: AnyCodingKey("appPayload"))
         self.extra = c.extras(excluding: Self.knownKeys)

@@ -5,6 +5,22 @@ enum TypeToClickBadgePlacement: Equatable {
     case inside
 }
 
+/// The tone a status line carries. The controller supplies it alongside the
+/// words, so the view never infers a tone by matching English copy.
+enum TypeToClickStatusTone: Equatable {
+    case ready
+    case busy
+    case alert
+
+    var color: NSColor {
+        switch self {
+        case .ready: House.NSColorToken.success
+        case .busy: House.NSColorToken.hudMuted
+        case .alert: House.NSColorToken.danger
+        }
+    }
+}
+
 /// A named callout anchored to one clickable control.
 struct TypeToClickBadge: Equatable {
     let rect: NSRect        // in the overlay window's coordinate space
@@ -24,6 +40,11 @@ final class TypeToClickOverlayView: NSView {
         didSet { needsDisplay = true }
     }
     var statusText: String? {
+        didSet { needsDisplay = true }
+    }
+    /// The tone for `statusText`'s dot, carried from the controller. Only
+    /// the words change the drawn line; a caller that sets none stays ready.
+    var statusTone: TypeToClickStatusTone = .ready {
         didSet { needsDisplay = true }
     }
     /// Panel-local point used for status messages. The controller places it
@@ -210,43 +231,13 @@ final class TypeToClickOverlayView: NSView {
             width: Self.statusDotDiameter,
             height: Self.statusDotDiameter
         )
-        statusTone(for: text).color.setFill()
+        statusTone.color.setFill()
         NSBezierPath(ovalIn: dot).fill()
 
         string.draw(at: NSPoint(
             x: dot.maxX + dotGap,
             y: pill.midY - textSize.height / 2
         ))
-    }
-
-    /// The three tones a status line can carry. The dot never carries the
-    /// meaning alone: it always sits beside the words in the same pill.
-    private enum StatusTone {
-        case ready
-        case busy
-        case alert
-
-        var color: NSColor {
-            switch self {
-            case .ready: House.NSColorToken.success
-            case .busy: House.NSColorToken.hudMuted
-            case .alert: House.NSColorToken.danger
-            }
-        }
-    }
-
-    /// Reads the tone from the wording the controller already supplies: a
-    /// trailing ellipsis means a scan or a click is still running, a no-match,
-    /// permission, or changed-target line is an alert, and anything else is a
-    /// ready count of named targets.
-    private func statusTone(for text: String) -> StatusTone {
-        if text.hasPrefix("No match")
-            || text.contains("changed")
-            || text.contains("not visible yet")
-            || text.contains("Privacy & Security") {
-            return .alert
-        }
-        return text.hasSuffix("…") ? .busy : .ready
     }
 
     override func keyDown(with event: NSEvent) {

@@ -87,8 +87,10 @@ public struct RequestReceipt: Codable, Sendable, Equatable, Identifiable {
         self.selection = try c.decodeIfPresent(ModelSelection.self, forKey: AnyCodingKey("selection"))
         self.status = try c.decodeIfPresent(RequestStatus.self, forKey: AnyCodingKey("status")) ?? .unknown
         self.context = try c.decodeIfPresent(ContextReceipt.self, forKey: AnyCodingKey("context"))
-        self.attachmentRefs = try c.decodeIfPresent([AttachmentSnapshotRef].self, forKey: AnyCodingKey("attachmentRefs")) ?? []
-        self.toolRounds = try c.decodeIfPresent([ToolRound].self, forKey: AnyCodingKey("toolRounds")) ?? []
+        // Content-bearing arrays: an absent key or an explicit null is a
+        // damaged receipt, never a silently thinned one. An empty array is legal.
+        self.attachmentRefs = try c.decode([AttachmentSnapshotRef].self, forKey: AnyCodingKey("attachmentRefs"))
+        self.toolRounds = try c.decode([ToolRound].self, forKey: AnyCodingKey("toolRounds"))
         self.timings = try c.decodeIfPresent(RequestTimings.self, forKey: AnyCodingKey("timings")) ?? RequestTimings()
         self.usage = try c.decodeIfPresent(TokenUsage.self, forKey: AnyCodingKey("usage"))
         self.endpoint = try c.decodeIfPresent(EndpointDescriptor.self, forKey: AnyCodingKey("endpoint"))

@@ -26,7 +26,7 @@ struct SchemaCompatibilityRegressionTests {
     }
 
     @Test func missingPayloadValuesDoesNotInvalidateConversation() throws {
-        let data = Data(#"{"id":"fixture-thread","appPayload":{"namespace":"ql","futurePayload":"kept"}}"#.utf8)
+        let data = Data(#"{"id":"fixture-thread","turns":[],"appPayload":{"namespace":"ql","futurePayload":"kept"}}"#.utf8)
         let record = try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, from: data)
         #expect(record.appPayload?.namespace == "ql")
         #expect(record.appPayload?.values.isEmpty == true)

@@ -791,6 +791,9 @@ struct ChatSnippet: Equatable, Sendable {
     @ObservationIgnored private var documents: [UUID: ChatSearchDocument] = [:]
     /// Stamps of the chats the build in flight is folding.
     @ObservationIgnored private var building: [UUID: ChatSearchStamp] = [:]
+    /// Stale sources that arrived while a build was in flight. They are folded
+    /// by the next background build, never inline on the main actor.
+    @ObservationIgnored private var parkedStale: [ChatSearchSource] = []
     @ObservationIgnored private(set) var buildTask: Task<Void, Never>?
     /// Stale text above this many UTF-8 bytes folds off the main actor.
     @ObservationIgnored let backgroundThreshold: Int?
@@ -864,16 +867,50 @@ struct ChatSnippet: Equatable, Sendable {
         if documents.count > live.count || documents.keys.contains(where: { !live.contains($0) }) {
             documents = documents.filter { live.contains($0.key) }
         }
-        guard !stale.isEmpty else { return }
+        guard !stale.isEmpty else {
+            parkedStale = parkedStale.filter { live.contains($0.id) }
+            return
+        }
+        // A batch that arrives now supersedes whatever was parked for it.
+        let staleIDs = Set(stale.map(\.id))
+        parkedStale = parkedStale.filter { live.contains($0.id) && !staleIDs.contains($0.id) }
         let size = stale.reduce(0) { total, source in
             total + source.title.utf8.count
                 + source.questions.reduce(0) { $0 + $1.utf8.count }
                 + source.answers.reduce(0) { $0 + $1.utf8.count }
         }
-        guard let backgroundThreshold, size > backgroundThreshold, buildTask == nil else {
+        guard let backgroundThreshold, size > backgroundThreshold else {
             for source in stale { documents[source.id] = ChatSearchDocument(source) }
             return
         }
+        // The size test comes before the in-flight test: a large batch that
+        // arrives during a build is parked, never folded on the main actor.
+        guard buildTask == nil else {
+            // A title-only stand-in keeps a ranking pass from folding the
+            // parked body inline; the chained build replaces it.
+            for source in stale { documents[source.id] = ChatSearchDocument(titleOnly: source) }
+            parkedStale = Self.merged(parkedStale, stale)
+            return
+        }
+        startBuild(stale)
+    }
+
+    /// One entry per chat, newest stamp wins, so a repeated update while a
+    /// build was in flight parks each chat once.
+    private static func merged(
+        _ parked: [ChatSearchSource],
+        _ incoming: [ChatSearchSource]
+    ) -> [ChatSearchSource] {
+        var byID: [UUID: ChatSearchSource] = [:]
+        var order: [UUID] = []
+        for source in parked + incoming {
+            if byID[source.id] == nil { order.append(source.id) }
+            byID[source.id] = source
+        }
+        return order.compactMap { byID[$0] }
+    }
+
+    private func startBuild(_ stale: [ChatSearchSource]) {
         for source in stale {
             building[source.id] = source.stamp
             // Until the build lands, the title is searched.
@@ -898,12 +935,20 @@ struct ChatSnippet: Equatable, Sendable {
         buildTask = nil
         rowCache.removeAll()
         revision &+= 1
+        // A batch parked during the build folds in the background, not here.
+        guard !parkedStale.isEmpty else { return }
+        let parked = parkedStale
+        parkedStale = []
+        startBuild(parked)
     }
 
     /// Waits for a background build (tests, and a caller that must have
-    /// message text searched).
+    /// message text searched). A build that parked another one chains, so the
+    /// wait drains every build it started.
     func waitForBuild() async {
-        await buildTask?.value
+        while let task = buildTask {
+            await task.value
+        }
     }
 
     /// The document for one chat, folding it now when the index has none

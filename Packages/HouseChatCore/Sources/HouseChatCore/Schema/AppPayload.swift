@@ -177,7 +177,7 @@ public enum SecretRedactor {
     /// value, and a bare well-known key prefix (`sk-…`, `ghp_…`).
     public static func redact(_ text: String) -> String {
         var result = redactURLs(in: text)
-        result = replace(credentialPair, in: result, with: "$1$2[redacted]$2")
+        result = replace(credentialPair, in: result, with: "$1$2$3[redacted]$3")
         result = replace(bearer, in: result, with: "$1[redacted]")
         result = replace(bareKey, in: result, with: "[redacted]")
         return result
@@ -192,7 +192,7 @@ public enum SecretRedactor {
 
     private static let urlPattern = regex(#"https?://[^\s"'<>()\[\]]+"#)
     private static let credentialPair = regex(
-        #"(?i)((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization)\s*[:=]\s*)(\"?)([^\s\"&,;]{4,})\2"#
+        #"(?i)((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization))(\"?\s*[:=]\s*)(\"?)([^\s\"&,;]{4,})\3"#
     )
     private static let bearer = regex(#"(?i)(\bbearer\s+)([A-Za-z0-9._\-]{8,})"#)
     private static let bareKey = regex(

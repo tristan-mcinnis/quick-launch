@@ -26,7 +26,7 @@ struct SharedDocumentExtractor: AttachmentExtracting {
         switch source {
         case .file(let url):
             do {
-                return try Self.content(try await documents.extract(fileURL: url))
+                return Self.content(try await documents.extract(fileURL: url))
             } catch let error as DocumentExtractionError {
                 throw AttachmentReadFailure(error.message)
             }

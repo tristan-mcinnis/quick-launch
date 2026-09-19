@@ -568,7 +568,17 @@ struct CompactHotkeyRecorder: View {
                     isRecording = true
                 } label: {
                     if let hotkey {
-                        KeyCapGroup(keys: hotkey.keyCaps)
+                        HStack(spacing: AQDesign.Space.compact) {
+                            KeyCapGroup(keys: hotkey.keyCaps)
+                            // The refusal must show here too: replacing an
+                            // existing hotkey with an invalid combination
+                            // left the old caps and hid the error.
+                            if let validationError {
+                                Text(validationError)
+                                    .font(AQDesign.TypeToken.caption)
+                                    .foregroundStyle(AQDesign.ColorToken.danger)
+                            }
+                        }
                     } else {
                         Text(validationError ?? "Record")
                             .font(AQDesign.TypeToken.label)

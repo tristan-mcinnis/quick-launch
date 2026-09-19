@@ -375,6 +375,110 @@ struct ChatArchiveTests {
         #expect(try String(contentsOf: file, encoding: .utf8) == "garbage")
     }
 
+    @Test func aThinLiveProjectionNeverDropsStoredTurns() async throws {
+        let directory = try root()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let archive = try ChatArchive(root: directory)
+        // The archive already holds two turns, A and B.
+        var stored = legacyConversation(messages: [
+            QuickMessage(role: .user, content: "A"),
+            QuickMessage(role: .assistant, content: "B"),
+        ])
+        _ = await archive.migrate(legacy: [stored], appVersion: "1.0.0")
+
+        // A re-derived live projection under the same chat ID holds only C.
+        stored.messages = [QuickMessage(role: .user, content: "C")]
+        stored.updatedAt = stored.updatedAt.addingTimeInterval(100)
+        try await archive.syncConversation(stored)
+
+        let merged = try await archive.load(id: stored.id.uuidString)
+        #expect(merged.turns.map(\.text) == ["A", "B", "C"], "a thin live save must not drop stored turns")
+    }
+
+    @Test func aDamagedExtractionEnvelopeIsNotServedAsText() {
+        // Plain UTF-8 is still a link/selection artifact.
+        #expect(ExtractionArtifact.text(in: Data("plain body".utf8)) == "plain body")
+        // A structured envelope that no longer decodes must not leak its
+        // raw JSON (header included) into the model text.
+        let header = "#!ql-extraction-v1\n"
+        #expect(ExtractionArtifact.text(in: Data((header + "{}").utf8)) == nil)
+        #expect(ExtractionArtifact.text(in: Data((header + #"{"kind":5,"name":"x"}"#).utf8)) == nil)
+    }
+
+    @Test func aDamagedExtractionEnvelopeIsReportedNotSilentlyDropped() async throws {
+        let directory = try root()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let archive = try ChatArchive(root: directory)
+        // A pre-pass build could write an envelope for a document with no
+        // name: the header and the JSON are well formed, but this build's
+        // decoder refuses the empty name. The bytes are hash-clean, so nothing
+        // was tampered with after the write.
+        let document = ExtractedDocument(
+            kind: .pdf,
+            kindLabel: "PDF",
+            name: "",
+            sections: [DocumentSection(
+                label: "Page 1",
+                unit: .page,
+                index: 1,
+                range: DocumentRange(start: 1, end: 1),
+                text: "Revenue rose."
+            )],
+            sectionUnit: .page,
+            unitCount: 1,
+            characterCount: 13,
+            text: "Revenue rose."
+        )
+        let original = Data("pdf bytes".utf8)
+        let ref = ChatAttachmentRef(
+            kind: .pdf,
+            name: "report.pdf",
+            byteCount: original.count,
+            pageCount: 1,
+            characterCount: 13,
+            contentHash: SHA256Digest.hex(original)
+        )
+        let conversation = legacyConversation(messages: [
+            QuickMessage(role: .user, content: "summarize", attachments: [ref]),
+        ])
+        try await archive.submit(TurnSubmission(
+            conversation: conversation,
+            attachmentContents: [AttachmentContent(
+                ref: ref,
+                text: document.text,
+                originalBytes: original,
+                extractedDocument: document
+            )]
+        ))
+
+        let record = try await archive.load(id: conversation.id.uuidString)
+        let stored = try #require(record.turns.first?.attachments.first?.artifacts?.extractedText)
+        let bytes = try await archive.attachments.read(stored)
+        #expect(ExtractionArtifact.isEnvelope(bytes))
+        #expect(ExtractionArtifact.isDamaged(bytes))
+        #expect(ExtractionArtifact.document(in: bytes) == nil)
+
+        // The text path names no text, and the storage view no longer calls
+        // the role present either: the two agree the document is not there.
+        #expect(try await archive.retainedText(
+            conversationID: conversation.id.uuidString,
+            attachmentID: ref.id.uuidString
+        ) == nil)
+        #expect(try await archive.retainedDocument(
+            conversationID: conversation.id.uuidString,
+            attachmentID: ref.id.uuidString
+        ) == nil)
+        let source = try #require(await archive.retainedSource(
+            conversationID: conversation.id.uuidString,
+            attachmentID: ref.id.uuidString
+        ))
+        #expect(source.extractedText != nil, "the bytes are still archived")
+        #expect(source.damagedRoles == ["extractedText"])
+        #expect(!source.missingRoles.contains("extractedText"))
+        let sources = try await archive.retainedSources(conversationID: conversation.id.uuidString)
+        #expect(sources.first?.damagedRoles == ["extractedText"])
+    }
+
     // MARK: - Keep-all, restart, deletion
 
     @Test func allChatsStayVisiblePastTheLegacyCacheLimit() async throws {

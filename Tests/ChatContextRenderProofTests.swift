@@ -155,6 +155,31 @@ struct ChatContextRenderProofTests {
 
     // MARK: - Pure summaries
 
+    @Test func aDamagedExtractionIsNamedRatherThanCalledPresent() {
+        let textRef = ArtifactRef(
+            kind: .extractedText,
+            sha256: String(repeating: "b", count: 64),
+            byteCount: 9_000,
+            fileExtension: "json"
+        )
+        let material = ChatRetainedMaterial(source: RetainedSource(
+            attachment: AttachmentRecord(
+                id: "77777777-7777-7777-7777-777777777777",
+                kind: .pdf,
+                name: "brief.pdf",
+                artifacts: AttachmentArtifacts(extractedText: textRef)
+            ),
+            original: nil,
+            normalizedImage: nil,
+            extractedText: textRef,
+            missingRoles: ["original", "normalizedImage"],
+            damagedRoles: ["extractedText"]
+        ))
+        #expect(material.hasBytes, "the bytes are archived")
+        #expect(material.status == .partial, "the extraction cannot be used, so it is not fully retained")
+        #expect(material.detail.contains("extracted text unreadable"))
+    }
+
     @Test func formatsDurationsForTheReceipt() {
         #expect(ChatAnswerReceiptSummary.duration(0.8) == "0.80 s")
         #expect(ChatAnswerReceiptSummary.duration(12.4) == "12.4 s")

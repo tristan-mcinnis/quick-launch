@@ -94,7 +94,7 @@ struct ChatRetainedMaterial: Identifiable, Equatable {
         extractedText = source.extractedText
         if !source.hasBytes {
             status = .missing
-        } else if source.original == nil || record.truncation != nil {
+        } else if source.original == nil || record.truncation != nil || !source.damagedRoles.isEmpty {
             status = .partial
         } else {
             status = .retained
@@ -109,6 +109,9 @@ struct ChatRetainedMaterial: Identifiable, Equatable {
         if record.truncation != nil { parts.append("trimmed") }
         if !source.missingRoles.isEmpty {
             parts.append("no \(source.missingRoles.map(Self.roleLabel).joined(separator: ", "))")
+        }
+        if !source.damagedRoles.isEmpty {
+            parts.append("\(source.damagedRoles.map(Self.roleLabel).joined(separator: ", ")) unreadable")
         }
         detail = parts.joined(separator: " · ")
     }

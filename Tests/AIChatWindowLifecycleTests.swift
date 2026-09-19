@@ -576,7 +576,10 @@ struct AIChatWindowLifecycleTests {
         #expect(!rig.model.isWindowFullScreen)
         // A window model without the app's window never reads full screen.
         let bare = AIChatWindowModel(chat: QuickViewModel(service: MockQuickService()))
-        bare.window = FakeAIChatWindow()
+        // Hold the window strongly: `AIChatWindowModel.window` is weak, so an
+        // inline temporary is deallocated and the check runs against nil.
+        let bareWindow = FakeAIChatWindow()
+        bare.window = bareWindow
         #expect(!bare.isWindowFullScreen)
     }
 

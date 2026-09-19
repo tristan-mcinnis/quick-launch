@@ -47,7 +47,7 @@ extension AttachmentExtractor: AttachmentExtracting {
     }
 
     /// Text selected in another app, as a text attachment: NFKC, the
-    /// per-attachment cap, and a hash of what was selected.
+    /// per-file retention cap, and a hash of what was selected.
     static func selectionContent(_ text: String, appName: String?) throws -> AttachmentContent {
         let finished = try DocumentText(text: text).finished()
         let ref = ChatAttachmentRef(

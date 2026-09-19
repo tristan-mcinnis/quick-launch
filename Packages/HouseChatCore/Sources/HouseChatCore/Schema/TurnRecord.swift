@@ -66,12 +66,14 @@ public struct TurnRecord: Codable, Sendable, Equatable, Identifiable {
         self.role = try c.decode(TurnRole.self, forKey: AnyCodingKey("role"))
         self.text = try c.decode(String.self, forKey: AnyCodingKey("text"))
         self.createdAt = try c.decodeIfPresent(Date.self, forKey: AnyCodingKey("createdAt"))
-        self.attachments = try c.decodeIfPresent([AttachmentRecord].self, forKey: AnyCodingKey("attachments")) ?? []
+        // Content-bearing arrays: an absent key or an explicit null is a
+        // damaged record, never a silently thinned one. An empty array is legal.
+        self.attachments = try c.decode([AttachmentRecord].self, forKey: AnyCodingKey("attachments"))
         self.model = try c.decodeIfPresent(ModelSelection.self, forKey: AnyCodingKey("model"))
         self.request = try c.decodeIfPresent(RequestReceipt.self, forKey: AnyCodingKey("request"))
-        self.toolRounds = try c.decodeIfPresent([ToolRound].self, forKey: AnyCodingKey("toolRounds")) ?? []
+        self.toolRounds = try c.decode([ToolRound].self, forKey: AnyCodingKey("toolRounds"))
         self.timings = try c.decodeIfPresent(TurnTimings.self, forKey: AnyCodingKey("timings")) ?? TurnTimings()
-        self.sessionLinks = try c.decodeIfPresent([SessionLink].self, forKey: AnyCodingKey("sessionLinks")) ?? []
+        self.sessionLinks = try c.decode([SessionLink].self, forKey: AnyCodingKey("sessionLinks"))
         self.error = try c.decodeIfPresent(String.self, forKey: AnyCodingKey("error"))
         self.appPayload = try c.decodeIfPresent(AppPayload.self, forKey: AnyCodingKey("appPayload"))
         self.extra = c.extras(excluding: Self.knownKeys)

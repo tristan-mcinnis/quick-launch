@@ -58,7 +58,7 @@ struct EndpointAndSecretTests {
 
     @Test("A legacy receipt with no endpoint decodes with it nil")
     func legacyReceiptWithoutEndpoint() throws {
-        let json = #"{"id":"r","status":"completed","usage":{"totalTokens":10}}"#
+        let json = #"{"id":"r","status":"completed","attachmentRefs":[],"toolRounds":[],"usage":{"totalTokens":10}}"#
         let receipt = try HouseChatCoding.makeDecoder().decode(RequestReceipt.self, from: Data(json.utf8))
         #expect(receipt.endpoint == nil)
         #expect(receipt.usage?.totalTokens == 10)

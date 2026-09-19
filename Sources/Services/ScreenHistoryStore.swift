@@ -171,12 +171,33 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
                 byteCount: Int64(frame.imageData.count)
             ))
         } catch {
-            try? FileManager.default.removeItem(at: imageURL)
+            // The insert is rolled back with the statement sequence, but a row
+            // from an earlier identical capture may already point at this
+            // path. Remove the file only when no row references it.
+            let referenced = (try? hasLocatorReference(to: imageURL.path)) ?? true
+            if !referenced {
+                try? FileManager.default.removeItem(at: imageURL)
+            }
             throw error
         }
     }
 
     func record(_ frame: ScreenHistoryFrameInput) throws -> Int64 {
+        try database.execute("BEGIN IMMEDIATE TRANSACTION;")
+        do {
+            let frameID = try recordFrame(frame)
+            try database.execute("COMMIT;")
+            return frameID
+        } catch {
+            try? database.execute("ROLLBACK;")
+            throw error
+        }
+    }
+
+    /// One row and its normalized structure, inside the caller's transaction.
+    /// Both statements commit together so a failure can never leave a
+    /// committed row pointing at media the caller then removes.
+    private func recordFrame(_ frame: ScreenHistoryFrameInput) throws -> Int64 {
         guard !frame.sourceIdentifier.isEmpty else {
             throw LocalSQLiteError.bind("source identifier is empty")
         }
@@ -223,13 +244,29 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
         guard !frames.isEmpty else { return 0 }
         try database.execute("BEGIN IMMEDIATE TRANSACTION;")
         do {
-            for frame in frames { _ = try record(frame) }
+            for frame in frames { _ = try recordFrame(frame) }
             try database.execute("COMMIT;")
             return frames.count
         } catch {
             try? database.execute("ROLLBACK;")
             throw error
         }
+    }
+
+    /// True when any frame row still names `locator` as its media.
+    private func hasLocatorReference(to locator: String) throws -> Bool {
+        let statement = try database.prepare("""
+            SELECT 1 FROM screen_history_frame
+            WHERE image_locator = ? OR media_locator = ?
+            LIMIT 1;
+            """)
+        defer { sqlite3_finalize(statement) }
+        try SQLiteValue.bind(locator, to: statement, at: 1)
+        try SQLiteValue.bind(locator, to: statement, at: 2)
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW { return true }
+        if result == SQLITE_DONE { return false }
+        throw LocalSQLiteError.step(database.message())
     }
 
     func search(_ query: ScreenHistorySearchQuery) throws -> [ScreenHistoryFrame] {
@@ -402,7 +439,7 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
             var ownedFrameID = existingOwnedID
             var ownedRowDelta = removedOwnedRow ? -1 : 0
             if status == .imported {
-                ownedFrameID = try record(frame)
+                ownedFrameID = try recordFrame(frame)
                 if existingOwnedID == nil { ownedRowDelta = 1 }
             }
 
@@ -1000,7 +1037,7 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
     func previewPrune(
         policy: ScreenHistoryRetentionPolicy,
         now: Date = Date()
-    ) throws -> ScreenHistoryPrunePreview {
+    ) async throws -> ScreenHistoryPrunePreview {
         let candidates = try retentionCandidates(policy: policy, now: now)
         let locators = Set(candidates.flatMap { row in
             [row.image, row.media].compactMap { locator -> String? in
@@ -1009,6 +1046,11 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
             }
         })
         let bytes = candidates.reduce(Int64(0)) { $0 + $1.bytes }
+        let reclaimable = try reclaimableRows()
+        let plannedIDs = Set(candidates.map(\.id))
+        let retainedBytes = reclaimable
+            .filter { !plannedIDs.contains($0.id) }
+            .reduce(Int64(0)) { $0 + $1.bytes }
         return ScreenHistoryPrunePreview(
             policy: policy,
             rowsPlanned: candidates.count,
@@ -1016,7 +1058,7 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
             ownedFilesPlanned: locators.count,
             earliestRemoval: candidates.map(\.capturedAt).min(),
             latestRemoval: candidates.map(\.capturedAt).max(),
-            retainedBytes: max(0, try totalBytes() - bytes),
+            retainedBytes: retainedBytes,
             hasPendingQueue: try pruneQueueCounts().rows > 0
         )
     }
@@ -1693,11 +1735,19 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
         }
     }
 
-    private func totalBytes() throws -> Int64 {
-        let statement = try database.prepare("SELECT COALESCE(sum(byte_count), 0) FROM screen_history_frame;")
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw LocalSQLiteError.step(database.message()) }
-        return sqlite3_column_int64(statement, 0)
+    /// Every row whose media retention can actually remove, oldest first.
+    /// A row counts only when one of its locators resolves inside an owned
+    /// media root: imported Coast metadata still pointing at the read-only
+    /// legacy root can never free a byte here.
+    private func reclaimableRows() throws -> [PruneCandidate] {
+        try pruningCandidates(where: nil, number: nil).filter { isReclaimable($0) }
+    }
+
+    private func isReclaimable(_ row: PruneCandidate) -> Bool {
+        [row.image, row.media].contains { locator in
+            guard let locator, !locator.isEmpty else { return false }
+            return ownedPruneCandidateURL(locator) != nil
+        }
     }
 
     private struct PruneQueueCounts {
@@ -1830,16 +1880,19 @@ actor SQLiteScreenHistoryStore: ScreenHistoryStoring, ScreenHistoryFrameSink, Sc
         }
 
         let selected = Set(candidates.map(\.id))
-        let selectedBytes = candidates.reduce(Int64(0)) { $0 + $1.bytes }
         if let cap = policy.storageCapBytes {
-            let retainedBytes = try totalBytes() - selectedBytes
-            if retainedBytes > cap {
-                var bytesToRemove = retainedBytes - cap
-                for row in try pruningCandidates(where: nil, number: nil) where !selected.contains(row.id) {
-                    candidates.append(row)
-                    bytesToRemove -= row.bytes
-                    if bytesToRemove <= 0 { break }
-                }
+            // Size the cap against bytes this pass can free. Counting
+            // unremovable Coast media would keep the cap out of reach and
+            // spend owned captures on it pass after pass.
+            let reclaimable = try reclaimableRows()
+            let selectedBytes = reclaimable
+                .filter { selected.contains($0.id) }
+                .reduce(Int64(0)) { $0 + $1.bytes }
+            var retainedBytes = reclaimable.reduce(Int64(0)) { $0 + $1.bytes } - selectedBytes
+            for row in reclaimable where !selected.contains(row.id) {
+                guard retainedBytes > cap else { break }
+                candidates.append(row)
+                retainedBytes -= row.bytes
             }
         }
         return candidates

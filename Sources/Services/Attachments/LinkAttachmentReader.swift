@@ -132,7 +132,7 @@ actor LinkAttachmentReader {
                 kindLabel: "PDF",
                 fetched: fetched,
                 hash: hash,
-                characterCap: AttachmentLimits.charactersPerAttachment
+                characterCap: AttachmentLimits.charactersPerFile
             )
 
         case .html, .text:
@@ -236,53 +236,34 @@ actor LinkAttachmentReader {
         request.httpShouldHandleCookies = false
 
         let redirects = RedirectGuard(limit: AttachmentLimits.linkRedirects)
-        let bytes: URLSession.AsyncBytes
-        let response: URLResponse
+        let loaded: (data: Data, response: URLResponse)
         do {
-            (bytes, response) = try await session.bytes(for: request, delegate: redirects)
+            // One bounded read. Iterating `session.bytes` costs an async
+            // suspension per byte, so a 5 MB page ran into the total timeout
+            // instead of being cut; `AttachmentExtractor.withTimeout` still
+            // cancels this request when the total deadline fires.
+            loaded = try await session.data(for: request, delegate: redirects)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             if let refusal = redirects.refusal { throw refusal }
             throw failure(for: error)
         }
-        if let refusal = redirects.refusal {
-            bytes.task.cancel()
-            throw refusal
-        }
-        guard let http = response as? HTTPURLResponse else {
-            bytes.task.cancel()
+        if let refusal = redirects.refusal { throw refusal }
+        guard let http = loaded.response as? HTTPURLResponse else {
             throw AttachmentFailure.unreachable
         }
         guard (200..<300).contains(http.statusCode) else {
-            bytes.task.cancel()
             throw AttachmentFailure.httpStatus(http.statusCode)
         }
 
         let (mimeType, charset) = parseContentType(http.value(forHTTPHeaderField: "Content-Type"))
-        var buffer: [UInt8] = []
-        let expected = http.expectedContentLength
-        buffer.reserveCapacity(expected > 0 ? min(Int(expected), bodyLimit) : 64 * 1_024)
-        var cut = false
-        do {
-            for try await byte in bytes {
-                if buffer.count >= bodyLimit {
-                    cut = true
-                    break
-                }
-                buffer.append(byte)
-                if buffer.count % 65_536 == 0 { try Task.checkCancellation() }
-            }
-        } catch is CancellationError {
-            bytes.task.cancel()
-            throw CancellationError()
-        } catch {
-            throw failure(for: error)
-        }
-        if cut { bytes.task.cancel() }
+        let cut = loaded.data.count > bodyLimit
         return Fetched(
             finalURL: http.url ?? url,
             mimeType: mimeType,
             charset: charset,
-            data: Data(buffer),
+            data: cut ? Data(loaded.data.prefix(bodyLimit)) : loaded.data,
             bodyCut: cut
         )
     }

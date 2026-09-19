@@ -27,7 +27,7 @@ struct SchemaCodingTests {
 
     @Test("A legacy record without optional metadata decodes; identity and content stay required")
     func legacyMinimal() throws {
-        let json = #"{"id":"legacy-1","turns":[{"id":"t1","role":"user","text":"hi"}]}"#
+        let json = #"{"id":"legacy-1","turns":[{"id":"t1","role":"user","text":"hi","attachments":[],"toolRounds":[],"sessionLinks":[]}]}"#
         let record = try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, from: Data(json.utf8))
 
         #expect(record.id == "legacy-1")
@@ -63,10 +63,96 @@ struct SchemaCodingTests {
         }
     }
 
+    @Test("A content-bearing array must be present and non-null; an empty array is legal")
+    func contentArraysAreRequired() throws {
+        let decoder = HouseChatCoding.makeDecoder()
+        let malformed: [String] = [
+            #"{"id":"c"}"#,
+            #"{"id":"c","turns":null}"#,
+            #"{"id":"c","turns":[{"id":"t","role":"user","text":"hi"}]}"#,
+            #"{"id":"c","turns":[{"id":"t","role":"user","text":"hi","attachments":null,"toolRounds":[],"sessionLinks":[]}]}"#,
+            #"{"id":"c","turns":[{"id":"t","role":"user","text":"hi","attachments":[],"toolRounds":null,"sessionLinks":[]}]}"#,
+            #"{"id":"c","turns":[{"id":"t","role":"user","text":"hi","attachments":[],"toolRounds":[],"sessionLinks":null}]}"#,
+        ]
+        for json in malformed {
+            #expect(throws: DecodingError.self, "\(json)") {
+                try decoder.decode(ConversationRecord.self, from: Data(json.utf8))
+            }
+        }
+
+        // An explicit empty array is a legitimately empty list, not damage.
+        let empty = #"{"id":"c","turns":[]}"#
+        let record = try decoder.decode(ConversationRecord.self, from: Data(empty.utf8))
+        #expect(record.turns.isEmpty)
+
+        let receiptCases: [String] = [
+            #"{"id":"r","status":"completed"}"#,
+            #"{"id":"r","status":"completed","attachmentRefs":null,"toolRounds":[]}"#,
+            #"{"id":"r","status":"completed","attachmentRefs":[],"toolRounds":null}"#,
+        ]
+        for json in receiptCases {
+            #expect(throws: DecodingError.self, "\(json)") {
+                try decoder.decode(RequestReceipt.self, from: Data(json.utf8))
+            }
+        }
+        let receipt = try decoder.decode(
+            RequestReceipt.self,
+            from: Data(#"{"id":"r","status":"completed","attachmentRefs":[],"toolRounds":[]}"#.utf8)
+        )
+        #expect(receipt.attachmentRefs.isEmpty)
+        #expect(receipt.toolRounds.isEmpty)
+    }
+
+    @Test("A pre-pass record fails closed on the content arrays the pass made required")
+    func prePassRecordFailsClosed() throws {
+        let decoder = HouseChatCoding.makeDecoder()
+        // The shape an earlier build wrote: identity and text, then nothing the
+        // pass made required. No migration reads it; a caller reports the
+        // record as unreadable rather than seeing an empty history.
+        let prePass = #"""
+        {"id":"legacy","schemaVersion":3,"title":"Before","turns":[{"id":"t1","role":"user","text":"hi"},{"id":"t2","role":"assistant","text":"ok"}]}
+        """#
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(ConversationRecord.self, from: Data(prePass.utf8))
+        }
+        // A record with no `turns` key at all is not an empty conversation.
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(ConversationRecord.self, from: Data(#"{"id":"legacy","title":"Before"}"#.utf8))
+        }
+        // An explicit null is not an empty list either.
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(ConversationRecord.self, from: Data(#"{"id":"legacy","turns":null}"#.utf8))
+        }
+    }
+
+    @Test("An extracted document needs its kind and name; an empty object does not decode")
+    func extractedDocumentNeedsIdentity() throws {
+        let decoder = HouseChatCoding.makeDecoder()
+        let malformed: [String] = [
+            #"{}"#,
+            #"{"kind":"pdf"}"#,
+            #"{"name":"report.pdf"}"#,
+            #"{"kind":"pdf","name":""}"#,
+            #"{"kind":5,"name":"report.pdf"}"#,
+        ]
+        for json in malformed {
+            #expect(throws: DecodingError.self, "\(json)") {
+                try decoder.decode(ExtractedDocument.self, from: Data(json.utf8))
+            }
+        }
+        let document = try decoder.decode(
+            ExtractedDocument.self,
+            from: Data(#"{"kind":"pdf","name":"report.pdf"}"#.utf8)
+        )
+        #expect(document.kind == .pdf)
+        #expect(document.name == "report.pdf")
+        #expect(document.text == nil)
+    }
+
     @Test("Unknown keys survive a decode and an encode")
     func unknownKeysRoundTrip() throws {
         let json = #"""
-        {"id":"c","turns":[{"id":"t","role":"assistant","text":"ok","futureTurnField":7}],"futureFlag":true,"futureObject":{"a":[1,2]}}
+        {"id":"c","turns":[{"id":"t","role":"assistant","text":"ok","attachments":[],"toolRounds":[],"sessionLinks":[],"futureTurnField":7}],"futureFlag":true,"futureObject":{"a":[1,2]}}
         """#
         let record = try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, from: Data(json.utf8))
         #expect(record.extra["futureFlag"] == .bool(true))
@@ -84,7 +170,7 @@ struct SchemaCodingTests {
     @Test("An unrecognized role, kind, or status decodes to its fallback, not a failure")
     func unknownEnumFallbacks() throws {
         let json = #"""
-        {"id":"c","turns":[{"id":"t","role":"debugger","text":"x","attachments":[{"id":"a","kind":"spreadsheet","name":"s.xlsx"}]}]}
+        {"id":"c","turns":[{"id":"t","role":"debugger","text":"x","attachments":[{"id":"a","kind":"spreadsheet","name":"s.xlsx"}],"toolRounds":[],"sessionLinks":[]}]}
         """#
         let record = try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, from: Data(json.utf8))
         #expect(record.turns[0].role == .unknown)

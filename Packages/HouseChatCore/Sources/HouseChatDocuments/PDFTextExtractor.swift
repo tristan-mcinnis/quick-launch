@@ -78,10 +78,11 @@ enum PDFTextExtractor {
             )
         }
         var unitCut: DocumentText.UnitCut?
-        var partialTruncation: TextTruncation?
         if pageCount > readCount {
             unitCut = DocumentText.UnitCut(unit: .page, kept: readCount, total: pageCount)
-        } else if !skippedThin.isEmpty {
+        }
+        var partialTruncation: TextTruncation?
+        if !skippedThin.isEmpty {
             // Pages the OCR cap skipped were never read. Coverage is the pages
             // actually processed, which need not be a prefix: a text page after
             // a skipped scan is still covered. A blank page OCR attempted is
@@ -94,6 +95,19 @@ enum PDFTextExtractor {
                 totalUnits: pageCount,
                 coveredUnits: covered
             )
+            // The page cap and the OCR cap can cut the same read. `finished`
+            // then reports the page-cap line ("first 300 of 400 pages"), so
+            // name the skipped pages here rather than let the record read as a
+            // contiguous text-bearing head.
+            if pageCount > readCount {
+                let skippedPages = skippedThin.map { $0 + 1 }
+                let phrase = Self.pagesPhrase(skippedPages)
+                notes.append(DocumentNote(
+                    kind: .partialExtraction,
+                    modelLine: "[Some pages inside the read range had no text layer and were not read by OCR: \(phrase).]",
+                    detailLine: "OCR skipped \(phrase)"
+                ))
+            }
         }
         return DocumentText(
             sections: sections,
@@ -113,6 +127,26 @@ enum PDFTextExtractor {
             if count >= threshold { return false }
         }
         return true
+    }
+
+    /// Skipped pages as a compact one-based phrase: "page 7", "pages 3-5",
+    /// "pages 2-4, 9". Input is ascending.
+    static func pagesPhrase(_ pages: [Int]) -> String {
+        guard !pages.isEmpty else { return "none" }
+        var runs: [String] = []
+        var start = pages[0]
+        var previous = pages[0]
+        for page in pages.dropFirst() {
+            if page == previous + 1 {
+                previous = page
+                continue
+            }
+            runs.append(start == previous ? "\(start)" : "\(start)-\(previous)")
+            start = page
+            previous = page
+        }
+        runs.append(start == previous ? "\(start)" : "\(start)-\(previous)")
+        return "\(pages.count == 1 ? "page" : "pages") \(runs.joined(separator: ", "))"
     }
 
     /// The page as an image with its long side at `pixels`.

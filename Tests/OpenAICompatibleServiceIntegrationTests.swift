@@ -85,6 +85,44 @@ struct OpenAICompatibleServiceIntegrationTests {
         }
     }
 
+    // MARK: — A non-2xx body is surfaced, not swallowed
+
+    @Test func testProviderErrorMessageReachesTheCaller() async throws {
+        let server = try LocalHTTPServer(
+            responseBody: "{\"error\":{\"message\":\"Incorrect API key provided\"}}",
+            statusCode: 401
+        )
+        defer { Task { await server.stop() } }
+        let port = try await server.start()
+
+        let service = OpenAICompatibleService(baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!, modelName: "test-model")
+        do {
+            for try await _ in service.send(prompt: "hi") {}
+            Issue.record("Expected the 401 to be thrown")
+        } catch {
+            #expect(error.localizedDescription.contains("401"))
+            #expect(error.localizedDescription.contains("Incorrect API key provided"))
+        }
+    }
+
+    // MARK: — A 200 with no parseable choice is an error, not an empty turn
+
+    @Test func testAStreamWithoutChoicesThrowsInsteadOfCompletingEmpty() async throws {
+        let server = try LocalHTTPServer(
+            responseBody: "data: {\"id\":\"a\"}\r\n\r\ndata: {\"id\":\"b\"}\r\n\r\ndata: [DONE]\r\n\r\n"
+        )
+        defer { Task { await server.stop() } }
+        let port = try await server.start()
+
+        let service = OpenAICompatibleService(baseURL: URL(string: "http://127.0.0.1:\(port)/v1")!, modelName: "test-model")
+        do {
+            for try await _ in service.send(prompt: "hi") {}
+            Issue.record("Expected an empty stream to be thrown")
+        } catch {
+            #expect(error.localizedDescription.contains("no content"))
+        }
+    }
+
     // MARK: — The chosen reasoning effort reaches the server
 
     @Test func testReasoningEffortIsSentOnTheWire() async throws {

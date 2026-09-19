@@ -322,7 +322,11 @@ struct AIChatWindowTests {
         let chat = QuickViewModel(store: launcher.store, service: service, attachmentExtractor: extractor)
         let suite = "AIChatWindowTests.\(UUID().uuidString)"
         let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: suite)!)
-        window.window = FakeAIChatWindow()
+        // Hold the fake strongly: `AIChatWindowModel.window` is weak, so the
+        // old inline assignment was deallocated and `open(handoff:)` reached
+        // a nil window while the test still passed.
+        let fakeWindow = FakeAIChatWindow()
+        window.window = fakeWindow
         launcher.aiChatOpener = { handoff in window.open(handoff: handoff) }
 
         launcher.openQuickAI()

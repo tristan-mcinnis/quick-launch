@@ -9,6 +9,8 @@ import Vision
 
 struct ScreenHistoryCaptureConfiguration: Equatable, Sendable {
     static let ownBundleIdentifier = "com.tristanmcinnis.quick-launch"
+    /// The cadence every capture caller falls back to when none is chosen.
+    static let defaultCadenceSeconds: TimeInterval = 3
     static let minimumCadenceSeconds: TimeInterval = 2
     static let maximumCadenceSeconds: TimeInterval = 60
     static let minimumInactivityThresholdSeconds: TimeInterval = 60
@@ -76,7 +78,7 @@ struct ScreenHistoryCaptureConfiguration: Equatable, Sendable {
 
     init(
         isEnabled: Bool = false,
-        cadenceSeconds: TimeInterval = 3,
+        cadenceSeconds: TimeInterval = Self.defaultCadenceSeconds,
         inactivityThresholdSeconds: TimeInterval = 5 * 60,
         excludedBundleIdentifiers: Set<String> = Self.safeDefaultExcludedBundleIdentifiers,
         excludedDomains: Set<String> = Self.safeDefaultExcludedDomains
@@ -103,13 +105,6 @@ struct ScreenHistoryCaptureConfiguration: Equatable, Sendable {
             || Self.safeDefaultExcludedBundleIdentifiers.contains(normalized)
             || Self.safeDefaultCaptureOnlyExcludedBundleIdentifiers.contains(normalized)
             || excludedBundleIdentifiers.contains(normalized)
-    }
-
-    func excludes(domain: String) -> Bool {
-        Self.matches(
-            domain: domain,
-            rules: excludedDomains
-        )
     }
 
     static func normalizedBundleIdentifier(_ value: String) -> String? {
@@ -269,6 +264,12 @@ actor ScreenHistoryCaptureService {
         captureTask?.cancel()
         captureTask = nil
         configuration = newConfiguration
+        // The storage-rate receipt's window is one capture interval, so the
+        // sink follows the effective cadence rather than its construction
+        // default.
+        if let cadenceSink = sink as? ScreenHistorySegmentedCaptureSink {
+            await cadenceSink.updateEstimatedCadenceSeconds(newConfiguration.cadenceSeconds)
+        }
         if wasRunning {
             do {
                 try await sink.flush()

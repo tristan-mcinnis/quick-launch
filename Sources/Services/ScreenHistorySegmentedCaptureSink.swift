@@ -7,17 +7,23 @@ import Foundation
 actor ScreenHistorySegmentedCaptureSink: ScreenHistoryFrameSink {
     private let store: any ScreenHistoryStoring
     private let writer: any ScreenHistoryMediaSegmentWriting
-    private let estimatedCadenceSeconds: TimeInterval
+    private var estimatedCadenceSeconds: TimeInterval
     private var latestReceipt: ScreenHistoryStorageRateReceipt?
 
     init(
         store: any ScreenHistoryStoring,
         writer: any ScreenHistoryMediaSegmentWriting,
-        estimatedCadenceSeconds: TimeInterval = 3
+        estimatedCadenceSeconds: TimeInterval = ScreenHistoryCaptureConfiguration.defaultCadenceSeconds
     ) {
         self.store = store
         self.writer = writer
         self.estimatedCadenceSeconds = max(0.001, estimatedCadenceSeconds)
+    }
+
+    /// The capture service pushes the configured cadence here, so the receipt
+    /// window is the real capture interval rather than a construction guess.
+    func updateEstimatedCadenceSeconds(_ seconds: TimeInterval) {
+        estimatedCadenceSeconds = max(0.001, seconds)
     }
 
     func receive(_ frame: CapturedScreenFrame) async throws {

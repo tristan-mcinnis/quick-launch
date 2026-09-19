@@ -3,6 +3,26 @@ import AppKit
 import Observation
 import HouseChatCore
 
+/// Does nothing but say so. Used when a presenter was assigned and has since
+/// been released (a short-lived test double): the view model must not fall back
+/// to posting legacy notifications that nothing asked for. Every call leaves a
+/// trace, so an overlay action that reached no presenter is visible rather
+/// than silently swallowed.
+@MainActor
+private final class ReleasedOverlayPresenter: OverlayPresenting {
+    func presentOverlay() { Self.report("presentOverlay") }
+    func dismissOverlay() { Self.report("dismissOverlay") }
+    func openSettings() { Self.report("openSettings") }
+    func openTranslator() { Self.report("openTranslator") }
+    func openTypeToClick() { Self.report("openTypeToClick") }
+
+    private static func report(_ action: String) {
+        AppLog.overlay.error(
+            "Overlay action \(action, privacy: .public) dropped: the assigned presenter was released"
+        )
+    }
+}
+
 @Observable @MainActor final class QuickViewModel {
 
     // MARK: - Published state
@@ -794,7 +814,32 @@ import HouseChatCore
     @ObservationIgnored var interactionJournal: InteractionJournalStore
     /// Shows/hides the panel. AppDelegate installs the real one; the default
     /// posts the legacy notifications so tests and previews keep working.
-    @ObservationIgnored var overlayPresenter: any OverlayPresenting = NotificationOverlayPresenter()
+    ///
+    /// Held weakly: the AI Chat window's controller installs itself here, and a
+    /// strong reference would close controller -> model -> chat -> controller.
+    /// The weak reference breaks that cycle, but it does not by itself make the
+    /// controller's `isolated deinit` reachable: `AppDelegate` holds the
+    /// controller strongly for the app's life and never clears it, so the deinit
+    /// runs only if that strong reference is released. The fallback keeps the
+    /// stored, non-optional call syntax (`overlayPresenter.dismissOverlay()`).
+    @ObservationIgnored private weak var overlayPresenterTarget: (any OverlayPresenting)?
+    @ObservationIgnored private let fallbackOverlayPresenter = NotificationOverlayPresenter()
+    @ObservationIgnored private let releasedOverlayPresenter = ReleasedOverlayPresenter()
+    @ObservationIgnored private var didAssignOverlayPresenter = false
+    var overlayPresenter: any OverlayPresenting {
+        get {
+            if let target = overlayPresenterTarget { return target }
+            // A presenter assigned and since released (a short-lived test
+            // double) is not swapped for the notifying default: nothing
+            // asked for those notifications. Before any assignment, the
+            // default keeps observers and previews working.
+            return didAssignOverlayPresenter ? releasedOverlayPresenter : fallbackOverlayPresenter
+        }
+        set {
+            overlayPresenterTarget = newValue
+            didAssignOverlayPresenter = true
+        }
+    }
     @ObservationIgnored var prepareForExternalAction: (() -> Void)?
     @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
@@ -851,7 +896,10 @@ import HouseChatCore
     @ObservationIgnored private var journalActedQuery: String?
     /// The command-action process for the request on screen, so Escape can
     /// really terminate it instead of only hiding its output.
-    @ObservationIgnored private var commandTask: Task<String, Error>?
+    /// Internal rather than private: the launcher tests arm a pending task
+    /// here to prove that clearing or replacing the thread cancels the
+    /// command lane. Nothing outside this file reads it in production.
+    @ObservationIgnored var commandTask: Task<String, Error>?
     /// Tokens arrive faster than the overlay can re-render a long answer, so
     /// deltas collect here and `output` is published at most every 33 ms.
     @ObservationIgnored private var streamBuffer = ""
@@ -909,6 +957,10 @@ import HouseChatCore
     /// Sent chips being read again (Re-attach), or whose read failed.
     var reattachStates: [UUID: AttachmentChipModel.Phase] = [:]
     @ObservationIgnored var reattachTasks: [UUID: Task<Void, Never>] = [:]
+    /// One writer per chat for archive-only metadata (pin, rename): two rapid
+    /// actions would otherwise reach the actor in whatever order their Tasks
+    /// were scheduled.
+    @ObservationIgnored private var archiveWriteChain: [UUID: Task<Void, Never>] = [:]
     /// True while a send waits for chips still reading.
     var isWaitingForAttachments = false
     /// An Add Context row's work (File…, a capture), kept so a test can
@@ -958,7 +1010,10 @@ import HouseChatCore
         houseCommandCatalog: HouseCommandCatalog? = nil,
         currentVersion: String = "1.0.0"
     ) {
-        let reader = attachmentExtractor ?? Self.sharedAttachmentExtractor
+        // The non-injected path matches production: the shared reader, so a
+        // document is extracted by HouseChatDocuments and not the app-side
+        // OOXML copy that has drifted from the package's.
+        let reader = attachmentExtractor ?? SharedDocumentExtractor()
         self.attachmentReader = reader
         self.attachmentTray = AttachmentTray(extractor: reader)
         // A shared store (the AI Chat window's view model) brings its own
@@ -3303,9 +3358,11 @@ import HouseChatCore
     func moveApplicationSelection(_ delta: Int) {
         let matches = launcherMatches
         guard !matches.isEmpty else { return }
-        applicationSelectionIndex = (
-            applicationSelectionIndex + delta + matches.count
-        ) % matches.count
+        // Swift's `%` keeps the dividend's sign, so a full grid-row step up from
+        // the first row (`delta` of -9 in a short match list) would land on a
+        // negative index and trap when the row is announced. Normalise it.
+        let offset = (applicationSelectionIndex + delta) % matches.count
+        applicationSelectionIndex = offset < 0 ? offset + matches.count : offset
         announceCurrentLauncherSelection()
         if catalogScope == .screenHistory {
             screenHistory.setAnnouncement(launcherSelectionAnnouncement)
@@ -3664,6 +3721,9 @@ import HouseChatCore
             effectiveQuery = question
         }
         inputMode = nil
+        // The typed question is held for Escape exactly as a web search's is:
+        // a cancelled Vault Search puts it back in the composer.
+        if enrichmentSubmittedInput == nil { enrichmentSubmittedInput = input }
         input = ""
         // Not a turn of the chat and not the model: the question is its own
         // pill, and the header names Vault Search and its mode.
@@ -3675,16 +3735,28 @@ import HouseChatCore
         errorMessage = nil
         followThreadBottom()
         isStreaming = true
+        var result: String?
         do {
-            output = try await vaultSearchService.search(mode: mode, query: effectiveQuery)
-            activeVaultSearchMode = mode
-            vaultSearchAnchor = effectiveQuery
+            result = try await vaultSearchService.search(mode: mode, query: effectiveQuery)
         } catch {
-            errorMessage = error.localizedDescription
-            pendingQuestion = nil
-            isFollowUpQueued = false
+            if !Task.isCancelled {
+                errorMessage = error.localizedDescription
+                pendingQuestion = nil
+                isFollowUpQueued = false
+            }
         }
         isStreaming = false
+        // Escape cancelled this task while the search ran: the question is
+        // already back in the composer and a late result is never published.
+        guard !Task.isCancelled else {
+            restoreEnrichmentInput()
+            return
+        }
+        if let result {
+            output = result
+            activeVaultSearchMode = mode
+            vaultSearchAnchor = effectiveQuery
+        }
         requestInputFocus()
         await sendQueuedFollowUp()
     }
@@ -4602,7 +4674,6 @@ import HouseChatCore
             pendingModelChoice = ChatModelChoice(providerID: providerID, model: model)
         }
         modelRefreshMessage = nil
-        NotificationCenter.default.post(name: .providerChanged, object: nil)
         noteInteraction()
     }
 
@@ -7031,6 +7102,27 @@ import HouseChatCore
         requestInputFocus()
     }
 
+    /// One writer per chat for archive-only metadata. The history is a cache
+    /// and the archive is canonical, so writes queue in the order the user
+    /// made them and a failure is logged, never hidden.
+    private func enqueueArchiveWrite(
+        for chatID: UUID,
+        _ operation: @escaping @Sendable (ChatArchive) async throws -> Void
+    ) {
+        let previous = archiveWriteChain[chatID]
+        archiveWriteChain[chatID] = Task { [chatArchive] in
+            await previous?.value
+            guard let chatArchive else { return }
+            do {
+                try await operation(chatArchive)
+            } catch {
+                AppLog.persistence.error(
+                    "Chat archive write failed for \(chatID.uuidString): \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
     func togglePinConversation(id: UUID) {
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
         history[index].isPinned.toggle()
@@ -7039,8 +7131,10 @@ import HouseChatCore
         saveHistory()
         invalidateLauncherRanking()
         // The canonical record is the archive; the history is a cache.
-        if let chatArchive {
-            Task { try? await chatArchive.setPinned(id: id.uuidString, isPinned: pinned) }
+        if chatArchive != nil {
+            enqueueArchiveWrite(for: id) { archive in
+                try await archive.setPinned(id: id.uuidString, isPinned: pinned)
+            }
         }
     }
 
@@ -7053,8 +7147,10 @@ import HouseChatCore
         let titleSource = history[index].titleSource
         saveHistory()
         invalidateLauncherRanking()
-        if let chatArchive {
-            Task { try? await chatArchive.rename(id: id.uuidString, customTitle: custom, titleSource: titleSource) }
+        if chatArchive != nil {
+            enqueueArchiveWrite(for: id) { archive in
+                try await archive.rename(id: id.uuidString, customTitle: custom, titleSource: titleSource)
+            }
         }
     }
 
@@ -7182,10 +7278,6 @@ import HouseChatCore
         input = ""
         overlayPresenter.dismissOverlay()
         workspace.revealInFileViewer([application.url])
-    }
-
-    func closeApplicationActionPane() {
-        closeItemActionPane()
     }
 
     func closeCatalogActionPane() {
@@ -7878,7 +7970,11 @@ import HouseChatCore
         // page fetch and web search in enrich, and the model call, all come
         // after this. A write failure keeps the draft and blocks send.
         turnPersistStartedAt = Date()
-        let durable = await submitDurableMaterial(request)
+        // Decide once, before any await a time-based window could cross, and
+        // carry that decision through persist, enrich and stream: the archived
+        // chat and the live chat must be the same chat.
+        let startsNewChat = willStartNewChat(for: request)
+        let durable = await submitDurableMaterial(request, startsNewChat: startsNewChat)
         turnPersistFinishedAt = Date()
         guard durable else { return }
         turnEnrichStartedAt = Date()
@@ -7888,7 +7984,7 @@ import HouseChatCore
             pendingSubmission = nil
             return
         }
-        await stream(request)
+        await stream(request, startsNewChat: startsNewChat)
     }
 
     /// Starts a fresh turn's measurements. Every phase timestamp is cleared, so
@@ -7937,9 +8033,10 @@ import HouseChatCore
         return timings
     }
 
-    /// Whether this request begins a new chat. Shared by `submit` (which
-    /// reserves the future chat's id) and `stream` (which uses it), so the
-    /// two can never disagree.
+    /// Whether this request begins a new chat. Evaluated exactly once in
+    /// `submit`, before the persist and enrich awaits, and carried through, so
+    /// a time-based window that crosses during them cannot move the turn to a
+    /// chat other than the one whose id was reserved.
     func willStartNewChat(for request: PreparedRequest) -> Bool {
         !request.reasksTurn && (shouldStartNewConversation
             || (request.action != nil && (isFollowUp || currentConversation?.assistantID != nil)))
@@ -7949,9 +8046,9 @@ import HouseChatCore
     /// external network. The archived turn and the live turn share ids, so a
     /// later commit merges rather than duplicates. False means the write
     /// failed and no provider may be called.
-    func submitDurableMaterial(_ request: PreparedRequest) async -> Bool {
+    func submitDurableMaterial(_ request: PreparedRequest, startsNewChat: Bool) async -> Bool {
         guard let chatArchive else { return true }
-        let startsNew = willStartNewChat(for: request)
+        let startsNew = startsNewChat
         let conversationID = startsNew ? UUID() : (currentConversation?.id ?? UUID())
         let messageID = UUID()
         var provisional: QuickConversation
@@ -8500,7 +8597,7 @@ import HouseChatCore
 
     /// Picks the provider and model, records the turn in the conversation,
     /// and streams the answer into `output`.
-    func stream(_ request: PreparedRequest) async {
+    func stream(_ request: PreparedRequest, startsNewChat: Bool) async {
         let submittedInput = request.submittedInput
         // The user submitted this text, whatever happens next: a failure or a
         // cancellation must not later read as an abandoned search.
@@ -8515,7 +8612,8 @@ import HouseChatCore
         // its own: after an answer, and in an assistant chat, it starts one.
         // ⌘R asks a turn of this chat again: it stays in this chat whatever
         // the Start New Chat interval says, and the composer keeps its text.
-        let startsNewChat = willStartNewChat(for: request)
+        // `startsNewChat` was frozen once at submit, before the persist and
+        // enrich awaits, and is carried in: it is never re-derived here.
         // Auto-copy takes a chat's first answer only: in a chat that already
         // showed one, this answer is a follow-up.
         let chatHadAnswer = !startsNewChat && request.chatShowedAnswer
@@ -8608,7 +8706,9 @@ import HouseChatCore
         let turnSelection = ModelSelection(chosen: frozenModel.choice, effective: effectiveModel.choice)
         pendingModelFreeze = nil
         if startsNewChat {
-            startNewConversation()
+            // This reset runs inside the submit task; cancelling the submit
+            // handles here would cancel this very turn.
+            startNewConversation(cancelingSubmitTasks: false)
         }
         if currentConversation == nil {
             currentConversation = QuickConversation(
@@ -8643,7 +8743,9 @@ import HouseChatCore
         currentConversation?.updatedAt = Date()
         // The durable submission already happened before `enrich`; the ids
         // reserved there are the ids used here, so the archived turn and the
-        // live turn are one.
+        // live turn are one. Capture the submission's clock before the handle
+        // is cleared: both the archive write and the stream timer read it.
+        let submissionStartedAt = pendingSubmission?.startedAt
         pendingSubmission = nil
         // A question left without an answer (stopped before any text, or a
         // provider error) stays in the thread, but the model gets the chat
@@ -8809,7 +8911,7 @@ import HouseChatCore
                     requestSnapshot: requestSnapshot,
                     requestSnapshotKind: "requestSansKey",
                     endpoint: frozenModel.endpoint,
-                    startedAt: pendingSubmission?.startedAt ?? Date()
+                    startedAt: submissionStartedAt ?? Date()
                 ))
                 // The round hook writes against the turn that submission just
                 // created, so it is attached before the stream can run.
@@ -8835,6 +8937,9 @@ import HouseChatCore
                 return
             }
         }
+        // A stop during the archive write must not go on to call the provider,
+        // and must not bump the generation the cancel already moved past.
+        guard !Task.isCancelled else { return }
         let stream = service.send(messages: requestMessages, turnImages: requestImages)
         streamGeneration &+= 1
         let generation = streamGeneration
@@ -8846,7 +8951,7 @@ import HouseChatCore
         currentAssistantTurnID = assistantTurnID
         let archivedConversationID = currentConversation?.id.uuidString
         archiveCheckpointCharacters = 0
-        streamStartedAt = pendingSubmission?.startedAt ?? Date()
+        streamStartedAt = submissionStartedAt ?? Date()
         streamFirstTokenAt = nil
 
         streamTask = Task {
@@ -8890,14 +8995,20 @@ import HouseChatCore
                         archiveCheckpointCharacters = output.count
                         let partial = output
                         let rounds = streamToolRounds
-                        try? await chatArchive.checkpoint(
-                            conversationID: archivedConversationID,
-                            turnID: assistantTurnID.uuidString,
-                            update: .checkpoint(
-                                text: partial,
-                                toolRounds: rounds.isEmpty ? nil : rounds
+                        do {
+                            _ = try await chatArchive.checkpoint(
+                                conversationID: archivedConversationID,
+                                turnID: assistantTurnID.uuidString,
+                                update: .checkpoint(
+                                    text: partial,
+                                    toolRounds: rounds.isEmpty ? nil : rounds
+                                )
                             )
-                        )
+                        } catch {
+                            AppLog.persistence.error(
+                                "Chat archive checkpoint failed: \(error.localizedDescription)"
+                            )
+                        }
                     }
                 }
                 // Stopped: `cancel()` kept the turn and the text that arrived.
@@ -8938,16 +9049,22 @@ import HouseChatCore
                             startedAt: startedAt,
                             finishedAt: finishedAt
                         )
-                        try? await chatArchive.completeTurn(
-                            conversationID: archivedConversationID,
-                            turnID: assistantTurnID.uuidString,
-                            text: output,
-                            receipt: receipt,
-                            selection: turnSelection,
-                            timings: timings,
-                            usage: streamUsage,
-                            toolRounds: rounds
-                        )
+                        do {
+                            _ = try await chatArchive.completeTurn(
+                                conversationID: archivedConversationID,
+                                turnID: assistantTurnID.uuidString,
+                                text: output,
+                                receipt: receipt,
+                                selection: turnSelection,
+                                timings: timings,
+                                usage: streamUsage,
+                                toolRounds: rounds
+                            )
+                        } catch {
+                            AppLog.persistence.error(
+                                "Chat archive completion write failed: \(error.localizedDescription)"
+                            )
+                        }
                     }
                     persistAnsweredConversation()
                     // The lines live on the answer now.
@@ -9002,16 +9119,22 @@ import HouseChatCore
                 // looking like it is still streaming.
                 if let chatArchive, let archivedConversationID {
                     let finishedAt = Date()
-                    try? await chatArchive.failTurn(
-                        conversationID: archivedConversationID,
-                        turnID: assistantTurnID.uuidString,
-                        error: "Interrupted",
-                        status: .cancelled,
-                        text: output.isEmpty ? nil : output,
-                        timings: requestTimings(finishedAt: finishedAt),
-                        usage: streamUsage,
-                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
-                    )
+                    do {
+                        _ = try await chatArchive.failTurn(
+                            conversationID: archivedConversationID,
+                            turnID: assistantTurnID.uuidString,
+                            error: "Interrupted",
+                            status: .cancelled,
+                            text: output.isEmpty ? nil : output,
+                            timings: requestTimings(finishedAt: finishedAt),
+                            usage: streamUsage,
+                            toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                        )
+                    } catch {
+                        AppLog.persistence.error(
+                            "Chat archive interrupt write failed: \(error.localizedDescription)"
+                        )
+                    }
                 }
                 liveToolRecords = []
                 streamingStatus = nil
@@ -9033,16 +9156,22 @@ import HouseChatCore
                 // The failure is durable with the text that arrived.
                 if let chatArchive, let archivedConversationID {
                     let finishedAt = Date()
-                    try? await chatArchive.failTurn(
-                        conversationID: archivedConversationID,
-                        turnID: assistantTurnID.uuidString,
-                        error: error.localizedDescription,
-                        status: .failed,
-                        text: output.isEmpty ? nil : output,
-                        timings: requestTimings(finishedAt: finishedAt),
-                        usage: streamUsage,
-                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
-                    )
+                    do {
+                        _ = try await chatArchive.failTurn(
+                            conversationID: archivedConversationID,
+                            turnID: assistantTurnID.uuidString,
+                            error: error.localizedDescription,
+                            status: .failed,
+                            text: output.isEmpty ? nil : output,
+                            timings: requestTimings(finishedAt: finishedAt),
+                            usage: streamUsage,
+                            toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                        )
+                    } catch {
+                        AppLog.persistence.error(
+                            "Chat archive failure write failed: \(error.localizedDescription)"
+                        )
+                    }
                 }
                 isFollowUpQueued = false
                 recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
@@ -9408,9 +9537,34 @@ import HouseChatCore
         isFollowUpQueued = false
         output = fallback
         isStreaming = false
-        errorMessage = timedOut
+        let fallbackReason = timedOut
             ? "The selected model took too long. Showing search results."
             : "The selected model returned no answer. Showing search results."
+        errorMessage = fallbackReason
+        // The fallback is this turn's answer on screen, so it is its answer in
+        // the archive too; otherwise the question stays pending and a reopen
+        // relabels it interrupted while the results are gone. The terminal
+        // status stays `.failed` on purpose: the model call really did fail and
+        // the reason rides the receipt's own error, while the text carries what
+        // the user got instead. `.completed` would claim the model answered.
+        if let chatArchive, let archivedConversationID = currentConversation?.id.uuidString,
+           let assistantTurnID = currentAssistantTurnID {
+            let finishedAt = Date()
+            do {
+                _ = try await chatArchive.failTurn(
+                    conversationID: archivedConversationID,
+                    turnID: assistantTurnID.uuidString,
+                    error: fallbackReason,
+                    status: .failed,
+                    text: fallback,
+                    timings: requestTimings(finishedAt: finishedAt)
+                )
+            } catch {
+                AppLog.persistence.error(
+                    "Chat archive fallback write failed: \(error.localizedDescription)"
+                )
+            }
+        }
         requestInputFocus()
     }
 
@@ -9443,14 +9597,12 @@ import HouseChatCore
         settings.select(providerID: providerID, model: model)
         settings.save()
         modelRefreshMessage = nil
-        NotificationCenter.default.post(name: .providerChanged, object: nil)
     }
 
     func selectProvider(providerID: UUID) {
         settings.select(providerID: providerID)
         settings.save()
         modelRefreshMessage = nil
-        NotificationCenter.default.post(name: .providerChanged, object: nil)
     }
 
     func setCustomModel(providerID: UUID, model: String) {
@@ -9490,7 +9642,6 @@ import HouseChatCore
         try? APIKeyStore.delete(providerID: id)
         invalidateAPIKeyPresence()
         settings.save()
-        NotificationCenter.default.post(name: .providerChanged, object: nil)
     }
 
     func refreshModels(providerID: UUID) async {
@@ -9502,6 +9653,9 @@ import HouseChatCore
                 for: provider,
                 apiKey: APIKeyStore.load(providerID: provider.id)
             )
+            // A provider removed while the request was in flight shifts the
+            // indices; find it by id again rather than writing the wrong one.
+            guard let index = settings.providers.firstIndex(where: { $0.id == providerID }) else { return }
             settings.providers[index].models = models
             if settings.providers[index].selectedModel.isEmpty ||
                 !models.contains(settings.providers[index].selectedModel) {
@@ -9659,13 +9813,19 @@ import HouseChatCore
                let assistantTurnID = currentAssistantTurnID {
                 let text = output.isEmpty ? nil : output
                 Task {
-                    try? await chatArchive.failTurn(
-                        conversationID: conversationID,
-                        turnID: assistantTurnID.uuidString,
-                        error: "Stopped by the user",
-                        status: .cancelled,
-                        text: text
-                    )
+                    do {
+                        _ = try await chatArchive.failTurn(
+                            conversationID: conversationID,
+                            turnID: assistantTurnID.uuidString,
+                            error: "Stopped by the user",
+                            status: .cancelled,
+                            text: text
+                        )
+                    } catch {
+                        AppLog.persistence.error(
+                            "Chat archive stop write failed: \(error.localizedDescription)"
+                        )
+                    }
                 }
             }
         } else {
@@ -10102,6 +10262,9 @@ import HouseChatCore
         justCopied = true
         justCopiedTask = Task { @MainActor [weak self, timeout = justCopiedTimeout] in
             try? await Task.sleep(for: timeout)
+            // A second copy cancelled this task and started a new flash: the
+            // old task must not clear the new one.
+            guard !Task.isCancelled else { return }
             self?.justCopied = false
         }
     }
@@ -10130,7 +10293,7 @@ import HouseChatCore
         static let all: ResetScope = [.layers, .mode, .attachments, .thread, .input]
     }
 
-    func reset(_ scope: ResetScope) {
+    func reset(_ scope: ResetScope, cancelingSubmitTasks: Bool = true) {
         // Leaving the surface or clearing the field: a follow-up held behind
         // a layer is not sent when the layers below close.
         if !scope.isDisjoint(with: [.mode, .input]) { isFollowUpQueued = false }
@@ -10166,11 +10329,25 @@ import HouseChatCore
             clearLaunchScopedState()
         }
         if scope.contains(.thread) {
-            // A stream still running belongs to the thread being cleared.
+            // A stream still running belongs to the thread being cleared, as
+            // do the command and queued-follow-up tasks: a command result
+            // must not land in a just-cleared chat. The submit tasks are
+            // cancelled too, unless the reset is running inside one (the
+            // new-chat path in `stream`).
             streamGeneration &+= 1
             inFlightTurn = nil
             streamTask?.cancel()
             streamTask = nil
+            commandTask?.cancel()
+            commandTask = nil
+            if cancelingSubmitTasks {
+                tabSubmitTask?.cancel()
+                tabSubmitTask = nil
+                composerSubmitTask?.cancel()
+                composerSubmitTask = nil
+            }
+            queuedFollowUpTask?.cancel()
+            queuedFollowUpTask = nil
             discardStreamBuffer()
             isStreaming = false
             streamingStatus = nil
@@ -10648,9 +10825,9 @@ import HouseChatCore
         }
     }
 
-    func startNewConversation() {
+    func startNewConversation(cancelingSubmitTasks: Bool = true) {
         expandedTranscriptMessageIDs.removeAll()
-        reset([.thread, .input])
+        reset([.thread, .input], cancelingSubmitTasks: cancelingSubmitTasks)
         requestInputFocus()
     }
     /// Confirmed deletion of every saved chat.
@@ -10795,13 +10972,19 @@ import HouseChatCore
                 for turn in record.turns where turn.role == .assistant {
                     let status = turn.request?.status
                     if status == .streaming || status == .pending {
-                        try? await chatArchive.failTurn(
-                            conversationID: conversationID,
-                            turnID: turn.id,
-                            error: "Interrupted before completion",
-                            status: .cancelled,
-                            text: turn.text.isEmpty ? nil : turn.text
-                        )
+                        do {
+                            _ = try await chatArchive.failTurn(
+                                conversationID: conversationID,
+                                turnID: turn.id,
+                                error: "Interrupted before completion",
+                                status: .cancelled,
+                                text: turn.text.isEmpty ? nil : turn.text
+                            )
+                        } catch {
+                            AppLog.persistence.error(
+                                "Chat archive interrupt write failed: \(error.localizedDescription)"
+                            )
+                        }
                     }
                 }
             }
@@ -10832,6 +11015,13 @@ import HouseChatCore
                                     extractedDocument: document
                                 ),
                                 for: ref
+                            )
+                        } else if !source.damagedRoles.isEmpty {
+                            // The envelope is stored but no longer decodes, so
+                            // the model text is not there. Say so instead of
+                            // letting the attachment resume as absent.
+                            AppLog.persistence.error(
+                                "Retained extraction is damaged and cannot be resumed: \(ref.kind.displayName)"
                             )
                         }
                     }

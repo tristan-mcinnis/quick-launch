@@ -10,21 +10,12 @@ struct QuickLaunchApp: App {
     }
 
     var body: some Scene {
-        Settings {
-            if let viewModel = appDelegate.viewModel {
-                SettingsView(viewModel: viewModel)
-            } else {
-                ProgressView("Starting Quick Launch…")
-                    .frame(width: 600, height: 560)
-            }
-        }
-        .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    NotificationCenter.default.post(name: .openSettings, object: nil)
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
-        }
+        // Quick Launch is a menu-bar app: every window (the launcher panel,
+        // Settings, AI Chat) is AppKit-owned and built by `AppDelegate`. The
+        // SwiftUI Settings scene duplicated that panel and nothing ever
+        // opened it (`showSettingsWindow:` is never sent), so no scene
+        // remains; the empty scene keeps the App lifecycle and the delegate
+        // adaptor. Settings is opened by `.openSettings` through
+        // `AppDelegate.showSettingsPanel`.
     }
 }

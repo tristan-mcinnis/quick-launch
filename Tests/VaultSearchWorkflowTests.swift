@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import QuickLaunch
 
 @MainActor
@@ -48,6 +49,34 @@ struct VaultSearchWorkflowTests {
         let roots = vm.launcherMatches
         #expect(roots.contains(.catalog(.vaultSearch, count: 4)))
         #expect(roots.filter { $0.id == "catalog:vaultSearch" }.count == 1)
+    }
+
+    @Test func escapeDuringAVaultSearchRestoresTheQuestionAndPublishesNothing() async {
+        let service = SuspendingVaultSearchService()
+        let vm = QuickViewModel(vaultSearchService: service)
+        vm.enterInputMode(.vaultSearch(.current))
+        vm.input = "Acme Launch where do we stand?"
+        vm.submitFromComposer()
+        let submit = vm.composerSubmitTask
+        await service.waitUntilSearching()
+        vm.cancel()
+        await submit?.value
+        #expect(vm.output.isEmpty)
+        #expect(vm.input == "Acme Launch where do we stand?")
+    }
+}
+
+private actor SuspendingVaultSearchService: VaultSearchServicing {
+    private var started = false
+
+    func search(mode: VaultSearchMode, query: String) async throws -> String {
+        started = true
+        try await Task.sleep(for: .seconds(30))
+        return "Vault result"
+    }
+
+    func waitUntilSearching() async {
+        while !started { try? await Task.sleep(for: .milliseconds(2)) }
     }
 }
 

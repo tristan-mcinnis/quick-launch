@@ -398,6 +398,17 @@ struct QuickViewModelTests {
         #expect(vm.justCopied == false)
     }
 
+    @Test func testStartNewConversationCancelsAPendingCommandTask() async throws {
+        let vm = QuickViewModel(service: nil)
+        let pending = Task { () -> String in
+            try await Task.sleep(for: .seconds(30))
+            return "late"
+        }
+        vm.commandTask = pending
+        vm.startNewConversation()
+        #expect(pending.isCancelled)
+    }
+
     // MARK: - 23a. The injected service is used without any key or network
 
     @Test func testSubmitUsesTheInjectedServiceWithoutTouchingTheKeychain() async throws {

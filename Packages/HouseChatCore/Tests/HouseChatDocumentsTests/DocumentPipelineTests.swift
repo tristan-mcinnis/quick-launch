@@ -39,7 +39,7 @@ struct DocumentPipelineTests {
         )
         let finished = try document.finished(characterCap: 1_000)
         #expect(finished.truncation == TextTruncation(unit: .page, keptUnits: 1, totalUnits: 5))
-        #expect(finished.truncation?.summary == "pages 1-1 of 5")
+        #expect(finished.truncation?.summary == "pages 1 of 5")
     }
 
     @Test("No readable text throws empty")

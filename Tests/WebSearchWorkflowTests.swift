@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import QuickLaunch
 
 @Suite("Web search workflow", .serialized)
@@ -66,6 +67,39 @@ struct WebSearchWorkflowTests {
         #expect(vm.output.contains("[NBA Schedule](https://www.nba.com/schedule)"))
         #expect(vm.errorMessage?.contains("too long") == true)
         #expect(vm.isStreaming == false)
+    }
+
+    @Test func theFallbackAnswerIsPersistedInTheArchive() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("web-fallback-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let search = FakeWebSearchService(result: """
+        ## [1] NBA Schedule
+        URL: https://www.nba.com/schedule
+        Snippet: Official game schedule.
+        """)
+        let ai = MockQuickService()
+        await ai.setDelay(.seconds(30))
+        await ai.setResponses([StreamDelta(text: "Too late", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = true
+        let vm = QuickViewModel(
+            settings: settings,
+            service: ai,
+            webSearchService: search,
+            archiveRootURL: directory
+        )
+        vm.webAnswerTimeout = .milliseconds(10)
+        vm.input = "when is the next NBA game?"
+
+        await vm.submit()
+
+        let archive = try #require(vm.chatArchive)
+        let record = try #require(try await archive.loadAll().first)
+        let answer = try #require(record.turns.first { $0.role == .assistant })
+        #expect(answer.request?.status == .failed)
+        #expect(answer.text.contains("https://www.nba.com/schedule"))
     }
 }
 

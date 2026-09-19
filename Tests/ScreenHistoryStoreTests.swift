@@ -56,6 +56,10 @@ struct ScreenHistoryStoreTests {
         try FileManager.default.createDirectory(at: ownedRoot, withIntermediateDirectories: true)
         let expiredFile = ownedRoot.appendingPathComponent("old.heic")
         try Data("old".utf8).write(to: expiredFile)
+        let middleFile = ownedRoot.appendingPathComponent("middle.heic")
+        try Data("mid".utf8).write(to: middleFile)
+        let newFile = ownedRoot.appendingPathComponent("new.heic")
+        try Data("new".utf8).write(to: newFile)
         let store = try SQLiteScreenHistoryStore(
             databaseURL: fixture.databaseURL,
             ownedMediaRootURLs: [ownedRoot]
@@ -63,8 +67,8 @@ struct ScreenHistoryStoreTests {
         let day = 86_400.0
         _ = try await store.record([
             frame("expired", at: day, text: "expired searchable words", image: expiredFile.path, bytes: 40),
-            frame("middle", at: 9 * day, text: "middle", bytes: 40),
-            frame("new", at: 10 * day, text: "new", media: "/synthetic/new.mp4", bytes: 40),
+            frame("middle", at: 9 * day, text: "middle", image: middleFile.path, bytes: 40),
+            frame("new", at: 10 * day, text: "new", image: newFile.path, bytes: 40),
         ])
 
         let result = try await store.prune(
@@ -75,12 +79,57 @@ struct ScreenHistoryStoreTests {
         #expect(result.rowsPlanned == 2)
         #expect(result.rowsRemoved == 2)
         #expect(result.bytesRemoved == 80)
-        #expect(result.filesRemoved == 1)
+        #expect(result.filesRemoved == 2)
         #expect(result.retryRequired == false)
         #expect(!FileManager.default.fileExists(atPath: expiredFile.path))
         #expect(try await store.count() == 1)
         #expect(try await store.search(ScreenHistorySearchQuery()).first?.sourceIdentifier == "new")
         #expect(try await store.search(ScreenHistorySearchQuery(text: "expired")).isEmpty)
+    }
+
+    @Test func storageCapIgnoresUnremovableCoastMediaAndKeepsOwnedCaptures() async throws {
+        let fixture = try Fixture()
+        let ownedRoot = try fixture.ownedDirectory()
+        let ownedFile = ownedRoot.appendingPathComponent("capture.heic")
+        try Data("capture".utf8).write(to: ownedFile)
+        let coastRoot = fixture.directory.appendingPathComponent("coast", isDirectory: true)
+        try FileManager.default.createDirectory(at: coastRoot, withIntermediateDirectories: true)
+        let coastFile = coastRoot.appendingPathComponent("source.mp4")
+        try Data(repeating: 0x41, count: 400).write(to: coastFile)
+        let store = try SQLiteScreenHistoryStore(
+            databaseURL: fixture.databaseURL,
+            ownedMediaRootURLs: [ownedRoot]
+        )
+        _ = try await store.record([
+            ScreenHistoryFrameInput(
+                source: .coast,
+                sourceIdentifier: "coast-source",
+                capturedAt: Date(timeIntervalSince1970: 100),
+                ocrText: "coast media stays external",
+                mediaLocator: coastFile.path,
+                byteCount: 400
+            ),
+            frame("owned", at: 200, text: "owned capture survives", image: ownedFile.path, bytes: 100),
+        ])
+
+        // The Coast bytes are not removable here, so they must not spend the
+        // one owned capture that is.
+        let result = try await store.prune(
+            policy: ScreenHistoryRetentionPolicy(storageCapBytes: 200),
+            now: Date(timeIntervalSince1970: 300)
+        )
+        #expect(result.rowsPlanned == 0)
+        #expect(result.rowsRemoved == 0)
+        #expect(FileManager.default.fileExists(atPath: ownedFile.path))
+        #expect(FileManager.default.fileExists(atPath: coastFile.path))
+        #expect(try await store.search(ScreenHistorySearchQuery(text: "owned")).count == 1)
+
+        let preview = try await store.previewPrune(
+            policy: ScreenHistoryRetentionPolicy(storageCapBytes: 200),
+            now: Date(timeIntervalSince1970: 300)
+        )
+        #expect(preview.rowsPlanned == 0)
+        #expect(preview.retainedBytes == 100)
     }
 
     @Test func sharedOwnedMediaStaysUntilTheLastReferenceIsQueued() async throws {

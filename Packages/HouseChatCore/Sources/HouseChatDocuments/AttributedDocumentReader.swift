@@ -5,8 +5,15 @@ import Foundation
 /// detection "succeeds" on the wrong format with empty or raw output.
 enum AttributedDocumentReader {
     /// `packageURL` is the `.rtfd` folder when the file is one; everything
-    /// else reads from `data`.
-    static func read(route: DocumentRoute, data: Data, packageURL: URL? = nil) throws -> DocumentText {
+    /// else reads from `data`. `packageByteLimit` is re-checked against the
+    /// package immediately before the native package read, which cannot be
+    /// capped or interrupted once it starts.
+    static func read(
+        route: DocumentRoute,
+        data: Data,
+        packageURL: URL? = nil,
+        packageByteLimit: Int = .max
+    ) throws -> DocumentText {
         let isPackage = route == .rtfd
             && packageURL.map { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true } == true
         let type: NSAttributedString.DocumentType
@@ -24,10 +31,20 @@ enum AttributedDocumentReader {
         let string: NSAttributedString
         do {
             if isPackage, let packageURL {
+                // `NSAttributedString(url:)` re-opens the package with no cap
+                // of its own, outside the 50 MB limit, and the cooperative
+                // deadline cannot interrupt a blocking native read. Re-stat
+                // right here and refuse a package that has grown past the cap.
+                let size = DocumentFileGate.packageSize(packageURL)
+                guard size <= packageByteLimit else {
+                    throw DocumentExtractionError.tooLarge(limit: packageByteLimit)
+                }
                 string = try NSAttributedString(url: packageURL, options: options, documentAttributes: nil)
             } else {
                 string = try NSAttributedString(data: data, options: options, documentAttributes: nil)
             }
+        } catch let error as DocumentExtractionError {
+            throw error
         } catch {
             throw DocumentExtractionError.damaged
         }

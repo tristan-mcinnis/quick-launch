@@ -160,6 +160,67 @@ struct ScreenHistoryMediaSegmentWriterTests {
         #expect(try fixture.stagingDirectories().count == 1)
     }
 
+    @Test func aStageWhoseManifestHoldsNoFrameIsRecoveredNotCorrupt() async throws {
+        let fixture = try SegmentWorkspace()
+        let identifier = "11111111-2222-3333-4444-555555555555"
+        let stage = fixture.mediaDirectory
+            .appendingPathComponent(".segment-staging", isDirectory: true)
+            .appendingPathComponent(identifier, isDirectory: true)
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+        // The exact crash window `makeStage` opens: a manifest written before
+        // the first JPEG. It holds nothing, so recovery must remove it.
+        let manifest = "{\"createdAt\":0,\"frames\":[],\"identifier\":\"\(identifier)\","
+            + "\"pixelHeight\":64,\"pixelWidth\":96}"
+        try Data(manifest.utf8).write(to: stage.appendingPathComponent("manifest.json"))
+
+        let writer = try fixture.writer(maximumFrames: 3)
+        let appended = try await writer.append(Self.frame(
+            at: 100,
+            fingerprint: 1,
+            color: .red,
+            text: "after the empty stage"
+        ))
+        #expect(appended.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: stage.path))
+
+        let flushed = try await writer.flush()
+        #expect(flushed.count == 1)
+        #expect(flushed.first?.frames.count == 1)
+    }
+
+    @Test func aStageThatKeepsFailingToFinalizeIsQuarantinedSoCaptureResumes() async throws {
+        let fixture = try SegmentWorkspace()
+        let identifier = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let stage = fixture.mediaDirectory
+            .appendingPathComponent(".segment-staging", isDirectory: true)
+            .appendingPathComponent(identifier, isDirectory: true)
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+        // A manifest whose JPEG is gone: every recovery attempt fails.
+        let manifest = "{\"createdAt\":0,\"frames\":[{\"applicationName\":\"Segment Test\","
+            + "\"bundleIdentifier\":\"test.quick-launch.segment\",\"capturedAt\":1,"
+            + "\"filename\":\"000000.jpg\",\"fingerprint\":7,\"pixelHeight\":64,"
+            + "\"pixelWidth\":96,\"recognizedBoxes\":[],\"recognizedText\":\"ghost\"}],"
+            + "\"identifier\":\"\(identifier)\",\"pixelHeight\":64,\"pixelWidth\":96}"
+        try Data(manifest.utf8).write(to: stage.appendingPathComponent("manifest.json"))
+
+        let writer = try fixture.writer(maximumFrames: 3)
+        for _ in 0..<2 {
+            await #expect(throws: ScreenHistoryMediaSegmentWriterError.unreadableFrame("000000.jpg")) {
+                _ = try await writer.flush()
+            }
+            #expect(FileManager.default.fileExists(atPath: stage.path))
+        }
+        // The third failed recovery sets the stage aside instead of throwing
+        // on every later capture tick.
+        let recovered = try await writer.flush()
+        #expect(recovered.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: stage.path))
+        let quarantined = fixture.mediaDirectory
+            .appendingPathComponent("Segment Quarantine", isDirectory: true)
+            .appendingPathComponent(identifier, isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: quarantined.path))
+    }
+
     private static func frame(
         at timestamp: TimeInterval,
         fingerprint: UInt64,

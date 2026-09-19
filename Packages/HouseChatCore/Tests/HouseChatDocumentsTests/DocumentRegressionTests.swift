@@ -128,6 +128,26 @@ struct DocumentRegressionTests {
         #expect(result.isComplete == false)
     }
 
+    @Test("The page cap and the OCR cap both cut, and the skipped pages are named")
+    func pageCapAndOCRCapBothCut() async throws {
+        let data = Fixtures.scannedPDF(pages: (1...4).map { "Scanned page \($0)" })
+        var configuration = DocumentExtractionConfiguration.standard
+        configuration.pdfPageLimit = 2
+        configuration.ocrPageLimit = 1
+        let result = try await DocumentExtractor(
+            configuration: configuration,
+            recognizeText: FakeOCR(reply: "OCR text").recognizer
+        ).extract(fileURL: Fixtures.write(data, named: "both-cuts.pdf", in: folder))
+
+        #expect(result.document.unitCount == 4)
+        #expect(result.document.unitCut?.kept == 2)
+        #expect(result.document.unitCut?.total == 4)
+        #expect(result.document.truncation?.summary == "pages 1-2 of 4")
+        let skipped = try #require(result.document.notes.first { $0.kind == .partialExtraction })
+        #expect(skipped.detailLine == "OCR skipped page 2")
+        #expect(result.isComplete == false)
+    }
+
     @Test("A scan read inside the cap is complete, with every page carrying text")
     func scanWithinCapComplete() async throws {
         let data = Fixtures.scannedPDF(pages: (1...3).map { "Scanned page \($0)" })
@@ -183,6 +203,37 @@ struct DocumentRegressionTests {
         #expect(result.document.text?.contains("DROP-ME") == false)
         #expect(result.document.text?.contains("Kept") == true)
         #expect(result.document.text?.contains("Header words") == true)
+    }
+
+    @Test("An unclosed inline svg or nav cannot discard the rest of a complete page")
+    func unclosedInlineBlockKeepsFollowingContent() async throws {
+        let svgBody = Data("""
+        <html><head><title>Icon Page</title></head><body><p>First paragraph.</p><svg viewBox="0 0 1 1">
+        <main><p>Second paragraph.</p></main></body></html>
+        """.utf8)
+        let svg = try await DocumentExtractor().extract(data: svgBody, name: "icon.html")
+        #expect(svg.document.text?.contains("Second paragraph.") == true)
+        #expect(svg.document.notes.contains { $0.kind == .partialExtraction })
+        #expect(svg.isComplete == false)
+
+        let navBody = Data("""
+        <html><body><nav><a href="/">Home</a>
+        <main><p>Real article words.</p></main></body></html>
+        """.utf8)
+        let nav = try await DocumentExtractor().extract(data: navBody, name: "nav.html")
+        #expect(nav.document.text?.contains("Real article words.") == true)
+        #expect(nav.document.notes.contains { $0.kind == .partialExtraction })
+        #expect(nav.isComplete == false)
+
+        // A self-closing inline icon is removed whole, and is not a drop.
+        let selfClosingBody = Data(
+            #"<body><p>Alpha.</p><svg class="i" width="10"/><p>Beta.</p></body>"#.utf8
+        )
+        let icon = try await DocumentExtractor().extract(data: selfClosingBody, name: "selfclosing.html")
+        #expect(icon.document.text?.contains("Alpha.") == true)
+        #expect(icon.document.text?.contains("Beta.") == true)
+        #expect(icon.document.text?.contains("width") == false)
+        #expect(icon.document.notes.contains { $0.kind == .partialExtraction } == false)
     }
 
     // MARK: .rtfd
@@ -241,6 +292,35 @@ struct DocumentRegressionTests {
         // wall-clock stop.
         #expect(elapsed > .milliseconds(250))
         #expect(await stubborn.finished)
+    }
+
+    // MARK: Pre-pass documents
+
+    @Test("A pre-pass extraction without document identity fails closed, typed")
+    func prePassDocumentFailsClosed() {
+        let decoder = HouseChatCoding.makeDecoder()
+        // What an earlier build wrote for a nameless document: valid JSON and
+        // the envelope's own header, but no identity this build accepts. The
+        // artifact is reported damaged and its text is not served.
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(
+                ExtractedDocument.self,
+                from: Data(#"{"kind":"pdf","kindLabel":"PDF","name":"","text":"Revenue rose."}"#.utf8)
+            )
+        }
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(
+                ExtractedDocument.self,
+                from: Data(#"{"name":"report.pdf","text":"Revenue rose."}"#.utf8)
+            )
+        }
+        // An explicit null name is damage, not a nameless document.
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(
+                ExtractedDocument.self,
+                from: Data(#"{"kind":"pdf","name":null}"#.utf8)
+            )
+        }
     }
 }
 

@@ -39,11 +39,17 @@ struct InterfaceContractTests {
 
     @Test("Command-comma routes to the real settings interface")
     func settingsRoute() throws {
-        let source = try Self.source("Sources/App/QuickLaunchApp.swift")
-        #expect(source.contains("SettingsView(viewModel: viewModel)"))
-        #expect(source.contains("CommandGroup(replacing: .appSettings)"))
-        #expect(source.contains("keyboardShortcut(\",\", modifiers: .command)"))
-        #expect(!source.contains("Settings {\n            EmptyView()"))
+        // The SwiftUI Settings scene was unreachable (nothing sends
+        // `showSettingsWindow:`), so it is gone; Settings is the AppKit panel
+        // AppDelegate builds, and every ⌘, entry reaches it.
+        let app = try Self.source("Sources/App/QuickLaunchApp.swift")
+        let delegate = try Self.source("Sources/App/AppDelegate.swift")
+        let statusMenu = try Self.source("Sources/App/StatusMenu.swift")
+        let chatMenu = try Self.source("Sources/App/AIChatMenu.swift")
+        #expect(!app.contains("CommandGroup(replacing: .appSettings)"))
+        #expect(delegate.contains("SettingsView(viewModel: vm, initialDestination: destination)"))
+        #expect(statusMenu.contains(".openSettings, key: \",\")"))
+        #expect(chatMenu.contains("#selector(openSettings), \",\""))
     }
 
     @Test("Answer actions are keys from the shared table, not buttons")

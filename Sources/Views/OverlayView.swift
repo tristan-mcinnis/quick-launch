@@ -1512,7 +1512,10 @@ struct StatusLightLabel: View {
 struct ThinkingIndicator: View {
     @State private var phase = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+    /// `@State`, not a stored `let`: a stored publisher is rebuilt on every
+    /// view init during streaming, which resets the subscription and can
+    /// freeze the dots at phase 0. State keeps one publisher per identity.
+    @State private var timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 3) {

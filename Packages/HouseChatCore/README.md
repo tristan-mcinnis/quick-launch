@@ -103,10 +103,14 @@ let conversation = ConversationRecord(
 `timings`, `usage`, and `error`.
 
 **Identity and content are required.** A stored record missing a conversation
-`id`, a turn `id`/`role`/`text`, or an attachment `id`/`kind`/`name` fails to
-decode, and an empty string is not an identity. A damaged record is an error,
-never a record with an invented UUID or empty text. Only metadata is optional,
-which is what a legacy adapter supplies.
+`id` or `turns`, a turn `id`/`role`/`text`/`attachments`/`toolRounds`/
+`sessionLinks`, a request receipt's `attachmentRefs`/`toolRounds`, an
+attachment `id`/`kind`/`name`, or an extracted document's `kind`/`name` fails to
+decode, and an empty string is not an identity. An explicit `null` where one of
+those belongs fails too: null and absence are both damage, never 0 turns. An
+empty array is a legitimate empty list. A damaged record is an error, never a
+record with an invented UUID or empty text. Only metadata is optional, which is
+what a legacy adapter supplies.
 
 **Stored content and metadata preserve unknown keys.** Each of these carries
 `extra: ExtraFields`, captured on decode and written back at the same level on
@@ -124,6 +128,10 @@ let record = try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, f
 record.turns[0].request?.usage?.extra["futureUsage"]   // JSONValue? — preserved verbatim
 ```
 
+A preserved number that is integral but too large for a `Double` (above 2^53,
+for example a nanosecond timestamp or a large id) keeps its exact value and
+re-encodes as the same literal.
+
 Derived listing/export wrappers (`ConversationSummary`, `ConversationBundle`)
 use their declared fields only. `AppPayload` preserves both its outer unknown
 keys and its app-specific `values`; an absent `values` object means an empty
@@ -136,7 +144,9 @@ are not retained as opaque data that might bypass credential filtering.
 **Enums tolerate the future.** An unknown `role`, `kind`, `status`, or unit
 decodes to `.unknown`/`.other` while keeping the original string
 (`AttachmentRecord.kindRaw`, `ArtifactRef.kindRaw`). An unknown
-`ArtifactRef.Kind` is never treated as `.original`: see §2.
+`ArtifactRef.Kind` is never treated as `.original`: see §2. An unknown
+`RetrievalScope` is never treated as `.none`: the receipt's `scope` is left
+unstated and `ContextReceipt.scopeRaw` holds the original string.
 
 **Dates** are ISO 8601 with fractional seconds. Always use
 `HouseChatCoding.makeEncoder(prettyPrinted:)` / `makeDecoder()`.
@@ -171,7 +181,7 @@ honest statement:
 
 ```swift
 let receipt = rawReceipt.sanitizedForStorage()   // redacts error + tool call text
-let line = SecretRedactor.redact(providerError)  // URLs, key=value pairs, Bearer, sk-… prefixes
+let line = SecretRedactor.redact(providerError)  // URLs, key=value and "key": "value" pairs, Bearer, sk-… prefixes
 ```
 
 ```swift
@@ -259,6 +269,11 @@ let wrote   = try await conversations.saveIfAbsent(conversation) // idempotent
 - The root must be a real directory; a symlinked root is refused (`.unsafeRoot`).
 - `saveIfAbsent` validates the ID first, so an unusable ID throws
   `.invalidID` rather than reporting "nothing to do".
+- `save` refuses a conversation whose own `schemaVersion` is newer than this
+  build's (`.unsupportedSchema`), so it can never write a file its own
+  `load`/`list` would reject.
+- `exportAll` throws when a file `list()` vouched for then fails to load: a
+  whole-app export is never silently short a chat.
 
 **Legacy migration (idempotent, consumer-owned).** The package does not know
 QL's or RTI's old formats. A consumer adapter reads its own legacy file, builds a
@@ -497,6 +512,10 @@ characters plus every CJK bigram.
 | root `/` refused; traversal IDs stay inside | `RootIntegrityTests` |
 | missing vs corrupt vs newer-schema vs wrong-ID conversation; unreadable root throws | `ConversationArchiveTests` |
 | identity and content required, empty identity fails closed | `SchemaCodingTests`, `VerifierRegressionTests.emptyIdentityFailsClosed` |
+| content-bearing arrays required; explicit null fails, `[]` is legal | `SchemaCodingTests.contentArraysAreRequired` |
+| an extracted document needs its `kind` and `name` | `SchemaCodingTests.extractedDocumentNeedsIdentity` |
+| an integral unknown number above 2^53 round trips verbatim | `VerifierRegressionTests.integralUnknownNumberStaysExact` |
+| a quoted credential pair (`"api_key": "…"`) is redacted | `VerifierRegressionTests.quotedCredentialPairsAreRedacted` |
 | unknown content/metadata keys preserved, endpoint security exception explicit | `VerifierRegressionTests.nestedUnknownKeysSurvive`, `SchemaCompatibilityRegressionTests` |
 | unknown artifact kinds preserved and refused by every operation | `VerifierRegressionTests.unknownArtifactKindRefused` |
 | GC fails closed on a corrupt or newer-schema owner | `gcFailsClosedOnCorruptOwner`, `gcFailsClosedOnUnsupportedSchema` |
