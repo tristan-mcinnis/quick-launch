@@ -6,14 +6,16 @@
 ![Swift 6.2](https://img.shields.io/badge/swift-6.2-orange)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-Press `Option+Space` and one search field opens over whatever you are doing.
-Launch an app, run a command, rearrange a window, translate a selection, or ask
-an AI. `Tab` turns the panel into a chat; `Command+J` moves that chat into a
-full window. The app lives in the menu bar, keeps the interface fast and
-keyboard-first, and runs local actions without a model.
+Press `Option+Space`, or a hotkey you choose, and one search field opens over
+whatever you are doing: launch an app, run a command, rearrange a window,
+translate a selection, or ask an AI. `Tab` turns the panel into a chat, and
+`Command+J` moves that chat into a full window. It lives in the menu bar, stays
+fast and keyboard-first, and runs local actions without a model.
 
-Quick Launch is not an autonomous agent. It has no autonomy, no project
-management, no automations, and makes no file changes. Those belong to pi.
+Almost everything is yours to change: the global hotkey, the in-app keys,
+per-item aliases and hotkeys, the catalogs, and the model providers. Quick
+Launch exists so the launcher's inner workings stay open to you and new rows
+and actions can be added, instead of waiting on someone else's roadmap.
 
 ## Features
 
