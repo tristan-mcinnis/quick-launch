@@ -148,10 +148,25 @@ The house Swift rule is `../design-system/SWIFT.md`. This repository is its
 reference implementation, with a floor of macOS 26, swift-tools 6.2, and Swift
 Testing.
 
-## License and credits
-
-MIT. See [LICENSE](LICENSE).
+## Acknowledgements
 
 Quick Launch is a fork of the original
 [apfel-quick](https://github.com/Arthur-Ficial/apfel-quick) project by Arthur
-Ficial and retains that copyright alongside the fork's.
+Ficial, and retains that copyright alongside this fork's.
+
+The interface and behavior draw on earlier tools:
+
+- **Raycast** — the launcher surface, the Quick AI panel, the row action list,
+  the footer hints, and the window-management set.
+- **Shortcat** and **Homerow** — the Type to Click approach of labelling and
+  clicking controls through Accessibility.
+- **Vimium** — the equal-length, non-prefix hint style.
+- **Tuna Companion** — the predecessor this app replaces. Its translator
+  behavior is mirrored, and its snippets and quick links are imported once.
+
+It depends on Apple's [swift-markdown](https://github.com/apple/swift-markdown)
+and [swift-cmark](https://github.com/swiftlang/swift-cmark), both Apache-2.0.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
