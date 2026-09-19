@@ -7,8 +7,8 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 3. Ask Quick AI and keep the chat, or run a saved AI action.
 4. Run local date, time, and math actions.
 5. Retrieve bounded SearXNG snippets for explicit or time-sensitive searches.
-6. Paste existing Tuna snippets.
-7. Open existing Tuna Quick Links.
+6. Paste a local snippet.
+7. Open a local Quick Link.
 8. Search and paste a bounded local clipboard history (text, images, rich text, and files).
 9. Resize the previous window into deterministic whole-screen, halves, thirds, two-thirds, and fourths layouts, or move it to another display.
 10. Keep the Mac awake with a native Caffeinate toggle or a timed session.
@@ -30,13 +30,15 @@ actions stay configurable selected-text AI actions.
 
 It does not need general Finder file search. AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi. The search-only beta hard-locks ambient capture. A later capture release still needs separate explicit consent and will keep all browsers blocked.
 
-Files and links attached to a chat are specified, not built yet: `docs/attachments-and-search-spec-20260911.md`.
+Files and links attached to a chat are implemented; the design spec is
+`docs/attachments-and-search-spec-20260911.md` and the behavior reference is
+[`docs/features.md`](features.md#attachments).
 
 Refactor plans: `docs/consistency-audit-20260902.md` (keyboard layers, overlay modes, persistence, view styling) and, after the v1.5 rebuild, `docs/consistency-audit-v1.5-20260911.md`.
 
 ## Quick AI and AI Chat
 
-`Tab` in root search asks Quick AI: the launcher panel becomes a header, a thread, and a composer (750 × 475, larger by drag). Follow-ups stay in the chat. `⌘P` lists recent chats in the same panel. `⌘J` moves the chat to the AI Chat window: a normal, resizable window with a multi-line composer, a chat list (`⌘\`), and find (`⌘F`). Both views share one store of settings and chat history. Math, conversions, dates, and system facts never reach a model: in root search they answer in place, and in a chat they show as a "Local answer" that is never a turn of the chat.
+`Tab` in root search asks Quick AI: the launcher panel becomes a header, a thread, and a composer (750 × 475, larger by drag). Follow-ups stay in the chat. `⌘P` lists recent chats in the same panel. `⌘J` moves the chat to the AI Chat window: a normal, resizable window with a multi-line composer, a chat list (`⌃⌘S`), and find (`⌘F`). Both views share one store of settings and chat history. Math, conversions, dates, and system facts never reach a model: in root search they answer in place, and in a chat they show as a "Local answer" that is never a turn of the chat.
 
 ## Type to Click
 
@@ -63,7 +65,7 @@ The app stays running as a small menu-bar process.
 - Every app can have an editable alias and optional global hotkey in Settings.
 - An alias narrows directly to an item or command.
 - Return runs the default action.
-- Command-K shows keyboard-accessible actions for the selected item, including editing and guarded deletion of Tuna snippets.
+- Command-K shows keyboard-accessible actions for the selected item, including editing and guarded deletion of local snippets.
 - Backspace on an empty catalogue search returns to root; inactive nested catalogue state clears after 15 seconds.
 - Any item or command can have its own global hotkey.
 - A direct global hotkey runs without opening the search panel when no choice or result is required.
@@ -79,7 +81,7 @@ The app stays running as a small menu-bar process.
 | Snippets | Paste into the previous app | Alias or assigned hotkey |
 | Clipboard | Paste into the previous app | Open catalog, choose item |
 | Translate | Show or replace translation | Language action or assigned hotkey |
-| Quick Links | Open in the default browser | Alias or assigned hotkey |
+| Quick Links | Open in the chosen browser | Alias or assigned hotkey |
 | Quick AI | Ask in a chat; paste or copy the answer | `Tab`, the Ask AI row, a prompt alias, or an assigned hotkey |
 | Chats | Continue the chat in Quick AI; `⌘J` opens it in AI Chat | Enter the catalog, or `⌘P` for Recent Chats inside Quick AI |
 | AI Chat | Open the chat window on the last chat, or a new one | The "AI Chat" command, `⌘J` on Quick AI, or the menu-bar menu |
@@ -98,16 +100,13 @@ switchable per chat in `⌘K` › Tools. The Claude Code CLI provider gets no to
 Capture to Memory is the one write, and only the user runs it. There is no
 on-device Apple model and no MCP configuration.
 
-## Tuna transition
+## Local catalogs
 
-Keep Tuna installed until each replacement passes the same real interaction.
-
-- Port the Tuna Companion translator behavior.
-- Tuna snippets and Quick Links are read live without exposing their values in logs or settings.
-- The native app and clipboard catalogs are active. Clipboard history keeps text, images, rich text, and file URLs.
-- Caffeinate and screenshot capture are ported. Screen OCR to the clipboard and the screenshot text index are in; general Finder file search stays out unless the scope changes.
-
-Remove a Tuna command only after its alias, hotkey, result, and previous-app behavior work in Quick Launch.
+Snippets and Quick Links are owned by Quick Launch and stored in an owner-only
+catalog; a surviving legacy catalog is imported once. Clipboard history keeps
+text, images, rich text, and file URLs. Caffeinate, screenshot capture, screen
+OCR, and the screenshot text index are in; general Finder file search stays out
+unless the scope changes.
 
 ## Privacy
 
@@ -115,8 +114,8 @@ Remove a Tuna command only after its alias, hotkey, result, and previous-app beh
 - The interaction journal is optional and local: outcome rows only, bounded by retention and a hard event cap, written owner-only to `~/Library/Application Support/Quick Launch/interaction-journal.json`. The input field — which also carries AI prompts, and whose Ask AI row is digested like any other accepted row — is reduced to an HMAC-SHA256 digest (12 hex characters, `v2:`-prefixed) under a random per-install key kept owner-only in `interaction-journal-key`, before it is written, so no typed text reaches the file; only a coarse size band records how long it was. An identifier that could carry content is digested the same way, including the typed-URL row, whose launcher identity is a stable keyless FNV-1a hash that this journal re-keys under its own HMAC key. The digest is one-way, not a secret store. The journal is review evidence and never a ranking input.
 - Clipboard history is optional, local, bounded, and easy to clear.
 - Snippet and clipboard values never appear in diagnostics.
-- A question to an API or CLI provider sends more than the typed text: every earlier question and answer of the chat, the app's instruction, a saved command's or an assistant's instructions and context skills, any Add Context or selected text that went with this or an earlier question, web search snippets, and the text of a page whose address was typed. An OpenAI-compatible provider also receives what the memory, vault, skill, and web tools return; the Claude Code CLI provider runs with no tools. Tools are switchable per chat (`⌘K` › Tools) and for new chats (Settings › General › Chat). Screenshots go to the Vision model setting, DeepSeek by default.
-- Chat history is optional, local, owner-only, and bounded (100 chats on a new install; pinned chats are kept). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, what a tool returned, and screenshots are never saved.
+- A question to an API or CLI provider sends more than the typed text: every earlier question and answer of the chat, the app's instruction, a saved command's or an assistant's instructions and context skills, any Add Context or selected text that went with this or an earlier question, web search snippets, and the text of a page whose address was typed. An OpenAI-compatible provider also receives what the memory, vault, skill, and web tools return; the Claude Code CLI provider runs with no tools. Tools are switchable per chat (`⌘K` › Tools) and for new chats (Settings › General › Chat). Screenshots go to the vision model chosen in Settings.
+- Chat history is optional, local, owner-only, and bounded (100 chats on a new install; pinned chats are kept). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, and what a tool returned are not saved as chat turns; a submitted screenshot's bytes are archived with the chat as a source, like any other attachment.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
 - App, link, snippet, clipboard, colour, and window commands remain local.
 - The colour picker uses AppKit's colour sampler. It reads one pixel value, needs no screen recording permission, and stores numbers rather than images.
