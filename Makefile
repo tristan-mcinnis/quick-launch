@@ -34,12 +34,30 @@ check-clean:
 		exit 1; \
 	fi
 
+# Quitting is two attempts, not one. The AppleScript quit is polite but
+# unreliable here: Quick Launch is an LSUIElement app with no scripting
+# definition, so the quit event can go unanswered and osascript then sits
+# on it until its own timeout (seen 2026-09-20, where every install refused
+# and had to be unblocked by hand). It is bounded to five seconds, and a
+# process still up after that gets SIGTERM, which AppKit delivers as an
+# ordinary termination: `applicationWillTerminate` still stops the streams
+# and still waits for the history file. Only a process that survives both
+# refuses the install.
 install: check-clean build-app
-	-osascript -e 'tell application "Quick Launch" to quit'
+	-@osascript -e 'with timeout of 5 seconds' \
+		-e 'tell application "Quick Launch" to quit' \
+		-e 'end timeout' >/dev/null 2>&1
 	@for attempt in $$(seq 1 20); do \
 		pgrep -x quick-launch >/dev/null || break; sleep 0.5; \
-	done; \
-	if pgrep -x quick-launch >/dev/null; then \
+	done
+	@if pgrep -x quick-launch >/dev/null; then \
+		echo "Quick Launch did not answer the quit event; sending SIGTERM." >&2; \
+		pkill -TERM -x quick-launch || true; \
+		for attempt in $$(seq 1 20); do \
+			pgrep -x quick-launch >/dev/null || break; sleep 0.5; \
+		done; \
+	fi
+	@if pgrep -x quick-launch >/dev/null; then \
 		echo "Quick Launch did not quit; refusing to replace the running app." >&2; exit 1; \
 	fi
 	rm -rf "/Applications/Quick Launch.app"
