@@ -2,11 +2,17 @@ import AppKit
 
 /// The menu bar while the AI Chat window is open.
 ///
-/// Quick Launch is a menu-bar app with no main menu, so a normal window had
-/// no Edit menu (copy, paste, select all, and undo in the composer), no
-/// Window menu, and no Quit. This menu is installed when the window opens
+/// Quick Launch runs as a menu-bar app, so a normal window would otherwise
+/// have no Edit menu (copy, paste, select all, undo in the composer), no
+/// Window menu and no Quit. This menu is installed when the window opens
 /// and removed once no normal window is open (`AppActivation`), so the
 /// launcher panel keeps its own keys.
+///
+/// It replaces the bar the SwiftUI `App` lifecycle installs at launch,
+/// which holds the app menu alone. `present` used to install this one only
+/// when `NSApp.mainMenu` was nil, which it never was, so until 2026-09-20
+/// the chat window came up with no Edit, View or Window menu at all, and
+/// with none of the system window commands that come with a Window menu.
 ///
 /// `⌘Q` closes AI Chat, not the app: the launcher and its hotkey must
 /// survive a stray `⌘Q`. Quit Quick Launch is `⌥⌘Q`. The chat items act
@@ -22,8 +28,12 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         super.init()
     }
 
+    /// Marks the bar as ours, so `present` can tell it from the one the
+    /// SwiftUI `App` lifecycle installs before any window exists.
+    static let mainMenuTitle = "QuickLaunchAIChatMenu"
+
     func makeMenu() -> NSMenu {
-        let main = NSMenu()
+        let main = NSMenu(title: Self.mainMenuTitle)
 
         let app = submenu(in: main, title: "Quick Launch")
         app.addItem(item("About Quick Launch", #selector(about), ""))
@@ -57,14 +67,27 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         window.addItem(item("Keep on Top", #selector(toggleKeepOnTop), ""))
         window.addItem(.separator())
         window.addItem(item("Close", #selector(close), "w"))
-        // Handing the submenu to AppKit is what brings the system's own
-        // window commands: Move & Resize (Fill, halves, quarters, Centre,
-        // Arrange), Enter Full Screen, and the list of open windows. Without
-        // this the menu is ours alone and macOS adds none of them, which is
-        // why the chat window could not be tiled from the menu bar or by the
-        // keyboard even though it is an ordinary resizable window.
-        NSApp.windowsMenu = window
+        windowSubmenu = window
         return main
+    }
+
+    /// The Window submenu of the last menu built, for `adoptWindowsMenu`.
+    private weak var windowSubmenu: NSMenu?
+
+    /// Hands the Window submenu to AppKit, which is what brings the system's
+    /// own window commands: Move & Resize (Fill, halves, quarters, Centre,
+    /// Arrange), Enter Full Screen, and the list of open windows. Without it
+    /// the menu is ours alone and macOS adds none of them, which is why the
+    /// chat window could not be tiled from the menu bar or by the keyboard
+    /// even though it has always been an ordinary resizable window.
+    ///
+    /// Called only *after* the menu is installed as `NSApp.mainMenu`.
+    /// AppKit fills the Window menu with the system commands and the window
+    /// list only while it is part of the installed bar, so handing it over
+    /// from inside `makeMenu`, before the bar exists, does nothing.
+    func adoptWindowsMenu() {
+        guard NSApp.mainMenu?.title == Self.mainMenuTitle, let windowSubmenu else { return }
+        NSApp.windowsMenu = windowSubmenu
     }
 
     // MARK: - Building

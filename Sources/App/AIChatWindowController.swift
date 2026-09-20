@@ -233,7 +233,16 @@ final class SystemAIChatAppShell: AIChatAppShell {
     func present(_ window: NSWindow, menu: () -> NSMenu) {
         // A normal window gets a normal menu bar: Edit for the composer,
         // Window for minimise and close, and Quit.
-        if NSApp.mainMenu == nil { NSApp.mainMenu = menu() }
+        //
+        // The test used to be `mainMenu == nil`, which was never true: the
+        // SwiftUI `App` lifecycle installs a minimal bar of its own at
+        // launch, holding the app menu and nothing else. So this menu was
+        // never installed, and the chat window came up with no Edit, no
+        // View and no Window menu at all. Ours replaces whatever is there
+        // unless it is already ours.
+        if NSApp.mainMenu?.title != AIChatMenu.mainMenuTitle {
+            NSApp.mainMenu = menu()
+        }
         AppActivation.becomeRegularApp(showing: window)
     }
 
@@ -244,9 +253,9 @@ final class SystemAIChatAppShell: AIChatAppShell {
     func isOnScreen(_ window: NSWindow) -> Bool { window.isVisible }
 
     func refreshMenu(_ menu: () -> NSMenu) {
-        // Only while this app still owns a menu bar. As a menu-bar app it has
-        // none, and nothing is installed.
-        guard NSApp.mainMenu != nil else { return }
+        // Only while this app still owns the menu bar it built. As a
+        // menu-bar app it has none, and nothing is installed.
+        guard NSApp.mainMenu?.title == AIChatMenu.mainMenuTitle else { return }
         NSApp.mainMenu = menu()
     }
 }
@@ -463,6 +472,7 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
                 // rebind has to re-install it or the old key equivalent stays
                 // live in the menu while the router already answers the new one.
                 self.shell.refreshMenu { self.menu.makeMenu() }
+                self.menu.adoptWindowsMenu()
             }
         }
         watchStream()
@@ -487,6 +497,9 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
             place(window, on: screen)
         }
         shell.present(window) { menu.makeMenu() }
+        // Only once the bar is installed: a detached Window submenu handed
+        // to AppKit costs the app its whole menu bar (`adoptWindowsMenu`).
+        menu.adoptWindowsMenu()
     }
 
     func hideWindowForCapture() {

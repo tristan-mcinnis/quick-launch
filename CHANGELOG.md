@@ -5,12 +5,18 @@
 The AI Chat window, after a deep read of where its latency and its clutter
 actually came from (`docs/ai-chat-deep-dive-20260920.md`).
 
-- **The chat window can be tiled like any other window.** `NSApp.windowsMenu`
-  was never set, so AppKit never added its own window commands and macOS
-  never offered Move & Resize: no Fill, no halves, no quarters, no Centre, no
-  window list, and no Enter Full Screen item. The window has always been an
-  ordinary titled, resizable window; it simply never told the system it had a
-  Window menu. It does now, and the menu is handed back when the menu bar is.
+- **The AI Chat window had no menu bar, and now it can be tiled.** Two faults,
+  one on top of the other. The menu was installed only `if NSApp.mainMenu ==
+  nil`, which was never true, because the SwiftUI `App` lifecycle installs a
+  bar holding the app menu alone at launch. So the chat window came up with
+  no Edit menu, no View menu and no Window menu at all. And because there was
+  no Window menu, `NSApp.windowsMenu` was never set either, so macOS never
+  added its own window commands. Our bar replaces the SwiftUI one now, and
+  the Window menu is handed to AppKit once the bar is installed, which brings
+  Fill, Center, Move & Resize (halves, quarters, arrange, return to previous
+  size), Full Screen Tile, Move to Display and the window list. The window
+  itself was always an ordinary titled, resizable window; it simply never
+  told the system it had a Window menu to put them in.
 - **A long chat no longer slows down while an answer streams.** All three
   markdown caches failed at once. The segment cache held a single entry, so a
   thread of several answers missed on every one of them and re-parsed each
