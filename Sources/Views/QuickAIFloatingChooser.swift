@@ -12,13 +12,16 @@ struct QuickAIFloatingChooser: View {
     /// The Transform chooser, the model chooser, and Add Context float above
     /// the composer here, where at root they sit inline under the input row.
     var body: some View {
-        if viewModel.isTransformChooserPresented
+        if viewModel.isSlashCommandPalettePresented
+            || viewModel.isTransformChooserPresented
             || viewModel.isModelChooserPresented
             || viewModel.isAssistantChooserPresented
             || viewModel.isCaptureChooserPresented
             || viewModel.isAddContextMenuPresented {
             Group {
-                if viewModel.isTransformChooserPresented {
+                if viewModel.isSlashCommandPalettePresented {
+                    SlashCommandPane(viewModel: viewModel)
+                } else if viewModel.isTransformChooserPresented {
                     TransformChooserPane(viewModel: viewModel)
                 } else if viewModel.isModelChooserPresented {
                     ModelChooserPane(viewModel: viewModel)

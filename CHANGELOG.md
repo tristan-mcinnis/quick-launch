@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — 2026-09-20 (the `/` palette)
+
+- **Typing `/` in the composer now opens the command list.** The placeholder
+  has read "Ask anything, @ to attach, or / for commands…" since v1.4, and
+  typing `/` opened nothing. The `@` half had a trigger and a menu; `/` had
+  neither, and the fuzzy matcher that would have driven it was drawn in one
+  place only, the launcher's root search, which never renders on a chat
+  surface.
+
+  Nothing about the commands themselves changed. `/new` and `/clear` were
+  already routed, and every saved-prompt alias on the `/` prefix has expanded
+  through `SavedPromptResolver` on both surfaces for as long as the prefix has
+  been `/`. They were simply unnamed anywhere in the app: no menu, no palette
+  row, no settings pane, no help text. The only place either was ever printed
+  was the error you got for typing a different one.
+
+  The palette has no search field of its own, because the draft is the
+  search: the `/` stays where it was typed, the rows narrow as the name is
+  typed, and the composer keeps the keyboard. `↑` `↓` move, Return takes the
+  highlighted row into the draft rather than sending it, which leaves room for
+  an argument and keeps a destructive `/clear` two keystrokes away rather than
+  one. Escape closes the list and leaves the draft alone.
+
+- **Skills can be asked for by name.** The skills in `~/.claude/skills` were
+  reachable only when the model chose to call `read_skill`. `/<skill>` now
+  puts that skill's own text in front of the question, capped as it always was
+  at twelve thousand characters. A built-in or a saved prompt of the same name
+  still wins, a name that is not a skill folder holding a `SKILL.md` still
+  reaches the unknown-command refusal, and the composer says "Runs the
+  <name> skill" before Send, so that much guidance is never added silently.
+  The thread records which skill ran.
+
 ## Unreleased — 2026-09-20 (later)
 
 - **Quick Launch can now lay out its own AI Chat window.** Every window

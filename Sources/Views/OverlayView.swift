@@ -1596,6 +1596,12 @@ struct ComposerKeyRouting: ViewModifier {
             viewModel.moveAskQuestionSelection(delta)
             return .handled
         }
+        // The `/` palette has no field of its own: the draft is its search,
+        // so the composer keeps the keyboard and these keys are routed here.
+        if viewModel.isSlashCommandPalettePresented {
+            viewModel.moveSlashCommandSelection(delta)
+            return .handled
+        }
         if viewModel.isTransformChooserPresented {
             viewModel.moveTransformChooserSelection(delta)
             return .handled

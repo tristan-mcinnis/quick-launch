@@ -3583,6 +3583,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Return goes its own way: it picks in the question card or a chooser,
     /// or queues the typed follow-up (`queueFollowUp`), and never waits.
     func submitFromComposer() {
+        // With the `/` palette up, Return takes the highlighted command into
+        // the draft instead of sending it. That leaves room for an argument,
+        // and keeps a destructive `/clear` two keystrokes away rather than
+        // one. Both surfaces come through here.
+        if isSlashCommandPalettePresented, completeSlashCommand() { return }
         if isStreaming {
             guard streamingReturnTask == nil else { return }
             streamingReturnTask = Task { @MainActor [weak self] in
@@ -4825,6 +4830,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Files…, Link…, or Finder Selection. ↑↓ move, Return attaches exactly
     /// the highlighted capture, Escape closes. `⇧⌘D` stays the direct
     /// display capture and `⇧⌘A` stays the full Add Context menu.
+    /// The composer's `/` palette (`QuickViewModel+SlashCommands`).
+    var isSlashCommandPalettePresented = false
+    var slashCommandIndex = 0
+    /// The skill names listed when the palette opened. Taken once, because
+    /// the listing reads a directory.
+    @ObservationIgnored var cachedSlashSkillNames: [String] = []
+
     var isCaptureChooserPresented = false {
         didSet {
             if !isCaptureChooserPresented {
@@ -6490,6 +6502,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case assistantChooser
         case captureChooser
         case addContextMenu
+        /// The composer's `/` palette. Above `typedText`, because the draft
+        /// that opened it is the text underneath.
+        case slashCommandPalette
         case recentChats
         case streaming
         case attachment
@@ -6515,6 +6530,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if isAssistantChooserPresented { return .assistantChooser }
         if isCaptureChooserPresented { return .captureChooser }
         if isAddContextMenuPresented { return .addContextMenu }
+        if isSlashCommandPalettePresented { return .slashCommandPalette }
         if isRecentChatsPresented { return .recentChats }
         if isStreaming { return .streaming }
         if !input.isEmpty { return .typedText }
@@ -6558,6 +6574,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             } else {
                 closeAddContextMenu()
             }
+        case .slashCommandPalette:
+            // Escape leaves the draft alone: the `/` the user typed is
+            // theirs, only the list goes.
+            closeSlashCommandPalette()
+            requestInputFocus()
         case .recentChats:
             popRecentChatsLayer()
         case .streaming:
@@ -8150,7 +8171,27 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// `nil` when the request was handled here or could not proceed.
     func prepareRequest(text: String? = nil, reasksTurn: Bool = false) async -> PreparedRequest? {
         let takesComposerText = text == nil
-        let submittedInput = text ?? input
+        var submittedInput = text ?? input
+        /// Set when the draft named a skill, so the thread can say so
+        /// after the per-request notices are reset further down.
+        var skillInUse: String?
+        // A skill asked for by name: its own text goes in front of the
+        // question, and the command itself never reaches the model. The name
+        // must be a folder in `~/.claude/skills` that holds a `SKILL.md`, so
+        // a typo still falls through to the unknown-command refusal below.
+        // The skill text is capped by `SkillLibrary.maxCharacters`.
+        if !reasksTurn, !sendAsTextOnce,
+           let skill = slashSkillName(in: submittedInput),
+           let skillText = skillLibrary?.read(skill) {
+            let question = submittedInput
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .dropFirst(skill.count + 1)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            submittedInput = question.isEmpty
+                ? skillText
+                : skillText + "\n\n" + question
+            skillInUse = skill
+        }
         if !reasksTurn, submittedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            pendingContext != nil || launchSelection != nil {
             errorMessage = "Ask a question about the attached context."
@@ -8205,6 +8246,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         webSearchNote = nil
         liveToolRecords = []
         threadNotice = nil
+        // The thread says which skill ran, so an answer shaped by up to
+        // twelve thousand characters of guidance is never unexplained.
+        // Set after the reset above, which clears the last turn's notice.
+        if let skillInUse { threadNotice = "Using the \(skillInUse) skill" }
         // The pictures this turn carries. The thread's earlier pictures ride
         // their own turns, from the session store (`turnImages`), and a turn
         // asked again finds its own there by reference.
@@ -10588,8 +10633,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         if isRecentChatsPresented {
             if !newValue.isEmpty { recentChatsIndex = 0 }
-        } else if allowsContextTrigger {
-            addContextTriggerDidChange(newValue)
+        } else {
+            if allowsContextTrigger { addContextTriggerDidChange(newValue) }
+            // The `/` palette opens on the character and narrows as the
+            // name is typed, so it is evaluated on every change, not only
+            // on the keystroke that opened it.
+            slashCommandTriggerDidChange(newValue)
         }
     }
 

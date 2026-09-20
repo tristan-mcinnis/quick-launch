@@ -43,6 +43,11 @@ extension QuickViewModel {
         var names = Self.knownChatCommands
         guard settings.savedPromptPrefix == "/" else { return names }
         names.formUnion(settings.savedPrompts.map { "/" + $0.alias })
+        // A skill named in the draft is a command this build answers to
+        // (`runSlashSkill`), so it must not reach the unknown-command
+        // refusal. Only the one name in front of us is checked: listing the
+        // whole skills folder here would read the disk on every keystroke.
+        if let skill = slashSkillName(in: input) { names.insert("/" + skill) }
         return names
     }
 

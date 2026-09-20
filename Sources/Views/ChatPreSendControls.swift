@@ -18,7 +18,9 @@ struct ChatPreSendControls: View {
     @Bindable var viewModel: QuickViewModel
 
     private var showsDestination: Bool { !viewModel.chatDestinationIsRoutine }
-    private var showsAnything: Bool { showsDestination || viewModel.refusedCommandText != nil }
+    private var showsAnything: Bool {
+        showsDestination || viewModel.refusedCommandText != nil || viewModel.slashSkillNotice != nil
+    }
 
     var body: some View {
         if showsAnything {
@@ -29,12 +31,37 @@ struct ChatPreSendControls: View {
                         destination
                     }
                 }
+                skillNotice
                 sendAsText
             }
             .padding(.horizontal, House.Spacing.lg)
             .padding(.vertical, House.Spacing.xxs)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("What the next message needs you to know")
+        }
+    }
+
+    // MARK: - Skill
+
+    /// A skill command in the draft puts up to twelve thousand characters of
+    /// guidance in front of the question. That is worth one line before
+    /// Send, so it is never added silently.
+    @ViewBuilder
+    private var skillNotice: some View {
+        if let notice = viewModel.slashSkillNotice {
+            HStack(spacing: House.Spacing.xxs) {
+                Image(systemName: "book.closed")
+                    .font(AQDesign.TypeToken.footnote.weight(.semibold))
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+                Text(notice)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: House.Spacing.xs)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(notice)
         }
     }
 

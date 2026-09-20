@@ -132,6 +132,7 @@ enum ComposerCaretMove: Equatable, Sendable {
         let chat = model.chat
         return model.focus == .composer
             && !chat.input.isEmpty
+            && !chat.isSlashCommandPalettePresented
             && !chat.isRecentChatsPresented
             && !chat.isAskQuestionActive
             && !chat.isTransformChooserPresented
