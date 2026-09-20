@@ -597,6 +597,18 @@ The window itself qualifies for tiling. It is titled, resizable and
 is a one-line change that gives you native halves, quarters and thirds for
 free.** It is the highest-value item in this document per line of code.
 
+> **Correction, same day, from building it.** That one line was not enough,
+> because this section named only half the cause. The window had no menu bar
+> at all. `SystemAIChatAppShell.present` installed the menu only
+> `if NSApp.mainMenu == nil`, and that is never true: the SwiftUI `App`
+> lifecycle installs a bar holding the app menu alone at launch. So there was
+> no Edit menu, no View menu and no Window menu either, and a `windowsMenu`
+> assigned from inside `makeMenu()` did nothing, because AppKit fills a
+> Window menu with the system commands only while it is part of the installed
+> bar. Reading the source could not show this; looking at the running app
+> did. Both faults are fixed in `ce3c090`, and the menu now carries Fill,
+> Center, Move & Resize, Full Screen Tile and the window list.
+
 ### Two: Quick Launch's own layouts cannot target it
 
 Three separate blockers, which is why this has never worked:
