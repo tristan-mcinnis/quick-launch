@@ -199,16 +199,10 @@ final class WindowManager: WindowManaging {
     }
 
     /// Accessibility uses a top-left global coordinate space anchored on the
-    /// primary display. Convert the AppKit visible frame so layouts avoid the
-    /// menu bar and Dock on every display.
+    /// primary display. One conversion serves this path and the own-window
+    /// path (`OwnWindowLayout`), so the two cannot drift.
     private func accessibilityFrame(for screen: NSScreen) -> CGRect {
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
-        return CGRect(
-            x: screen.visibleFrame.minX,
-            y: primaryTop - screen.visibleFrame.maxY,
-            width: screen.visibleFrame.width,
-            height: screen.visibleFrame.height
-        )
+        AXSpace.axFrame(ofVisible: screen)
     }
 }
 

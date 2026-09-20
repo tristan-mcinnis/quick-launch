@@ -794,6 +794,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// live content instead of the model's stale training data.
     var pageReader: (any WebPageReading)?
     var windowManager: (any WindowManaging)?
+    /// Lays out Quick Launch's own AI Chat window, which `windowManager`
+    /// cannot reach. Nil until that window has been built.
+    @ObservationIgnored var ownWindowLayout: (any OwnWindowLaying)?
     var caffeinateManager: (any CaffeinateManaging)?
     /// The on-device voice for Read Aloud. Nil in a build without local-tts wired.
     var localSpeechService: (any LocalSpeechServicing)?
@@ -5576,15 +5579,25 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
-        guard item.value.hasPrefix("window."),
-              let target = selectionTarget,
-              let windowManager
-        else {
+        guard item.value.hasPrefix("window.") else {
             errorMessage = "No manageable window was available behind Quick Launch."
             requestInputFocus()
             return
         }
         let name = String(item.value.dropFirst("window.".count))
+        // Quick Launch's own AI Chat window takes the command when it is the
+        // window in front, and always when the command came from the chat's
+        // own palette. The external path could never reach it: its resolver
+        // skips this process, and Accessibility is the wrong actuator for an
+        // app's own window. Same layouts, same cycling, different setter.
+        if let ownWindowLayout, isAIChatWindow || ownWindowLayout.isFrontmost {
+            if runOwnWindowCommand(name, on: ownWindowLayout) { return }
+        }
+        guard let target = selectionTarget, let windowManager else {
+            errorMessage = "No manageable window was available behind Quick Launch."
+            requestInputFocus()
+            return
+        }
         let applied: Bool
         if let layout = WindowLayout(rawValue: name) {
             prepareForExternalAction?()
@@ -5610,6 +5623,39 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
         input = ""
+    }
+
+    /// Runs `name` against one of Quick Launch's own windows. Returns false
+    /// when the name is not a window command at all, so the caller falls
+    /// through to the external path and reports the unknown name there.
+    ///
+    /// The launcher panel is dismissed first, as it is for an external
+    /// window; the chat's own palette is not, because there
+    /// `prepareForExternalAction` hides the very window being laid out.
+    private func runOwnWindowCommand(_ name: String, on own: any OwnWindowLaying) -> Bool {
+        let applied: Bool
+        if let layout = WindowLayout(rawValue: name) {
+            if !isAIChatWindow { prepareForExternalAction?() }
+            applied = own.apply(layout)
+        } else if let move = WindowMove(rawValue: name) {
+            if !isAIChatWindow { prepareForExternalAction?() }
+            applied = own.move(move)
+        } else {
+            return false
+        }
+        if applied {
+            input = ""
+        } else {
+            let isDisplayMove = name == WindowMove.nextDisplay.rawValue
+                || name == WindowMove.previousDisplay.rawValue
+            errorMessage = isDisplayMove && screenGeometry.screenCount < 2
+                ? "Only one display is connected."
+                : (name == WindowMove.restore.rawValue
+                    ? "Nothing to restore yet for \(own.windowName)."
+                    : "Could not resize \(own.windowName).")
+            requestInputFocus()
+        }
+        return true
     }
 
     /// Copy Text from Screen Area: the system selector, Vision OCR on this

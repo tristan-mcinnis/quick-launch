@@ -450,6 +450,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         viewModel.prepareForExternalAction = { [weak self] in
             self?.hideOverlay()
         }
+        // A layout picked in the launcher acts on the AI Chat window when
+        // that window is the one in front. Resolved on each call, so it is
+        // simply absent until the chat window has been built.
+        viewModel.ownWindowLayout = OwnWindowLayout { [weak self] in
+            self?.aiChatController?.chatWindow
+        }
         viewModel.recoverFromExternalActionFailure = { [weak self] in
             self?.showOverlay(captureSelectionTarget: false)
         }
@@ -1729,6 +1735,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         chat.attachmentFilePicker = SystemAttachmentFilePicker()
         chat.piHandoff = PiHandoffService()
         let controller = AIChatWindowController(model: AIChatWindowModel(chat: chat), app: self)
+        // The chat window lays itself out. Weak, because the controller owns
+        // the window and the view model must never own the controller.
+        chat.ownWindowLayout = OwnWindowLayout { [weak controller] in controller?.chatWindow }
         aiChatController = controller
         return controller
     }

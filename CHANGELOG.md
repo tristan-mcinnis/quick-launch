@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — 2026-09-20 (later)
+
+- **Quick Launch can now lay out its own AI Chat window.** Every window
+  layout and move works on it: halves, thirds, two thirds, quarters, sixths,
+  the sixths, Center, Restore, the display moves, and the Left Half cycle
+  that steps half to two thirds to a third. macOS's own Move & Resize menu
+  has halves and quarters but no thirds at all, and no keys on any of them,
+  so this is the only way to put the chat window on the first third by
+  hotkey.
+
+  Three things were in the way, all of them assumptions that the layouts only
+  ever act on the app *behind* the launcher. The target resolver skips this
+  process by design. The chat window's view model was built with no window
+  manager at all, so the command died at a guard before the process check
+  even mattered. And the apply path hides the window first, for screen
+  capture, which would have ordered the chat window out and then resized it.
+
+  A layout picked in the launcher acts on the chat window when that window is
+  the one in front; the chat's own palette always acts on it. Otherwise
+  nothing changes: the app behind the launcher is still the target. The
+  actuator is `NSWindow.setFrame`, not Accessibility, which is the supported
+  call for an app's own window, and the geometry is the same `WindowLayout`
+  and `WindowCycling` the external path uses, so the two cannot behave
+  differently. The top-left coordinate conversion both paths need is now
+  written once.
+
 ## Unreleased — 2026-09-20
 
 The AI Chat window, after a deep read of where its latency and its clutter
