@@ -54,6 +54,9 @@ enum AppActivation {
         guard !keepsRegularApp(otherWindows: others) else { return }
         menuBarTask?.cancel()
         menuBarTask = nil
+        // The Window menu goes with the menu bar it belonged to; leaving it
+        // set would hand AppKit a detached menu to keep populating.
+        NSApp.windowsMenu = nil
         NSApp.mainMenu = nil
         NSApp.setActivationPolicy(.accessory)
     }

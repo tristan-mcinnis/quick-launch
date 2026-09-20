@@ -46,7 +46,9 @@ struct MarkdownTextView: View {
     }
 
     private var segmentStack: some View {
-        let segments = MarkdownRenderer.cachedSegments(markdown)
+        // Streaming text is transient: it must not evict the finished
+        // answers above it (`MarkdownCache`).
+        let segments = MarkdownRenderer.cachedSegments(markdown, transient: isStreaming)
         return VStack(alignment: .leading, spacing: MarkdownRenderer.segmentSpacing) {
             ForEach(segments) { segment in
                 segmentView(segment, isLast: segment.id == segments.last?.id)
@@ -188,7 +190,8 @@ private struct ProseSegmentView: NSViewRepresentable {
     }
 
     private func renderedText() -> NSAttributedString {
-        let rendered = MarkdownRenderer.cachedRender(markdown)
+        // The run carrying the caret is the one still growing.
+        let rendered = MarkdownRenderer.cachedRender(markdown, transient: showsCaret)
         guard showsCaret || !highlights.isEmpty || current != nil else { return rendered }
         let text = NSMutableAttributedString(attributedString: rendered)
         // Find in Chat: every hit in the hover fill, the current one in the
@@ -207,7 +210,14 @@ private struct ProseSegmentView: NSViewRepresentable {
     /// The text view draws the same string `measuredHeight` measures, plus
     /// the caret's own line while streaming so it is never clipped.
     private static func height(markdown: String, width: CGFloat, showsCaret: Bool) -> CGFloat {
-        let measured = MarkdownRenderer.proseHeight(markdown: markdown, width: width)
+        // `sizeThatFits` runs on every body pass, so this is the hot path:
+        // the growing run is measured into the live slot, never over the
+        // finished answers' measurements.
+        let measured = MarkdownRenderer.proseHeight(
+            markdown: markdown,
+            width: width,
+            transient: showsCaret
+        )
         guard showsCaret else { return measured }
         let caretFont = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
         let caretLine = (caretFont.ascender - caretFont.descender + caretFont.leading)

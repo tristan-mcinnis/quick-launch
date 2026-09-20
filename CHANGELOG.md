@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased — 2026-09-20
+
+The AI Chat window, after a deep read of where its latency and its clutter
+actually came from (`docs/ai-chat-deep-dive-20260920.md`).
+
+- **The chat window can be tiled like any other window.** `NSApp.windowsMenu`
+  was never set, so AppKit never added its own window commands and macOS
+  never offered Move & Resize: no Fill, no halves, no quarters, no Centre, no
+  window list, and no Enter Full Screen item. The window has always been an
+  ordinary titled, resizable window; it simply never told the system it had a
+  Window menu. It does now, and the menu is handed back when the menu bar is.
+- **A long chat no longer slows down while an answer streams.** All three
+  markdown caches failed at once. The segment cache held a single entry, so a
+  thread of several answers missed on every one of them and re-parsed each
+  answer on every body pass. The render and height caches held 24 entries
+  each and were keyed by the text, and a streaming answer produces new text
+  about thirty times a second, so within a second they held nothing but
+  snapshots of the answer in flight and every finished answer above had been
+  evicted. Each miss cost a full CommonMark parse and a text layout. Answer
+  text is now cached in a bounded store that keeps the answer still arriving
+  in its own slot, where it cannot displace the answers above it.
+- **Streaming no longer waits for the disk.** The durable checkpoint rewrites
+  the whole conversation file and fsyncs it twice, and it was awaited inside
+  the loop consuming the model's tokens, every 800 characters. It is started
+  and not awaited now, one at a time; a checkpoint skipped while another is
+  in flight costs nothing, because the next carries what it would have
+  written and the archive serialises its own writes.
+- **The composer scope pill is gone, and the tools are always offered.** In a
+  chat with no attachment every tool was already allowed, so the only thing a
+  click could do was withhold them, and because the label was chosen before
+  the override was read it went on saying "Standard chat" while it did. The
+  withhold itself is gone too: a grounded request was never told the tools
+  existed, so the model could not judge whether it needed one. It is offered
+  every enabled tool now and told, in the system prompt, that a source is
+  attached and to answer from it. Attachment scoping is unchanged, so
+  "summarise this file" still reads the file.
+- **The composer names the destination only when it is worth naming.** "Will
+  send to DeepSeek API" was on screen before every message and said nothing
+  the user had not chosen. The line is drawn now only for a blocked route, an
+  on-Mac route, or an image going somewhere other than the chosen model. The
+  route is still recorded against every answer, and a missing API key still
+  blocks before Send rather than after it.
+
+This amends the approved plan of 17 September on two points: the visible
+Attached sources / Broader search control, and the withholding of tools from
+a source-grounded request. `docs/chat-harmonization-plan-20260917.md` and
+`CLAUDE.md` carry the amendment.
+
 ## Unreleased — 2026-09-19
 
 A bug hunt across the app, prompted by a review pass. Everything below is a defect that shipped, not a preference.

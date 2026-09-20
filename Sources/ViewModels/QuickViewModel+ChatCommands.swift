@@ -104,73 +104,14 @@ extension QuickViewModel {
         )
     }
 
-    /// The gate the wording alone would give, ignoring the override. Used to
-    /// decide what the control offers.
-    var naturalContextEvaluation: ChatContextEvaluation {
-        ChatContextGate.standard.evaluate(
-            enabledTools: chatTools,
-            hasCurrentSource: hasPendingChatContext,
-            currentSourceCount: attachmentTray.items.filter { $0.content != nil }.count,
-            historyTurnCount: currentConversation?.messages.count ?? 0,
-            historyHasSources: Self.conversationHasSources(currentConversation),
-            question: input
-        )
-    }
-
-    /// "Standard chat", "Attached sources", or "Broader search", from the
-    /// real decision. An ordinary chat with no sources permits the tools, so
-    /// it is Standard chat; a grounded request whose tools are withheld is
-    /// Attached sources; once widened it is Broader search.
-    var contextScopeLabel: String {
-        let hasAnySource = hasPendingChatContext || Self.conversationHasSources(currentConversation)
-        guard hasAnySource else { return "Standard chat" }
-        return composerContextEvaluation.allowsExternalRetrieval ? "Broader search" : "Attached sources"
-    }
-
-    /// One line explaining the effective route.
-    var contextScopeDetail: String {
-        let evaluation = composerContextEvaluation
-        let hasAnySource = hasPendingChatContext || Self.conversationHasSources(currentConversation)
-        guard hasAnySource else {
-            return evaluation.allowsExternalRetrieval
-                ? "No source attached; the tools may be used."
-                : "No source attached; the tools are unavailable."
-        }
-        let reading: String
-        switch evaluation.execution {
-        case "currentSource": reading = "Reading the attached source"
-        case "history": reading = "Reading earlier turns"
-        case "currentSourceAndHistory": reading = "Reading the attached source and earlier turns"
-        default: reading = "Reading the conversation"
-        }
-        return evaluation.allowsExternalRetrieval
-            ? "\(reading); memory, vault, skills, and web are allowed."
-            : "\(reading); memory, vault, skills, and web are withheld."
-    }
-
-    /// True when the control should offer widening: the request is grounded
-    /// and its broad tools are currently withheld.
-    var contextScopeOffersWidening: Bool { composerContextEvaluation.broaderSearchEnabled }
-
-    /// A short summary of the attached sources, or nil when there are none.
-    var attachedSourceSummary: String? {
-        let pending = attachmentTray.items.compactMap { $0.content?.ref.name }
-        let names = pending.isEmpty
-            ? (currentConversation?.messages ?? []).flatMap(\.attachmentRefs).map(\.name)
-            : pending
-        guard !names.isEmpty else { return nil }
-        if names.count == 1 { return names[0] }
-        return "\(names.count) sources"
-    }
-
-    /// Toggle the context scope from the effective decision: widening when
-    /// the tools are withheld, narrowing to source-only when they are not.
-    /// Explicit wording may re-widen a request, so the toggle sets an
-    /// explicit override rather than returning to nil.
-    func toggleContextScope() {
-        contextOverride = composerContextEvaluation.allowsExternalRetrieval ? .sourceOnly : .broader
-        requestInputFocus()
-    }
+    // The composer's scope pill is gone (2026-09-20). It read "Standard
+    // chat" in an ordinary chat, where every tool was already allowed, so
+    // the only thing a click could do was withhold them; and because the
+    // label was decided before the override was consulted, it went on
+    // reading "Standard chat" while it did. The tools are always offered
+    // now (`ChatContextGate.gatedTools`), so there is nothing to widen and
+    // no control to draw. `composerContextEvaluation` stays: the send path
+    // and the per-turn receipt still use it.
 
     /// Whether a conversation carries any attachment reference.
     static func conversationHasSources(_ conversation: QuickConversation?) -> Bool {

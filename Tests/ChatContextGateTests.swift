@@ -3,15 +3,18 @@ import Foundation
 import HouseChatCore
 @testable import QuickLaunch
 
-/// The source-first gate: a source-grounded request withholds every broad
-/// tool, follow-ups included, until the user asks for outside evidence or
-/// chooses Broader search.
+/// The context gate. Since 2026-09-20 it withholds nothing: every enabled
+/// tool is offered whatever the sources, so the model makes the call. What
+/// the policy still decides is `allowsExternalRetrieval`, which names the
+/// scope on the persisted receipt, and `grounded`, which adds the grounding
+/// sentence to the system prompt. Attachment scoping, not the tool set, is
+/// what keeps "summarise this file" on the file.
 @Suite("Chat context gate")
 struct ChatContextGateTests {
     private let gate = ChatContextGate.standard
     private let everyTool = Set(ChatToolKind.allCases)
 
-    @Test func aCurrentSourceWithholdsEveryBroadTool() {
+    @Test func aCurrentSourceStillOffersEveryTool() {
         let evaluation = gate.evaluate(
             enabledTools: everyTool,
             hasCurrentSource: true,
@@ -20,8 +23,11 @@ struct ChatContextGateTests {
             historyHasSources: false,
             question: "What does this file say about revenue?"
         )
+        // The decision still records that the request is grounded ...
         #expect(!evaluation.allowsExternalRetrieval)
-        #expect(evaluation.gatedTools.isEmpty)
+        #expect(evaluation.grounded)
+        // ... but nothing is taken away from the model.
+        #expect(evaluation.gatedTools == everyTool)
         #expect(evaluation.execution == "currentSource")
     }
 
@@ -38,7 +44,7 @@ struct ChatContextGateTests {
         #expect(evaluation.gatedTools == [.web, .vault])
     }
 
-    @Test func aFollowUpOnAGroundedHistoryStaysWithheld() {
+    @Test func aFollowUpOnAGroundedHistoryKeepsItsTools() {
         let evaluation = gate.evaluate(
             enabledTools: everyTool,
             hasCurrentSource: false,
@@ -48,7 +54,8 @@ struct ChatContextGateTests {
             question: "and what does the second table show?"
         )
         #expect(!evaluation.allowsExternalRetrieval)
-        #expect(evaluation.gatedTools.isEmpty)
+        #expect(evaluation.grounded)
+        #expect(evaluation.gatedTools == everyTool)
         #expect(evaluation.execution == "history")
     }
 
@@ -80,7 +87,7 @@ struct ChatContextGateTests {
         #expect(evaluation.gatedTools == [.web])
     }
 
-    @Test func sourceOnlyRefusesExternalEvenWithWording() {
+    @Test func sourceOnlyStillRecordsTheNarrowScope() {
         let evaluation = gate.evaluate(
             enabledTools: [.web],
             hasCurrentSource: true,
@@ -90,8 +97,10 @@ struct ChatContextGateTests {
             question: "search the web",
             override: .sourceOnly
         )
+        // The override still narrows what is read and what the receipt
+        // says; it no longer takes the tools away.
         #expect(!evaluation.allowsExternalRetrieval)
-        #expect(evaluation.gatedTools.isEmpty)
+        #expect(evaluation.gatedTools == [.web])
         #expect(evaluation.execution == "currentSource")
     }
 
@@ -105,11 +114,14 @@ struct ChatContextGateTests {
             question: "summarize everything"
         )
         #expect(!evaluation.allowsExternalRetrieval)
-        #expect(evaluation.gatedTools.isEmpty)
+        #expect(evaluation.gatedTools == everyTool)
         #expect(evaluation.execution == "currentSourceAndHistory")
     }
 
-    @Test func webSearchGateFollowsTheDecision() {
+    /// The enrichment gate is open. The caller has already decided the
+    /// wording asks for a search; this used to refuse it a second time
+    /// whenever a source was attached.
+    @Test func webSearchIsAllowedEvenWhenGrounded() {
         let grounded = gate.evaluate(
             enabledTools: [.web],
             hasCurrentSource: true,
@@ -118,7 +130,8 @@ struct ChatContextGateTests {
             historyHasSources: false,
             question: "summarize this file"
         )
-        #expect(!ChatContextGate.allowsWebSearch(grounded))
+        #expect(grounded.grounded)
+        #expect(ChatContextGate.allowsWebSearch(grounded))
         #expect(ChatContextGate.allowsWebSearch(nil))
     }
 

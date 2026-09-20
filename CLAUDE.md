@@ -83,10 +83,21 @@ owned assets, never original source files. Existing legacy missing content
 must stay labelled missing rather than being silently fetched again.
 
 Screenshots may be sent directly to the selected cloud vision model, currently
-DeepSeek by default. Show the effective destination before Send and record it
-per answer. Local capture or storage does not mean local inference. Source-only
-questions must not silently fetch memory, vault, web or skills. The approved
-implementation contract is `docs/chat-harmonization-plan-20260917.md`.
+DeepSeek by default. Record the effective destination on every answer, and
+show it before Send when it is not routine: a blocked route, an on-Mac route,
+or an image going somewhere other than the chosen model. The routine cloud
+route the user already chose is not announced. Local capture or storage does
+not mean local inference. The approved implementation contract is
+`docs/chat-harmonization-plan-20260917.md`.
+
+**Tools and grounding, amended 2026-09-20** (superseding the 2026-09-17
+rule that source-only questions must not fetch memory, vault, web or
+skills): every enabled tool is offered on every request, so the model
+decides whether it needs one. A grounded turn says so in its system prompt
+(`ChatContextGate.groundingDirective`) and its request still carries only
+in-scope source text (`ChatContextPipeline.scopedMessages`); that, not a
+withheld tool set, is what keeps a grounded answer on its source. There is
+no Attached sources / Broader search control.
 
 Clipboard History remains separate: it may retain the user's clipboard copy,
 honours concealed/transient markers, stays owner-only and retains its existing

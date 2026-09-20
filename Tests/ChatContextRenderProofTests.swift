@@ -1,13 +1,12 @@
 // ChatContextRenderProofTests — visual proof for the chat context surfaces
 // added by the approved harmonisation plan, in both appearances, written to
 // /tmp/quick-launch-render-proof/ with stable file names:
-//   chat-context-composer-min-{dark,light}.png   the pre-Send controls on the
-//                                                composer at the minimum chat
-//                                                size: "Attached sources",
-//                                                the source summary and the
-//                                                destination
-//   chat-context-broader-search-{dark,light}.png the same composer after
-//                                                Broader search is chosen
+//   chat-context-composer-min-{dark,light}.png   the composer at the minimum
+//                                                chat size with a source on
+//                                                the chat: no scope pill, no
+//                                                source summary, no routine
+//                                                destination, nothing above
+//                                                the field
 //   chat-context-send-as-text-{dark,light}.png   a refused slash command and
 //                                                the explicit Send as Text
 //                                                action
@@ -59,17 +58,24 @@ struct ChatContextRenderProofTests {
 
     // MARK: - Pre-Send controls
 
-    @Test func rendersThePreSendControlsAtTheMinimumChatSize() throws {
+    /// The composer is quiet. A grounded chat used to carry a scope pill, a
+    /// source summary and a sentence about withheld tools; all three are
+    /// gone (2026-09-20), and the tools are offered whatever the sources.
+    /// What remains on screen is the attachment strip and the field.
+    @Test func drawsNoScopeChromeForAGroundedChat() throws {
         for (appearance, suffix) in Self.appearances() {
             let viewModel = Self.makeViewModel(appearance)
             viewModel.input = ""
-            // A question whose answer must come from the material already on
-            // the chat: the broad tools are withheld, so the control says so.
             viewModel.currentConversation = Self.groundedConversation()
-            #expect(viewModel.contextScopeLabel == "Attached sources")
-            #expect(viewModel.contextScopeOffersWidening)
-            #expect(viewModel.contextScopeDetail.contains("withheld"))
-            #expect(viewModel.attachedSourceSummary == "brief.pdf")
+
+            // The gate withholds nothing, so there is nothing to widen.
+            let evaluation = viewModel.composerContextEvaluation
+            #expect(evaluation.grounded)
+            #expect(evaluation.gatedTools == viewModel.chatTools)
+            #expect(!viewModel.chatTools.isEmpty)
+            // No command was typed, so the only thing that could draw is a
+            // non-routine destination.
+            #expect(viewModel.refusedCommandText == nil)
 
             try Self.save(
                 try Self.renderComposer(viewModel, appearance: appearance),
@@ -78,20 +84,17 @@ struct ChatContextRenderProofTests {
         }
     }
 
-    @Test func rendersTheBroaderSearchChoice() throws {
-        for (appearance, suffix) in Self.appearances() {
-            let viewModel = Self.makeViewModel(appearance)
-            viewModel.currentConversation = Self.groundedConversation()
-            viewModel.toggleContextScope()
-            #expect(viewModel.contextOverride == .broader)
-            #expect(viewModel.contextScopeLabel == "Broader search")
-            #expect(viewModel.contextScopeDetail.contains("allowed"))
-
-            try Self.save(
-                try Self.renderComposer(viewModel, appearance: appearance),
-                name: "chat-context-broader-search-\(suffix).png"
-            )
-        }
+    /// A grounded turn still says so to the model, which is what keeps the
+    /// answer on the attached material now that no tool is withheld.
+    @Test func groundedTurnsCarryTheGroundingDirective() {
+        let grounded = ChatContextGate.systemPrompt("Be brief.", grounded: true)
+        #expect(grounded.hasPrefix("Be brief."))
+        #expect(grounded.contains("Answer from it."))
+        #expect(ChatContextGate.systemPrompt("Be brief.", grounded: false) == "Be brief.")
+        #expect(
+            ChatContextGate.systemPrompt("", grounded: true)
+                == ChatContextGate.groundingDirective
+        )
     }
 
     @Test func rendersTheSendAsTextActionForARefusedCommand() async throws {

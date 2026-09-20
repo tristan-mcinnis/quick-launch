@@ -16,6 +16,10 @@ struct ChatContextEvaluation: Sendable, Equatable {
     var execution: String
     var sourceFirst: Bool
     var includesHistory: Bool
+    /// True when this turn, or an earlier one, carried a source. The tools
+    /// are offered either way; this is what adds the grounding sentence to
+    /// the system prompt.
+    var grounded: Bool
     /// Scopes the UI may offer on top (`history`, `currentSourceAndHistory`).
     var offeredScopes: [String]
     var rationale: String
@@ -87,18 +91,45 @@ struct ChatContextGate: Sendable {
             execution: decision.execution.rawValue,
             sourceFirst: decision.sourceFirst,
             includesHistory: decision.includesHistory,
+            grounded: hasCurrentSource || historyHasSources,
             offeredScopes: decision.offered.map(\.rawValue),
             rationale: decision.rationale,
             gatedTools: Self.gatedTools(enabledTools, decision: decision)
         )
     }
 
-    /// Every Quick Launch chat tool reaches outside the conversation, so the
-    /// gate is all-or-nothing today. It is expressed per tool so a future
-    /// within-conversation tool is not silently withheld with the rest.
+    /// The tools a request may offer. Every tool the user has enabled, every
+    /// time.
+    ///
+    /// This used to withhold the whole set from a source-grounded request
+    /// (2026-09-17), which meant the model was never told the tools existed
+    /// and so could not judge whether it needed one. The judgment is the
+    /// model's now: a grounded request still says so in the system prompt
+    /// (`ChatContextGate.groundingDirective`), and attachment scoping still
+    /// decides which source text the request carries, so "summarise this
+    /// file" reads the file rather than the web. Decided 2026-09-20; the
+    /// 2026-09-17 plan is amended to match.
+    ///
+    /// `decision` is kept in the signature: it still names the scope on the
+    /// persisted receipt, and a future within-conversation tool may want it.
     static func gatedTools(_ enabled: Set<ChatToolKind>, decision: ContextDecision) -> Set<ChatToolKind> {
-        guard decision.allowsExternalRetrieval else { return [] }
-        return enabled
+        enabled
+    }
+
+    /// The sentence added to the system prompt when this turn carries a
+    /// source. It replaces the old hard withhold: the tools are offered, and
+    /// this is what keeps the answer on the material in front of the user.
+    static let groundingDirective = """
+        This conversation carries an attached source. Answer from it. \
+        Use a tool only when the question cannot be answered from the \
+        attached source and the conversation alone.
+        """
+
+    /// `prompt` with the grounding sentence when the request is grounded.
+    static func systemPrompt(_ prompt: String, grounded: Bool) -> String {
+        guard grounded else { return prompt }
+        guard !prompt.isEmpty else { return groundingDirective }
+        return prompt + "\n\n" + groundingDirective
     }
 
     /// The sanitized receipt persisted with the turn.
@@ -116,10 +147,13 @@ struct ChatContextGate: Sendable {
     }
 
     /// Whether an explicit web-search enrichment may run for this request.
-    /// The policy already treats explicit "search the web" wording as
-    /// external intent, so a grounded request still passes when the user
-    /// asked for it.
+    ///
+    /// Always. The caller has already decided the wording asks for a search
+    /// (`webSearchQuery`); this gate used to refuse that search a second
+    /// time whenever a source was attached, so "what do reviews say about
+    /// this product" with the product sheet attached searched nothing.
+    /// Amended 2026-09-20 with `gatedTools`.
     static func allowsWebSearch(_ evaluation: ChatContextEvaluation?) -> Bool {
-        evaluation?.allowsExternalRetrieval ?? true
+        true
     }
 }

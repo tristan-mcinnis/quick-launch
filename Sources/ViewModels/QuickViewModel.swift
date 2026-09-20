@@ -271,6 +271,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Characters of the streaming answer at the last archive checkpoint, so
     /// checkpoints are periodic rather than per-delta.
     @ObservationIgnored private var archiveCheckpointCharacters = 0
+    /// The durable checkpoint in flight, if any. One at a time, and never
+    /// awaited by the token loop: a checkpoint is a whole-file rewrite of
+    /// the conversation with two `fsync` calls, so waiting for it between
+    /// deltas puts disk latency straight into token rendering.
+    @ObservationIgnored private var archiveCheckpointTask: Task<Void, Never>?
     /// The archived assistant turn id for the stream in flight, so every
     /// path that persists the answer (completion, stop, error, resume) uses
     /// one record.
@@ -8856,6 +8861,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             provider: provider,
             model: model,
             toolOverride: request.contextEvaluation?.gatedTools,
+            grounded: request.contextEvaluation?.grounded == true,
             attachmentTrim: composed.trim,
             roundRecorder: roundRecorder
         ) else {
@@ -8990,24 +8996,37 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     }
                     // Periodic durable checkpoint of the answer in flight,
                     // with the tool rounds finished so far.
+                    //
+                    // Started, never awaited. The checkpoint rewrites the
+                    // whole conversation file and fsyncs it twice, so an
+                    // `await` here stalls the stream on the disk. One runs at
+                    // a time: a checkpoint skipped while another is in flight
+                    // costs nothing, because the next one carries everything
+                    // it would have written, and `ChatArchive` serializes its
+                    // own writes so the order still holds.
                     if let chatArchive, let archivedConversationID, !output.isEmpty,
+                       archiveCheckpointTask == nil,
                        output.count - archiveCheckpointCharacters >= 800 {
                         archiveCheckpointCharacters = output.count
                         let partial = output
                         let rounds = streamToolRounds
-                        do {
-                            _ = try await chatArchive.checkpoint(
-                                conversationID: archivedConversationID,
-                                turnID: assistantTurnID.uuidString,
-                                update: .checkpoint(
-                                    text: partial,
-                                    toolRounds: rounds.isEmpty ? nil : rounds
+                        let turnID = assistantTurnID.uuidString
+                        archiveCheckpointTask = Task { [weak self] in
+                            do {
+                                _ = try await chatArchive.checkpoint(
+                                    conversationID: archivedConversationID,
+                                    turnID: turnID,
+                                    update: .checkpoint(
+                                        text: partial,
+                                        toolRounds: rounds.isEmpty ? nil : rounds
+                                    )
                                 )
-                            )
-                        } catch {
-                            AppLog.persistence.error(
-                                "Chat archive checkpoint failed: \(error.localizedDescription)"
-                            )
+                            } catch {
+                                AppLog.persistence.error(
+                                    "Chat archive checkpoint failed: \(error.localizedDescription)"
+                                )
+                            }
+                            self?.archiveCheckpointTask = nil
                         }
                     }
                 }
@@ -9717,6 +9736,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         model: String,
         chatTools: Bool = true,
         toolOverride: Set<ChatToolKind>? = nil,
+        /// True when this turn carries a source. The tools are offered
+        /// either way now; this adds the sentence that keeps the answer on
+        /// the attached material (`ChatContextGate.groundingDirective`).
+        grounded: Bool = false,
         attachmentTrim: ContextBudget.Trim = ContextBudget.Trim(),
         roundRecorder: ChatRoundRecorder? = nil
     ) -> (any QuickService)? {
@@ -9759,7 +9782,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 baseURL: url,
                 modelName: model,
                 apiKey: apiKeyProvider(provider.id),
-                systemPrompt: settings.systemPrompt,
+                systemPrompt: ChatContextGate.systemPrompt(
+                    settings.systemPrompt,
+                    grounded: grounded
+                ),
                 webSearch: webSearch,
                 askUserQuestion: askUserQuestion,
                 tools: chatTools

@@ -2,6 +2,17 @@
 
 Approved by Tristan on 17 September 2026 after `cross-app-context-audit-20260917.md`. This document records the implementation contract, not a separate task registry. The full approved conversational plan is titled “Harmonize House chat behavior and restore launcher predictability.”
 
+## Amendment, 20 September 2026
+
+Approved by Tristan on 20 September 2026, after `ai-chat-deep-dive-20260920.md`. Two provisions of the Context and models section below are superseded; everything else stands.
+
+1. **The visible Attached sources / Broader search control is withdrawn.** In an ordinary chat every tool was already allowed, so the control's only effect was to withhold them, and its label was resolved before the override was read, so it kept reading “Standard chat” while it did. The control, its labels and `toggleContextScope` are removed.
+2. **Tools are no longer withheld from a source-grounded request.** Withholding meant the model was never told the tools existed and so could not judge whether it needed one. Every enabled tool is offered on every request (`ChatContextGate.gatedTools`), and the explicit web-search enrichment is no longer refused a second time when a source is attached (`ChatContextGate.allowsWebSearch`).
+
+What is unchanged, and is what now keeps a grounded answer on its source: attachment scoping still strips out-of-scope source text from the request (`ChatContextPipeline.scopedMessages`), the policy still resolves execution scope and records it on the per-turn receipt, and a grounded turn now carries `ChatContextGate.groundingDirective` in its system prompt, telling the model a source is attached and to answer from it.
+
+The pre-Send destination label is narrowed, not withdrawn: it is drawn for a blocked route, an on-Mac route or a vision fallback, and omitted for the routine cloud route the user already chose. The per-answer record is unchanged, so the effective destination is still recorded for every answer.
+
 ## Approved choices
 
 - Cloud screenshot inference remains allowed. Label the destination before Send and on each answer.

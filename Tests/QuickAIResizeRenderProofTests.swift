@@ -49,9 +49,13 @@ struct QuickAIResizeRenderProofTests {
         try Self.save(standard.image, name: "b1-quick-ai-750x475-\(suffix).png")
         await Task.yield()
         #expect(standard.image.size == CGSize(width: 750, height: 475))
+        // Since 2026-09-20 the pre-send controls draw nothing for an
+        // ordinary chat: no scope pill, no source summary, no routine
+        // destination. So the composer block is exactly the pill row, and
+        // the thread keeps the height the chrome used to take.
         #expect(
-            standard.composerHeight > QuickAIView.composerRowHeight,
-            "the composer is its pre-send controls plus the pill row: \(standard.composerHeight)"
+            standard.composerHeight == QuickAIView.composerRowHeight,
+            "the composer should be the pill row alone: \(standard.composerHeight)"
         )
         let standardInk = try #require(Self.threadInkRange(
             in: standard.image,

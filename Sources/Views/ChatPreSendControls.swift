@@ -1,100 +1,51 @@
 import SwiftUI
 
-/// What the next Send will read and where it will go, drawn between the
-/// attachment strip and the composer field. Both surfaces draw it, because
-/// both compose `QuickAIComposer`: Quick AI on its panel, the AI Chat window
-/// in its shell.
+/// What the next Send needs the user to know, drawn between the attachment
+/// strip and the composer field. Both surfaces draw it, because both compose
+/// `QuickAIComposer`: Quick AI on its panel, the AI Chat window in its shell.
 ///
-/// Every word comes from the view model's resolution of the request as it
-/// stands, never from the state of a control: `contextScopeLabel` is the
-/// policy the next turn will actually run under, so an ordinary chat with no
-/// sources reads "Standard chat", a grounded question whose tools are
-/// withheld reads "Attached sources", and one the user widened reads
-/// "Broader search", whatever was clicked to get there.
+/// It says nothing in the ordinary case. The scope pill was removed on
+/// 2026-09-20 (see `QuickViewModel+ChatCommands`), and the destination is
+/// drawn only when it is not the routine one: a blocked route, a local
+/// route, or an image going somewhere other than the chosen model. The
+/// routine "Will send to <provider>" was on screen for every message and
+/// told the user nothing they had not chosen themselves; the route is still
+/// recorded against every answer (`ChatContextRecordView`).
+///
+/// So this whole view collapses to nothing most of the time, and the
+/// composer sits directly under the attachment strip.
 struct ChatPreSendControls: View {
     @Bindable var viewModel: QuickViewModel
 
+    private var showsDestination: Bool { !viewModel.chatDestinationIsRoutine }
+    private var showsAnything: Bool { showsDestination || viewModel.refusedCommandText != nil }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: House.Spacing.xxs) {
-            HStack(spacing: House.Spacing.xs) {
-                scopeControl
-                if let attached = viewModel.attachedSourceSummary {
-                    Text(attached)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .accessibilityHidden(true)
+        if showsAnything {
+            VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                if showsDestination {
+                    HStack(spacing: House.Spacing.xs) {
+                        Spacer(minLength: House.Spacing.xs)
+                        destination
+                    }
                 }
-                Spacer(minLength: House.Spacing.xs)
-                destination
+                sendAsText
             }
-            if !viewModel.contextScopeDetail.isEmpty {
-                Text(viewModel.contextScopeDetail)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .accessibilityHidden(true)
-            }
-            sendAsText
+            .padding(.horizontal, House.Spacing.lg)
+            .padding(.vertical, House.Spacing.xxs)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("What the next message needs you to know")
         }
-        .padding(.horizontal, House.Spacing.lg)
-        .padding(.vertical, House.Spacing.xxs)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("What the next message reads and where it goes")
-    }
-
-    // MARK: - Scope
-
-    /// The visible Attached sources / Broader search control. It is never
-    /// disabled: the view model picks the other side of the *effective*
-    /// decision, so the same click widens a withheld request and narrows an
-    /// open one.
-    private var scopeControl: some View {
-        Button {
-            viewModel.toggleContextScope()
-        } label: {
-            HStack(spacing: House.Spacing.xxs) {
-                Circle()
-                    .fill(viewModel.contextScopeOffersWidening
-                        ? AQDesign.ColorToken.warning
-                        : AQDesign.ColorToken.textTertiary.opacity(0.6))
-                    .frame(width: House.Spacing.xxs, height: House.Spacing.xxs)
-                    .accessibilityHidden(true)
-                Text(viewModel.contextScopeLabel)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(AQDesign.TypeToken.footnote.weight(.semibold))
-                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, House.Spacing.sm)
-            .frame(minHeight: House.Control.chip - 6)
-            .background(
-                RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous)
-                    .fill(AQDesign.ColorToken.chipFill)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("What this message can read")
-        .accessibilityValue(viewModel.contextScopeLabel)
-        .accessibilityHint(viewModel.contextScopeDetail)
-        .help(viewModel.contextScopeOffersWidening
-            ? "Broaden this question to earlier turns and outside sources"
-            : (viewModel.contextScopeDetail.isEmpty ? "Change what this message may read" : viewModel.contextScopeDetail))
     }
 
     // MARK: - Destination
 
-    /// Where the next Send actually goes. The route is resolved once, by the
-    /// view model, for the request as it stands, so a tray image, an image
-    /// from an earlier turn and a plain text question all read from the same
-    /// decision the send path uses. The view adds no heuristic of its own:
-    /// it never looks at pending images or at the configured vision model.
+    /// Where the next Send actually goes, when that is worth saying. The
+    /// route is resolved once, by the view model, for the request as it
+    /// stands, so a tray image, an image from an earlier turn and a plain
+    /// text question all read from the same decision the send path uses. The
+    /// view adds no heuristic of its own: it never looks at pending images
+    /// or at the configured vision model.
     private var destination: some View {
         ChatDestinationLabel(destination: ChatDestination(
             label: viewModel.chatDestinationLabel,

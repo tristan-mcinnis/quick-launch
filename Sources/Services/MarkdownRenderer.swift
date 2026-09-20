@@ -17,6 +17,53 @@ struct AnswerSegment: Identifiable, Equatable {
     let content: Content
 }
 
+/// A bounded cache of parsed, rendered or measured answer text, with one
+/// extra slot for the answer still arriving.
+///
+/// The answer in flight produces a new string on every stream flush, about
+/// thirty times a second. Those strings are never asked for twice. Held in
+/// the same store as the finished answers they would fill it within a
+/// second, evicting every answer above them, and the thread would then
+/// re-parse and re-measure all of them on the next body pass. So a value
+/// marked `transient` goes to its own slot and never displaces a settled
+/// one. A lookup still reads both, so nothing is ever recomputed needlessly.
+@MainActor
+struct MarkdownCache<Key: Hashable, Value> {
+    /// Finished answers, keyed by their own text. `order` is insertion
+    /// order, so the oldest entry is the one evicted.
+    private var settled: [Key: Value] = [:]
+    private var order: [Key] = []
+    /// The answer still streaming. One slot, replaced on every flush.
+    private var live: (key: Key, value: Value)?
+    private let limit: Int
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    func value(for key: Key) -> Value? {
+        if let settledValue = settled[key] { return settledValue }
+        if let live, live.key == key { return live.value }
+        return nil
+    }
+
+    mutating func insert(_ value: Value, for key: Key, transient: Bool) {
+        guard !transient else {
+            live = (key, value)
+            return
+        }
+        if settled.updateValue(value, forKey: key) == nil {
+            order.append(key)
+            while order.count > limit {
+                settled.removeValue(forKey: order.removeFirst())
+            }
+        }
+    }
+
+    /// Entries held, for tests. The live slot is not one of them.
+    var settledCount: Int { settled.count }
+}
+
 /// Converts a markdown string to an NSAttributedString using swift-markdown's AST.
 enum MarkdownRenderer {
 
@@ -27,14 +74,20 @@ enum MarkdownRenderer {
 
     // MARK: - Segments
 
-    @MainActor private static var segmentsCache: (source: String, segments: [AnswerSegment])?
+    @MainActor private static var segmentsCache = MarkdownCache<String, [AnswerSegment]>(limit: 64)
 
     /// The answer split at its fenced code blocks, cached for the view and
     /// for `measuredHeight`.
-    @MainActor static func cachedSegments(_ markdown: String) -> [AnswerSegment] {
-        if let segmentsCache, segmentsCache.source == markdown { return segmentsCache.segments }
+    ///
+    /// Pass `transient: true` for the answer still streaming, so its
+    /// per-flush strings never evict the answers above it.
+    @MainActor static func cachedSegments(
+        _ markdown: String,
+        transient: Bool = false
+    ) -> [AnswerSegment] {
+        if let hit = segmentsCache.value(for: markdown) { return hit }
         let segments = segments(markdown)
-        segmentsCache = (markdown, segments)
+        segmentsCache.insert(segments, for: markdown, transient: transient)
         return segments
     }
 
@@ -149,16 +202,17 @@ enum MarkdownRenderer {
     /// when the answer text changes; a small cache makes a repeat render
     /// free. Keyed by source: an answer is several prose runs around its code
     /// blocks, and while streaming only the last one changes.
-    @MainActor private static var renderCache: [(source: String, rendered: NSAttributedString)] = []
-    private static let renderCacheLimit = 24
+    @MainActor private static var renderCache = MarkdownCache<String, NSAttributedString>(limit: 64)
 
-    @MainActor static func cachedRender(_ markdown: String) -> NSAttributedString {
-        if let hit = renderCache.first(where: { $0.source == markdown }) { return hit.rendered }
+    /// Pass `transient: true` for the run still streaming, so its per-flush
+    /// strings never evict the finished answers above it.
+    @MainActor static func cachedRender(
+        _ markdown: String,
+        transient: Bool = false
+    ) -> NSAttributedString {
+        if let hit = renderCache.value(for: markdown) { return hit }
         let rendered = render(markdown)
-        renderCache.append((markdown, rendered))
-        if renderCache.count > renderCacheLimit {
-            renderCache.removeFirst(renderCache.count - renderCacheLimit)
-        }
+        renderCache.insert(rendered, for: markdown, transient: transient)
         return rendered
     }
 
@@ -192,25 +246,35 @@ enum MarkdownRenderer {
         return output
     }
 
-    @MainActor private static var heightCache: [(source: String, width: CGFloat, height: CGFloat)] = []
-    private static let heightCacheLimit = 24
+    /// A measured run is one text at one width; the width changes when the
+    /// window resizes, so it belongs in the key.
+    struct MeasuredRun: Hashable {
+        let source: String
+        let width: CGFloat
+    }
+
+    @MainActor private static var heightCache = MarkdownCache<MeasuredRun, CGFloat>(limit: 64)
 
     /// Height one prose run needs at `width`. Reads the same string the text
     /// view draws, so the measurement cannot drift from the render.
-    @MainActor static func proseHeight(markdown: String, width: CGFloat) -> CGFloat {
+    ///
+    /// Pass `transient: true` for the run still streaming: text layout is the
+    /// most expensive thing here, and a live answer would otherwise evict
+    /// every finished measurement in under a second.
+    @MainActor static func proseHeight(
+        markdown: String,
+        width: CGFloat,
+        transient: Bool = false
+    ) -> CGFloat {
         guard !markdown.isEmpty, width > 0 else { return 0 }
-        if let hit = heightCache.first(where: { $0.source == markdown && $0.width == width }) {
-            return hit.height
-        }
-        let rect = cachedRender(markdown).boundingRect(
+        let key = MeasuredRun(source: markdown, width: width)
+        if let hit = heightCache.value(for: key) { return hit }
+        let rect = cachedRender(markdown, transient: transient).boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
         let height = rect.height.rounded(.up)
-        heightCache.append((markdown, width, height))
-        if heightCache.count > heightCacheLimit {
-            heightCache.removeFirst(heightCache.count - heightCacheLimit)
-        }
+        heightCache.insert(height, for: key, transient: transient)
         return height
     }
 

@@ -351,6 +351,14 @@ extension QuickViewModel {
         var usedVisionFallback: Bool
         /// Non-nil when the chosen route cannot actually send this request.
         var warning: String?
+
+        /// True when nothing about this route is worth saying before Send:
+        /// it works, it is the cloud provider the user chose, and no image
+        /// is being re-routed. The composer draws nothing in that case; the
+        /// answer's own record still names the route that ran.
+        var isRoutine: Bool {
+            warning == nil && isUsable && isCloud && !hasImages && !usedVisionFallback
+        }
     }
 
     func resolvedNextRoute() -> NextChatRoute {
@@ -382,6 +390,13 @@ extension QuickViewModel {
     var chatDestinationIsCloud: Bool { resolvedNextRoute().isCloud }
     /// Non-nil only when the chosen route is actually blocked or unusable.
     var chatRouteWarning: String? { resolvedNextRoute().warning }
+
+    /// True when the destination is the one the user already chose and
+    /// nothing surprising is happening to it: a usable cloud route, no
+    /// images, no fallback. The composer says nothing then. Everything else
+    /// (a block, an on-Mac route, an image going to another provider) is
+    /// worth a line before Send.
+    var chatDestinationIsRoutine: Bool { resolvedNextRoute().isRoutine }
 
     var nextRouteLabel: String { resolvedNextRoute().label }
     var nextRouteHasImages: Bool { resolvedNextRoute().hasImages }

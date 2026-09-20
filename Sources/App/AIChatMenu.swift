@@ -57,6 +57,13 @@ final class AIChatMenu: NSObject, NSMenuItemValidation {
         window.addItem(item("Keep on Top", #selector(toggleKeepOnTop), ""))
         window.addItem(.separator())
         window.addItem(item("Close", #selector(close), "w"))
+        // Handing the submenu to AppKit is what brings the system's own
+        // window commands: Move & Resize (Fill, halves, quarters, Centre,
+        // Arrange), Enter Full Screen, and the list of open windows. Without
+        // this the menu is ours alone and macOS adds none of them, which is
+        // why the chat window could not be tiled from the menu bar or by the
+        // keyboard even though it is an ordinary resizable window.
+        NSApp.windowsMenu = window
         return main
     }
 
