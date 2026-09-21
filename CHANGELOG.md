@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — 2026-09-21 (Bocha and Exa)
+
+- **Bocha and Exa join the search backends.** Bocha is the Chinese-web lane
+  and Exa is semantic discovery; both are called directly with a Keychain key,
+  like Tavily and Brave, and both appear in the same picker.
+
+  **Automatic** now prefers Bocha when the query contains Chinese characters
+  and a Bocha key is stored, then falls back to Tavily, the self-hosted
+  SearXNG, and Brave. Detection is by CJK ideographs only: kana or Hangul
+  alone do not trigger it, so a Japanese or Korean query keeps the English
+  order. Exa stays an explicit choice rather than a fallback step.
+
 ## Unreleased — 2026-09-21 (searchable web backends)
 
 - **The web-search provider is now a real choice, not four names for one

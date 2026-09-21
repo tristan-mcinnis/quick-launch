@@ -152,14 +152,19 @@ struct KeychainStoreTests {
         #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == nil)
         try APIKeyStore.saveFeatureKey("tvly-key", name: APIKeyStore.FeatureKey.tavilySearch, keychain: keychain)
         try APIKeyStore.saveFeatureKey("brave-key", name: APIKeyStore.FeatureKey.braveSearch, keychain: keychain)
+        try APIKeyStore.saveFeatureKey("bocha-key", name: APIKeyStore.FeatureKey.bochaSearch, keychain: keychain)
+        try APIKeyStore.saveFeatureKey("exa-key", name: APIKeyStore.FeatureKey.exaSearch, keychain: keychain)
 
         #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == "tvly-key")
         #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch, keychain: keychain) == "brave-key")
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch, keychain: keychain) == "bocha-key")
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch, keychain: keychain) == "exa-key")
         #expect(APIKeyStore.load(providerID: provider, keychain: keychain) == "provider-key")
 
         try APIKeyStore.deleteFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain)
         #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == nil)
         #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch, keychain: keychain) == "brave-key")
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch, keychain: keychain) == "bocha-key")
         #expect(APIKeyStore.load(providerID: provider, keychain: keychain) == "provider-key")
     }
 }

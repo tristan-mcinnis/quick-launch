@@ -215,11 +215,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         brave: BraveSearchService(
             apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) }
         ),
+        bocha: BochaSearchService(
+            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) }
+        ),
+        exa: ExaSearchService(
+            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) }
+        ),
         hasTavilyKey: {
             !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? "").isEmpty
         },
         hasBraveKey: {
             !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? "").isEmpty
+        },
+        hasBochaKey: {
+            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) ?? "").isEmpty
+        },
+        hasExaKey: {
+            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) ?? "").isEmpty
         }
     )
     private let vaultSearchService = SSHVaultSearchService()

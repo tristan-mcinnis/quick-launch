@@ -422,9 +422,10 @@ failures or cancellations, successful command actions, and hotkey runs.
   Provider settings, model choices, and actions use local `UserDefaults`.
 - Web search has its own provider choice (Settings › Models › Web search), shared
   by Quick AI, AI Chat, and the Translator: Google, Bing, DuckDuckGo, and News
-  through the self-hosted SearXNG, Tavily and Brave called directly, or Automatic
-  running Tavily, then SearXNG, then Brave. Tavily and Brave keys are stored in
-  the same owner-only Keychain as provider keys.
+  through the self-hosted SearXNG; Tavily, Brave, Bocha (Chinese web), and Exa
+  (semantic) called directly; or Automatic preferring Bocha for a Chinese query
+  when that key is set, then Tavily, SearXNG, and Brave. The direct-backend keys
+  are stored in the same owner-only Keychain as provider keys.
 - Local model discovery scans the local server's model folder without starting
   it.
 
@@ -438,9 +439,9 @@ failures or cancellations, successful command actions, and hotkey runs.
   web, or skills.
 - The memory and skill tools read local files only. The vault tool sends its
   query over SSH to the private VPS. SearXNG web search does the same. A
-  directly selected Tavily or Brave backend sends the query to that third
-  party. What a tool returns goes to the chat's model while it writes that
-  answer.
+  directly selected Tavily, Brave, Bocha, or Exa backend sends the query to
+  that third party. What a tool returns goes to the chat's model while it
+  writes that answer.
 - Chat history and source blobs are local and owner-only. Submitted material is
   saved before provider execution; a save failure keeps the draft and blocks
   Send.

@@ -89,7 +89,7 @@ struct WebSearchProviderTests {
     }
 
     @Test func apiBackendsDoNotRunThroughSearXNG() async {
-        for provider in [WebSearchProvider.tavily, .brave] {
+        for provider in [WebSearchProvider.tavily, .brave, .bocha, .exa] {
             #expect(provider.searxngSelection == nil)
             #expect(provider.requiresAPIKey)
             await #expect(throws: WebSearchError.self) {
@@ -105,6 +105,8 @@ struct WebSearchProviderTests {
         }
         #expect(WebSearchProvider.tavily.backend == .tavily)
         #expect(WebSearchProvider.brave.backend == .brave)
+        #expect(WebSearchProvider.bocha.backend == .bocha)
+        #expect(WebSearchProvider.exa.backend == .exa)
         #expect(WebSearchProvider.google.searxngSelection == .engine("google cse"))
         #expect(WebSearchProvider.news.searxngSelection == .category("news"))
     }

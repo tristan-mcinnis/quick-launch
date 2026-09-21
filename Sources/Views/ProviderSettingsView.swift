@@ -8,6 +8,8 @@ struct ProviderSettingsView: View {
     @State private var keyStatus: String?
     @State private var tavilyKey = ""
     @State private var braveKey = ""
+    @State private var bochaKey = ""
+    @State private var exaKey = ""
     @State private var searchKeyStatus: String?
     @State private var showingManageModels = false
 
@@ -217,11 +219,21 @@ struct ProviderSettingsView: View {
                 text: $braveKey,
                 featureKey: APIKeyStore.FeatureKey.braveSearch
             )
+            searchKeyRow(
+                title: "Bocha key",
+                text: $bochaKey,
+                featureKey: APIKeyStore.FeatureKey.bochaSearch
+            )
+            searchKeyRow(
+                title: "Exa key",
+                text: $exaKey,
+                featureKey: APIKeyStore.FeatureKey.exaSearch
+            )
             if let searchKeyStatus {
                 CardNote { CardText(searchKeyStatus) }
             }
             CardNote {
-                CardText("Automatic uses Tavily when a Tavily key is set, then the self-hosted SearXNG, then Brave. Tavily and Brave send the query to that provider; SearXNG stays on vault-vps. Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
+                CardText("Automatic uses Bocha for a Chinese query when a Bocha key is set, then Tavily, then the self-hosted SearXNG, then Brave. Direct backends send the query to that provider; SearXNG stays on vault-vps. Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
             }
         }
     }
@@ -328,6 +340,8 @@ struct ProviderSettingsView: View {
     private func loadSearchKeys() {
         tavilyKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? ""
         braveKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? ""
+        bochaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) ?? ""
+        exaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) ?? ""
         searchKeyStatus = nil
     }
 

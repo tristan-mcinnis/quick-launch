@@ -9,6 +9,8 @@ enum APIKeyStore {
     enum FeatureKey {
         static let tavilySearch = "websearch.tavily"
         static let braveSearch = "websearch.brave"
+        static let bochaSearch = "websearch.bocha"
+        static let exaSearch = "websearch.exa"
     }
 
     /// Service names used by earlier builds. Keys saved there are read once

@@ -82,66 +82,164 @@ struct WebSearchBackendsTests {
         #expect(recorder.request == nil)
     }
 
-    // MARK: - Router and chain
+    // MARK: - Bocha
 
-    @Test func explicitTavilyRequiresAStoredKey() async {
-        let tavily = RecordingStubSearch(.text("tavily"))
-        let router = WebSearchRouter(
-            searxng: RecordingStubSearch(.text("searxng")),
-            tavily: tavily,
-            brave: RecordingStubSearch(.text("brave")),
-            hasTavilyKey: { false },
-            hasBraveKey: { false }
-        )
+    @Test func bochaSendsBearerKeyAndFormatsResults() async throws {
+        let recorder = RequestRecorder(status: 200, body: Data("""
+        {"code":200,"data":{"webPages":{"value":[
+          {"name":"Bocha 来源","url":"https://example.cn/b","snippet":"片段","summary":"摘要"}
+        ]}}}
+        """.utf8))
+        let service = BochaSearchService(apiKey: { "bocha-test" }, transport: recorder.transport)
 
-        await #expect(throws: WebSearchError.self) {
-            _ = try await router.search("q", provider: .tavily)
-        }
-        #expect(await tavily.callCount() == 0)
+        let result = try await service.search("上海咖啡")
+
+        #expect(result.contains("## Bocha 来源"))
+        #expect(result.contains("URL: https://example.cn/b"))
+        #expect(result.contains("Snippet: 摘要"), "the summary is preferred over the snippet")
+        let request = try #require(recorder.request)
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer bocha-test")
+        let body = try #require(request.httpBody)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["query"] as? String == "上海咖啡")
     }
 
-    @Test func explicitSearXNGAndBraveRouteToTheirBackend() async throws {
+    @Test func bochaWithoutKeyFailsBeforeAnyRequest() async {
+        let recorder = RequestRecorder(status: 200, body: Data("{}".utf8))
+        let service = BochaSearchService(apiKey: { nil }, transport: recorder.transport)
+
+        await #expect(throws: WebSearchError.self) {
+            _ = try await service.search("x")
+        }
+        #expect(recorder.request == nil)
+    }
+
+    @Test func bochaApiErrorCodeIsReported() async {
+        let recorder = RequestRecorder(status: 200, body: Data(#"{"code":403,"message":"bad key","data":null}"#.utf8))
+        let service = BochaSearchService(apiKey: { "k" }, transport: recorder.transport)
+
+        await #expect(throws: WebSearchError.self) {
+            _ = try await service.search("x")
+        }
+    }
+
+    // MARK: - Exa
+
+    @Test func exaSendsApiKeyAndFormatsResults() async throws {
+        let recorder = RequestRecorder(status: 200, body: Data("""
+        {"results":[{"title":"Exa Source","url":"https://example.com/e","text":"Exa passage"}]}
+        """.utf8))
+        let service = ExaSearchService(apiKey: { "exa-test" }, transport: recorder.transport)
+
+        let result = try await service.search("semantic question")
+
+        #expect(result.contains("## Exa Source"))
+        #expect(result.contains("Snippet: Exa passage"))
+        let request = try #require(recorder.request)
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "x-api-key") == "exa-test")
+    }
+
+    @Test func exaWithoutKeyFailsBeforeAnyRequest() async {
+        let recorder = RequestRecorder(status: 200, body: Data("{}".utf8))
+        let service = ExaSearchService(apiKey: { nil }, transport: recorder.transport)
+
+        await #expect(throws: WebSearchError.self) {
+            _ = try await service.search("x")
+        }
+        #expect(recorder.request == nil)
+    }
+
+    // MARK: - Router and chain
+
+    @Test func explicitBackendsRequireTheirStoredKey() async {
+        let tavily = RecordingStubSearch(.text("tavily"))
+        let bocha = RecordingStubSearch(.text("bocha"))
+        let exa = RecordingStubSearch(.text("exa"))
+
+        for provider in [WebSearchProvider.tavily, .brave, .bocha, .exa] {
+            let router = makeRouter(tavily: tavily, bocha: bocha, exa: exa)
+            await #expect(throws: WebSearchError.self) {
+                _ = try await router.search("q", provider: provider)
+            }
+        }
+        #expect(await tavily.callCount() == 0)
+        #expect(await bocha.callCount() == 0)
+        #expect(await exa.callCount() == 0)
+    }
+
+    @Test func explicitBackendsRouteToTheirOwnService() async throws {
         let searxng = RecordingStubSearch(.text("searxng result"))
         let brave = RecordingStubSearch(.text("brave result"))
-        let router = WebSearchRouter(
+        let bocha = RecordingStubSearch(.text("bocha result"))
+        let exa = RecordingStubSearch(.text("exa result"))
+        let router = makeRouter(
             searxng: searxng,
-            tavily: RecordingStubSearch(.failure),
             brave: brave,
-            hasTavilyKey: { false },
-            hasBraveKey: { true }
+            bocha: bocha,
+            exa: exa,
+            hasBraveKey: true,
+            hasBochaKey: true,
+            hasExaKey: true
         )
 
         #expect(try await router.search("q", provider: .bing) == "searxng result")
         #expect(try await router.search("q", provider: .brave) == "brave result")
+        #expect(try await router.search("q", provider: .bocha) == "bocha result")
+        #expect(try await router.search("q", provider: .exa) == "exa result")
         #expect(await searxng.callCount() == 1)
         #expect(await brave.callCount() == 1)
+        #expect(await bocha.callCount() == 1)
+        #expect(await exa.callCount() == 1)
     }
 
     @Test func chainPrefersTavilyWhenItsKeyExists() async throws {
         let tavily = RecordingStubSearch(.text("tavily result"))
         let searxng = RecordingStubSearch(.text("searxng result"))
-        let router = WebSearchRouter(
+        let router = makeRouter(
             searxng: searxng,
             tavily: tavily,
-            brave: RecordingStubSearch(.text("brave result")),
-            hasTavilyKey: { true },
-            hasBraveKey: { true }
+            hasTavilyKey: true,
+            hasBraveKey: true
         )
 
         #expect(try await router.search("q", provider: .automatic) == "tavily result")
         #expect(await searxng.callCount() == 0)
     }
 
+    @Test func chainPrefersBochaForAChineseQuery() async throws {
+        let bocha = RecordingStubSearch(.text("bocha result"))
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let router = makeRouter(
+            tavily: tavily,
+            bocha: bocha,
+            hasTavilyKey: true,
+            hasBochaKey: true
+        )
+
+        #expect(try await router.search("上海咖啡推荐", provider: .automatic) == "bocha result")
+        #expect(await tavily.callCount() == 0)
+    }
+
+    @Test func chainKeepsTheEnglishOrderForANonChineseQuery() async throws {
+        let bocha = RecordingStubSearch(.text("bocha result"))
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let router = makeRouter(
+            tavily: tavily,
+            bocha: bocha,
+            hasTavilyKey: true,
+            hasBochaKey: true
+        )
+
+        #expect(try await router.search("shanghai coffee", provider: .automatic) == "tavily result")
+        #expect(await bocha.callCount() == 0)
+    }
+
     @Test func chainSkipsTavilyWithoutAKey() async throws {
         let tavily = RecordingStubSearch(.text("tavily result"))
         let searxng = RecordingStubSearch(.text("searxng result"))
-        let router = WebSearchRouter(
-            searxng: searxng,
-            tavily: tavily,
-            brave: RecordingStubSearch(.text("brave result")),
-            hasTavilyKey: { false },
-            hasBraveKey: { false }
-        )
+        let router = makeRouter(searxng: searxng, tavily: tavily)
 
         #expect(try await router.search("q", provider: .automatic) == "searxng result")
         #expect(await tavily.callCount() == 0)
@@ -150,12 +248,12 @@ struct WebSearchBackendsTests {
     @Test func chainFallsThroughAnEmptyOrFailingStepToBrave() async throws {
         let searxng = RecordingStubSearch(.failure)
         let brave = RecordingStubSearch(.text("brave result"))
-        let router = WebSearchRouter(
+        let router = makeRouter(
             searxng: searxng,
             tavily: RecordingStubSearch(.empty),
             brave: brave,
-            hasTavilyKey: { true },
-            hasBraveKey: { true }
+            hasTavilyKey: true,
+            hasBraveKey: true
         )
 
         #expect(try await router.search("q", provider: .automatic) == "brave result")
@@ -164,17 +262,24 @@ struct WebSearchBackendsTests {
     }
 
     @Test func chainThrowsWhenEveryStepFails() async {
-        let router = WebSearchRouter(
-            searxng: RecordingStubSearch(.failure),
-            tavily: RecordingStubSearch(.empty),
-            brave: RecordingStubSearch(.failure),
-            hasTavilyKey: { true },
-            hasBraveKey: { true }
+        let router = makeRouter(
+            hasTavilyKey: true,
+            hasBraveKey: true,
+            hasBochaKey: true,
+            hasExaKey: true
         )
 
         await #expect(throws: WebSearchError.self) {
             _ = try await router.search("q", provider: .automatic)
         }
+    }
+
+    @Test func chineseLaneDetectionFollowsIdeographsOnly() {
+        #expect(WebSearchQuery.containsCJK("上海咖啡"))
+        #expect(WebSearchQuery.containsCJK("東京"))
+        #expect(!WebSearchQuery.containsCJK("こんにちは"))
+        #expect(!WebSearchQuery.containsCJK("안녕하세요"))
+        #expect(!WebSearchQuery.containsCJK("shanghai"))
     }
 
     // MARK: - Shared formatting
@@ -189,6 +294,32 @@ struct WebSearchBackendsTests {
         #expect(text.contains("## T4"))
         #expect(!text.contains("## T5"))
         #expect(!text.contains("https://example.com/x"))
+    }
+
+    /// A router with every backend stubbed, so each test states only the
+    /// backends and keys it cares about. Unset steps are unavailable.
+    private func makeRouter(
+        searxng: RecordingStubSearch = RecordingStubSearch(.failure),
+        tavily: RecordingStubSearch = RecordingStubSearch(.failure),
+        brave: RecordingStubSearch = RecordingStubSearch(.failure),
+        bocha: RecordingStubSearch = RecordingStubSearch(.failure),
+        exa: RecordingStubSearch = RecordingStubSearch(.failure),
+        hasTavilyKey: Bool = false,
+        hasBraveKey: Bool = false,
+        hasBochaKey: Bool = false,
+        hasExaKey: Bool = false
+    ) -> WebSearchRouter {
+        WebSearchRouter(
+            searxng: searxng,
+            tavily: tavily,
+            brave: brave,
+            bocha: bocha,
+            exa: exa,
+            hasTavilyKey: { hasTavilyKey },
+            hasBraveKey: { hasBraveKey },
+            hasBochaKey: { hasBochaKey },
+            hasExaKey: { hasExaKey }
+        )
     }
 }
 
