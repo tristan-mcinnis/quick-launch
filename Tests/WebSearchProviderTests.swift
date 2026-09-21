@@ -55,7 +55,7 @@ struct WebSearchProviderTests {
     }
 
     @Test func singleProviderRequestsDoNotMixInCategoryEngines() async throws {
-        for provider in WebSearchProvider.allCases {
+        for provider in [WebSearchProvider.automatic, .google, .bing, .duckduckgo, .news] {
             let requests = SearchURLRecorder()
             let service = SearXNGSearchService(transport: { url in
                 await requests.record(url)
@@ -76,8 +76,37 @@ struct WebSearchProviderTests {
             case .bing:
                 #expect(fields["engines"] == "bing")
                 #expect(fields["categories"] == nil)
+            case .duckduckgo:
+                #expect(fields["engines"] == "duckduckgo")
+                #expect(fields["categories"] == nil)
+            case .news:
+                #expect(fields["categories"] == "news")
+                #expect(fields["engines"] == nil)
+            default:
+                break
             }
         }
+    }
+
+    @Test func apiBackendsDoNotRunThroughSearXNG() async {
+        for provider in [WebSearchProvider.tavily, .brave] {
+            #expect(provider.searxngSelection == nil)
+            #expect(provider.requiresAPIKey)
+            await #expect(throws: WebSearchError.self) {
+                _ = try await SearXNGSearchService().search("anything", provider: provider)
+            }
+        }
+    }
+
+    @Test func backendAndSelectionMappingIsStable() {
+        #expect(WebSearchProvider.automatic.backend == .chain)
+        for provider in [WebSearchProvider.google, .bing, .duckduckgo, .news] {
+            #expect(provider.backend == .searxng)
+        }
+        #expect(WebSearchProvider.tavily.backend == .tavily)
+        #expect(WebSearchProvider.brave.backend == .brave)
+        #expect(WebSearchProvider.google.searxngSelection == .engine("google cse"))
+        #expect(WebSearchProvider.news.searxngSelection == .category("news"))
     }
 
     @Test func paletteChoiceIsFuzzySharedAndPersisted() throws {

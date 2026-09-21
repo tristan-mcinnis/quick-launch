@@ -45,9 +45,16 @@ actor SearXNGSearchService: WebSearchServicing {
     }
 
     func search(_ query: String, provider: WebSearchProvider) async throws -> String {
+        guard let selection = provider.searxngSelection else {
+            throw WebSearchError.failed("\(provider.title) does not run through SearXNG")
+        }
+        return try await search(query, selection: selection)
+    }
+
+    func search(_ query: String, selection: SearXNGSelection) async throws -> String {
         let boundedQuery = String(query.prefix(500))
         let date = Date.now.formatted(.iso8601.year().month().day())
-        guard let url = Self.searchURL(query: "\(boundedQuery) current date \(date)", provider: provider) else {
+        guard let url = Self.searchURL(query: "\(boundedQuery) current date \(date)", selection: selection) else {
             throw WebSearchError.failed("invalid query")
         }
 
@@ -98,7 +105,7 @@ actor SearXNGSearchService: WebSearchServicing {
         return rows.joined(separator: "\n\n")
     }
 
-    private nonisolated static func searchURL(query: String, provider: WebSearchProvider) -> URL? {
+    nonisolated static func searchURL(query: String, selection: SearXNGSelection) -> URL? {
         var components = URLComponents(string: "http://127.0.0.1:8888/search")
         components?.queryItems = [
             URLQueryItem(name: "q", value: query),
@@ -108,14 +115,12 @@ actor SearXNGSearchService: WebSearchServicing {
             URLQueryItem(name: "safesearch", value: "0"),
         ]
         // Passing categories together with engines makes SearXNG include
-        // the category's other engines. A selected provider must stay exact.
-        switch provider {
-        case .automatic:
-            components?.queryItems?.append(URLQueryItem(name: "categories", value: "general"))
-        case .google:
-            components?.queryItems?.append(URLQueryItem(name: "engines", value: "google cse"))
-        case .bing:
-            components?.queryItems?.append(URLQueryItem(name: "engines", value: "bing"))
+        // the category's other engines. A selected selection must stay exact.
+        switch selection {
+        case .engine(let engine):
+            components?.queryItems?.append(URLQueryItem(name: "engines", value: engine))
+        case .category(let category):
+            components?.queryItems?.append(URLQueryItem(name: "categories", value: category))
         }
         return components?.url
     }

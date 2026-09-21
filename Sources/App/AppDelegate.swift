@@ -207,7 +207,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let clipboardHistory = ClipboardHistoryStore()
     private let colorHistory = ColorHistoryStore()
     private let colorSampler = ScreenColorSampler()
-    private let webSearchService = SearXNGSearchService()
+    private let webSearchService = WebSearchRouter(
+        searxng: SearXNGSearchService(),
+        tavily: TavilySearchService(
+            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) }
+        ),
+        brave: BraveSearchService(
+            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) }
+        ),
+        hasTavilyKey: {
+            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? "").isEmpty
+        },
+        hasBraveKey: {
+            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? "").isEmpty
+        }
+    )
     private let vaultSearchService = SSHVaultSearchService()
     /// `recall` over `~/memory`: the model's memory tools and Capture to Memory.
     private let recall = RecallCLI()

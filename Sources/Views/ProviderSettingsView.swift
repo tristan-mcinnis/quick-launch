@@ -6,6 +6,9 @@ struct ProviderSettingsView: View {
     @Bindable var viewModel: QuickViewModel
     @State private var apiKey = ""
     @State private var keyStatus: String?
+    @State private var tavilyKey = ""
+    @State private var braveKey = ""
+    @State private var searchKeyStatus: String?
     @State private var showingManageModels = false
 
     /// The shared model profiles. A parameter would be better, but this pane
@@ -52,7 +55,10 @@ struct ProviderSettingsView: View {
             .padding(.bottom, House.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { loadKey() }
+        .onAppear {
+            loadKey()
+            loadSearchKeys()
+        }
     }
 
     private var providerCard: some View {
@@ -201,8 +207,46 @@ struct ProviderSettingsView: View {
     private var webSearchCard: some View {
         SettingsCard("Web search") {
             WebSearchProviderRow(viewModel: viewModel, isFirst: true)
+            searchKeyRow(
+                title: "Tavily key",
+                text: $tavilyKey,
+                featureKey: APIKeyStore.FeatureKey.tavilySearch
+            )
+            searchKeyRow(
+                title: "Brave key",
+                text: $braveKey,
+                featureKey: APIKeyStore.FeatureKey.braveSearch
+            )
+            if let searchKeyStatus {
+                CardNote { CardText(searchKeyStatus) }
+            }
             CardNote {
-                CardText("Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
+                CardText("Automatic uses Tavily when a Tavily key is set, then the self-hosted SearXNG, then Brave. Tavily and Brave send the query to that provider; SearXNG stays on vault-vps. Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
+            }
+        }
+    }
+
+    /// One Keychain-backed search API key. Never written to settings files.
+    private func searchKeyRow(
+        title: String,
+        text: Binding<String>,
+        featureKey: String
+    ) -> some View {
+        SettingsRow(title: title) {
+            HStack(spacing: AQDesign.Space.standard) {
+                SecureField("Optional", text: text)
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.body)
+                    .padding(.horizontal, AQDesign.Space.standard)
+                    .frame(width: 220, height: House.Control.compact)
+                    .background(fieldBackground)
+                Button("Save") { saveSearchKey(text.wrappedValue, featureKey: featureKey) }
+                Button("Remove") {
+                    try? APIKeyStore.deleteFeatureKey(featureKey)
+                    text.wrappedValue = ""
+                    searchKeyStatus = "Key removed"
+                }
+                .disabled(text.wrappedValue.isEmpty && APIKeyStore.loadFeatureKey(featureKey) == nil)
             }
         }
     }
@@ -279,6 +323,21 @@ struct ProviderSettingsView: View {
     private func loadKey() {
         apiKey = APIKeyStore.load(providerID: viewModel.settings.selectedProviderID) ?? ""
         keyStatus = nil
+    }
+
+    private func loadSearchKeys() {
+        tavilyKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? ""
+        braveKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? ""
+        searchKeyStatus = nil
+    }
+
+    private func saveSearchKey(_ key: String, featureKey: String) {
+        do {
+            try APIKeyStore.saveFeatureKey(key, name: featureKey)
+            searchKeyStatus = "Key saved in Keychain"
+        } catch {
+            searchKeyStatus = error.localizedDescription
+        }
     }
 
     private func saveKey(_ providerID: UUID) {

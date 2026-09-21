@@ -4,6 +4,13 @@ import Security
 enum APIKeyStore {
     private static let service = "com.tristanmcinnis.quick-launch.provider-api-keys"
 
+    /// Stable account names for keys that are not tied to an inference
+    /// provider. Prefixed so they can never collide with a provider UUID.
+    enum FeatureKey {
+        static let tavilySearch = "websearch.tavily"
+        static let braveSearch = "websearch.brave"
+    }
+
     /// Service names used by earlier builds. Keys saved there are read once
     /// and copied to `service`, so a rename never strands a provider key.
     static let legacyServices = [
@@ -91,6 +98,61 @@ enum APIKeyStore {
                 throw APIKeyStoreError.keychain(error.status)
             }
         }
+    }
+
+    // MARK: - Feature keys
+
+    /// Reads a key stored under a stable feature name (for example
+    /// `FeatureKey.tavilySearch`). Separate from provider keys so the search
+    /// backends never need a fabricated provider UUID.
+    static func loadFeatureKey(
+        _ name: String,
+        keychain: any KeychainStoring = SystemKeychainStore()
+    ) -> String? {
+        do {
+            guard let data = try keychain.read(service: service, account: featureAccount(name)) else {
+                return nil
+            }
+            return String(data: data, encoding: .utf8)
+        } catch {
+            AppLog.persistence.error(
+                "Read feature key from Keychain failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    static func saveFeatureKey(
+        _ key: String,
+        name: String,
+        keychain: any KeychainStoring = SystemKeychainStore()
+    ) throws {
+        do {
+            // This Mac only. Do not sync search secrets through iCloud Keychain.
+            try keychain.write(
+                Data(key.utf8),
+                service: service,
+                account: featureAccount(name),
+                options: .thisMacOnly
+            )
+        } catch {
+            throw APIKeyStoreError.keychain(error.status)
+        }
+    }
+
+    static func deleteFeatureKey(
+        _ name: String,
+        keychain: any KeychainStoring = SystemKeychainStore()
+    ) throws {
+        do {
+            try keychain.delete(service: service, account: featureAccount(name))
+        } catch {
+            throw APIKeyStoreError.keychain(error.status)
+        }
+    }
+
+    private static func featureAccount(_ name: String) -> String {
+        "feature:" + name
     }
 }
 

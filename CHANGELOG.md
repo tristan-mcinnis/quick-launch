@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — 2026-09-21 (searchable web backends)
+
+- **The web-search provider is now a real choice, not four names for one
+  service.** Automatic / Google / Bing were all the self-hosted SearXNG on
+  vault-vps, only with a different engine set. The picker in **Settings ›
+  Models › Web search** and `⌘K` › **Search providers** now offers Google,
+  Bing, DuckDuckGo, and News through that stack, plus **Tavily** and **Brave**
+  called directly from the app with a Keychain key.
+
+  **Automatic** is the Pi lane order: Tavily when a Tavily key is stored, then
+  the self-hosted SearXNG, then Brave when a Brave key is stored. A backend is
+  skipped when its key is missing and fallen through when it throws or returns
+  nothing, so a SearchXNG outage no longer loses the answer to a dead free
+  stack. Explicit Tavily or Brave without a key says so instead of failing
+  quietly.
+
+  The two keys sit in the same owner-only Keychain as provider keys, under
+  stable feature names rather than a fabricated provider UUID. They are never
+  written to settings, logs, or the repository. Tavily and Brave send the query
+  to that provider; SearXNG stays on the private VPS.
+
 ## Unreleased — 2026-09-20 (the `/` palette)
 
 - **Typing `/` in the composer now opens the command list.** The placeholder

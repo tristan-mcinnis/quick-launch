@@ -156,7 +156,7 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 | `recall_open_tasks()` | the complete open backlog |
 | `search_vault(query, mode)` | the Vault Search lane: current, reconcile, history, or portfolio |
 | `read_skill(name)` | a `SKILL.md` from the skills folder, capped at 12,000 characters |
-| `search_web(query)` | the self-hosted search service |
+| `search_web(query)` | the chosen web-search backend |
 
 - The model is told to use memory and the vault only when you ask about your own
   notes, projects, clients, decisions, or files, and a skill when you name one
@@ -420,6 +420,11 @@ failures or cancellations, successful command actions, and hotkey runs.
   set it, and the choice follows you between models that take one.
 - API keys are stored in the macOS Keychain and are not synced through iCloud.
   Provider settings, model choices, and actions use local `UserDefaults`.
+- Web search has its own provider choice (Settings › Models › Web search), shared
+  by Quick AI, AI Chat, and the Translator: Google, Bing, DuckDuckGo, and News
+  through the self-hosted SearXNG, Tavily and Brave called directly, or Automatic
+  running Tavily, then SearXNG, then Brave. Tavily and Brave keys are stored in
+  the same owner-only Keychain as provider keys.
 - Local model discovery scans the local server's model folder without starting
   it.
 
@@ -432,8 +437,10 @@ failures or cancellations, successful command actions, and hotkey runs.
 - Source-only turns do not silently widen to unrelated history, memory, vault,
   web, or skills.
 - The memory and skill tools read local files only. The vault tool sends its
-  query over SSH to the private VPS. What a tool returns goes to the chat's
-  model while it writes that answer.
+  query over SSH to the private VPS. SearXNG web search does the same. A
+  directly selected Tavily or Brave backend sends the query to that third
+  party. What a tool returns goes to the chat's model while it writes that
+  answer.
 - Chat history and source blobs are local and owner-only. Submitted material is
   saved before provider execution; a save failure keeps the draft and blocks
   Send.

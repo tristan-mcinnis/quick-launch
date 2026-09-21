@@ -143,4 +143,23 @@ struct KeychainStoreTests {
             )
         }
     }
+
+    @Test func featureKeysRoundTripWithoutDisturbingProviderKeys() throws {
+        let keychain = InMemoryKeychainStore()
+        let provider = UUID()
+        try APIKeyStore.save("provider-key", providerID: provider, keychain: keychain)
+
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == nil)
+        try APIKeyStore.saveFeatureKey("tvly-key", name: APIKeyStore.FeatureKey.tavilySearch, keychain: keychain)
+        try APIKeyStore.saveFeatureKey("brave-key", name: APIKeyStore.FeatureKey.braveSearch, keychain: keychain)
+
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == "tvly-key")
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch, keychain: keychain) == "brave-key")
+        #expect(APIKeyStore.load(providerID: provider, keychain: keychain) == "provider-key")
+
+        try APIKeyStore.deleteFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain)
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: keychain) == nil)
+        #expect(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch, keychain: keychain) == "brave-key")
+        #expect(APIKeyStore.load(providerID: provider, keychain: keychain) == "provider-key")
+    }
 }
