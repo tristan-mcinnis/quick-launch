@@ -808,6 +808,76 @@ struct QuickAIKeyboardTests {
         #expect(!viewModel.isCatalogActionPanePresented)
         #expect(viewModel.isRecentChatsPresented, "Escape closed the pane and nothing else")
     }
+
+    // MARK: - Editing keys
+
+    /// The launcher panel is key with no Edit menu, so ⌘A and ⌘C must reach
+    /// the focused text view through the panel's own routing.
+    private func editingPanel() -> (KeyablePanel, RecordingTextView) {
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 80),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        let editor = RecordingTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 80))
+        editor.isEditable = true
+        editor.string = "the quick brown fox"
+        panel.contentView = editor
+        return (panel, editor)
+    }
+
+    private func editingKeyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
+        ))
+    }
+
+    @Test func commandASelectsAllInTheFocusedTextView() throws {
+        let (panel, editor) = editingPanel()
+        #expect(panel.makeFirstResponder(editor))
+
+        #expect(try panel.performKeyEquivalent(with: editingKeyEvent("a", keyCode: 0)))
+        #expect(
+            editor.selectedRange() == NSRange(location: 0, length: (editor.string as NSString).length),
+            "⌘A selected the whole field"
+        )
+    }
+
+    @Test func commandCCopiesFromTheFocusedTextView() throws {
+        let (panel, editor) = editingPanel()
+        #expect(panel.makeFirstResponder(editor))
+
+        #expect(try panel.performKeyEquivalent(with: editingKeyEvent("c", keyCode: 8)))
+        #expect(editor.copyCount == 1, "⌘C reached the text view, not only the panel")
+    }
+
+    @Test func commandXCutsAnEditableFieldButNeverAnAnswer() throws {
+        let (panel, editor) = editingPanel()
+        #expect(panel.makeFirstResponder(editor))
+
+        #expect(try panel.performKeyEquivalent(with: editingKeyEvent("x", keyCode: 7)))
+        #expect(editor.cutCount == 1, "⌘X reached the editable field")
+
+        // A read-only answer must never be cut: the guard falls through and
+        // the panel does not consume the key.
+        let answer = RecordingTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 80))
+        answer.isEditable = false
+        answer.string = "an answer"
+        panel.contentView = answer
+        #expect(panel.makeFirstResponder(answer))
+        #expect(!(try panel.performKeyEquivalent(with: editingKeyEvent("x", keyCode: 7))))
+        #expect(answer.cutCount == 0)
+    }
 }
 
 // MARK: - Harness
@@ -1010,4 +1080,18 @@ private final class KeyboardApplicationCatalog: ApplicationCatalogServicing {
     ]
 
     func launch(_ application: LaunchableApplication) -> Bool { true }
+}
+
+/// A text view that records Copy without touching the system pasteboard.
+private final class RecordingTextView: NSTextView {
+    private(set) var copyCount = 0
+    private(set) var cutCount = 0
+
+    override func copy(_ sender: Any?) {
+        copyCount += 1
+    }
+
+    override func cut(_ sender: Any?) {
+        cutCount += 1
+    }
 }

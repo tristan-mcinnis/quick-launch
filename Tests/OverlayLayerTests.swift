@@ -127,6 +127,20 @@ struct OverlayLayerTests {
         #expect(vm.topLayer == .quickLinkInput)
     }
 
+    @Test("A captured background selection does not hijack Return on another row")
+    func launchSelectionDoesNotForceAttachmentSubmit() {
+        let (vm, _) = makeModel()
+        vm.launchSelection = QuickViewModel.LaunchSelection(text: "background passage", appName: "Editor")
+        vm.input = ""
+
+        // A background selection rides with the model only when the model is
+        // the chosen destination. The highlighted launcher row still wins.
+        guard case .launcherRow = vm.classifySubmit() else {
+            Issue.record("expected a launcher row, got \(vm.classifySubmit())")
+            return
+        }
+    }
+
     @Test("Bare Return on an answer does nothing")
     func bareReturnOnAnswerIsNoOp() async {
         let (vm, presenter) = makeModel()

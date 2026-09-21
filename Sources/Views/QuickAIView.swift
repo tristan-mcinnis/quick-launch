@@ -95,6 +95,26 @@ struct QuickAIView: View {
             }
             QuickAITitleBlock(viewModel: viewModel)
             Spacer(minLength: House.Spacing.sm)
+            // Recent Chats, one click away. The list, its keys and its menu
+            // row all existed and were still undiscoverable, so the header
+            // carries a visible way in. It toggles: while the list is up the
+            // same control returns to the thread.
+            if viewModel.canOpenRecentChats || viewModel.isRecentChatsPresented {
+                QuickAIGlyphButton(
+                    symbol: viewModel.isRecentChatsPresented
+                        ? "bubble.left.and.text.bubble.right"
+                        : "clock.arrow.circlepath",
+                    font: AQDesign.TypeToken.label,
+                    color: AQDesign.ColorToken.textSecondary,
+                    label: viewModel.isRecentChatsPresented ? "Back to chat" : "Recent Chats",
+                    help: viewModel.isRecentChatsPresented
+                        ? "Back to chat (esc)"
+                        : "Recent Chats (\(viewModel.shortcutLabel(for: .recentChats)))"
+                ) {
+                    viewModel.toggleRecentChats()
+                }
+                .accessibilityValue(viewModel.isRecentChatsPresented ? "Open" : "Closed")
+            }
             // Raycast's expand glyph is a boxed up-right arrow; this is the
             // nearest SF Symbol. As in Raycast it moves the chat to the AI
             // Chat window (`⌘J`), a labelled button with its key, so moving a

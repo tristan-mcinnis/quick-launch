@@ -3200,7 +3200,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 
     func classifySubmit() -> SubmitIntent {
-        if hasPendingChatContext { return .attachment }
+        // Only an explicit attachment forces the model-bound submission. A
+        // captured background selection rides with the model when the model
+        // is the chosen destination; it must not override Return on every
+        // other launcher row (`hasPendingChatContext` counts both).
+        if hasPendingAttachment { return .attachment }
         if inputMode != nil { return .inputMode }
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if pendingQuickLink == nil, exactCommandAlias() != nil { return .commandAlias }

@@ -102,6 +102,27 @@ final class KeyablePanel: NSPanel {
            commandCHandler?() == true {
             return true
         }
+        // An accessory app has no Edit menu while the launcher panel is key,
+        // so the system never delivers Select All, Copy or Cut to the field
+        // editor or to an answer's text view. Route them to the first
+        // responder by hand, as the Translator panel does. Paste and undo
+        // keep their own composer handlers below.
+        if event.type == .keyDown, modifiers == [.command],
+           let editor = firstResponder as? NSTextView {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "a":
+                editor.selectAll(nil)
+                return true
+            case "c":
+                editor.copy(nil)
+                return true
+            case "x" where editor.isEditable:
+                editor.cut(nil)
+                return true
+            default:
+                break
+            }
+        }
         if event.type == .keyDown,
            shortcuts.matches(.commandPalette, keyCode: event.keyCode, modifiers: modifiers) {
             commandKHandler?()

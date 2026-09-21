@@ -103,6 +103,22 @@ struct AskAITests {
         #expect(ids.contains("catalog:snippets"))
     }
 
+    @Test func launchSelectionRidesWithAskAIWithoutHijackingAnotherRow() async {
+        let (vm, catalog, ai) = make()
+        await ai.setResponses([StreamDelta(text: "Answer", finishReason: "stop")])
+        vm.launchSelection = QuickViewModel.LaunchSelection(text: "background passage", appName: "Editor")
+        vm.input = "what is the capital of france"
+
+        // The captured selection is context, not an attachment: Return still
+        // runs the highlighted row rather than forcing a model-bound send.
+        #expect(vm.classifySubmit() != .attachment)
+        // And when that row does reach the model, the selection rides with it.
+        await vm.submitResolvingFuzzyAlias()
+        let prompt = await ai.lastPrompt ?? ""
+        #expect(prompt.contains("background passage"), "the selection reached the model")
+        #expect(catalog.launched == nil)
+    }
+
     @Test func tabHandsTheTypedTextToQuickAIAndSendsIt() async {
         let (vm, catalog, ai) = make()
         vm.input = "hi"

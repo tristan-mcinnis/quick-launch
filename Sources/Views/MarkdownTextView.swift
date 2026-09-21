@@ -130,6 +130,18 @@ private struct StreamingCaret: View {
     }
 }
 
+/// The answer prose's text view. It refuses window dragging so a drag on an
+/// answer selects text instead of moving the launcher panel: the panel is
+/// movable by its background, and this view draws none, so the default
+/// `mouseDownCanMoveWindow` would hand the drag to the window.
+final class AnswerTextView: NSTextView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// A click that lands on an answer while the panel is not yet key selects
+    /// on the first press, as reading software does.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// One markdown run: the rendered attributed string in a non-editable,
 /// selectable text view that reports the height it needs at the answer width.
 private struct ProseSegmentView: NSViewRepresentable {
@@ -149,7 +161,7 @@ private struct ProseSegmentView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSTextView {
-        let textView = NSTextView()
+        let textView = AnswerTextView()
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false

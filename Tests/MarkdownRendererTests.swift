@@ -459,4 +459,15 @@ struct MarkdownRendererTests {
         // Should have double newline between paragraphs
         #expect(text.contains("First paragraph.\n\nSecond paragraph."))
     }
+
+    // MARK: - Answer selection
+
+    @Test func answerTextViewRefusesWindowDrag() {
+        // The launcher panel is movable by its background and the prose view
+        // draws no background, so without this a drag moves the panel instead
+        // of selecting the answer.
+        let textView = AnswerTextView()
+        #expect(!textView.mouseDownCanMoveWindow)
+        #expect(textView.acceptsFirstMouse(for: nil))
+    }
 }
