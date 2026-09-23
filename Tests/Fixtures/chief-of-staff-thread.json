@@ -1,5 +1,5 @@
 {
-  "createdAt": "2026-09-23T12:58:26.123Z",
+  "createdAt": "2026-09-23T13:32:37.057Z",
   "id": "chief-of-staff-main",
   "schemaVersion": 1,
   "sessionLinks": [],
@@ -46,8 +46,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "4610686e-e359-4be8-bc7b-ef6e9dd41cbe",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "5012fee1-e85d-472a-9451-d5bdcf06d437",
       "role": "assistant",
       "sessionLinks": [],
       "text": "The readout moved to Friday.\nI propose: log it.",
@@ -63,8 +63,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "4fdd0ee2-697d-439e-95a3-a27eb4488928",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "463f1be5-0350-48a4-953c-28678c742a3c",
       "role": "system",
       "sessionLinks": [],
       "text": "Done: ok status_note",
@@ -96,13 +96,13 @@
             }
           ],
           "created": "2026-09-23T09:05:00.000Z",
-          "due": "2026-09-30",
+          "due": "2026-09-24",
           "event_kind": "email",
-          "headline": "Budget approved, quote due Tuesday",
+          "headline": "Sam approved the budget; confirm the quote date",
           "id": "cc33dd44",
           "importance": "client",
           "kind": "proposal",
-          "message": "Budget is approved.\nI propose: log it, add two tasks, draft a reply.",
+          "message": "Budget is approved.\nI propose: log it, add a task, draft a reply, close the sign-off task.",
           "paths": [
             "kb/databases/emails/2026/09/a.md"
           ],
@@ -112,15 +112,15 @@
           "status": "pending",
           "tier": "decide",
           "title": "RE: Budget",
-          "why": ""
+          "why": "Sam waits on your reply before booking the room."
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "c0ac2b96-1323-4ee4-b06c-29e45143a5e8",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "b60bf909-d8d1-461b-853e-4f826afc735f",
       "role": "assistant",
       "sessionLinks": [],
-      "text": "Budget is approved.\nI propose: log it, add two tasks, draft a reply.",
+      "text": "Budget is approved.\nI propose: log it, add a task, draft a reply, close the sign-off task.",
       "toolRounds": []
     },
     {
@@ -131,8 +131,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "f2464bdf-050a-45c7-b262-a640540d66a1",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "550c125e-9503-411f-9df6-11dfbc3571b3",
       "role": "user",
       "sessionLinks": [],
       "text": "What is still open on sample-project?",
@@ -146,8 +146,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "93345a03-b01f-4c5e-bae7-53163482d803",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "590fcdbe-b503-42a8-a696-17e5f1d76fe1",
       "role": "assistant",
       "sessionLinks": [],
       "text": "One proposal waits: the budget approval.",
@@ -161,7 +161,7 @@
           "created": "2026-09-23T09:20:00.000Z",
           "due": null,
           "event_kind": "email",
-          "headline": "",
+          "headline": "A newsletter arrived",
           "id": "dd00ee11",
           "importance": "admin",
           "kind": "proposal",
@@ -173,15 +173,15 @@
           "reason": "",
           "sender": "Sam Client <sam@example.com>",
           "status": "dismissed",
-          "tier": "today",
+          "tier": "fyi",
           "title": "Newsletter",
           "verdict": "skip",
           "why": ""
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "c4c00344-f6f6-496f-9856-e02202037081",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "0704e3bd-d59a-4369-b57e-497be9ccceb3",
       "role": "assistant",
       "sessionLinks": [],
       "text": "A newsletter arrived.",
@@ -201,7 +201,7 @@
           "created": "2026-09-23T09:30:00.000Z",
           "due": null,
           "event_kind": "slack",
-          "headline": "",
+          "headline": "Alex asks who owns the ops rota",
           "id": "ee55ff66",
           "importance": "team",
           "kind": "proposal",
@@ -209,7 +209,7 @@
           "paths": [
             "kb/databases/emails/2026/09/a.md"
           ],
-          "project": "",
+          "project": "ops-desk",
           "reason": "",
           "sender": "Alex",
           "status": "pending",
@@ -219,8 +219,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "00cefe49-b577-4b57-8926-3d20253f0d33",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "9e12d98d-ec75-4c3a-8ce1-13768a947c84",
       "role": "assistant",
       "sessionLinks": [],
       "text": "A question in #ops waits for you.",
@@ -234,7 +234,7 @@
           "created": "2026-09-23T09:40:00.000Z",
           "due": null,
           "event_kind": "email",
-          "headline": "",
+          "headline": "Pay the studio invoice",
           "id": "ff77aa88",
           "importance": "admin",
           "kind": "proposal",
@@ -253,8 +253,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "a3c30e4a-1a47-4ac7-af4d-1f272de9fbf1",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "86ee901a-b491-4fde-8193-5084ef4b215f",
       "role": "assistant",
       "sessionLinks": [],
       "text": "Invoice due next month.",
@@ -287,11 +287,187 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.123Z",
-      "id": "683e3219-725c-4fb3-b5f3-ef8c04e5a7aa",
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "e180fb2a-4229-42e6-aabd-bdcd29643189",
       "role": "assistant",
       "sessionLinks": [],
       "text": "All jobs are green.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T10:00:00.000Z",
+          "due": null,
+          "event_kind": "health",
+          "headline": "2 background jobs are failing.",
+          "id": "11aa22bb",
+          "importance": "system",
+          "kind": "proposal",
+          "message": "2 background jobs are failing.\nFailing: memory check, media backup.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": null,
+          "reason": "",
+          "red": [
+            "com.tristan.memory-health",
+            "com.tristan.vault-heavy-backup"
+          ],
+          "sender": "",
+          "status": "pending",
+          "tier": "system",
+          "title": "System health",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "1fa5e8fd-0190-4db2-9606-4b1ccdb45b3a",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "2 background jobs are failing.\nFailing: memory check, media backup.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-22T10:00:00.000Z",
+          "due": null,
+          "event_kind": "email",
+          "headline": "Sam owes the interview count",
+          "id": "33cc44dd",
+          "importance": "client",
+          "kind": "proposal",
+          "message": "Sam said he will confirm how many interviews he attends.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam",
+          "status": "pending",
+          "tier": "waiting",
+          "title": "Interview count",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "9279b0e9-fd2d-4fb8-8b76-1c632e923e10",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Sam said he will confirm how many interviews he attends.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T10:10:00.000Z",
+          "due": null,
+          "event_kind": "email",
+          "headline": "Priya shared the final deck",
+          "id": "55ee66ff",
+          "importance": "team",
+          "kind": "proposal",
+          "message": "Priya shared the final deck in the team folder.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Priya",
+          "status": "pending",
+          "tier": "fyi",
+          "title": "Deck shared",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T13:32:37.057Z",
+      "id": "7fbf4f41-6677-440e-9c73-6cda91842d0e",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Priya shared the final deck in the team folder.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [
+            {
+              "evidence": "kb/databases/emails/2026/09/c.md",
+              "task_id": "T-7",
+              "type": "task_close",
+              "what": "Sent the transcript on 2026-09-23."
+            }
+          ],
+          "created": "2026-09-23T10:20:00.000Z",
+          "due": null,
+          "event_kind": "ledger_close",
+          "headline": "Your 20:16 mail delivers the transcript",
+          "id": "77aa88bb",
+          "importance": "client",
+          "kind": "proposal",
+          "message": "You mailed Sam the transcript.\nNext: close the task.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam Client <sam@example.com>",
+          "status": "pending",
+          "tier": "today",
+          "title": "Sent mail proves a task",
+          "why": "The transcript task is still open."
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T13:32:37.058Z",
+      "id": "24c51560-75b1-4d97-8835-62f38c9f4d3c",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "You mailed Sam the transcript.\nNext: close the task.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T10:30:00.000Z",
+          "due": "2026-09-24",
+          "event_kind": "ledger_due",
+          "headline": "The stimulus photos are due tomorrow",
+          "id": "88bb99cc",
+          "importance": "client",
+          "kind": "proposal",
+          "message": "Finalise the stimulus photos is due tomorrow with no progress logged.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam Client <sam@example.com>",
+          "status": "pending",
+          "tier": "today",
+          "title": "Due tomorrow",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T13:32:37.058Z",
+      "id": "34d4e1e6-1162-401b-bdd7-08055a31e50e",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Finalise the stimulus photos is due tomorrow with no progress logged.",
       "toolRounds": []
     },
     {
@@ -304,8 +480,8 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.197Z",
-      "id": "ad00a243-7e4c-40d8-bcf4-176622b85053",
+      "createdAt": "2026-09-23T13:32:37.107Z",
+      "id": "3004d5c2-3363-4404-9323-f6cf15135873",
       "role": "user",
       "sessionLinks": [],
       "text": "Draft the reply for me?",
@@ -320,13 +496,13 @@
         }
       },
       "attachments": [],
-      "createdAt": "2026-09-23T12:58:26.256Z",
-      "id": "57cc7879-dcc7-49ef-9570-fb47a17f7a79",
+      "createdAt": "2026-09-23T13:32:37.151Z",
+      "id": "6aeea103-88c9-4fd2-bcc6-87c719010f59",
       "role": "assistant",
       "sessionLinks": [],
       "text": "Press Edit on card cc33dd44 and change the reply body.",
       "toolRounds": []
     }
   ],
-  "updatedAt": "2026-09-23T12:58:26.256Z"
+  "updatedAt": "2026-09-23T13:32:37.151Z"
 }

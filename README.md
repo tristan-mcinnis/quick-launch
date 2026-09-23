@@ -44,9 +44,11 @@ and actions can be added, instead of waiting on someone else's roadmap.
 - Read-only tools cover local notes and tasks, project evidence, skills, and
   web search. Each tool switches on or off per chat.
 - The Chief of Staff (`cos`) has a pinned conversation at the top of the AI
-  Chat list: its waiting cards sit above the chat, and `⌘↩` Do it, `⌘E` Edit
-  and `⌘⌫` Skip answer the focused card. Its notifications come from Quick
-  Launch. Type `cos` in the launcher to open it.
+  Chat list: health in its status line, then DECIDE, TODAY, WAITING ON
+  OTHERS, PROJECTS, LATER and FYI above the chat, or a Board (`⌘2`). On a
+  card, `⌘↩` Do it, `⌘E` Edit, `⌘L` Later, `⌘⌫` No, `⌘R` Bring back; `⌘N`
+  adds a task. Its notifications come from Quick Launch. Type `cos` in the
+  launcher to open it.
 
 **Capture and screen**
 

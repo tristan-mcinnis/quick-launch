@@ -7,7 +7,19 @@ enum CosCommand: Sendable, Equatable {
     case status
     case doIt(id: String)
     case edit(id: String, actions: [ProposalAction])
-    case skip(id: String, reason: String?)
+    /// No: nothing runs; recorded as a no (`cos no`, `skip` is its alias).
+    case no(id: String, reason: String?)
+    /// Later: hidden until `until`, then back (`tonight`, `tomorrow`,
+    /// `nextweek`, or `YYYY-MM-DD[THH:MM]`).
+    case later(id: String, until: String)
+    /// Bring back a Later, No, handled or expired card now.
+    case reopen(id: String)
+    /// The active projects strip.
+    case projects
+    /// The canonical task tree's open lanes for one project.
+    case tasks(project: String)
+    /// A new canonical task (`task-tree.py add` behind `cos add`).
+    case add(title: String, project: String, due: String?)
     /// Record a chat turn this app made. The text goes on stdin (`-`), so a
     /// long answer never meets an argument limit.
     case append(role: Role, text: String, meta: [String: String])
@@ -26,11 +38,25 @@ enum CosCommand: Sendable, Equatable {
             return ["do", id]
         case .edit(let id, let actions):
             return ["edit", id, "--actions-json", try ProposalAction.actionsJSON(actions)]
-        case .skip(let id, let reason):
+        case .no(let id, let reason):
             guard let reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty else {
-                return ["skip", id]
+                return ["no", id]
             }
-            return ["skip", id, "--reason", reason]
+            return ["no", id, "--reason", reason]
+        case .later(let id, let until):
+            return ["later", id, "--until", until]
+        case .reopen(let id):
+            return ["reopen", id]
+        case .projects:
+            return ["projects", "--json"]
+        case .tasks(let project):
+            return ["tasks", "--project", project]
+        case .add(let title, let project, let due):
+            // `--` would be safer, but argparse reads a leading dash in the
+            // title as an option; one is refused before it gets here.
+            var arguments = ["add", title, "--project", project]
+            if let due, !due.isEmpty { arguments += ["--due", due] }
+            return arguments
         case .append(let role, _, let meta):
             var arguments = ["append", "--role", role.rawValue, "--surface", ChiefOfStaffThread.surface]
             if !meta.isEmpty {
@@ -52,8 +78,8 @@ enum CosCommand: Sendable, Equatable {
     /// vault writers (an Outlook draft can take a while).
     var timeout: TimeInterval {
         switch self {
-        case .status, .skip, .append: 20
-        case .doIt, .edit: 180
+        case .status, .no, .later, .reopen, .append, .projects, .tasks: 20
+        case .doIt, .edit, .add: 180
         }
     }
 }
@@ -129,5 +155,72 @@ struct CosStatus: Sendable, Equatable, Decodable {
 
     static func decode(_ stdout: String) throws -> CosStatus {
         try JSONDecoder().decode(CosStatus.self, from: Data(stdout.utf8))
+    }
+}
+
+/// One row of `cos projects --json`: an active project, its next due date,
+/// open and overdue tasks, cards waiting on it, and a risk word.
+struct CosProject: Sendable, Equatable, Identifiable, Decodable {
+    var slug: String
+    var name: String
+    var phase: String?
+    var openTasks: Int
+    var nextDue: String?
+    var overdue: Int
+    var waitingCards: Int
+    var laterCards: Int
+    /// `red`, `amber`, or `ok`.
+    var risk: String
+
+    var id: String { slug }
+
+    private enum CodingKeys: String, CodingKey {
+        case slug, name, phase, risk, overdue
+        case openTasks = "open_tasks"
+        case nextDue = "next_due"
+        case waitingCards = "waiting_cards"
+        case laterCards = "later_cards"
+    }
+
+    init(slug: String, name: String, phase: String? = nil, openTasks: Int = 0, nextDue: String? = nil,
+         overdue: Int = 0, waitingCards: Int = 0, laterCards: Int = 0, risk: String = "ok") {
+        self.slug = slug
+        self.name = name
+        self.phase = phase
+        self.openTasks = openTasks
+        self.nextDue = nextDue
+        self.overdue = overdue
+        self.waitingCards = waitingCards
+        self.laterCards = laterCards
+        self.risk = risk
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        slug = try c.decode(String.self, forKey: .slug)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? slug
+        phase = try c.decodeIfPresent(String.self, forKey: .phase)
+        openTasks = try c.decodeIfPresent(Int.self, forKey: .openTasks) ?? 0
+        nextDue = try c.decodeIfPresent(String.self, forKey: .nextDue)
+        overdue = try c.decodeIfPresent(Int.self, forKey: .overdue) ?? 0
+        waitingCards = try c.decodeIfPresent(Int.self, forKey: .waitingCards) ?? 0
+        laterCards = try c.decodeIfPresent(Int.self, forKey: .laterCards) ?? 0
+        risk = try c.decodeIfPresent(String.self, forKey: .risk) ?? "ok"
+    }
+
+    static func decodeList(_ stdout: String) throws -> [CosProject] {
+        try JSONDecoder().decode([CosProject].self, from: Data(stdout.utf8))
+    }
+}
+
+/// One open task of the canonical task tree (`cos tasks --project P`).
+struct CosTask: Sendable, Equatable, Identifiable, Decodable {
+    var id: String
+    var lane: String
+    var title: String
+    var due: String?
+
+    static func decodeList(_ stdout: String) throws -> [CosTask] {
+        try JSONDecoder().decode([CosTask].self, from: Data(stdout.utf8))
     }
 }

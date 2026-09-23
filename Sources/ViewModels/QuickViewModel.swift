@@ -6401,7 +6401,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             resetQuickAISize()
         case .copyMessage, .captureMessage, .searchSettings:
             return
-        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop, .chiefOfStaff:
+        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop, .chiefOfStaff, .newTask:
             chatWindowHost?.performWindowSurfaceAction(action)
             // Find and the chat list take the focus themselves.
             return

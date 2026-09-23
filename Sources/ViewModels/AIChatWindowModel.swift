@@ -67,6 +67,8 @@ protocol AIChatWindowPresenting: AnyObject {
         case cards
         /// A waiting card's Edit fields.
         case cardEdit
+        /// The Chief of Staff's New task sheet or project picker.
+        case cosForm
         /// A field the window does not route: the `⌘K` palette's search.
         /// Return and ⇧↩ are that field's own.
         case other
@@ -248,7 +250,7 @@ protocol AIChatWindowPresenting: AnyObject {
 
     /// The keyboard onto the waiting cards: `id`'s, or the newest.
     func focusCards(_ id: String? = nil) {
-        guard let chiefOfStaff, !chiefOfStaff.waiting.isEmpty else { return }
+        guard let chiefOfStaff, chiefOfStaff.firstFocusable != nil || id != nil else { return }
         chiefOfStaff.focusCard(id)
         focus = .cards
     }
@@ -258,20 +260,33 @@ protocol AIChatWindowPresenting: AnyObject {
         chiefOfStaff?.releaseCardFocus()
     }
 
-    /// The Chief of Staff's keys (↑↓ onto and over the cards, ⌘↩ Do it,
-    /// ⌘E Edit, ⌘⌫ Skip, Escape back), while its conversation is open.
-    /// True when the key was used.
+    /// The Chief of Staff's keys, while its conversation is open: ↑↓ onto
+    /// and over the cards (←→ between board columns), ⌘↩ Do it, ⌘E Edit,
+    /// ⌘L Later, ⌘⌫ No, ⌘R Bring back, esc back; and anywhere in it ⌘1 List,
+    /// ⌘2 Board, ⌘N New task, ⌘I health, ⇧⌘P project, ⇧⌘↩ Do all TODAY,
+    /// ⇧⌘T tasks. True when the key was used; every other chat is untouched.
     func handleChiefOfStaffKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard isChiefOfStaffOpen, let chiefOfStaff else { return false }
+        if focus == .cosForm {
+            // The sheet's fields type; ⌘↩ adds the task.
+            guard key?.isReturn == true, modifiers.overlayRelevant == [.command], chiefOfStaff.newTask != nil else { return false }
+            chiefOfStaff.submitNewTask()
+            if chiefOfStaff.newTask == nil { returnFromCosForm() }
+            return true
+        }
         let place: ChiefOfStaffKeys.Place
         switch focus {
         case .cards:
-            place = .card
+            if let menu = chiefOfStaff.laterMenu {
+                place = menu.isPicking ? .laterPicking : .laterMenu
+            } else {
+                place = .card(board: chiefOfStaff.viewMode == .board)
+            }
         case .cardEdit:
             place = .editing
         case .composer:
             // A chooser, the palette, or the question card over the
-            // composer keeps its own arrows.
+            // composer keeps its own keys.
             switch chat.topLayer {
             case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser, .modelChooser,
                  .assistantChooser, .captureChooser, .addContextMenu, .slashCommandPalette, .recentChats:
@@ -288,14 +303,21 @@ protocol AIChatWindowPresenting: AnyObject {
             characters: characters,
             modifiers: modifiers,
             place: place,
-            hasWaiting: !chiefOfStaff.waiting.isEmpty
+            hasCards: chiefOfStaff.firstFocusable != nil
         ) else { return false }
+        perform(action, on: chiefOfStaff)
+        return true
+    }
+
+    private func perform(_ action: ChiefOfStaffKeys.Action, on chiefOfStaff: ChiefOfStaffModel) {
         switch action {
         case .focusCards:
             focusCards()
         case .move(let delta):
             chiefOfStaff.moveCardFocus(delta)
             if chiefOfStaff.focusedCardID == nil { focusComposer() }
+        case .moveColumn(let delta):
+            chiefOfStaff.moveColumnFocus(delta)
         case .toComposer:
             focusComposer()
         case .doIt:
@@ -303,16 +325,51 @@ protocol AIChatWindowPresenting: AnyObject {
         case .edit:
             chiefOfStaff.editFocused()
             if chiefOfStaff.isEditingFocusedCard { focus = .cardEdit }
-        case .skip:
-            chiefOfStaff.skipFocused()
+        case .later:
+            chiefOfStaff.openLaterMenu()
+        case .no:
+            chiefOfStaff.noFocused()
+        case .bringBack:
+            chiefOfStaff.bringBackFocused()
         case .runEdit:
             chiefOfStaff.doFocused()
             focus = .cards
         case .cancelEdit:
             if let id = chiefOfStaff.focusedCardID { chiefOfStaff.cancelEdit(id) }
             focus = .cards
+        case .menuMove(let delta):
+            chiefOfStaff.moveLaterMenu(delta)
+        case .menuPick(let choice):
+            chiefOfStaff.chooseLater(choice)
+        case .menuClose:
+            chiefOfStaff.laterMenu = nil
+        case .showList:
+            chiefOfStaff.viewMode = .list
+        case .showBoard:
+            chiefOfStaff.viewMode = .board
+        case .newTask:
+            chiefOfStaff.openNewTask()
+            focus = .cosForm
+        case .toggleHealth:
+            chiefOfStaff.isHealthDetailShown.toggle()
+        case .pickProject:
+            chiefOfStaff.toggleProjectPicker()
+            if chiefOfStaff.projectPicker != nil { focus = .cosForm }
+        case .doAllToday:
+            chiefOfStaff.doAllToday()
+        case .toggleTasks:
+            chiefOfStaff.toggleTasks()
         }
-        return true
+    }
+
+    /// The sheet or picker closed: the keyboard goes back to the card it
+    /// came from, else the composer.
+    private func returnFromCosForm() {
+        if chiefOfStaff?.focusedCardID != nil {
+            focus = .cards
+        } else {
+            focusComposer()
+        }
     }
 
     // MARK: - Rail
@@ -377,9 +434,13 @@ protocol AIChatWindowPresenting: AnyObject {
         item.chatSnippet?.keepingLead(Self.railSnippetLead)
     }
 
-    /// The `⌘` number a row answers to (`⌘1`…`⌘9`), by drawn position.
+    /// The `⌘` number a row answers to (`⌘1`…`⌘9`), by drawn position
+    /// among the chats: the pinned Chief of Staff row above them takes none,
+    /// so every chat keeps the number it had.
     func railNumber(at index: Int) -> Int? {
-        index < Self.jumpRowCount ? index + 1 : nil
+        let offset = chiefOfStaffRailItem == nil ? 0 : 1
+        let position = index - offset
+        return position >= 0 && position < Self.jumpRowCount ? position + 1 : nil
     }
 
     /// What the rail says when it has no row.
@@ -478,7 +539,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// not the rail is showing.
     @discardableResult
     func jumpToRailRow(_ number: Int) -> Bool {
-        let items = railItems
+        let items = chat.chatItems(matching: railQuery)
         guard number >= 1, number <= Self.jumpRowCount, items.indices.contains(number - 1) else { return false }
         openChat(itemID: items[number - 1].itemID)
         return true
@@ -798,18 +859,24 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Window actions (⌘K)
 
     var windowSurfaceActions: [QuickAISurfaceAction] {
-        var actions: [QuickAISurfaceAction] = []
-        if chiefOfStaff != nil, !isChiefOfStaffOpen { actions.append(.chiefOfStaff) }
-        return actions + [
+        var actions: [QuickAISurfaceAction] = [
             isRailVisible ? .hideChatList : .showChatList,
             .findInChat,
             isAlwaysOnTop ? .stopKeepingOnTop : .keepOnTop,
         ]
+        // Added after the window's own rows, so their order never moves.
+        if chiefOfStaff != nil {
+            actions.append(isChiefOfStaffOpen ? .newTask : .chiefOfStaff)
+        }
+        return actions
     }
 
     func performWindowSurfaceAction(_ action: QuickAISurfaceAction) {
         switch action {
         case .chiefOfStaff: openChiefOfStaff()
+        case .newTask:
+            chiefOfStaff?.openNewTask()
+            focus = .cosForm
         case .showChatList: showRail()
         case .hideChatList: hideRail()
         case .findInChat: openFind()
@@ -836,11 +903,21 @@ protocol AIChatWindowPresenting: AnyObject {
         default:
             break
         }
-        if focus == .cardEdit, let chiefOfStaff, let id = chiefOfStaff.focusedCardID {
+        if focus == .cosForm, let chiefOfStaff {
+            chiefOfStaff.newTask = nil
+            chiefOfStaff.projectPicker = nil
+            chiefOfStaff.laterMenu = nil
+            returnFromCosForm()
+        } else if focus == .cardEdit, let chiefOfStaff, let id = chiefOfStaff.focusedCardID {
             chiefOfStaff.cancelEdit(id)
             focus = .cards
         } else if focus == .cards {
             focusComposer()
+        } else if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.isHealthDetailShown || chiefOfStaff.newTask != nil
+                    || chiefOfStaff.projectPicker != nil {
+            chiefOfStaff.isHealthDetailShown = false
+            chiefOfStaff.newTask = nil
+            chiefOfStaff.projectPicker = nil
         } else if renamingChatID != nil {
             cancelRename()
         } else if railActionsPresented {
@@ -881,7 +958,7 @@ protocol AIChatWindowPresenting: AnyObject {
         case .cards:
             // A bare Return never decides a card: ⌘↩ does.
             return true
-        case .cardEdit, .other:
+        case .cardEdit, .cosForm, .other:
             return false
         }
     }
@@ -911,7 +988,7 @@ protocol AIChatWindowPresenting: AnyObject {
             return .handled
         case .cards:
             return .handled
-        case .rail, .rename, .cardEdit, .other:
+        case .rail, .rename, .cardEdit, .cosForm, .other:
             return .ignored
         }
     }

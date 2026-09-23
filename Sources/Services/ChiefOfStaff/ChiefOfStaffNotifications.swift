@@ -18,80 +18,66 @@ struct QuietHours: Sendable, Equatable {
 
 /// How loudly one notification may interrupt.
 enum ChiefOfStaffUrgency: Sendable, Equatable {
-    /// Passes a Focus: a client email whose text names a date within 48 h.
+    /// Passes a Focus: a DECIDE card.
     case timeSensitive
-    /// A normal banner.
+    /// A normal banner: a job that just turned red.
     case active
+    /// Notification Centre only, no banner: TODAY and FYI cards.
+    case passive
 }
 
-/// What Quick Launch posts for the cards that arrived since the last read.
+/// What Quick Launch posts for what changed since the last read.
 enum ChiefOfStaffNotice: Sendable, Equatable {
-    /// One card: its own banner, grouped by project, with Do it, Skip, Open
-    /// and Reply.
+    /// One card: its own notification, grouped by project, with Do it, No,
+    /// Open and Reply.
     case card(Proposal, ChiefOfStaffUrgency)
-    /// Three or more at once: one summary, "3 new: Globex, Acme, Slack".
+    /// Three or more quiet cards at once: one summary, "3 new: Globex, Acme".
     case summary(count: Int, sources: [String], urgency: ChiefOfStaffUrgency)
+    /// Background jobs that just turned red, named.
+    case health(newlyRed: [String], headline: String)
 }
 
 /// The notification rules, pure so they are tested without a notification
-/// center: quiet hours, the digest threshold, and urgency.
+/// center: quiet hours, tiers, the digest, and new red jobs.
 enum ChiefOfStaffNotificationRules {
-    /// This many new cards in one read become one summary.
+    /// This many quiet cards in one read become one summary.
     static let summaryThreshold = 3
-    /// A date this close makes a client email time sensitive.
-    static let urgentWindow: TimeInterval = 48 * 60 * 60
 
-    /// The notices for `fresh` (cards new since the last read), none in
-    /// quiet hours.
+    /// The notices for `fresh` (cards new since the last read) and the jobs
+    /// that turned red since then; none in quiet hours. DECIDE interrupts
+    /// (time sensitive); TODAY and FYI go to Notification Centre only;
+    /// WAITING never notifies; a health card is not a card, only a job that
+    /// newly turned red is.
     static func notices(
         for fresh: [Proposal],
+        newlyRed: [String] = [],
+        healthHeadline: String = "",
         now: Date,
         quietHours: QuietHours = .standard,
         calendar: Calendar = .current
     ) -> [ChiefOfStaffNotice] {
-        guard !fresh.isEmpty, !quietHours.contains(now, calendar: calendar) else { return [] }
-        let urgencies = fresh.map { urgency(of: $0, now: now, calendar: calendar) }
-        if fresh.count >= summaryThreshold {
+        guard !quietHours.contains(now, calendar: calendar) else { return [] }
+        var notices: [ChiefOfStaffNotice] = []
+        if !newlyRed.isEmpty {
+            notices.append(.health(newlyRed: newlyRed, headline: healthHeadline))
+        }
+        let decide = fresh.filter { $0.tierKind == .decide }
+        notices += decide.map { .card($0, .timeSensitive) }
+        let quiet = fresh.filter { $0.tierKind == .today || $0.tierKind == .fyi }
+        if quiet.count >= summaryThreshold {
             var sources: [String] = []
-            for source in fresh.map(\.source) where !source.isEmpty && !sources.contains(source) {
+            for source in quiet.map(\.source) where !source.isEmpty && !sources.contains(source) {
                 sources.append(source)
             }
-            let urgency: ChiefOfStaffUrgency = urgencies.contains(.timeSensitive) ? .timeSensitive : .active
-            return [.summary(count: fresh.count, sources: sources, urgency: urgency)]
+            notices.append(.summary(count: quiet.count, sources: sources, urgency: .passive))
+        } else {
+            notices += quiet.map { .card($0, .passive) }
         }
-        return zip(fresh, urgencies).map { .card($0, $1) }
-    }
-
-    /// Time sensitive only for a client email card whose due date or text
-    /// names a date from now to 48 h ahead.
-    static func urgency(of proposal: Proposal, now: Date, calendar: Calendar = .current) -> ChiefOfStaffUrgency {
-        guard proposal.eventKind == "email", proposal.importance == "client" else { return .active }
-        let window = now.addingTimeInterval(-60 * 60)...now.addingTimeInterval(urgentWindow)
-        if let due = proposal.due, let date = day(from: due, calendar: calendar) {
-            // A due day counts from its start, so "due today" is inside.
-            let end = calendar.date(byAdding: .day, value: 1, to: date) ?? date
-            if window.overlaps(date...end) { return .timeSensitive }
-        }
-        let text = [proposal.headline, proposal.message].joined(separator: "\n")
-        return datesNamed(in: text).contains(where: window.contains) ? .timeSensitive : .active
+        return notices
     }
 
     /// The summary line: "3 new: Globex, Acme, Slack".
     static func summaryBody(count: Int, sources: [String]) -> String {
         sources.isEmpty ? "\(count) new cards" : "\(count) new: \(sources.joined(separator: ", "))"
-    }
-
-    private static func day(from text: String, calendar: Calendar) -> Date? {
-        let parts = text.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
-        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
-    }
-
-    /// Every date the text names ("Friday", "tomorrow at 3", "25 Sep").
-    /// Relative words resolve against the clock, as the detector reads them.
-    static func datesNamed(in text: String) -> [Date] {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return [] }
-        let range = NSRange(text.startIndex..., in: text)
-        return detector.matches(in: text, options: [], range: range).compactMap(\.date)
     }
 }

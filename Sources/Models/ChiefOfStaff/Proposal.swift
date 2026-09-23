@@ -21,6 +21,20 @@ struct Proposal: Sendable, Equatable, Identifiable {
         case unknown
     }
 
+    /// How much of Tristan's attention a card asks for. Old cards without a
+    /// tier are `today`; a health card is `system`.
+    enum Tier: String, Sendable, CaseIterable {
+        /// Needs his decision or answer: a client waiting, or due within 48 h.
+        case decide
+        /// A quick one-tap action: log it, close it, add a task.
+        case today
+        /// Someone else owes the next move.
+        case waiting
+        case fyi
+        /// Health of the background jobs: the header's status line, not a card.
+        case system
+    }
+
     /// One line of what running the actions did, as `cos` recorded it.
     struct Result: Sendable, Equatable, Hashable {
         var type: String
@@ -39,13 +53,21 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var message: String
     /// The brain's one-line summary; the first message line when absent.
     var cardHeadline: String
-    /// `decide`, `today`, `waiting`, `fyi`, or `system`.
+    /// `decide`, `today`, `waiting`, `fyi`, or `system` as written.
     var tier: String
+    /// One line on why it matters; may be empty.
+    var why: String
+    /// When a Later card comes back.
+    var snoozedUntil: Date?
+    /// A health card's failing job labels.
+    var red: [String]
     /// `client`, `team`, `admin`, or `system`.
     var importance: String
     var due: String?
     var actions: [ProposalAction]
     var created: Date?
+    /// When the verdict was given.
+    var decided: Date?
     var verdict: String?
     var results: [Result]
 
@@ -61,10 +83,14 @@ struct Proposal: Sendable, Equatable, Identifiable {
         message: String,
         headline: String = "",
         tier: String = "",
+        why: String = "",
+        snoozedUntil: Date? = nil,
+        red: [String] = [],
         importance: String = "",
         due: String? = nil,
         actions: [ProposalAction] = [],
         created: Date? = nil,
+        decided: Date? = nil,
         verdict: String? = nil,
         results: [Result] = []
     ) {
@@ -79,10 +105,14 @@ struct Proposal: Sendable, Equatable, Identifiable {
         self.message = message
         self.cardHeadline = headline
         self.tier = tier
+        self.why = why
+        self.snoozedUntil = snoozedUntil
+        self.red = red
         self.importance = importance
         self.due = due
         self.actions = actions
         self.created = created
+        self.decided = decided
         self.verdict = verdict
         self.results = results
     }
@@ -104,10 +134,14 @@ struct Proposal: Sendable, Equatable, Identifiable {
             message: values["message"]?.stringValue ?? fallbackText,
             headline: values["headline"]?.stringValue ?? "",
             tier: values["tier"]?.stringValue ?? "",
+            why: values["why"]?.stringValue ?? "",
+            snoozedUntil: values["snoozed_until"]?.stringValue.flatMap(HouseChatCoding.date(from:)),
+            red: values["red"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             importance: values["importance"]?.stringValue ?? "",
             due: values["due"]?.stringValue,
             actions: values["actions"]?.arrayValue?.compactMap(ProposalAction.init(json:)) ?? [],
             created: values["created"]?.stringValue.flatMap(HouseChatCoding.date(from:)) ?? fallbackDate,
+            decided: values["decided"]?.stringValue.flatMap(HouseChatCoding.date(from:)),
             verdict: values["verdict"]?.stringValue,
             results: values["results"]?.arrayValue?.compactMap(Self.result(from:)) ?? []
         )
@@ -123,6 +157,21 @@ struct Proposal: Sendable, Equatable, Identifiable {
     }
 
     var isWaiting: Bool { status == .pending }
+
+    /// The tier the face sorts by: a health card is always `system`, and a
+    /// card from before tiers is `today`.
+    var tierKind: Tier {
+        if eventKind == "health" { return .system }
+        return Tier(rawValue: tier) ?? .today
+    }
+
+    /// Later, No, handled or expired: `cos reopen` can bring it back.
+    var canBringBack: Bool {
+        switch status {
+        case .later, .dismissed, .skipped, .handled, .expired: true
+        case .pending, .done, .unknown: false
+        }
+    }
 
     /// What a card names it by: the project, else the sender, else the
     /// event title (a health card has only a title).

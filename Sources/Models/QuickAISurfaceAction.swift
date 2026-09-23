@@ -14,6 +14,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     case searchSettings
     /// AI Chat: open the Chief of Staff's pinned conversation.
     case chiefOfStaff
+    /// The Chief of Staff's conversation: a new canonical task (⌘N there).
+    case newTask
     /// AI Chat: slide the chat list in (`⌘\`).
     case showChatList
     /// AI Chat: slide the chat list out (`⌘\`).
@@ -37,6 +39,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         case .searchSettings: "Search Provider…"
         case .resetSize: "Reset Quick AI Size"
         case .chiefOfStaff: "Chief of Staff"
+        case .newTask: "New Task…"
         case .showChatList: "Show Chat List"
         case .hideChatList: "Hide Chat List"
         case .findInChat: "Find in Chat"
@@ -57,6 +60,8 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
             "Back to \(Int(QuickAISize.standard.width)) × \(Int(QuickAISize.standard.height))"
         case .chiefOfStaff:
             "The waiting cards and the pinned conversation"
+        case .newTask:
+            "Add a task to a project's task tree"
         case .showChatList, .hideChatList:
             "Pinned and recent chats beside the thread"
         case .findInChat:
@@ -82,6 +87,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         case .searchSettings: "magnifyingglass"
         case .resetSize: "arrow.down.right.and.arrow.up.left"
         case .chiefOfStaff: "tray"
+        case .newTask: "checklist"
         case .showChatList, .hideChatList: "sidebar.left"
         case .findInChat: "magnifyingglass"
         // Layers with the top one filled: "in front". Not the pin, which
@@ -97,7 +103,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     var shortcut: KeyShortcut? {
         switch self {
         case .attach: QuickViewModel.attachShortcut
-        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings, .chiefOfStaff: nil
+        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings, .chiefOfStaff, .newTask: nil
         case .showChatList, .hideChatList: AIChatWindowModel.chatListShortcut
         case .findInChat: AIChatWindowModel.findShortcut
         }
@@ -111,7 +117,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
         case .attach: .attachMenu
         case .showChatList, .hideChatList: .chatList
         case .findInChat: .findInChat
-        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings, .chiefOfStaff:
+        case .resetSize, .keepOnTop, .stopKeepingOnTop, .copyMessage, .captureMessage, .searchSettings, .chiefOfStaff, .newTask:
             nil
         }
     }

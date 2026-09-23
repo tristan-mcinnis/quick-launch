@@ -1,20 +1,27 @@
 import SwiftUI
 
 /// The Proposal card component (design-system registry `proposal-card`),
-/// ported from the retired ChiefOfStaff.app: one waiting proposal on a
-/// raised card at `Radius.lg`. Source and time in `meta`, the message in
-/// `body`, the numbered actions, then Do it / Edit / Skip. Edit turns each
-/// action into its own field with Run and Cancel. The focused card wears the
-/// selection ring and shows its keys: ⌘↩ Do it, ⌘E Edit, ⌘⌫ Skip.
+/// ported from the retired ChiefOfStaff.app: one DECIDE proposal on a raised
+/// card at `Radius.lg`. Source, relative due and time in `meta`; the
+/// headline in `heading`; why in `bodySmall`; the numbered actions; then Do
+/// it / Edit / Later / No (Got it / Later / No when nothing runs). Edit turns
+/// each action into its own field with Run and Cancel. The focused card wears
+/// a strong hairline and shows its keys.
 struct ProposalCard: View {
     let proposal: Proposal
     @Bindable var state: ProposalCardState
     var isFocused = false
     /// Bumped by the model to put the keyboard in the first Edit field.
     var editFocusRequest = 0
+    /// The Later menu, open on this card.
+    var laterMenu: ChiefOfStaffModel.LaterMenu? = nil
+    var now: Date = .now
     var onDo: () -> Void = {}
     var onEdit: () -> Void = {}
-    var onSkip: () -> Void = {}
+    var onLater: () -> Void = {}
+    var onNo: () -> Void = {}
+    var onLaterChoice: (LaterChoice) -> Void = { _ in }
+    var onLaterPickText: (String) -> Void = { _ in }
     var onRun: () -> Void = {}
     var onCancel: () -> Void = {}
     /// The keyboard moved into or out of the Edit fields.
@@ -25,16 +32,35 @@ struct ProposalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.xs) {
             header
-            Text(proposal.message)
-                .font(House.TypeToken.body)
-                .foregroundStyle(House.ColorToken.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            if proposal.cardHeadline.isEmpty {
+                // A card from before headlines: its message is the text.
+                Text(proposal.message)
+                    .font(House.TypeToken.body)
+                    .foregroundStyle(House.ColorToken.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            } else {
+                Text(proposal.cardHeadline)
+                    .font(House.TypeToken.heading)
+                    .foregroundStyle(House.ColorToken.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if !proposal.why.isEmpty {
+                    Text(proposal.why)
+                        .font(House.TypeToken.bodySmall)
+                        .foregroundStyle(House.ColorToken.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
             if !proposal.actions.isEmpty {
                 actions
             }
             outcome
             controls
+            if let laterMenu, laterMenu.proposalID == proposal.id {
+                LaterMenuView(menu: laterMenu, onChoice: onLaterChoice, onPickText: onLaterPickText)
+            }
         }
         .padding(House.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -73,11 +99,12 @@ struct ProposalCard: View {
                 .foregroundStyle(House.ColorToken.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let due = proposal.due {
-                Text("Due \(due)")
+            if let due = proposal.due, let phrase = ChiefOfStaffDates.relativeDue(due, now: now) {
+                Text(phrase)
                     .font(House.TypeToken.meta)
-                    .foregroundStyle(House.ColorToken.textTertiary)
+                    .foregroundStyle(House.ColorToken.textSecondary)
                     .lineLimit(1)
+                    .help("Due \(due)")
             }
             Spacer(minLength: House.Spacing.xs)
             if let created = proposal.created {
@@ -139,17 +166,21 @@ struct ProposalCard: View {
             CardButton(title: "Run", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onRun)
                 .help("Run the edited actions (⌘↩)")
             CardButton(title: "Cancel", keys: ["esc"], showsKeys: isFocused, action: onCancel)
-        } else if proposal.isNotice {
-            // A health card has nothing to run: one acknowledgement.
-            CardButton(title: "Got it", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onDo)
-                .help("Mark as seen. Nothing runs (⌘↩)")
         } else {
-            CardButton(title: "Do it", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onDo)
-                .help("Run these actions now (⌘↩)")
-            CardButton(title: "Edit", keys: ["⌘", "E"], showsKeys: isFocused, action: onEdit)
-                .help("Change the actions, then run them (⌘E)")
-            CardButton(title: "Skip", keys: ["⌘", "⌫"], showsKeys: isFocused, action: onSkip)
-                .help("Record a no. Nothing runs (⌘⌫)")
+            if proposal.isNotice {
+                // Nothing to run: one acknowledgement.
+                CardButton(title: "Got it", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onDo)
+                    .help("Mark as seen. Nothing runs (⌘↩)")
+            } else {
+                CardButton(title: "Do it", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onDo)
+                    .help("Run these actions now (⌘↩)")
+                CardButton(title: "Edit", keys: ["⌘", "E"], showsKeys: isFocused, action: onEdit)
+                    .help("Change the actions, then run them (⌘E)")
+            }
+            CardButton(title: "Later", keys: ["⌘", "L"], showsKeys: isFocused, action: onLater)
+                .help("Hide it until tonight, tomorrow, next week, or a day (⌘L)")
+            CardButton(title: "No", keys: ["⌘", "⌫"], showsKeys: isFocused, action: onNo)
+                .help("Not needed. Nothing runs (⌘⌫)")
         }
     }
 }
@@ -336,5 +367,57 @@ struct CardButtonStyle: ButtonStyle {
             }
             .opacity(configuration.isPressed && prominent ? 0.8 : (isEnabled ? 1 : 0.45))
             .contentShape(shape)
+    }
+}
+
+/// ⌘L on a card: when it comes back. `↑↓` and Return, or 1 to 4; Pick date
+/// takes a typed day (tomorrow, fri, 2026-10-02).
+struct LaterMenuView: View {
+    let menu: ChiefOfStaffModel.LaterMenu
+    let onChoice: (LaterChoice) -> Void
+    let onPickText: (String) -> Void
+    @State private var pickText = ""
+    @FocusState private var pickFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+            ForEach(LaterChoice.allCases) { choice in
+                Button {
+                    onChoice(choice)
+                } label: {
+                    HStack(spacing: House.Spacing.xs) {
+                        Text(choice.title)
+                            .font(House.TypeToken.label)
+                            .foregroundStyle(House.ColorToken.textPrimary)
+                        Spacer(minLength: House.Spacing.xs)
+                        KeyCap(text: "\(choice.rawValue + 1)")
+                    }
+                    .padding(.horizontal, House.Spacing.xs)
+                    .frame(height: House.Control.railRow)
+                    .background { RowHighlight(isSelected: choice.rawValue == menu.index) }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(choice.rawValue == menu.index ? .isSelected : [])
+            }
+            if menu.isPicking {
+                CardField(prompt: "Day: tomorrow, fri, 2026-10-02", text: $pickText, lines: 1...1)
+                    .focused($pickFocused)
+                    .onSubmit { onChoice(.pickDate) }
+                    .onChange(of: pickText) { _, text in onPickText(text) }
+                    .onAppear { FocusRequest.apply($pickFocused) }
+            }
+        }
+        .padding(House.Spacing.xs)
+        .frame(maxWidth: Layout.menuWidth, alignment: .leading)
+        .raisedCard(radius: AQDesign.cardCornerRadius, fill: AQDesign.ColorToken.raisedSurface)
+        .houseShadow(AQDesign.Shadow.card)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Later")
+    }
+
+    private enum Layout {
+        /// Wide enough for "Tomorrow 9:00" and its key, as the palette rows.
+        static let menuWidth = House.Layout.chatRail + House.Spacing.xxl
     }
 }

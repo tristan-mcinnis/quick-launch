@@ -70,28 +70,37 @@ struct AIChatWindowView: View {
                 AIChatFindBar(model: model)
             }
             if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
-                ChiefOfStaffWaitingSection(
+                ChiefOfStaffPanel(
                     model: chiefOfStaff,
-                    maxHeight: max(House.Control.row * 2, conversationHeight * Self.waitingShare),
+                    maxHeight: max(House.Control.row * 2, conversationHeight * Self.panelShare),
                     hasKeyboard: model.focus == .cards || model.focus == .cardEdit
-                ) { _, editing in
-                    model.noteFocus(editing ? .cardEdit : .cards, true)
+                ) { place in
+                    switch place {
+                    case .cards: model.noteFocus(.cards, true)
+                    case .editing: model.noteFocus(.cardEdit, true)
+                    case .form: model.noteFocus(.cosForm, true)
+                    }
                 }
+                // The Board takes the room above the composer; the List
+                // leaves the thread under it.
+                .frame(maxHeight: chiefOfStaff.viewMode == .board ? .infinity : nil, alignment: .top)
                 HouseDivider()
             }
-            QuickAIThread(
-                viewModel: chat,
-                find: model.findHighlights,
-                onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) },
-                header: chiefOfStaffHistory
-            )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // The scroll view would otherwise draw up under the header
-                // and the transparent title bar.
-                .clipped()
-                // A file, link, or picture dropped on the thread attaches to
-                // the next question, as on the composer.
-                .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
+            if !(model.isChiefOfStaffOpen && model.chiefOfStaff?.viewMode == .board) {
+                QuickAIThread(
+                    viewModel: chat,
+                    find: model.findHighlights,
+                    onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) },
+                    header: chiefOfStaffHistory
+                )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The scroll view would otherwise draw up under the header
+                    // and the transparent title bar.
+                    .clipped()
+                    // A file, link, or picture dropped on the thread attaches to
+                    // the next question, as on the composer.
+                    .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
+            }
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }
@@ -104,16 +113,16 @@ struct AIChatWindowView: View {
             max(0, conversationHeight - composerHeight - Self.titleBarHeight - House.Spacing.xs))
     }
 
-    /// The share of the conversation's height the waiting cards may take
-    /// before they scroll, so the thread and the composer always show.
-    static let waitingShare: CGFloat = 0.5
+    /// The share of the conversation's height the Chief of Staff's List may
+    /// take before it scrolls, so the thread and the composer always show.
+    static let panelShare: CGFloat = 0.6
 
     /// The Chief of Staff's decided cards and other surfaces' chat, above
     /// its chat's own turns. Nil in any other chat.
     private var chiefOfStaffHistory: AnyView? {
         guard model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff else { return nil }
         return AnyView(ChiefOfStaffHistory(
-            items: chiefOfStaff.history,
+            items: chiefOfStaff.filteredHistory,
             problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
         ))
     }

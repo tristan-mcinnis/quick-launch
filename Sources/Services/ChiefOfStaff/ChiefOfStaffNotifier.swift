@@ -4,7 +4,8 @@ import UserNotifications
 /// A tap on a Chief of Staff notification.
 enum ChiefOfStaffNotificationChoice: Sendable, Equatable {
     case doIt(proposalID: String)
-    case skip(proposalID: String)
+    /// No: nothing runs.
+    case no(proposalID: String)
     /// Open the pinned conversation, on this card when there is one.
     case open(proposalID: String?)
     /// Reply typed in the notification: a chat message about the card.
@@ -39,7 +40,7 @@ struct ChiefOfStaffNotificationContent: Sendable, Equatable {
     static let noticeCategory = "chief-of-staff.notice"
     static let summaryCategory = "chief-of-staff.summary"
     static let doAction = "chief-of-staff.do"
-    static let skipAction = "chief-of-staff.skip"
+    static let noAction = "chief-of-staff.no"
     static let openAction = "chief-of-staff.open"
     static let replyAction = "chief-of-staff.reply"
     static let proposalKey = "proposal"
@@ -56,6 +57,14 @@ struct ChiefOfStaffNotificationContent: Sendable, Equatable {
             threadIdentifier = proposal.project.isEmpty ? "chief-of-staff" : proposal.project
             proposalID = proposal.id
             self.urgency = urgency
+        case .health(let newlyRed, let headline):
+            identifier = "chief-of-staff.health"
+            subtitle = newlyRed.count == 1 ? "A job turned red" : "\(newlyRed.count) jobs turned red"
+            body = headline.isEmpty ? newlyRed.joined(separator: ", ") : headline
+            category = Self.summaryCategory
+            threadIdentifier = "chief-of-staff.health"
+            proposalID = nil
+            urgency = .active
         case .summary(let count, let sources, let urgency):
             identifier = "chief-of-staff.summary"
             subtitle = ""
@@ -68,14 +77,18 @@ struct ChiefOfStaffNotificationContent: Sendable, Equatable {
     }
 
     var interruptionLevel: UNNotificationInterruptionLevel {
-        urgency == .timeSensitive ? .timeSensitive : .active
+        switch urgency {
+        case .timeSensitive: .timeSensitive
+        case .active: .active
+        case .passive: .passive
+        }
     }
 
     /// What a response to this category means.
     static func choice(action: String, proposalID: String?, text: String?) -> ChiefOfStaffNotificationChoice? {
         switch action {
         case doAction: proposalID.map { .doIt(proposalID: $0) }
-        case skipAction: proposalID.map { .skip(proposalID: $0) }
+        case noAction: proposalID.map { .no(proposalID: $0) }
         case replyAction:
             text.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
                 .map { .reply(proposalID: proposalID, text: $0) }
@@ -105,7 +118,7 @@ final class ChiefOfStaffNotifier: ChiefOfStaffNotifying {
 
     func prepare() async {
         let doIt = UNNotificationAction(identifier: ChiefOfStaffNotificationContent.doAction, title: "Do it")
-        let skip = UNNotificationAction(identifier: ChiefOfStaffNotificationContent.skipAction, title: "Skip")
+        let no = UNNotificationAction(identifier: ChiefOfStaffNotificationContent.noAction, title: "No")
         let open = UNNotificationAction(
             identifier: ChiefOfStaffNotificationContent.openAction,
             title: "Open",
@@ -123,7 +136,7 @@ final class ChiefOfStaffNotifier: ChiefOfStaffNotifying {
         center.setNotificationCategories(existing.union([
             UNNotificationCategory(
                 identifier: ChiefOfStaffNotificationContent.cardCategory,
-                actions: [doIt, skip, open, reply],
+                actions: [doIt, no, open, reply],
                 intentIdentifiers: []
             ),
             UNNotificationCategory(
@@ -151,7 +164,8 @@ final class ChiefOfStaffNotifier: ChiefOfStaffNotifying {
         content.categoryIdentifier = plan.category
         content.threadIdentifier = plan.threadIdentifier
         content.interruptionLevel = plan.interruptionLevel
-        content.sound = .default
+        // A quiet card makes no sound.
+        content.sound = plan.urgency == .passive ? nil : .default
         if let proposalID = plan.proposalID {
             content.userInfo = [ChiefOfStaffNotificationContent.proposalKey: proposalID]
         }

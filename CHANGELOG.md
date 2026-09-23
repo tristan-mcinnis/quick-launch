@@ -3,27 +3,42 @@
 ## Unreleased — 2026-09-23 (Chief of Staff)
 
 - **Quick Launch is the Chief of Staff's face.** AI Chat pins a Chief of
-  Staff conversation at the top of its chat list (`⌘1`, never renamed or
-  deleted, with the waiting count), and `⌘K` › **Chief of Staff** and the
-  launcher row (`cos`) open it. Opened, the waiting cards sit in their own
-  scroll above the thread, newest first; decided cards fold to one line.
+  Staff conversation at the top of its chat list (never renamed or deleted,
+  with its waiting count; it takes no `⌘` number, so every chat keeps its
+  own), and `⌘K` › **Chief of Staff** and the launcher row (`cos`) open it.
+  Everything is additive: Quick AI and every other chat keep their provider,
+  tools, keys and palette order (regression tests prove it).
 
-  Keyboard first: `↑` from an empty composer or `⌥↑` moves onto the cards,
-  `↑↓` between them; `⌘↩` Do it, `⌘E` Edit (fields; `⌘↩` Run, `esc` Cancel),
-  `⌘⌫` Skip, `esc` back to the composer. The focused card shows its keys.
-  Every verdict runs through the `cos` CLI; Quick Launch never writes the
-  thread.
+  Cards are not equal. The header's status line carries health (a red dot
+  and "6 jobs failing"; `⌘I` shows which). Then DECIDE (the largest cards:
+  headline, why, due as "by tomorrow", actions; three until Show all), TODAY
+  (compact rows, `⇧⌘↩` twice runs them all), WAITING ON OTHERS, PROJECTS
+  (`cos projects`: risk dot, phase, next date, open and waiting counts; a
+  click filters), LATER (when each returns), FYI, then the decided history
+  and the chat. `⌘1` List, `⌘2` Board (Decide, Today, Waiting, Later, Done
+  this week; `⇧⌘T` adds the filtered project's task lanes), `⇧⌘P` project
+  filter, `⌘N` New task (`cos add`). These keys act only inside the pinned
+  conversation.
+
+  Keyboard first on a card: `↑` from an empty composer or `⌥↑` onto the
+  cards, `↑↓` (and `←→` on the Board) between them; `⌘↩` Do it (Got it when
+  nothing runs), `⌘E` Edit (`⌘↩` Run, `esc` Cancel), `⌘L` Later (Tonight,
+  Tomorrow 9:00, Next week, Pick date), `⌘⌫` No, `⌘R` Bring back, `esc` back
+  to the composer. Every verb is the `cos` CLI; Quick Launch never writes
+  the thread.
 
   A question in the conversation runs on the normal pipeline (DeepSeek Flash
   when offered, the read-only tools, attachments) with the Chief of Staff's
   instruction, the waiting cards and the last twelve proposals as its system
   message. Both turns go to the thread through `cos append`.
 
-  Quick Launch sends the Chief of Staff's notifications: one per new card,
-  grouped by project, with Do it, Skip, Open and a Reply field; one summary
-  when three or more arrive together; time sensitive only for a client email
-  naming a date within 48 hours; none from 23:00 to 07:00. It touches
-  `app.alive` every 30 seconds, so `cos` leaves its own banners alone.
+  Quick Launch sends the Chief of Staff's notifications: DECIDE is time
+  sensitive with Do it, No, Open and Reply; TODAY and FYI go to Notification
+  Centre only, grouped by project, one summary for three or more; WAITING
+  never notifies; health only when a new job turns red; none from 23:00 to
+  07:00. A Reply starting with `task:` adds a task on the card's project.
+  It touches `app.alive` every 30 seconds, so `cos` leaves its own banners
+  alone.
 
   The AI Chat root view no longer forces a minimum width; a narrow window
   reflows.

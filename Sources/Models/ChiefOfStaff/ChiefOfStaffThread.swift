@@ -66,13 +66,14 @@ enum ChiefOfStaffThread {
         Array(items.compactMap(\.proposal).suffix(limit))
     }
 
-    /// The history under the waiting cards: decided cards and chat turns
+    /// The history under the tiers: decided cards and chat turns
     /// another surface recorded. Waiting cards live above it, and the chat
     /// turns this app appended are drawn by the chat's own thread.
     static func history(in items: [ChiefOfStaffThreadItem]) -> [ChiefOfStaffThreadItem] {
         items.filter { item in
             switch item {
-            case .proposal(_, let proposal): !proposal.isWaiting
+            // Later cards have their own section until they come back.
+            case .proposal(_, let proposal): !proposal.isWaiting && proposal.status != .later
             case .verdict: false
             case .chat(_, _, _, _, let surface): surface != Self.surface
             }

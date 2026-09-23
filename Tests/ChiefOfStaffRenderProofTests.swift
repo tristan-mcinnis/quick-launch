@@ -36,13 +36,13 @@ struct ChiefOfStaffRenderProofTests {
         defaults.removePersistentDomain(forName: suite)
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         window.window = FakeAIChatWindow()
-        let chiefOfStaff = ChiefOfStaffModel(paths: try CosFixture.home(), runner: RecordingCosRunner())
+        let chiefOfStaff = ChiefOfStaffModel(paths: try CosFixture.home(), runner: RecordingCosRunner(), clock: { cosNow })
         await chiefOfStaff.reload(force: true)
         chat.chiefOfStaff = chiefOfStaff
         chat.chiefOfStaffOpener = { window.openChiefOfStaff(proposalID: $0) }
         window.openChiefOfStaff()
         await service.setResponses([StreamDelta(
-            text: "Two cards wait. The **budget** one is the client's: do it before Tuesday so the quote goes out on time.",
+            text: "Two cards want you. The **budget** one is the client's: answer it before tomorrow.",
             finishReason: "stop"
         )])
         chat.input = "What should I do first?"
@@ -51,57 +51,98 @@ struct ChiefOfStaffRenderProofTests {
         return (window, chiefOfStaff)
     }
 
+    private func key(_ window: AIChatWindowModel, _ key: VirtualKey?, _ characters: String? = nil, _ modifiers: NSEvent.ModifierFlags = []) {
+        _ = window.handleChiefOfStaffKey(key: key, characters: characters, modifiers: modifiers)
+    }
+
     @Test func rendersThePinnedConversationSet() async throws {
         for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
             let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
 
-            // The chat holds the Chief of Staff weakly, as the app's does:
-            // the proof keeps each one alive, as the app delegate does.
-            let (plain, plainCos) = try await makeWindow(appearance: preference)
-            #expect(plain.isChiefOfStaffOpen)
-            try Self.save(try Self.render(plain, size: Self.normal, appearance: appearance), name: "cos-normal-\(suffix).png")
-            try Self.save(try Self.render(plain, size: Self.narrow, appearance: appearance), name: "cos-narrow-\(suffix).png")
-            try Self.save(try Self.render(plain, size: Self.wide, appearance: appearance), name: "cos-wide-\(suffix).png")
-            withExtendedLifetime(plainCos) {}
+            // The chat holds the Chief of Staff weakly, as the app's does: the
+            // proof keeps each one alive, as the app delegate does.
+            let (list, listCos) = try await makeWindow(appearance: preference)
+            #expect(list.isChiefOfStaffOpen)
+            try Self.save(try Self.render(list, size: Self.normal, appearance: appearance), name: "cos-normal-\(suffix).png")
+            try Self.save(try Self.render(list, size: Self.narrow, appearance: appearance), name: "cos-narrow-\(suffix).png")
+            // Every section open, at the wide size.
+            listCos.expanded = [.waiting, .later, .fyi]
+            listCos.isHealthDetailShown = true
+            try Self.save(try Self.render(list, size: Self.wide, appearance: appearance), name: "cos-wide-\(suffix).png")
+            // Tall enough that every section, the projects strip included, shows.
+            try Self.save(try Self.render(list, size: CGSize(width: Self.normal.width, height: 2_000), appearance: appearance), name: "cos-tall-\(suffix).png")
 
-            // ↑ from the empty composer: the newest card has the keyboard
-            // and shows its keys.
+            // ↑ onto the DECIDE card, ⌘L: its keys and the Later menu.
             let (focused, cos) = try await makeWindow(appearance: preference)
             focused.chat.input = ""
-            _ = focused.handleChiefOfStaffKey(key: .upArrow, characters: nil, modifiers: [])
-            #expect(cos.focusedCardID == "ee55ff66")
+            key(focused, .upArrow)
+            #expect(cos.focusedCardID == "cc33dd44")
+            key(focused, nil, "l", [.command])
+            #expect(cos.laterMenu != nil)
             try Self.save(try Self.render(focused, size: Self.normal, appearance: appearance), name: "cos-focused-\(suffix).png")
             try Self.save(try Self.render(focused, size: Self.narrow, appearance: appearance), name: "cos-focused-narrow-\(suffix).png")
+            key(focused, .escape)
 
-            // ⌘E: the card's task as its title and due fields.
-            _ = focused.handleChiefOfStaffKey(key: nil, characters: "e", modifiers: [.command])
+            // ⌘E: the DECIDE card's four actions as fields.
+            key(focused, nil, "e", [.command])
             #expect(cos.isEditingFocusedCard)
             try Self.save(try Self.render(focused, size: Self.wide, appearance: appearance), name: "cos-edit-\(suffix).png")
+            key(focused, .escape)
 
-            // The rail: the pinned row first, with its waiting count.
+            // ↓ onto a TODAY row, then ⇧⌘↩ once: its keys and the confirm.
+            key(focused, .downArrow)
+            key(focused, .return, nil, [.command, .shift])
+            #expect(cos.bulkArmed?.count == 3)
+            try Self.save(try Self.render(focused, size: Self.normal, appearance: appearance), name: "cos-today-\(suffix).png")
+
+            // ⌘2: the Board, a card focused; then filtered with its tasks.
+            let (board, boardCos) = try await makeWindow(appearance: preference)
+            board.chat.input = ""
+            key(board, nil, "2", [.command])
+            key(board, .upArrow)
+            key(board, .rightArrow)
+            try Self.save(try Self.render(board, size: Self.wide, appearance: appearance), name: "cos-board-\(suffix).png")
+            try Self.save(try Self.render(board, size: Self.narrow, appearance: appearance), name: "cos-board-narrow-\(suffix).png")
+            boardCos.setProjectFilter("sample-project")
+            await boardCos.perform(.loadTasks(project: "sample-project"))
+            boardCos.toggleTasks()
+            try Self.save(try Self.render(board, size: Self.wide, appearance: appearance), name: "cos-board-filtered-\(suffix).png")
+
+            // ⌘N: the New task sheet with a project half typed.
+            let (sheet, sheetCos) = try await makeWindow(appearance: preference)
+            key(sheet, nil, "n", [.command])
+            sheetCos.newTask?.title = "Book the readout room"
+            sheetCos.newTask?.due = "fri"
+            try Self.save(try Self.render(sheet, size: Self.normal, appearance: appearance), name: "cos-new-task-\(suffix).png")
+
+            // The rail: the pinned row first, with its count and no number.
             let (rail, railCos) = try await makeWindow(appearance: preference)
             rail.showRail()
             try Self.save(try Self.render(rail, size: Self.normal, appearance: appearance), name: "cos-rail-\(suffix).png")
-            withExtendedLifetime(railCos) {}
+            withExtendedLifetime([listCos, boardCos, sheetCos, railCos]) {}
         }
     }
 
     /// Offered less than the window's minimum width, the root view takes
-    /// exactly the offer: nothing forces a width, so nothing overflows.
+    /// exactly the offer, in the List and on the Board: nothing forces a
+    /// width, so nothing overflows.
     @Test func theRootReflowsAtNarrowWidths() async throws {
         let (window, cos) = try await makeWindow(appearance: .dark)
-        _ = window.handleChiefOfStaffKey(key: .upArrow, characters: nil, modifiers: [.option])
+        key(window, .upArrow, nil, [.option])
         #expect(cos.focusedCardID != nil)
-        for width in [Self.narrow.width, House.Layout.chatMinWidth / 2] {
-            let controller = NSHostingController(rootView: AIChatWindowView(model: window))
-            let fitted = controller.sizeThatFits(in: CGSize(width: width, height: Self.normal.height))
-            #expect(fitted.width <= width + 0.5, "the root asked for \(fitted.width) of \(width)")
+        for mode in [ChiefOfStaffModel.ViewMode.list, .board] {
+            cos.viewMode = mode
+            for width in [Self.narrow.width, House.Layout.chatMinWidth / 2] {
+                let controller = NSHostingController(rootView: AIChatWindowView(model: window))
+                let fitted = controller.sizeThatFits(in: CGSize(width: width, height: Self.normal.height))
+                #expect(fitted.width <= width + 0.5, "\(mode): the root asked for \(fitted.width) of \(width)")
+            }
         }
     }
 
     /// The pinned conversation over the real `cos` thread and the real
-    /// `cos status`, offscreen and read only: nothing is sent, decided, or
-    /// appended. Opt in with QUICK_LAUNCH_COS_LIVE_PROOF=1.
+    /// `cos status` and `cos projects`, offscreen and read only: nothing is
+    /// sent, decided, or appended. Opt in with QUICK_LAUNCH_COS_LIVE_PROOF=1.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_COS_LIVE_PROOF"] == "1"))
     func rendersTheRealThread() async throws {
         var settings = QuickSettings()
@@ -122,7 +163,9 @@ struct ChiefOfStaffRenderProofTests {
             chat.settings.appearance = appearance == .darkAqua ? .dark : .light
             try Self.save(try Self.render(window, size: Self.normal, appearance: appearance), name: "cos-live-\(suffix).png")
         }
-        print("cos live proof: \(chiefOfStaff.waiting.count) waiting: \(chiefOfStaff.waiting.map(\.id))")
+        chiefOfStaff.viewMode = .board
+        try Self.save(try Self.render(window, size: Self.wide, appearance: .darkAqua), name: "cos-live-board-dark.png")
+        print("cos live proof: decide \(chiefOfStaff.decide.map(\.id)) today \(chiefOfStaff.today.map(\.id)) health \(chiefOfStaff.health?.id ?? "none") projects \(chiefOfStaff.projects.count)")
     }
 
     // MARK: - Rendering
