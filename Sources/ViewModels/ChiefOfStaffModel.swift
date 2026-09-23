@@ -58,7 +58,7 @@ final class ChiefOfStaffModel {
         case refresh
     }
 
-    /// ⌘1 List (the tiers) or ⌘2 Board (columns).
+    /// ⌥⌘1 List (the tiers) or ⌥⌘2 Board (columns).
     enum ViewMode: Sendable, Equatable {
         case list
         case board
@@ -995,10 +995,13 @@ enum ChiefOfStaffKeys {
         }
 
         // The pinned conversation's own keys, from the composer or a card.
+        // ⌥⌘1 and ⌥⌘2: ⌘1 to ⌘9 stay the rail's, in this chat as in any.
+        if modifiers == [.command, .option] {
+            if character == "1" { return .showList }
+            if character == "2" { return .showBoard }
+        }
         if modifiers == [.command] {
             switch character {
-            case "1": return .showList
-            case "2": return .showBoard
             case "n": return .newTask
             case "i": return .toggleHealth
             default: break

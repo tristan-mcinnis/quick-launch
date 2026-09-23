@@ -45,7 +45,7 @@ and actions can be added, instead of waiting on someone else's roadmap.
   web search. Each tool switches on or off per chat.
 - The Chief of Staff (`cos`) has a pinned conversation at the top of the AI
   Chat list: health in its status line, then DECIDE, TODAY, WAITING ON
-  OTHERS, PROJECTS, LATER and FYI above the chat, or a Board (`⌘2`). On a
+  OTHERS, PROJECTS, LATER and FYI above the chat, or a Board (`⌥⌘2`). On a
   card, `⌘↩` Do it, `⌘E` Edit, `⌘L` Later, `⌘⌫` No, `⌘R` Bring back; `⌘N`
   adds a task. Its notifications come from Quick Launch. Type `cos` in the
   launcher to open it.

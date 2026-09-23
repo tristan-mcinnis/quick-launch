@@ -255,8 +255,8 @@ struct ChiefOfStaffPanel: View {
 // MARK: - Status bar
 
 /// The line under the window header: health as a status dot and a word
-/// (⌘I opens the detail), the project filter (⇧⌘P), the view (⌘1 List,
-/// ⌘2 Board), and New task (⌘N).
+/// (⌘I opens the detail), the project filter chip, and the view (⌥⌘1 List,
+/// ⌥⌘2 Board). The conversation's other keys are in its footer.
 struct ChiefOfStaffStatusBar: View {
     @Bindable var model: ChiefOfStaffModel
 
@@ -298,20 +298,14 @@ struct ChiefOfStaffStatusBar: View {
             .buttonStyle(.plain)
             .help("Show every project (⇧⌘P)")
             .accessibilityLabel("Filter: \(project.name). Clear")
-        } else {
-            KeyHint(label: "Project", keys: ["⇧", "⌘", "P"])
         }
+        // Never truncated: the health line gives way first, then the row wraps.
         ViewSwitch(mode: model.viewMode) { model.viewMode = $0 }
-        Button {
-            model.openNewTask()
-        } label: {
-            KeyHint(label: "New task", keys: ["⌘", "N"])
-        }
-        .buttonStyle(.plain)
+            .fixedSize()
     }
 }
 
-/// List ⌘1 and Board ⌘2, the current one in ink.
+/// List ⌥⌘1 and Board ⌥⌘2, the current one in ink.
 struct ViewSwitch: View {
     let mode: ChiefOfStaffModel.ViewMode
     let onChange: (ChiefOfStaffModel.ViewMode) -> Void
@@ -333,7 +327,7 @@ struct ViewSwitch: View {
                 Text(title)
                     .font(House.TypeToken.meta)
                     .foregroundStyle(mode == value ? House.ColorToken.textPrimary : House.ColorToken.textTertiary)
-                KeyCap(text: "⌘\(key)")
+                KeyCapGroup(keys: ["⌥", "⌘", key])
             }
             .padding(.horizontal, House.Spacing.xs)
             .frame(height: House.Control.chip)
@@ -1148,5 +1142,34 @@ struct DecidedProposalDetail: View {
             RoundedRectangle(cornerRadius: House.Radius.lg, style: .continuous)
                 .fill(House.ColorToken.surfaceTint)
         )
+    }
+}
+
+/// The pinned conversation's own keys, as caps along its foot, over the
+/// composer: they act only here, so they are shown only here.
+struct ChiefOfStaffKeyStrip: View {
+    let model: ChiefOfStaffModel
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: House.Spacing.md) { hints(all: true) }
+            HStack(spacing: House.Spacing.md) { hints(all: false) }
+        }
+        .padding(.horizontal, House.Spacing.lg)
+        .frame(maxWidth: .infinity, minHeight: House.Control.chip, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chief of Staff keys")
+    }
+
+    @ViewBuilder
+    private func hints(all: Bool) -> some View {
+        KeyHint(label: "Cards", keys: ["⌥", "↑"])
+        KeyHint(label: "New task", keys: ["⌘", "N"])
+        KeyHint(label: "Project", keys: ["⇧", "⌘", "P"])
+        if all {
+            KeyHint(label: "Do all Today", keys: ["⇧", "⌘", "↩"])
+            if model.health != nil { KeyHint(label: "Health", keys: ["⌘", "I"]) }
+            if model.viewMode == .board { KeyHint(label: "Tasks", keys: ["⇧", "⌘", "T"]) }
+        }
     }
 }

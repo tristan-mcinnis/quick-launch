@@ -54,7 +54,7 @@ acts only by calling the `cos` CLI (`do`, `edit`, `no`, `later`, `reopen`,
 `add`, `append`; reads `status`, `projects`, `tasks`) on an action the user
 takes; Quick Launch never writes the thread and its chat gets no write tools.
 It is additive: Quick AI and every other AI Chat conversation keep their
-provider, tools, keys and palette order, and its keys (`⌘1` `⌘2` `⌘N` `⌘I`
+provider, tools, keys and palette order, and its keys (`⌥⌘1` `⌥⌘2` `⌘N` `⌘I`
 `⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it
 (`ChiefOfStaffChatTests` guards this). The backing chat (`ChiefOfStaffModel.conversationID`)
 stays out of every chat list. Quick Launch is the one notification sender and

@@ -101,6 +101,9 @@ struct AIChatWindowView: View {
                     // the next question, as on the composer.
                     .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
             }
+            if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
+                ChiefOfStaffKeyStrip(model: chiefOfStaff)
+            }
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }

@@ -292,8 +292,11 @@ struct ChiefOfStaffKeyTests {
 
     @Test func theConversationsOwnKeysWorkFromTheComposerAndACard() {
         for place in [ChiefOfStaffKeys.Place.composer(draftIsEmpty: false), .card(board: false)] {
-            #expect(route(nil, "1", [.command], place) == .showList)
-            #expect(route(nil, "2", [.command], place) == .showBoard)
+            #expect(route(nil, "1", [.command, .option], place) == .showList)
+            #expect(route(nil, "2", [.command, .option], place) == .showBoard)
+            // ⌘1 to ⌘9 stay the rail's, here as in every chat.
+            #expect(route(nil, "1", [.command], place) == nil)
+            #expect(route(nil, "2", [.command], place) == nil)
             #expect(route(nil, "n", [.command], place) == .newTask)
             #expect(route(nil, "i", [.command], place) == .toggleHealth)
             #expect(route(nil, "p", [.command, .shift], place) == .pickProject)
@@ -307,7 +310,7 @@ struct ChiefOfStaffKeyTests {
         #expect(route(.return, nil, [], .laterMenu) == .menuPick(nil))
         #expect(route(nil, "2", [], .laterMenu) == .menuPick(.tomorrow))
         #expect(route(.escape, nil, [], .laterMenu) == .menuClose)
-        #expect(route(nil, "1", [.command], .laterMenu) == nil)
+        #expect(route(nil, "1", [.command, .option], .laterMenu) == nil)
         // Typing a day types; Return picks it.
         #expect(route(nil, "2", [], .laterPicking) == nil)
         #expect(route(.return, nil, [], .laterPicking) == .menuPick(.pickDate))
@@ -758,7 +761,8 @@ struct ChiefOfStaffChatTests {
         #expect(rig.window.handleEscape())
         #expect(rig.window.focus == .composer)
         #expect(cos.focusedCardID == nil)
-        #expect(rig.window.handleChiefOfStaffKey(key: nil, characters: "2", modifiers: [.command]))
+        #expect(!rig.window.handleChiefOfStaffKey(key: nil, characters: "2", modifiers: [.command]))
+        #expect(rig.window.handleChiefOfStaffKey(key: nil, characters: "2", modifiers: [.command, .option]))
         #expect(cos.viewMode == .board)
         #expect(rig.window.handleChiefOfStaffKey(key: nil, characters: "n", modifiers: [.command]))
         #expect(rig.window.focus == .cosForm)
@@ -831,13 +835,24 @@ struct ChiefOfStaffChatTests {
         let rig = try await makeRig(history: [conversation("Budget review", minutes: 5), conversation("Kyoto trip", minutes: 50)])
         rig.window.open(handoff: nil)
         for (key, characters, modifiers) in [
-            (nil, "1", NSEvent.ModifierFlags.command), (nil, "2", [.command]), (nil, "n", [.command]),
+            (nil, "1", NSEvent.ModifierFlags([.command, .option])), (nil, "2", [.command, .option]), (nil, "n", [.command]),
             (nil, "i", [.command]), (nil, "p", [.command, .shift]), (VirtualKey.upArrow, nil, []),
             (.upArrow, nil, [.option]), (.return, nil, [.command, .shift]),
         ] as [(VirtualKey?, String?, NSEvent.ModifierFlags)] {
             #expect(!rig.window.handleChiefOfStaffKey(key: key, characters: characters, modifiers: modifiers))
         }
         #expect(rig.window.handleKeyEquivalent(characters: "1", keyCode: 18, modifiers: [.command]))
+        #expect(rig.window.chat.currentConversation.map { rig.window.chat.title(of: $0) } == "Budget review")
+        withExtendedLifetime(rig.chiefOfStaff) {}
+    }
+
+    /// In the pinned conversation too, ⌘1 opens the rail's first chat.
+    @Test func railJumpsKeepTheirMeaningInsideThePinnedConversation() async throws {
+        let rig = try await makeRig(history: [conversation("Budget review", minutes: 5), conversation("Kyoto trip", minutes: 50)])
+        rig.window.openChiefOfStaff()
+        #expect(!rig.window.handleChiefOfStaffKey(key: nil, characters: "1", modifiers: [.command]))
+        #expect(rig.window.handleKeyEquivalent(characters: "1", keyCode: 18, modifiers: [.command]))
+        #expect(!rig.window.isChiefOfStaffOpen)
         #expect(rig.window.chat.currentConversation.map { rig.window.chat.title(of: $0) } == "Budget review")
         withExtendedLifetime(rig.chiefOfStaff) {}
     }

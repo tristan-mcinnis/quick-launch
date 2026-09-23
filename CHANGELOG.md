@@ -15,10 +15,11 @@
   (compact rows, `⇧⌘↩` twice runs them all), WAITING ON OTHERS, PROJECTS
   (`cos projects`: risk dot, phase, next date, open and waiting counts; a
   click filters), LATER (when each returns), FYI, then the decided history
-  and the chat. `⌘1` List, `⌘2` Board (Decide, Today, Waiting, Later, Done
+  and the chat. `⌥⌘1` List, `⌥⌘2` Board (Decide, Today, Waiting, Later, Done
   this week; `⇧⌘T` adds the filtered project's task lanes), `⇧⌘P` project
   filter, `⌘N` New task (`cos add`). These keys act only inside the pinned
-  conversation.
+  conversation, and show as key caps along its foot; `⌘1` to `⌘9` stay the
+  rail's everywhere.
 
   Keyboard first on a card: `↑` from an empty composer or `⌥↑` onto the
   cards, `↑↓` (and `←→` on the Board) between them; `⌘↩` Do it (Got it when

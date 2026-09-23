@@ -95,10 +95,10 @@ struct ChiefOfStaffRenderProofTests {
             #expect(cos.bulkArmed?.count == 3)
             try Self.save(try Self.render(focused, size: Self.normal, appearance: appearance), name: "cos-today-\(suffix).png")
 
-            // ⌘2: the Board, a card focused; then filtered with its tasks.
+            // ⌥⌘2: the Board, a card focused; then filtered with its tasks.
             let (board, boardCos) = try await makeWindow(appearance: preference)
             board.chat.input = ""
-            key(board, nil, "2", [.command])
+            key(board, nil, "2", [.command, .option])
             key(board, .upArrow)
             key(board, .rightArrow)
             try Self.save(try Self.render(board, size: Self.wide, appearance: appearance), name: "cos-board-\(suffix).png")

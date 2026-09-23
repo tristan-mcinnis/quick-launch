@@ -262,8 +262,8 @@ protocol AIChatWindowPresenting: AnyObject {
 
     /// The Chief of Staff's keys, while its conversation is open: ↑↓ onto
     /// and over the cards (←→ between board columns), ⌘↩ Do it, ⌘E Edit,
-    /// ⌘L Later, ⌘⌫ No, ⌘R Bring back, esc back; and anywhere in it ⌘1 List,
-    /// ⌘2 Board, ⌘N New task, ⌘I health, ⇧⌘P project, ⇧⌘↩ Do all TODAY,
+    /// ⌘L Later, ⌘⌫ No, ⌘R Bring back, esc back; and anywhere in it ⌥⌘1
+    /// List, ⌥⌘2 Board, ⌘N New task, ⌘I health, ⇧⌘P project, ⇧⌘↩ Do all TODAY,
     /// ⇧⌘T tasks. True when the key was used; every other chat is untouched.
     func handleChiefOfStaffKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard isChiefOfStaffOpen, let chiefOfStaff else { return false }
