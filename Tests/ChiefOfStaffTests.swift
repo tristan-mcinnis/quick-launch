@@ -264,9 +264,40 @@ struct CosCommandTests {
         drafts[3].text = "Sign-off in the 20:16 mail"
         let arguments = try CosCommand.edit(id: budget.id, actions: drafts.map(\.action)).arguments()
         #expect(Array(arguments.prefix(3)) == ["edit", "cc33dd44", "--actions-json"])
-        let decoded = try JSONDecoder().decode([[String: String]].self, from: Data(try #require(arguments.last).utf8))
-        #expect(decoded[1] == ["type": "task_add", "title": "Send the revised quote; today"])
-        #expect(decoded[3] == ["type": "task_close", "task_id": "T-42", "what": "Sign-off in the 20:16 mail"])
+        let decoded = try JSONDecoder().decode([[String: JSONValue]].self, from: Data(try #require(arguments.last).utf8))
+        #expect(decoded[1] == ["type": .string("task_add"), "title": .string("Send the revised quote; today")])
+        // Fields Edit does not model come back as they were, a null included.
+        #expect(decoded[3] == [
+            "type": .string("task_close"), "task_id": .string("T-42"),
+            "what": .string("Sign-off in the 20:16 mail"), "evidence": .null,
+        ])
+    }
+
+    /// Edit never drops a field it does not model: lists, objects, numbers,
+    /// booleans and empty strings go back to `cos edit` unchanged.
+    @Test func editKeepsNestedAndListFields() throws {
+        let wire = #"""
+        {"type": "charter_compact", "note": "Merge these", "rules": ["[all] Skip newsletters", "[project:globex] Less like this"],
+         "scope": {"project": "globex", "since": 3, "strict": true}, "weight": 2.5, "empty": "", "none": null}
+        """#
+        let action = try #require(ProposalAction(json: JSONDecoder().decode(JSONValue.self, from: Data(wire.utf8))))
+        let edited = action.editing(text: "  Merge these three  ", due: "")
+        let json = try ProposalAction.actionsJSON([edited])
+        let sent = try JSONDecoder().decode([[String: JSONValue]].self, from: Data(json.utf8))
+        #expect(sent == [[
+            "type": .string("charter_compact"),
+            "note": .string("Merge these three"),
+            "rules": .array([.string("[all] Skip newsletters"), .string("[project:globex] Less like this")]),
+            "scope": .object(["project": .string("globex"), "since": .number(3), "strict": .bool(true)]),
+            "weight": .number(2.5),
+            "empty": .string(""),
+            "none": .null,
+        ]])
+        // Unedited, the action goes back exactly as it came.
+        let untouched = try JSONDecoder().decode([[String: JSONValue]].self, from: Data(try ProposalAction.actionsJSON([action]).utf8))
+        var original = try JSONDecoder().decode([String: JSONValue].self, from: Data(wire.utf8))
+        original["note"] = .string("Merge these")
+        #expect(untouched == [original])
     }
 
     @Test func appendSendsTheTextOnStdinAndTheSurface() throws {

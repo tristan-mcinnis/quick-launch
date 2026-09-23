@@ -3,9 +3,11 @@ import HouseChatCore
 
 /// One numbered action inside a Chief of Staff proposal, as the brain wrote
 /// it and as the Edit fields change it. Ported from the retired
-/// ChiefOfStaff.app. Every string field on the wire is kept, so a field this
-/// build does not edit (a task close's `task_id` and `evidence`) goes back
-/// to `cos edit` unchanged.
+/// ChiefOfStaff.app. Every field on the wire is kept as it came, strings,
+/// numbers, lists and objects alike, so a field this build does not edit (a
+/// task close's `task_id` and `evidence`, a list of rules) goes back to
+/// `cos edit` unchanged. Edit changes only the one text field (and a task's
+/// due date).
 struct ProposalAction: Sendable, Equatable, Hashable {
     enum Kind: String, Sendable {
         case statusNote = "status_note"
@@ -19,14 +21,21 @@ struct ProposalAction: Sendable, Equatable, Hashable {
 
     /// The wire value, kept verbatim so an unknown kind survives an edit.
     var type: String
-    /// Every string field besides `type`: `note`, `title`, `due`, `body`,
-    /// `task_id`, `what`, `evidence`.
-    var fields: [String: String]
+    /// Every field besides `type`, as it came.
+    var raw: [String: JSONValue]
+
+    init(type: String, raw: [String: JSONValue]) {
+        self.type = type
+        self.raw = raw
+    }
 
     init(type: String, fields: [String: String] = [:]) {
-        self.type = type
-        self.fields = fields
+        self.init(type: type, raw: fields.mapValues(JSONValue.string))
     }
+
+    /// The string fields: `note`, `title`, `due`, `body`, `task_id`,
+    /// `what`, `evidence`, `brief`.
+    var fields: [String: String] { raw.compactMapValues(\.stringValue) }
 
     var kind: Kind { Kind(rawValue: type) ?? .other }
 
@@ -38,7 +47,7 @@ struct ProposalAction: Sendable, Equatable, Hashable {
         case .draftReply: "body"
         case .taskClose: "what"
         case .prepare: "brief"
-        case .other: ["note", "title", "body", "what", "brief"].first { fields[$0] != nil } ?? "note"
+        case .other: ["note", "title", "body", "what", "brief"].first { raw[$0]?.stringValue != nil } ?? "note"
         }
     }
 
@@ -54,35 +63,36 @@ struct ProposalAction: Sendable, Equatable, Hashable {
         }
     }
 
-    var text: String { fields[textKey] ?? "" }
-    var due: String? { fields["due"].flatMap { $0.isEmpty ? nil : $0 } }
+    var text: String { raw[textKey]?.stringValue ?? "" }
+    var due: String? { raw["due"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } }
+
+    /// The fields Edit writes; every other field is sent back as it came.
+    private var editedKeys: Set<String> { kind == .taskAdd ? [textKey, "due"] : [textKey] }
 
     /// Read from one element of a proposal's `actions` array.
     init?(json: JSONValue) {
         guard let object = json.objectValue, let type = object["type"]?.stringValue else { return nil }
-        var fields: [String: String] = [:]
-        for (key, value) in object where key != "type" {
-            if let string = value.stringValue { fields[key] = string }
-        }
-        self.init(type: type, fields: fields)
+        self.init(type: type, raw: object.filter { $0.key != "type" })
     }
 
     /// This action with its text and due date replaced (the Edit fields).
     func editing(text: String, due: String) -> ProposalAction {
         var copy = self
-        copy.fields[textKey] = text
-        if kind == .taskAdd { copy.fields["due"] = due }
+        copy.raw[textKey] = .string(text)
+        if kind == .taskAdd { copy.raw["due"] = .string(due) }
         return copy
     }
 
-    /// The object `cos edit --actions-json` expects: every field, trimmed,
-    /// with no empty value.
-    var editObject: [String: String] {
-        var object = ["type": type]
-        for (key, value) in fields {
+    /// The object `cos edit --actions-json` expects: every field as it
+    /// came, and the edited ones trimmed, an emptied one left out.
+    var editObject: [String: JSONValue] {
+        var object = raw
+        for key in editedKeys {
+            guard let value = raw[key]?.stringValue else { continue }
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { object[key] = trimmed }
+            object[key] = trimmed.isEmpty ? nil : .string(trimmed)
         }
+        object["type"] = .string(type)
         return object
     }
 
