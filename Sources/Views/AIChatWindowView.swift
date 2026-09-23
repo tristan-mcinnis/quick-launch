@@ -41,12 +41,10 @@ struct AIChatWindowView: View {
             }
             conversation
         }
-        .frame(
-            minWidth: House.Layout.chatMinWidth,
-            maxWidth: .infinity,
-            minHeight: House.Layout.chatMinHeight,
-            maxHeight: .infinity
-        )
+        // No minimum here: the window keeps its own (`contentMinSize`), and
+        // a tiling manager can still make it narrower. A view that insisted
+        // on a width would then overflow and clip; the content reflows.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AQDesign.ColorToken.windowSurface)
         // The header shares the title-bar row with the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
@@ -71,9 +69,22 @@ struct AIChatWindowView: View {
             if model.isFindPresented {
                 AIChatFindBar(model: model)
             }
-            QuickAIThread(viewModel: chat, find: model.findHighlights) { hit, offset in
-                model.noteFindHitOffset(offset, for: hit)
+            if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
+                ChiefOfStaffWaitingSection(
+                    model: chiefOfStaff,
+                    maxHeight: max(House.Control.row * 2, conversationHeight * Self.waitingShare),
+                    hasKeyboard: model.focus == .cards || model.focus == .cardEdit
+                ) { _, editing in
+                    model.noteFocus(editing ? .cardEdit : .cards, true)
+                }
+                HouseDivider()
             }
+            QuickAIThread(
+                viewModel: chat,
+                find: model.findHighlights,
+                onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) },
+                header: chiefOfStaffHistory
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The scroll view would otherwise draw up under the header
                 // and the transparent title bar.
@@ -91,6 +102,20 @@ struct AIChatWindowView: View {
         .overlay(alignment: .bottomTrailing) { actionPalette }
         .environment(\.composerPaneMaximumHeight,
             max(0, conversationHeight - composerHeight - Self.titleBarHeight - House.Spacing.xs))
+    }
+
+    /// The share of the conversation's height the waiting cards may take
+    /// before they scroll, so the thread and the composer always show.
+    static let waitingShare: CGFloat = 0.5
+
+    /// The Chief of Staff's decided cards and other surfaces' chat, above
+    /// its chat's own turns. Nil in any other chat.
+    private var chiefOfStaffHistory: AnyView? {
+        guard model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff else { return nil }
+        return AnyView(ChiefOfStaffHistory(
+            items: chiefOfStaff.history,
+            problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
+        ))
     }
 
     // MARK: - Header
@@ -398,7 +423,13 @@ struct AIChatRail: View {
                     model.railIndex = index
                     model.openChat(itemID: item.itemID)
                 } label: {
-                    rowLayout(isSelected: isSelected, isOpen: isOpen, isPinned: showsPin, number: showsNumber ? number : nil) {
+                    rowLayout(
+                        isSelected: isSelected,
+                        isOpen: isOpen,
+                        isPinned: showsPin,
+                        number: showsNumber ? number : nil,
+                        badge: waitingBadge(for: item)
+                    ) {
                         Text(item.title)
                             .font(AQDesign.TypeToken.label)
                             .foregroundStyle(AQDesign.ColorToken.textPrimary)
@@ -414,7 +445,7 @@ struct AIChatRail: View {
             }
         }
         .contextMenu {
-            ForEach(AIChatWindowModel.RailAction.allCases) { action in
+            ForEach(AIChatWindowModel.isChiefOfStaffItem(item.itemID) ? [] : AIChatWindowModel.RailAction.allCases) { action in
                 Button(role: action == .delete ? .destructive : nil) {
                     model.performRailAction(action, itemID: item.itemID)
                 } label: {
@@ -429,12 +460,20 @@ struct AIChatRail: View {
         .accessibilityValue(isSelected ? "Selected, \(index + 1) of \(total)" : "\(index + 1) of \(total)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityActions {
-            ForEach(AIChatWindowModel.RailAction.allCases) { action in
+            ForEach(AIChatWindowModel.isChiefOfStaffItem(item.itemID) ? [] : AIChatWindowModel.RailAction.allCases) { action in
                 Button(model.title(of: action, for: item)) {
                     model.performRailAction(action, itemID: item.itemID)
                 }
             }
         }
+    }
+
+    /// The Chief of Staff row's waiting count; nil on every other row and
+    /// when nothing waits.
+    private func waitingBadge(for item: LauncherCatalogItem) -> Int? {
+        guard AIChatWindowModel.isChiefOfStaffItem(item.itemID),
+              let count = model.chiefOfStaff?.waitingCount, count > 0 else { return nil }
+        return count
     }
 
     /// One rail row: the open-chat bar, two lines, and the `⌘` number.
@@ -443,6 +482,7 @@ struct AIChatRail: View {
         isOpen: Bool,
         isPinned: Bool,
         number: Int?,
+        badge: Int? = nil,
         @ViewBuilder lines: () -> Lines
     ) -> some View {
         HStack(spacing: House.Spacing.xs) {
@@ -455,6 +495,9 @@ struct AIChatRail: View {
                     .font(AQDesign.TypeToken.footnote.weight(.semibold))
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .accessibilityHidden(true)
+            }
+            if let badge {
+                WaitingBadge(count: badge)
             }
             if let number {
                 KeyCap(text: "⌘\(number)")
@@ -650,5 +693,22 @@ private struct OpenChatMarker: View {
             .fill(AQDesign.ColorToken.textPrimary)
             .frame(width: House.Spacing.xxs / 2, height: House.Control.keyCap)
             .accessibilityHidden(true)
+    }
+}
+
+/// The Chief of Staff row's waiting count in the rail: `meta` digits on a
+/// `chipFill` capsule. Ink, never a colour; the row's detail says it too.
+struct WaitingBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text("\(count)")
+            .font(AQDesign.TypeToken.metadata)
+            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+            .monospacedDigit()
+            .padding(.horizontal, House.Spacing.xs)
+            .frame(minWidth: House.Control.keyCap, minHeight: House.Control.keyCap)
+            .background(Capsule(style: .continuous).fill(AQDesign.ColorToken.chipFill))
+            .accessibilityLabel("\(count) waiting")
     }
 }

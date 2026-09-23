@@ -178,6 +178,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsPanel: NSPanel?
     /// The AI Chat window, built on first open.
     private var aiChatController: AIChatWindowController?
+    /// The Chief of Staff: the `cos` thread, its waiting cards, and its
+    /// notices. Quick Launch is its face; `run()` is its root task.
+    private var chiefOfStaff: ChiefOfStaffModel?
+    private var chiefOfStaffTask: Task<Void, Never>?
     private var globalHotKey: GlobalHotKey?
     private var clipboardHistoryHotKey: GlobalHotKey?
     private var translatorHotKey: GlobalHotKey?
@@ -362,6 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // On the launcher's display, where the keyboard was.
             self.showAIChat(handoff: handoff, on: self.launcherScreen() ?? self.screenContainingMouse())
         }
+        startChiefOfStaff(viewModel: vm)
 
         Task { @MainActor [weak self] in
             await self?.bootstrap(viewModel: vm)
@@ -428,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // A stream in either view stops and keeps its question and what
         // arrived; the history file is on disk before the process ends.
         aiChatController?.prepareForTermination()
+        chiefOfStaffTask?.cancel()
         if let viewModel { AIChatWindowController.keepStreamForQuit(viewModel) }
         QuickHistoryStore.waitForPendingWrites()
         overlayClearTask?.cancel()
@@ -1781,12 +1787,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         chat.fileOpener = OpenCommandFileOpener()
         chat.attachmentFilePicker = SystemAttachmentFilePicker()
         chat.piHandoff = PiHandoffService()
+        chat.chiefOfStaff = chiefOfStaff
+        chat.chiefOfStaffOpener = launcher.chiefOfStaffOpener
         let controller = AIChatWindowController(model: AIChatWindowModel(chat: chat), app: self)
         // The chat window lays itself out. Weak, because the controller owns
         // the window and the view model must never own the controller.
         chat.ownWindowLayout = OwnWindowLayout { [weak controller] in controller?.chatWindow }
         aiChatController = controller
         return controller
+    }
+
+    // MARK: - Chief of Staff
+
+    /// The Chief of Staff's face is the AI Chat window's pinned
+    /// conversation. Quick Launch is its one notification sender, and keeps
+    /// `app.alive` fresh so `cos` leaves its own banners alone.
+    private func startChiefOfStaff(viewModel vm: QuickViewModel) {
+        UserNotificationRouter.shared.install()
+        let model = ChiefOfStaffModel(paths: CosPaths.resolve(), notifier: ChiefOfStaffNotifier())
+        model.onOpen = { [weak self] proposalID in self?.showChiefOfStaff(proposalID: proposalID) }
+        model.onReply = { [weak self] text in
+            guard let self, let controller = self.aiChatWindowController() else { return }
+            self.showChiefOfStaff(proposalID: nil)
+            controller.model.chat.sendChiefOfStaffReply(text)
+        }
+        chiefOfStaff = model
+        vm.chiefOfStaff = model
+        vm.chiefOfStaffOpener = { [weak self] proposalID in
+            self?.showChiefOfStaff(proposalID: proposalID)
+        }
+        chiefOfStaffTask = Task { await model.run() }
+    }
+
+    /// The AI Chat window on the pinned conversation, on `proposalID`'s card
+    /// when one is named, on the display under the pointer.
+    func showChiefOfStaff(proposalID: String?) {
+        guard let controller = aiChatWindowController() else { return }
+        if panel?.isVisible == true { hideOverlay() }
+        controller.openingScreen = screenContainingMouse().map(ScreenArea.init)
+        controller.model.openChiefOfStaff(proposalID: proposalID)
     }
 
     @objc private func showAIChatFromMenu() {

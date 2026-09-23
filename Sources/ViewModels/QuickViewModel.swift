@@ -781,6 +781,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// not here.
     @ObservationIgnored weak var chatWindowHost: (any AIChatWindowHosting)?
     var isAIChatWindow: Bool { chatWindowHost != nil }
+    /// The Chief of Staff (`cos`): its pinned chat's system message, the
+    /// thread its answered turns go to, and the waiting count the launcher
+    /// row shows. The app sets it; nil leaves the Chief of Staff out.
+    @ObservationIgnored weak var chiefOfStaff: ChiefOfStaffModel?
+    /// Opens the AI Chat window on the Chief of Staff's pinned
+    /// conversation, on a card when one is named. The app sets it.
+    @ObservationIgnored var chiefOfStaffOpener: ((_ proposalID: String?) -> Void)?
     /// Set once the AI Chat window has opened. Its first open lands on the
     /// most recent chat; after that it keeps what it holds.
     @ObservationIgnored var hasOpenedAIChatWindow = false
@@ -1501,6 +1508,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // "is it on?" in one line. Timers and Agent Watch sit in the catalog.
         commands.append(contentsOf: [translate, typeToClick, caffeine, readAloud])
         if aiChatOpener != nil { commands.append(aiChatCommand) }
+        if let chiefOfStaffCommand { commands.append(chiefOfStaffCommand) }
         if let speechStopRow { commands.append(speechStopRow) }
         if let screenHistoryControl { commands.append(screenHistoryControl) }
         commands.append(settings)
@@ -1817,7 +1825,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// render that reads the rows again gets the cached rows. Hidden chats
     /// are filtered here, so one hide covers every Quick Launch list.
     func chatItems(matching query: String) -> [LauncherCatalogItem] {
+        // The Chief of Staff's backing chat is reached by its pinned row only.
         visibleLauncherItems(searchedChatItems(matching: query))
+            .filter { $0.itemID != ChiefOfStaffModel.conversationID.uuidString }
     }
 
     /// One chat as a launcher row: its title, question count, and time,
@@ -3035,6 +3045,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The Quick AI header title: the conversation once it has an answer,
     /// "Quick AI" before that.
     var quickAITitle: String {
+        // The pinned Chief of Staff chat is named before its first answer.
+        if isChiefOfStaffChatOpen { return ChiefOfStaffModel.title }
         guard let conversation = currentConversation,
               conversation.messages.contains(where: { $0.role == .assistant })
         else { return "Quick AI" }
@@ -5561,6 +5573,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
+        if item.value == Self.chiefOfStaffCommandID {
+            openChiefOfStaff()
+            return
+        }
+
         if item.value == "translate.mode" {
             input = ""
             overlayPresenter.dismissOverlay()
@@ -6384,7 +6401,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             resetQuickAISize()
         case .copyMessage, .captureMessage, .searchSettings:
             return
-        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop:
+        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop, .chiefOfStaff:
             chatWindowHost?.performWindowSurfaceAction(action)
             // Find and the chat list take the focus themselves.
             return
@@ -8731,6 +8748,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 conversationID: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID)
             )
         }
+        // The pinned Chief of Staff chat carries its instruction, waiting
+        // cards and recent proposals, read from the thread as it is now.
+        assistantSystem = pinnedSystemMessage(
+            forChat: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID),
+            assistant: assistantSystem
+        )
         guard !Task.isCancelled else {
             restoreEnrichmentInput()
             return
@@ -9181,6 +9204,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                         }
                     }
                     persistAnsweredConversation()
+                    if let conversationID = currentConversation?.id {
+                        chiefOfStaff?.chatDidAnswer(
+                            id: conversationID,
+                            question: submittedInput,
+                            answer: output,
+                            attachmentNames: attachments.map(\.ref.name)
+                        )
+                    }
                     // The lines live on the answer now.
                     liveToolRecords = []
                     if usedWebSearch { webSearchNote = nil }

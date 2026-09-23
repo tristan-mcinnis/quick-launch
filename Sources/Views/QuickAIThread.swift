@@ -16,6 +16,9 @@ struct QuickAIThread: View {
     var find: ThreadFindHighlights? = nil
     /// Where the current hit sits under its message's head, once laid out.
     var onFindHitOffset: ((FindHit, CGFloat) -> Void)? = nil
+    /// What the thread shows above its first turn: the Chief of Staff's
+    /// history in its pinned conversation. Set, the empty-state hints go.
+    var header: AnyView? = nil
     /// Where the thread is scrolled. Every scroll the thread makes goes
     /// through it: to a message's head, to an edge, or by a page.
     @State private var threadPosition = ScrollPosition()
@@ -92,6 +95,7 @@ struct QuickAIThread: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: House.Spacing.md) {
                 let pendingQuestion = pendingQuestion
+                if let header { header }
                 ForEach(viewModel.conversationMessages) { message in
                     turn(message)
                         .coordinateSpace(.named(Self.turnSpace(message.id)))
@@ -205,7 +209,7 @@ struct QuickAIThread: View {
             }
         }
         .overlay {
-            let hints = viewModel.quickAIEmptyStateHints
+            let hints = header == nil ? viewModel.quickAIEmptyStateHints : []
             if !hints.isEmpty { emptyStateHints(hints) }
         }
         .overlay(alignment: .bottom) {

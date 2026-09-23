@@ -48,6 +48,15 @@ credential type without echoing the value, then rotate the credential.
 
 AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi.
 
+**Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
+organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
+acts only by calling the `cos` CLI (`do`, `edit`, `skip`, `append`, `status`)
+on a card action the user takes; Quick Launch never writes the thread and its
+chat gets no write tools. The backing chat (`ChiefOfStaffModel.conversationID`)
+stays out of every chat list. Quick Launch is the one notification sender and
+touches `app.alive`; `UserNotificationRouter` is the app's one notification
+delegate.
+
 `Packages/HouseChatCore` owns the shared chat policy, archival schema and
 attachment interfaces consumed by Quick Launch and RTI. Keep it compatible
 with Swift 6.0 and macOS 14. Histories and app defaults remain separate;

@@ -23,6 +23,9 @@ final class AIChatWindow: NSWindow {
         // An input method's composition (pinyin, for one) owns Return and
         // Escape until it commits.
         if textView?.hasMarkedText() == true { return false }
+        // The Chief of Staff's card keys, before the draft's caret keys:
+        // ⌥↑ onto the cards wins over the paragraph move.
+        if routeChiefOfStaffKey(event, model: model) { return true }
         // The draft's own caret keys, before the thread's scrolling (the
         // composer's key routing) can take them.
         if routeComposerCaretKey(event, model: model) { return true }
@@ -55,6 +58,11 @@ final class AIChatWindow: NSWindow {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.overlayRelevant
+        // ⌘↩, ⌘E and ⌘⌫ on a focused card, before the menu bar's own.
+        if event.type == .keyDown, let model, (firstResponder as? NSTextView)?.hasMarkedText() != true,
+           routeChiefOfStaffKey(event, model: model) {
+            return true
+        }
         if event.type == .keyDown, modifiers == [.command],
            event.charactersIgnoringModifiers?.lowercased() == "w" {
             performClose(nil)
@@ -75,6 +83,15 @@ final class AIChatWindow: NSWindow {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    private func routeChiefOfStaffKey(_ event: NSEvent, model: AIChatWindowModel) -> Bool {
+        guard event.type == .keyDown else { return false }
+        return model.handleChiefOfStaffKey(
+            key: VirtualKey(event: event),
+            characters: event.charactersIgnoringModifiers,
+            modifiers: event.modifierFlags
+        )
     }
 
     /// `⌘↑` `⌘↓`, `⌥↑` `⌥↓`, and PageUp PageDown in the multi-line
@@ -331,16 +348,19 @@ protocol UserNotificationCentering: AnyObject {
     func add(identifier: String, title: String, body: String) async
 }
 
-/// `UNUserNotificationCenter`, and its delegate so a click opens the chat.
+/// `UNUserNotificationCenter` for answer notices. The center's delegate is
+/// the app's one `UserNotificationRouter`, shared with the Chief of Staff's
+/// notices; a click on an answer notice comes back here through it.
 @MainActor
-final class SystemUserNotificationCenter: NSObject, UserNotificationCentering, UNUserNotificationCenterDelegate {
-    var onOpen: (() -> Void)?
+final class SystemUserNotificationCenter: UserNotificationCentering {
+    var onOpen: (() -> Void)? {
+        didSet { UserNotificationRouter.shared.answerOpen = onOpen }
+    }
     private let center: UNUserNotificationCenter
 
-    override init() {
+    init() {
         center = UNUserNotificationCenter.current()
-        super.init()
-        center.delegate = self
+        UserNotificationRouter.shared.install()
     }
 
     func authorizationStatus() async -> UNAuthorizationStatus {
@@ -356,21 +376,6 @@ final class SystemUserNotificationCenter: NSObject, UserNotificationCentering, U
         content.title = title
         content.body = body
         try? await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .list]
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        await MainActor.run { self.onOpen?() }
     }
 }
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — 2026-09-23 (Chief of Staff)
+
+- **Quick Launch is the Chief of Staff's face.** AI Chat pins a Chief of
+  Staff conversation at the top of its chat list (`⌘1`, never renamed or
+  deleted, with the waiting count), and `⌘K` › **Chief of Staff** and the
+  launcher row (`cos`) open it. Opened, the waiting cards sit in their own
+  scroll above the thread, newest first; decided cards fold to one line.
+
+  Keyboard first: `↑` from an empty composer or `⌥↑` moves onto the cards,
+  `↑↓` between them; `⌘↩` Do it, `⌘E` Edit (fields; `⌘↩` Run, `esc` Cancel),
+  `⌘⌫` Skip, `esc` back to the composer. The focused card shows its keys.
+  Every verdict runs through the `cos` CLI; Quick Launch never writes the
+  thread.
+
+  A question in the conversation runs on the normal pipeline (DeepSeek Flash
+  when offered, the read-only tools, attachments) with the Chief of Staff's
+  instruction, the waiting cards and the last twelve proposals as its system
+  message. Both turns go to the thread through `cos append`.
+
+  Quick Launch sends the Chief of Staff's notifications: one per new card,
+  grouped by project, with Do it, Skip, Open and a Reply field; one summary
+  when three or more arrive together; time sensitive only for a client email
+  naming a date within 48 hours; none from 23:00 to 07:00. It touches
+  `app.alive` every 30 seconds, so `cos` leaves its own banners alone.
+
+  The AI Chat root view no longer forces a minimum width; a narrow window
+  reflows.
+
 ## Unreleased — 2026-09-21 (Bocha and Exa)
 
 - **Bocha and Exa join the search backends.** Bocha is the Chinese-web lane

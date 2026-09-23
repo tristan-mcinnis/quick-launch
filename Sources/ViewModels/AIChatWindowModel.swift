@@ -63,6 +63,10 @@ protocol AIChatWindowPresenting: AnyObject {
         case find
         case rail
         case rename
+        /// A waiting card of the Chief of Staff (↑↓ from the composer).
+        case cards
+        /// A waiting card's Edit fields.
+        case cardEdit
         /// A field the window does not route: the `⌘K` palette's search.
         /// Return and ⇧↩ are that field's own.
         case other
@@ -178,6 +182,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// command, the menu) shows the chat the window holds, or the last one,
     /// or a new one when the Start New Chat interval has passed.
     func open(handoff: AIChatHandoff?) {
+        releaseCards()
         if let handoff {
             closeFind()
             chat.adoptAIChatHandoff(handoff)
@@ -191,12 +196,136 @@ protocol AIChatWindowPresenting: AnyObject {
         chat.requestInputFocus()
     }
 
+    // MARK: - Chief of Staff
+
+    /// The Chief of Staff, when the app has one and its CLI is installed.
+    var chiefOfStaff: ChiefOfStaffModel? {
+        chat.chiefOfStaff.flatMap { $0.isAvailable ? $0 : nil }
+    }
+
+    /// The pinned Chief of Staff conversation is the open chat.
+    var isChiefOfStaffOpen: Bool { chiefOfStaff != nil && chat.isChiefOfStaffChatOpen }
+
+    /// The rail's first row: the pinned conversation, always there, never
+    /// renamed or deleted. It answers a search for its name or `cos`.
+    var chiefOfStaffRailItem: LauncherCatalogItem? {
+        guard let chiefOfStaff else { return nil }
+        let item = LauncherCatalogItem(
+            kind: .conversation,
+            itemID: ChiefOfStaffModel.conversationID.uuidString,
+            title: ChiefOfStaffModel.title,
+            detail: chiefOfStaff.summary,
+            value: "",
+            keywords: "cos",
+            isPinned: true
+        )
+        let query = FuzzyMatcher.fold(railQuery.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !query.isEmpty else { return item }
+        return FuzzyMatcher.fold("\(item.title) cos").contains(query) ? item : nil
+    }
+
+    static func isChiefOfStaffItem(_ itemID: String?) -> Bool {
+        itemID == ChiefOfStaffModel.conversationID.uuidString
+    }
+
+    /// Opens the pinned conversation: the backing chat, the waiting cards
+    /// above it, and the keyboard in the composer, or on `proposalID`'s card
+    /// when a notification named one.
+    func openChiefOfStaff(proposalID: String? = nil) {
+        guard chiefOfStaff != nil else { return }
+        closeFind()
+        chat.openChiefOfStaffChat()
+        railIndex = currentRailIndex ?? railIndex
+        railActionsPresented = false
+        deleteArmedChatID = nil
+        if let proposalID {
+            focusCards(proposalID)
+        } else {
+            focusComposer()
+        }
+        window?.showWindow()
+    }
+
+    /// The keyboard onto the waiting cards: `id`'s, or the newest.
+    func focusCards(_ id: String? = nil) {
+        guard let chiefOfStaff, !chiefOfStaff.waiting.isEmpty else { return }
+        chiefOfStaff.focusCard(id)
+        focus = .cards
+    }
+
+    /// The keyboard leaves the cards; an open Edit closes.
+    private func releaseCards() {
+        chiefOfStaff?.releaseCardFocus()
+    }
+
+    /// The Chief of Staff's keys (↑↓ onto and over the cards, ⌘↩ Do it,
+    /// ⌘E Edit, ⌘⌫ Skip, Escape back), while its conversation is open.
+    /// True when the key was used.
+    func handleChiefOfStaffKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard isChiefOfStaffOpen, let chiefOfStaff else { return false }
+        let place: ChiefOfStaffKeys.Place
+        switch focus {
+        case .cards:
+            place = .card
+        case .cardEdit:
+            place = .editing
+        case .composer:
+            // A chooser, the palette, or the question card over the
+            // composer keeps its own arrows.
+            switch chat.topLayer {
+            case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser, .modelChooser,
+                 .assistantChooser, .captureChooser, .addContextMenu, .slashCommandPalette, .recentChats:
+                return false
+            default:
+                if chat.isAskQuestionActive { return false }
+            }
+            place = .composer(draftIsEmpty: chat.input.isEmpty)
+        default:
+            return false
+        }
+        guard let action = ChiefOfStaffKeys.route(
+            key: key,
+            characters: characters,
+            modifiers: modifiers,
+            place: place,
+            hasWaiting: !chiefOfStaff.waiting.isEmpty
+        ) else { return false }
+        switch action {
+        case .focusCards:
+            focusCards()
+        case .move(let delta):
+            chiefOfStaff.moveCardFocus(delta)
+            if chiefOfStaff.focusedCardID == nil { focusComposer() }
+        case .toComposer:
+            focusComposer()
+        case .doIt:
+            chiefOfStaff.doFocused()
+        case .edit:
+            chiefOfStaff.editFocused()
+            if chiefOfStaff.isEditingFocusedCard { focus = .cardEdit }
+        case .skip:
+            chiefOfStaff.skipFocused()
+        case .runEdit:
+            chiefOfStaff.doFocused()
+            focus = .cards
+        case .cancelEdit:
+            if let id = chiefOfStaff.focusedCardID { chiefOfStaff.cancelEdit(id) }
+            focus = .cards
+        }
+        return true
+    }
+
     // MARK: - Rail
 
-    /// The rail's rows: pinned first, then recent, narrowed and ranked by
-    /// the search every chat list shares. The view model caches the rows
-    /// per query, so reading them again costs nothing.
-    var railItems: [LauncherCatalogItem] { chat.chatItems(matching: railQuery) }
+    /// The rail's rows: the pinned Chief of Staff first, then pinned chats,
+    /// then recent, narrowed and ranked by the search every chat list
+    /// shares. The view model caches the rows per query, so reading them
+    /// again costs nothing.
+    var railItems: [LauncherCatalogItem] {
+        let chats = chat.chatItems(matching: railQuery)
+        guard let chiefOfStaffRailItem else { return chats }
+        return [chiefOfStaffRailItem] + chats
+    }
 
     /// While a query is typed the rail is one ranked list under "Results";
     /// pinned rows keep their glyph but are not floated (spec 4.5).
@@ -231,6 +360,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// count and the time today, the day before that. A row found by its
     /// text shows its snippet there instead, and this moves to the tooltip.
     func railDetail(for item: LauncherCatalogItem, now: Date = Date()) -> String {
+        if Self.isChiefOfStaffItem(item.itemID) { return chiefOfStaff?.summary ?? item.detail }
         guard let facts = railFacts[item.itemID] else { return item.detail }
         let count = facts.questions == 1 ? "1 question" : "\(facts.questions) questions"
         let stamp = Calendar.current.isDate(facts.updatedAt, inSameDayAs: now)
@@ -329,6 +459,11 @@ protocol AIChatWindowPresenting: AnyObject {
     /// Opens a chat from the rail (a click, Return, or `⌘1`…`⌘9`). The rail
     /// stays; the keyboard goes back to the composer.
     func openChat(itemID: String) {
+        if Self.isChiefOfStaffItem(itemID) {
+            openChiefOfStaff()
+            return
+        }
+        releaseCards()
         if chat.isStreaming { chat.cancel() }
         closeFind()
         chat.continueConversation(itemID: itemID)
@@ -377,7 +512,12 @@ protocol AIChatWindowPresenting: AnyObject {
         }
     }
 
-    var railActions: [RailAction] { highlightedRailItem == nil ? [] : RailAction.allCases }
+    /// The pinned Chief of Staff row has none: it cannot be pinned off,
+    /// renamed, or deleted.
+    var railActions: [RailAction] {
+        guard let item = highlightedRailItem, !Self.isChiefOfStaffItem(item.itemID) else { return [] }
+        return RailAction.allCases
+    }
 
     var filteredRailActions: [RailAction] {
         QuickViewModel.rankByQuery(railActions, query: railActionQuery) { title(of: $0) }
@@ -433,7 +573,8 @@ protocol AIChatWindowPresenting: AnyObject {
     }
 
     func performRailAction(_ action: RailAction) {
-        guard let item = highlightedRailItem, let id = UUID(uuidString: item.itemID) else { return }
+        guard let item = highlightedRailItem, !Self.isChiefOfStaffItem(item.itemID),
+              let id = UUID(uuidString: item.itemID) else { return }
         switch action {
         case .pin:
             deleteArmedChatID = nil
@@ -649,6 +790,7 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Focus
 
     func focusComposer() {
+        releaseCards()
         focus = .composer
         chat.requestInputFocus()
     }
@@ -656,7 +798,9 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Window actions (⌘K)
 
     var windowSurfaceActions: [QuickAISurfaceAction] {
-        [
+        var actions: [QuickAISurfaceAction] = []
+        if chiefOfStaff != nil, !isChiefOfStaffOpen { actions.append(.chiefOfStaff) }
+        return actions + [
             isRailVisible ? .hideChatList : .showChatList,
             .findInChat,
             isAlwaysOnTop ? .stopKeepingOnTop : .keepOnTop,
@@ -665,6 +809,7 @@ protocol AIChatWindowPresenting: AnyObject {
 
     func performWindowSurfaceAction(_ action: QuickAISurfaceAction) {
         switch action {
+        case .chiefOfStaff: openChiefOfStaff()
         case .showChatList: showRail()
         case .hideChatList: hideRail()
         case .findInChat: openFind()
@@ -691,7 +836,12 @@ protocol AIChatWindowPresenting: AnyObject {
         default:
             break
         }
-        if renamingChatID != nil {
+        if focus == .cardEdit, let chiefOfStaff, let id = chiefOfStaff.focusedCardID {
+            chiefOfStaff.cancelEdit(id)
+            focus = .cards
+        } else if focus == .cards {
+            focusComposer()
+        } else if renamingChatID != nil {
             cancelRename()
         } else if railActionsPresented {
             railActionsPresented = false
@@ -728,7 +878,10 @@ protocol AIChatWindowPresenting: AnyObject {
         case .rename:
             commitRename()
             return true
-        case .other:
+        case .cards:
+            // A bare Return never decides a card: ⌘↩ does.
+            return true
+        case .cardEdit, .other:
             return false
         }
     }
@@ -756,7 +909,9 @@ protocol AIChatWindowPresenting: AnyObject {
         case .find:
             findPrevious()
             return .handled
-        case .rail, .rename, .other:
+        case .cards:
+            return .handled
+        case .rail, .rename, .cardEdit, .other:
             return .ignored
         }
     }

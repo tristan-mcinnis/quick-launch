@@ -1,0 +1,332 @@
+{
+  "createdAt": "2026-09-23T12:58:26.123Z",
+  "id": "chief-of-staff-main",
+  "schemaVersion": 1,
+  "sessionLinks": [],
+  "surface": "chief-of-staff",
+  "title": "Chief of Staff",
+  "turns": [
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [
+            {
+              "note": "Client moved the readout to Friday.",
+              "type": "status_note"
+            }
+          ],
+          "created": "2026-09-23T08:10:00.000Z",
+          "decided": "2026-09-23T08:20:00.000Z",
+          "due": null,
+          "event_kind": "email",
+          "headline": "Readout moved to Friday",
+          "id": "aa11bb22",
+          "importance": "client",
+          "kind": "proposal",
+          "message": "The readout moved to Friday.\nI propose: log it.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "results": [
+            {
+              "detail": "wrote status note",
+              "ok": true,
+              "type": "status_note"
+            }
+          ],
+          "sender": "Sam Client <sam@example.com>",
+          "status": "done",
+          "tier": "today",
+          "title": "Readout date",
+          "verdict": "do",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "4610686e-e359-4be8-bc7b-ef6e9dd41cbe",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "The readout moved to Friday.\nI propose: log it.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "kind": "verdict",
+          "proposal": "aa11bb22",
+          "verdict": "do"
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "4fdd0ee2-697d-439e-95a3-a27eb4488928",
+      "role": "system",
+      "sessionLinks": [],
+      "text": "Done: ok status_note",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [
+            {
+              "note": "Budget approved at the revised figure.",
+              "type": "status_note"
+            },
+            {
+              "due": "2026-09-30",
+              "title": "Send revised quote",
+              "type": "task_add"
+            },
+            {
+              "body": "Thanks, confirmed. I will send the quote by Tuesday.",
+              "type": "draft_reply"
+            },
+            {
+              "evidence": null,
+              "task_id": "T-42",
+              "type": "task_close",
+              "what": "Budget sign-off received"
+            }
+          ],
+          "created": "2026-09-23T09:05:00.000Z",
+          "due": "2026-09-30",
+          "event_kind": "email",
+          "headline": "Budget approved, quote due Tuesday",
+          "id": "cc33dd44",
+          "importance": "client",
+          "kind": "proposal",
+          "message": "Budget is approved.\nI propose: log it, add two tasks, draft a reply.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam Client <sam@example.com>",
+          "status": "pending",
+          "tier": "decide",
+          "title": "RE: Budget",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "c0ac2b96-1323-4ee4-b06c-29e45143a5e8",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Budget is approved.\nI propose: log it, add two tasks, draft a reply.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "kind": "chat"
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "f2464bdf-050a-45c7-b262-a640540d66a1",
+      "role": "user",
+      "sessionLinks": [],
+      "text": "What is still open on sample-project?",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "kind": "chat"
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "93345a03-b01f-4c5e-bae7-53163482d803",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "One proposal waits: the budget approval.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T09:20:00.000Z",
+          "due": null,
+          "event_kind": "email",
+          "headline": "",
+          "id": "dd00ee11",
+          "importance": "admin",
+          "kind": "proposal",
+          "message": "A newsletter arrived.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam Client <sam@example.com>",
+          "status": "dismissed",
+          "tier": "today",
+          "title": "Newsletter",
+          "verdict": "skip",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "c4c00344-f6f6-496f-9856-e02202037081",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "A newsletter arrived.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [
+            {
+              "due": null,
+              "title": "Reply to Slack thread",
+              "type": "task_add"
+            }
+          ],
+          "created": "2026-09-23T09:30:00.000Z",
+          "due": null,
+          "event_kind": "slack",
+          "headline": "",
+          "id": "ee55ff66",
+          "importance": "team",
+          "kind": "proposal",
+          "message": "A question in #ops waits for you.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "",
+          "reason": "",
+          "sender": "Alex",
+          "status": "pending",
+          "tier": "today",
+          "title": "#ops",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "00cefe49-b577-4b57-8926-3d20253f0d33",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "A question in #ops waits for you.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T09:40:00.000Z",
+          "due": null,
+          "event_kind": "email",
+          "headline": "",
+          "id": "ff77aa88",
+          "importance": "admin",
+          "kind": "proposal",
+          "message": "Invoice due next month.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": "sample-project",
+          "reason": "",
+          "sender": "Sam Client <sam@example.com>",
+          "snoozed_until": "2026-09-24T01:00:00.000Z",
+          "status": "later",
+          "tier": "today",
+          "title": "Invoice",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "a3c30e4a-1a47-4ac7-af4d-1f272de9fbf1",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Invoice due next month.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "actions": [],
+          "created": "2026-09-23T09:45:00.000Z",
+          "due": null,
+          "event_kind": "health",
+          "headline": "",
+          "id": "99887766",
+          "importance": "system",
+          "kind": "proposal",
+          "message": "All jobs are green.",
+          "paths": [
+            "kb/databases/emails/2026/09/a.md"
+          ],
+          "project": null,
+          "reason": "",
+          "sender": "",
+          "status": "handled",
+          "tier": "system",
+          "title": "System health",
+          "verdict": "auto",
+          "why": ""
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.123Z",
+      "id": "683e3219-725c-4fb3-b5f3-ef8c04e5a7aa",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "All jobs are green.",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "attachments": "brief.pdf",
+          "kind": "chat",
+          "surface": "quick-launch"
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.197Z",
+      "id": "ad00a243-7e4c-40d8-bcf4-176622b85053",
+      "role": "user",
+      "sessionLinks": [],
+      "text": "Draft the reply for me?",
+      "toolRounds": []
+    },
+    {
+      "appPayload": {
+        "namespace": "chief-of-staff",
+        "values": {
+          "kind": "chat",
+          "surface": "quick-launch"
+        }
+      },
+      "attachments": [],
+      "createdAt": "2026-09-23T12:58:26.256Z",
+      "id": "57cc7879-dcc7-49ef-9570-fb47a17f7a79",
+      "role": "assistant",
+      "sessionLinks": [],
+      "text": "Press Edit on card cc33dd44 and change the reply body.",
+      "toolRounds": []
+    }
+  ],
+  "updatedAt": "2026-09-23T12:58:26.256Z"
+}
