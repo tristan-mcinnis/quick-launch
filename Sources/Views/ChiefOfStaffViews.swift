@@ -293,11 +293,11 @@ struct ChiefOfStaffStatusBar: View {
             Button {
                 model.setProjectFilter(nil)
             } label: {
-                HouseChip(text: project.name, icon: "xmark")
+                HouseChip(text: project.shortName, icon: "xmark")
             }
             .buttonStyle(.plain)
             .help("Show every project (⇧⌘P)")
-            .accessibilityLabel("Filter: \(project.name). Clear")
+            .accessibilityLabel("Filter: \(project.shortName). Clear")
         }
         // Never truncated: the health line gives way first, then the row wraps.
         ViewSwitch(mode: model.viewMode) { model.viewMode = $0 }
@@ -449,7 +449,7 @@ struct TodayRow: View {
                         .font(House.TypeToken.meta)
                         .foregroundStyle(House.ColorToken.textTertiary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.tail)
                 }
                 Spacer(minLength: House.Spacing.xs)
                 if state.isRunning {
@@ -490,11 +490,12 @@ struct TodayRow: View {
         .accessibilityAddTraits(isFocused ? .isSelected : [])
     }
 
-    /// The source, the actions ("Log it · Add task"), and the due phrase.
+    /// The source, the first action ("Finalise the photos, +2 more"), and
+    /// the due phrase.
     private var detail: String {
         var parts = [proposal.source].filter { !$0.isEmpty }
-        let actions = proposal.actions.map(\.typeLabel)
-        if !actions.isEmpty { parts.append(actions.joined(separator: " · ")) }
+        // Not when it only repeats the headline.
+        if let actions = proposal.actionSummary, !actions.hasPrefix(proposal.headline) { parts.append(actions) }
         if let due = proposal.due, let phrase = ChiefOfStaffDates.relativeDue(due) { parts.append(phrase) }
         return parts.joined(separator: " · ")
     }
@@ -566,7 +567,7 @@ struct ProjectRow: View {
         Button(action: onTap) {
             HStack(alignment: .firstTextBaseline, spacing: House.Spacing.xs) {
                 StatusDot(color: riskColor)
-                Text(project.name)
+                Text(project.shortName)
                     .font(House.TypeToken.label)
                     .foregroundStyle(House.ColorToken.textPrimary)
                     .lineLimit(1)
@@ -586,8 +587,8 @@ struct ProjectRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(isSelected ? "Show every project" : "Show only \(project.name)")
-        .accessibilityLabel("\(project.name), \(riskWord), \(detail)")
+        .help(isSelected ? "Show every project" : project.name)
+        .accessibilityLabel("\(project.shortName), \(riskWord), \(detail)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -846,7 +847,7 @@ struct NewTaskSheet: View {
                                 pickProject()
                                 field = .due
                             } label: {
-                                Text(project.name)
+                                Text(project.shortName)
                                     .font(House.TypeToken.bodySmall)
                                     .foregroundStyle(House.ColorToken.textPrimary)
                                     .lineLimit(1)
@@ -916,7 +917,7 @@ struct NewTaskSheet: View {
         let list = Array(suggestions.prefix(Self.suggestionCount))
         guard list.indices.contains(draft.projectIndex) else { return }
         model.newTask?.projectSlug = list[draft.projectIndex].slug
-        model.newTask?.projectQuery = list[draft.projectIndex].name
+        model.newTask?.projectQuery = list[draft.projectIndex].shortName
     }
 }
 
@@ -944,7 +945,7 @@ struct ProjectPickerView: View {
                     Button {
                         pick(rows, at: index)
                     } label: {
-                        Text(project?.name ?? "All projects")
+                        Text(project?.shortName ?? "All projects")
                             .font(House.TypeToken.label)
                             .foregroundStyle(House.ColorToken.textPrimary)
                             .lineLimit(1)
@@ -996,7 +997,7 @@ struct ProjectPickerView: View {
 /// surface recorded (`cos ask`) as normal chat. The turns this app asked
 /// follow as the chat's own thread.
 struct ChiefOfStaffHistory: View {
-    let items: [ChiefOfStaffThreadItem]
+    let entries: [ChiefOfStaffThread.EarlierEntry]
     var problem: String?
     @State private var expanded: Set<String> = []
 
@@ -1012,14 +1013,49 @@ struct ChiefOfStaffHistory: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            if !items.isEmpty {
+            if !entries.isEmpty {
                 SectionLabel(text: "Earlier")
             }
-            ForEach(items) { item in
-                row(item)
+            ForEach(entries) { entry in
+                switch entry {
+                case .item(let item):
+                    row(item)
+                case .closedOnTheirOwn(let proposals):
+                    closedLine(proposals)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "7 closed on their own": one quiet line; a click lists them.
+    @ViewBuilder
+    private func closedLine(_ proposals: [Proposal]) -> some View {
+        let key = "closed-on-their-own"
+        Button {
+            if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
+        } label: {
+            HStack(spacing: House.Spacing.xs) {
+                StatusDot(color: House.ColorToken.textTertiary)
+                Text("\(proposals.count) closed on their own")
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textSecondary)
+                Image(systemName: expanded.contains(key) ? "chevron.down" : "chevron.right")
+                    .font(House.TypeToken.caption)
+                    .foregroundStyle(House.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(expanded.contains(key) ? "Open" : "Closed")
+        if expanded.contains(key) {
+            ForEach(proposals) { proposal in
+                DecidedProposalLine(proposal: proposal) {}
+                    .padding(.leading, House.Spacing.sm)
+            }
+        }
     }
 
     @ViewBuilder

@@ -45,6 +45,9 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var id: String
     var status: Status
     var project: String
+    /// The project's human name from `cos projects`, set by the model;
+    /// nil shows the slug.
+    var projectName: String?
     var eventKind: String
     var title: String
     var sender: String
@@ -97,6 +100,7 @@ struct Proposal: Sendable, Equatable, Identifiable {
         self.id = id
         self.status = status
         self.project = project
+        projectName = nil
         self.eventKind = eventKind
         self.title = title
         self.sender = sender
@@ -173,16 +177,41 @@ struct Proposal: Sendable, Equatable, Identifiable {
         }
     }
 
-    /// What a card names it by: the project, else the sender, else the
-    /// event title (a health card has only a title).
+    /// What a card names it by: the project's name (or slug), else the
+    /// sender, else the event title (a health card has only a title).
     var source: String {
-        [project, sender, title].first { !$0.isEmpty } ?? ""
+        [projectName ?? "", project, sender, title].first { !$0.isEmpty } ?? ""
     }
 
-    /// One line: the brain's headline, else the message's first line.
+    /// One line: the brain's headline, else the message's first sentence,
+    /// cut at a semicolon.
     var headline: String {
-        if !cardHeadline.isEmpty { return cardHeadline }
-        return message.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? title
+        if !cardHeadline.isEmpty {
+            // A long headline from before the 12-word rule: its first clause.
+            let words = cardHeadline.split(separator: " ").count
+            return words > Self.headlineWords ? Self.firstSentence(of: cardHeadline) ?? cardHeadline : cardHeadline
+        }
+        return Self.firstSentence(of: message) ?? title
+    }
+
+    /// The brain keeps a headline to this many words.
+    static let headlineWords = 12
+
+    static func firstSentence(of text: String) -> String? {
+        guard var line = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) else { return nil }
+        if let semicolon = line.firstIndex(of: ";") { line = String(line[..<semicolon]) }
+        if let stop = line.range(of: ". ") { line = String(line[..<stop.lowerBound]) + "." }
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// A row's second line: the first action's text, and how many follow
+    /// ("Finalise stimulus photos, +2 more"). Nil when nothing runs.
+    var actionSummary: String? {
+        guard let first = actions.first(where: { !$0.text.isEmpty }) else { return nil }
+        var text = Self.firstSentence(of: first.text) ?? first.text
+        if text.hasSuffix(".") { text.removeLast() }
+        return actions.count > 1 ? "\(text), +\(actions.count - 1) more" : text
     }
 
     /// A health card has nothing to run: its one button is Got it.

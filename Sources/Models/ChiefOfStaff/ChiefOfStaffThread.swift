@@ -80,6 +80,44 @@ enum ChiefOfStaffThread {
         }
     }
 
+    /// One line of EARLIER: a history item, or the cards that closed on
+    /// their own, folded into one line.
+    enum EarlierEntry: Sendable, Equatable, Identifiable {
+        case item(ChiefOfStaffThreadItem)
+        case closedOnTheirOwn([Proposal])
+
+        var id: String {
+            switch self {
+            case .item(let item): item.id
+            case .closedOnTheirOwn: "closed-on-their-own"
+            }
+        }
+    }
+
+    /// The note `cos` writes when it merges cards into one digest.
+    static let mergedNote = "Merged into one digest"
+
+    /// EARLIER without the bookkeeping: cards merged into a digest are left
+    /// out, other cards that closed on their own fold into one first line,
+    /// and the rest keep thread order.
+    static func earlier(_ history: [ChiefOfStaffThreadItem], in items: [ChiefOfStaffThreadItem]) -> [EarlierEntry] {
+        var autoNotes: [String: String] = [:]
+        for item in items {
+            if case .verdict(_, let proposalID, "auto", let text, _) = item { autoNotes[proposalID] = text }
+        }
+        var closed: [Proposal] = []
+        var entries: [EarlierEntry] = []
+        for item in history {
+            guard let proposal = item.proposal, proposal.verdict == "auto" else {
+                entries.append(.item(item))
+                continue
+            }
+            if autoNotes[proposal.id]?.hasPrefix(mergedNote) == true { continue }
+            closed.append(proposal)
+        }
+        return closed.isEmpty ? entries : [.closedOnTheirOwn(closed)] + entries
+    }
+
     static func item(for turn: TurnRecord) -> ChiefOfStaffThreadItem? {
         let payload = turn.appPayload
         guard payload == nil || payload?.namespace == namespace else { return nil }

@@ -147,6 +147,63 @@ struct ChiefOfStaffThreadTests {
     }
 }
 
+@Suite("Chief of Staff reading")
+struct ChiefOfStaffReadingTests {
+    @Test func headlinesFallBackToTheFirstSentenceCutAtASemicolon() {
+        #expect(Proposal.firstSentence(of: "Charlie approved the mini group; Dana started.\nMore.") == "Charlie approved the mini group")
+        #expect(Proposal.firstSentence(of: "The readout moved. Log it.") == "The readout moved.")
+        #expect(Proposal.firstSentence(of: "One line") == "One line")
+        #expect(Proposal.firstSentence(of: "\n\n") == nil)
+        #expect(Proposal(id: "x", message: "A; b").headline == "A")
+        #expect(Proposal(id: "x", message: "m", headline: "Given").headline == "Given")
+        let long = "Charlie approved the mini group with 5 IC recruits on 2026-09-23; Dana started the same day"
+        #expect(Proposal(id: "x", message: "m", headline: long).headline == "Charlie approved the mini group with 5 IC recruits on 2026-09-23")
+        #expect(Proposal(id: "x", message: "m", headline: "Short; fine").headline == "Short; fine")
+    }
+
+    @Test func rowsSayTheFirstActionNotItsType() {
+        let close = { (what: String) in ProposalAction(type: "task_close", fields: ["task_id": "t", "what": what]) }
+        let three = Proposal(id: "x", message: "m", actions: [close("Finalise stimulus photos."), close("b"), close("c")])
+        #expect(three.actionSummary == "Finalise stimulus photos, +2 more")
+        #expect(Proposal(id: "x", message: "m", actions: [close("Sent the transcript")]).actionSummary == "Sent the transcript")
+        #expect(Proposal(id: "x", message: "m").actionSummary == nil)
+    }
+
+    @Test func projectsShowTheirShortName() throws {
+        let long = CosProject(slug: "globex-northwind", name: "Northwind & Contoso Consumer Immersion — Globex Corporation")
+        #expect(long.shortName == "Northwind & Contoso Consumer Immersion")
+        #expect(CosProject(slug: "s", name: "Plain").shortName == "Plain")
+        #expect(CosProject(slug: "s", name: " — x").shortName == "s")
+        var named = Proposal(id: "x", project: "globex-northwind", sender: "Charlie", message: "m")
+        #expect(named.source == "globex-northwind")
+        named.projectName = long.shortName
+        #expect(named.source == "Northwind & Contoso Consumer Immersion")
+    }
+
+    @Test func earlierDropsDigestBookkeepingAndFoldsAutoClosedCards() {
+        func card(_ id: String, _ verdict: String?) -> ChiefOfStaffThreadItem {
+            .proposal(turnID: id, Proposal(id: id, status: verdict == "auto" ? .handled : .done, message: id, verdict: verdict))
+        }
+        func note(_ id: String, _ text: String) -> ChiefOfStaffThreadItem {
+            .verdict(turnID: "v-\(id)-\(text.count)", proposalID: id, verdict: "auto", text: text, date: nil)
+        }
+        let items: [ChiefOfStaffThreadItem] = [
+            card("merged", "auto"), note("merged", "Merged into one digest"),
+            card("closed", "auto"), note("closed", "Closed on its own: the proof arrived"),
+            card("done", "do"),
+            card("health", "auto"),
+        ]
+        let entries = ChiefOfStaffThread.earlier(ChiefOfStaffThread.history(in: items), in: items)
+        #expect(entries.count == 2)
+        guard case .closedOnTheirOwn(let folded) = entries.first else {
+            Issue.record("expected the folded line first, got \(entries)")
+            return
+        }
+        #expect(folded.map(\.id) == ["closed", "health"])
+        #expect(entries.last?.id == "done")
+    }
+}
+
 @Suite("Chief of Staff cos calls")
 struct CosCommandTests {
     @Test func verbsAreArgumentArrays() throws {
@@ -441,6 +498,8 @@ struct ChiefOfStaffModelTests {
         #expect(model.waitingCount == 4)
         #expect(model.summary == "4 waiting")
         #expect(model.projects.map(\.slug) == ["sample-project", "ops-desk"])
+        // Cards carry their project's name from the strip, not the slug.
+        #expect(model.today.map(\.source) == ["Sample Project", "Sample Project", "Ops Desk"])
         #expect(!model.focusOrder.contains("11aa22bb"))
     }
 
@@ -644,7 +703,7 @@ struct ChiefOfStaffModelTests {
         let model = try await model()
         let message = try #require(model.systemMessage(forChat: ChiefOfStaffModel.conversationID))
         #expect(message.contains("You cannot act from this chat"))
-        #expect(message.contains("[cc33dd44] Waiting · sample-project · decide · due 2026-09-24"))
+        #expect(message.contains("[cc33dd44] Waiting · Sample Project (sample-project) · decide · due 2026-09-24"))
         #expect(message.contains("4. Close task: Budget sign-off received"))
         #expect(!message.contains("WAITING CARDS (newest first)\n[11aa22bb]"))
         #expect(!message.contains("—"))

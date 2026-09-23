@@ -125,7 +125,7 @@ struct AIChatWindowView: View {
     private var chiefOfStaffHistory: AnyView? {
         guard model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff else { return nil }
         return AnyView(ChiefOfStaffHistory(
-            items: chiefOfStaff.filteredHistory,
+            entries: chiefOfStaff.earlier,
             problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
         ))
     }

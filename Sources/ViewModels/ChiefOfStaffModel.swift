@@ -250,6 +250,11 @@ final class ChiefOfStaffModel {
         return history.filter { $0.proposal.map(inFilter) ?? false }
     }
 
+    /// EARLIER as drawn: no digest bookkeeping, auto-closed cards folded.
+    var earlier: [ChiefOfStaffThread.EarlierEntry] {
+        ChiefOfStaffThread.earlier(filteredHistory, in: items)
+    }
+
     /// The count on the rail row and the launcher: cards that want him now
     /// (DECIDE and TODAY), whatever the filter.
     var waitingCount: Int {
@@ -305,13 +310,25 @@ final class ChiefOfStaffModel {
     }
 
     func apply(_ newItems: [ChiefOfStaffThreadItem]) {
-        items = newItems
+        items = named(newItems)
         // Every card has its state before a view reads it, so a render
         // never writes the model.
         for proposal in newItems.compactMap(\.proposal) where cards[proposal.id] == nil {
             cards[proposal.id] = ProposalCardState()
         }
         refocus()
+    }
+
+    /// Each card's project name from the projects strip, so every surface
+    /// (cards, rows, the board, notifications) says "Acme Amplify", not
+    /// its slug.
+    private func named(_ items: [ChiefOfStaffThreadItem]) -> [ChiefOfStaffThreadItem] {
+        let names = Dictionary(projects.map { ($0.slug, $0.shortName) }, uniquingKeysWith: { first, _ in first })
+        return items.map { item in
+            guard case .proposal(let turn, var proposal) = item else { return item }
+            proposal.projectName = names[proposal.project]
+            return .proposal(turnID: turn, proposal)
+        }
     }
 
     /// A focused card that left the view hands the focus on.
@@ -732,6 +749,7 @@ final class ChiefOfStaffModel {
               let list = try? CosProject.decodeList(result.stdout)
         else { return }
         projects = list
+        items = named(items)
     }
 
     /// The notices for cards that appeared, and jobs that turned red, since
@@ -914,7 +932,10 @@ final class ChiefOfStaffModel {
         self.status = status
         isPaused = paused
         isAvailable = true
-        if let projects { self.projects = projects }
+        if let projects {
+            self.projects = projects
+            self.items = named(self.items)
+        }
     }
 }
 

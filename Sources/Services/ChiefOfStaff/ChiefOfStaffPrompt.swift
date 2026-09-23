@@ -41,6 +41,8 @@ enum ChiefOfStaffPrompt {
     static func describe(_ proposal: Proposal, full: Bool) -> String {
         var head = "[\(proposal.id)] \(proposal.statusWord)"
         if !proposal.source.isEmpty { head += " · \(proposal.source)" }
+        // The slug too, which the tools search by.
+        if !proposal.project.isEmpty, proposal.source != proposal.project { head += " (\(proposal.project))" }
         if !proposal.tier.isEmpty { head += " · \(proposal.tier)" }
         if let due = proposal.due { head += " · due \(due)" }
         head += " · \(proposal.headline)"

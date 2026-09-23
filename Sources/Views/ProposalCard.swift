@@ -32,26 +32,20 @@ struct ProposalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.xs) {
             header
-            if proposal.cardHeadline.isEmpty {
-                // A card from before headlines: its message is the text.
-                Text(proposal.message)
-                    .font(House.TypeToken.body)
-                    .foregroundStyle(House.ColorToken.textPrimary)
+            Text(proposal.headline)
+                .font(House.TypeToken.heading)
+                .foregroundStyle(House.ColorToken.textPrimary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            // Why it matters; a card from before headlines shows its message.
+            let why = proposal.cardHeadline.isEmpty ? proposal.message : proposal.why
+            if !why.isEmpty {
+                Text(why)
+                    .font(House.TypeToken.bodySmall)
+                    .foregroundStyle(House.ColorToken.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-            } else {
-                Text(proposal.cardHeadline)
-                    .font(House.TypeToken.heading)
-                    .foregroundStyle(House.ColorToken.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                if !proposal.why.isEmpty {
-                    Text(proposal.why)
-                        .font(House.TypeToken.bodySmall)
-                        .foregroundStyle(House.ColorToken.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
             }
             if !proposal.actions.isEmpty {
                 actions

@@ -174,6 +174,12 @@ struct CosProject: Sendable, Equatable, Identifiable, Decodable {
 
     var id: String { slug }
 
+    /// The name before " — ": "Acme Amplify", not its long subtitle.
+    var shortName: String {
+        let short = name.components(separatedBy: " — ").first?.trimmingCharacters(in: .whitespaces) ?? ""
+        return short.isEmpty ? slug : short
+    }
+
     private enum CodingKeys: String, CodingKey {
         case slug, name, phase, risk, overdue
         case openTasks = "open_tasks"
