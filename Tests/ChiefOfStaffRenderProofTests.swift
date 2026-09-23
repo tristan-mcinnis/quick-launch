@@ -99,6 +99,32 @@ struct ChiefOfStaffRenderProofTests {
         }
     }
 
+    /// The pinned conversation over the real `cos` thread and the real
+    /// `cos status`, offscreen and read only: nothing is sent, decided, or
+    /// appended. Opt in with QUICK_LAUNCH_COS_LIVE_PROOF=1.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_COS_LIVE_PROOF"] == "1"))
+    func rendersTheRealThread() async throws {
+        var settings = QuickSettings()
+        settings.appearance = .dark
+        let chat = QuickViewModel(settings: settings, service: MockQuickService())
+        let suite = "ChiefOfStaffLiveProof.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let window = AIChatWindowModel(chat: chat, defaults: defaults)
+        window.window = FakeAIChatWindow()
+        let chiefOfStaff = ChiefOfStaffModel(paths: CosPaths.resolve(environment: [:]))
+        await chiefOfStaff.reload(force: true)
+        chat.chiefOfStaff = chiefOfStaff
+        chat.chiefOfStaffOpener = { window.openChiefOfStaff(proposalID: $0) }
+        window.openChiefOfStaff()
+        #expect(window.isChiefOfStaffOpen)
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            chat.settings.appearance = appearance == .darkAqua ? .dark : .light
+            try Self.save(try Self.render(window, size: Self.normal, appearance: appearance), name: "cos-live-\(suffix).png")
+        }
+        print("cos live proof: \(chiefOfStaff.waiting.count) waiting: \(chiefOfStaff.waiting.map(\.id))")
+    }
+
     // MARK: - Rendering
 
     private static func render(_ model: AIChatWindowModel, size: CGSize, appearance: NSAppearance.Name) throws -> NSImage {
