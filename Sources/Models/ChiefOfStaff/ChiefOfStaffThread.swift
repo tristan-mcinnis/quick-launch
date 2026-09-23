@@ -49,7 +49,7 @@ enum ChiefOfStaffThread {
     static func waiting(in items: [ChiefOfStaffThreadItem]) -> [Proposal] {
         items.compactMap(\.proposal)
             .enumerated()
-            .filter { $0.element.isWaiting }
+            .filter { $0.element.isWaiting && !$0.element.awaitsReview }
             .sorted { lhs, rhs in
                 switch (lhs.element.created, rhs.element.created) {
                 case let (left?, right?) where left != right: left > right
@@ -73,7 +73,8 @@ enum ChiefOfStaffThread {
         items.filter { item in
             switch item {
             // Later cards have their own section until they come back.
-            case .proposal(_, let proposal): !proposal.isWaiting && proposal.status != .later
+            // A card a rung ran shows under FYI as "I did this".
+            case .proposal(_, let proposal): !proposal.isWaiting && proposal.status != .later && !proposal.auto
             case .verdict: false
             case .chat(_, _, _, _, let surface): surface != Self.surface
             }

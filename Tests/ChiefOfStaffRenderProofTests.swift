@@ -70,12 +70,13 @@ struct ChiefOfStaffRenderProofTests {
             listCos.isHealthDetailShown = true
             try Self.save(try Self.render(list, size: Self.wide, appearance: appearance), name: "cos-wide-\(suffix).png")
             // Tall enough that every section, the projects strip included, shows.
-            try Self.save(try Self.render(list, size: CGSize(width: Self.normal.width, height: 2_000), appearance: appearance), name: "cos-tall-\(suffix).png")
+            try Self.save(try Self.render(list, size: CGSize(width: Self.normal.width, height: 3_400), appearance: appearance), name: "cos-tall-\(suffix).png")
 
             // ↑ onto the DECIDE card, ⌘L: its keys and the Later menu.
             let (focused, cos) = try await makeWindow(appearance: preference)
             focused.chat.input = ""
             key(focused, .upArrow)
+            key(focused, .downArrow)
             #expect(cos.focusedCardID == "cc33dd44")
             key(focused, nil, "l", [.command])
             #expect(cos.laterMenu != nil)
@@ -89,7 +90,9 @@ struct ChiefOfStaffRenderProofTests {
             try Self.save(try Self.render(focused, size: Self.wide, appearance: appearance), name: "cos-edit-\(suffix).png")
             key(focused, .escape)
 
-            // ↓ onto a TODAY row, then ⇧⌘↩ once: its keys and the confirm.
+            // ↓ past the morning brief onto a TODAY row, then ⇧⌘↩ once:
+            // its keys and the confirm.
+            key(focused, .downArrow)
             key(focused, .downArrow)
             key(focused, .return, nil, [.command, .shift])
             #expect(cos.bulkArmed?.count == 3)
@@ -119,7 +122,39 @@ struct ChiefOfStaffRenderProofTests {
             let (rail, railCos) = try await makeWindow(appearance: preference)
             rail.showRail()
             try Self.save(try Self.render(rail, size: Self.normal, appearance: appearance), name: "cos-rail-\(suffix).png")
-            withExtendedLifetime([listCos, boardCos, sheetCos, railCos]) {}
+            // Contract v1 pages: Activity, Artifacts (a row focused), Charter.
+            let (pages, pagesCos) = try await makeWindow(appearance: preference)
+            key(pages, nil, "3", [.command, .option])
+            await pagesCos.perform(.loadActivity(day: nil))
+            try Self.save(try Self.render(pages, size: Self.normal, appearance: appearance), name: "cos-activity-\(suffix).png")
+            try Self.save(try Self.render(pages, size: Self.narrow, appearance: appearance), name: "cos-activity-narrow-\(suffix).png")
+            key(pages, nil, "4", [.command, .option])
+            await pagesCos.perform(.loadArtifacts)
+            pagesCos.focusCard(pagesCos.artifacts.first?.id)
+            pages.focusCards(pagesCos.artifacts.first?.id)
+            try Self.save(try Self.render(pages, size: Self.normal, appearance: appearance), name: "cos-artifacts-\(suffix).png")
+            try Self.save(try Self.render(pages, size: Self.narrow, appearance: appearance), name: "cos-artifacts-narrow-\(suffix).png")
+            key(pages, nil, "5", [.command, .option])
+            await pagesCos.perform(.loadCharter)
+            try Self.save(try Self.render(pages, size: Self.normal, appearance: appearance), name: "cos-charter-\(suffix).png")
+            pagesCos.openAddRule()
+            pagesCos.addRule?.section = "ignore"
+            pagesCos.addRule?.text = "Newsletters, unless a client sent them"
+            try Self.save(try Self.render(pages, size: Self.narrow, appearance: appearance), name: "cos-charter-narrow-\(suffix).png")
+
+            // After a Do it: the Always offer; and ⌘- on a card: Less, why.
+            let (offer, offerCos) = try await makeWindow(appearance: preference)
+            offerCos.focusCard("ee55ff66")
+            offerCos.lessFocused()
+            offerCos.lessPrompt?.why = "Rota questions are Alex's"
+            try Self.save(try Self.render(offer, size: Self.normal, appearance: appearance), name: "cos-less-\(suffix).png")
+            offerCos.lessPrompt = nil
+            // The proof's runner says OK with nothing printed: the run counts.
+            await offerCos.perform(.doIt(id: "ee55ff66"))
+            #expect(offerCos.rungOffer != nil)
+            try Self.save(try Self.render(offer, size: Self.normal, appearance: appearance), name: "cos-always-\(suffix).png")
+            try Self.save(try Self.render(offer, size: Self.narrow, appearance: appearance), name: "cos-always-narrow-\(suffix).png")
+            withExtendedLifetime([listCos, boardCos, sheetCos, railCos, pagesCos, offerCos]) {}
         }
     }
 
@@ -165,6 +200,15 @@ struct ChiefOfStaffRenderProofTests {
         }
         chiefOfStaff.viewMode = .board
         try Self.save(try Self.render(window, size: Self.wide, appearance: .darkAqua), name: "cos-live-board-dark.png")
+        chiefOfStaff.viewMode = .activity
+        await chiefOfStaff.perform(.loadActivity(day: nil))
+        try Self.save(try Self.render(window, size: Self.normal, appearance: .darkAqua), name: "cos-live-activity-dark.png")
+        chiefOfStaff.viewMode = .charter
+        await chiefOfStaff.perform(.loadCharter)
+        try Self.save(try Self.render(window, size: CGSize(width: Self.normal.width, height: 1_600), appearance: .aqua), name: "cos-live-charter-light.png")
+        chiefOfStaff.viewMode = .artifacts
+        await chiefOfStaff.perform(.loadArtifacts)
+        try Self.save(try Self.render(window, size: Self.normal, appearance: .darkAqua), name: "cos-live-artifacts-dark.png")
         print("cos live proof: decide \(chiefOfStaff.decide.map(\.id)) today \(chiefOfStaff.today.map(\.id)) health \(chiefOfStaff.health?.id ?? "none") projects \(chiefOfStaff.projects.count)")
     }
 

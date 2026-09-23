@@ -54,14 +54,67 @@ final class ChiefOfStaffModel {
         case reopen(id: String)
         case addTask(title: String, project: String, due: String?)
         case loadTasks(project: String)
+        case more(id: String)
+        case less(id: String, why: String?)
+        case always(id: String)
+        case never(rung: String)
+        case undo(id: String)
+        case rule(text: String, section: String)
+        case loadActivity(day: String?)
+        case loadArtifacts
+        case loadCharter
+        /// Open a file in its default app (an explicit action only).
+        case open(URL)
         case recordTurn(question: String, answer: String, attachmentNames: [String])
         case refresh
     }
 
-    /// ⌥⌘1 List (the tiers) or ⌥⌘2 Board (columns).
-    enum ViewMode: Sendable, Equatable {
-        case list
+    /// ⌥⌘1 List (the tiers), ⌥⌘2 Board (columns), ⌥⌘3 Activity (what it
+    /// did one day), ⌥⌘4 Artifacts (what Prepare made), ⌥⌘5 Charter.
+    enum ViewMode: Int, CaseIterable, Sendable, Equatable {
+        case list = 1
         case board
+        case activity
+        case artifacts
+        case charter
+
+        var title: String {
+            switch self {
+            case .list: "List"
+            case .board: "Board"
+            case .activity: "Activity"
+            case .artifacts: "Artifacts"
+            case .charter: "Charter"
+            }
+        }
+    }
+
+    /// ⌘- on a card: an optional one-line why, then `cos less`.
+    struct LessPrompt: Sendable, Equatable {
+        let proposalID: String
+        var why = ""
+    }
+
+    /// After a Do it on an auto-eligible card: "Always do this for …?"
+    struct RungOffer: Sendable, Equatable {
+        let proposalID: String
+        let project: String
+        let types: [String]
+    }
+
+    /// ⌘N in the Charter: a new rule in one section.
+    struct AddRule: Sendable, Equatable {
+        var section = "learned"
+        var text = ""
+    }
+
+    /// ⌘D: what Discuss opens in a new ordinary chat.
+    struct Discussion: Sendable, Equatable {
+        var title: String
+        /// The card as text, attached as a selection chip.
+        var cardText: String
+        /// Its source files that exist on this Mac.
+        var files: [URL]
     }
 
     /// The collapsible sections of the list.
@@ -149,8 +202,37 @@ final class ChiefOfStaffModel {
     private(set) var notice: String?
 
     var viewMode: ViewMode = .list {
-        didSet { if viewMode != oldValue { refocus() } }
+        didSet {
+            guard viewMode != oldValue else { return }
+            refocus()
+            switch viewMode {
+            case .activity: send(.loadActivity(day: activityDay))
+            case .artifacts: send(.loadArtifacts)
+            case .charter: send(.loadCharter)
+            case .list, .board: break
+            }
+        }
     }
+    var lessPrompt: LessPrompt?
+    private(set) var rungOffer: RungOffer?
+    var addRule: AddRule?
+    /// Activity: the day shown (nil is today) and what `cos` said of it.
+    private(set) var activityDay: String?
+    private(set) var activity: CosActivity?
+    private(set) var artifacts: [CosArtifact] = []
+    private(set) var charter: CosCharter?
+    private(set) var rungs: [CosRung] = []
+    /// Why Activity, Artifacts or the Charter could not be read.
+    private(set) var viewProblem: String?
+    /// Cards run by ⇧⌘↩: no "Always" offer for a bulk run.
+    @ObservationIgnored private var bulkIDs: Set<String> = []
+    /// Discuss (⌘D): the window opens a new ordinary chat with it.
+    @ObservationIgnored var onDiscuss: ((Discussion) -> Void)?
+    /// Opens a file in its default app (`/usr/bin/open`), only on an
+    /// explicit action. The app sets it.
+    @ObservationIgnored var fileOpener: (any LocalFileOpening)?
+    /// The data directory, for Prepare's files.
+    @ObservationIgnored let paths: CosPaths?
     /// Only this project's cards, in both views.
     private(set) var projectFilter: String?
     var expanded: Set<Section> = []
@@ -190,6 +272,7 @@ final class ChiefOfStaffModel {
         quietHours: QuietHours = .standard,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.paths = paths
         files = paths.map(CosFiles.init(paths:))
         self.runner = runner ?? paths.map { CosCLI(executable: $0.executable) }
         self.notifier = notifier
@@ -222,11 +305,22 @@ final class ChiefOfStaffModel {
     var visibleDecide: [Proposal] {
         expanded.contains(.decide) ? decide : Array(decide.prefix(Self.decideVisibleLimit))
     }
-    /// TODAY: quick one-tap actions.
-    var today: [Proposal] { pending(.today) }
+    /// TODAY: quick one-tap actions, the morning brief pinned first.
+    var today: [Proposal] {
+        let cards = pending(.today)
+        return cards.filter(\.isMorning) + cards.filter { !$0.isMorning }
+    }
     /// WAITING ON OTHERS.
     var waitingOnOthers: [Proposal] { pending(.waiting) }
-    var fyi: [Proposal] { pending(.fyi) }
+    /// FYI: waiting FYI cards, then what a rung ran by itself this week
+    /// ("I did this").
+    var fyi: [Proposal] {
+        let since = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let ranByItself = items.compactMap(\.proposal)
+            .filter { $0.auto && $0.status == .done && inFilter($0) && ($0.decided ?? $0.created ?? .distantPast) >= since }
+            .reversed()
+        return pending(.fyi) + ranByItself
+    }
 
     /// LATER: hidden until a time, soonest back first.
     var later: [Proposal] {
@@ -374,6 +468,9 @@ final class ChiefOfStaffModel {
         switch viewMode {
         case .list: listFocusOrder
         case .board: Column.allCases.flatMap { column($0).map(\.id) }
+        case .activity: []
+        case .artifacts: artifacts.map(\.id)
+        case .charter: rungs.map(\.id)
         }
     }
 
@@ -399,6 +496,16 @@ final class ChiefOfStaffModel {
             let next = index + delta
             if next < 0 { return true }
             focusedCardID = next < order.count ? order[next] : nil
+            return true
+        case .activity, .artifacts, .charter:
+            let order = focusOrder
+            guard !order.isEmpty else {
+                focusedCardID = nil
+                return false
+            }
+            let index = focusedCardID.flatMap { order.firstIndex(of: $0) }.map { $0 + delta } ?? 0
+            if index < 0 { return true }
+            focusedCardID = index < order.count ? order[index] : nil
             return true
         case .board:
             guard let (column, row) = boardPosition else {
@@ -464,6 +571,158 @@ final class ChiefOfStaffModel {
     private func dismissTransient() {
         laterMenu = nil
         bulkArmed = nil
+        lessPrompt = nil
+    }
+
+    // MARK: - Feedback, rungs, undo, Discuss
+
+    /// ⌘= on a card: More like this.
+    func moreFocused() {
+        guard let proposal = focusedProposal else { return }
+        send(.more(id: proposal.id))
+    }
+
+    /// ⌘- on a card: Less like this, with an optional why.
+    func lessFocused() {
+        guard let proposal = focusedProposal else { return }
+        laterMenu = nil
+        lessPrompt = LessPrompt(proposalID: proposal.id)
+    }
+
+    /// Return in the Less prompt: `cos less`, with the why when one is typed.
+    func submitLess() {
+        guard let prompt = lessPrompt else { return }
+        lessPrompt = nil
+        let why = prompt.why.trimmingCharacters(in: .whitespacesAndNewlines)
+        send(.less(id: prompt.proposalID, why: why.isEmpty ? nil : why))
+    }
+
+    /// ⌘Y on the offer: a consent rung for these action types here.
+    func acceptRungOffer() {
+        guard let offer = rungOffer else { return }
+        rungOffer = nil
+        send(.always(id: offer.proposalID))
+    }
+
+    func dismissRungOffer() {
+        rungOffer = nil
+    }
+
+    /// ⌘Z on a done or auto card: run its recorded undo steps.
+    func undoFocused() {
+        guard let proposal = focusedProposal, proposal.canUndo else { return }
+        send(.undo(id: proposal.id))
+    }
+
+    /// ⌘D on a card or an artifact: a new ordinary chat about it.
+    func discussFocused() {
+        guard let discussion = focusedDiscussion else { return }
+        onDiscuss?(discussion)
+    }
+
+    var focusedDiscussion: Discussion? {
+        if let proposal = focusedProposal { return discussion(for: proposal) }
+        if let artifact = artifacts.first(where: { $0.id == focusedCardID }) { return discussion(for: artifact) }
+        return nil
+    }
+
+    func discussion(for proposal: Proposal) -> Discussion {
+        Self.discussion(
+            for: proposal,
+            vault: FileManager.default.homeDirectoryForCurrentUser.appending(path: "vault", directoryHint: .isDirectory),
+            data: paths?.data
+        )
+    }
+
+    func discussion(for artifact: CosArtifact) -> Discussion {
+        let card = proposal(artifact.card)
+        var text = "Prepared file: \(artifact.name)"
+        if card == nil, let headline = artifact.headline { text += "\nFor: \(headline)" }
+        if let card { text += "\n\n" + Self.cardText(card) }
+        let url = paths.map { artifact.url(in: $0) }
+        let files = [url].compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
+        return Discussion(title: artifact.name, cardText: text, files: files)
+    }
+
+    /// The card as the text a new chat starts from: headline, why, the
+    /// message, and the numbered actions.
+    nonisolated static func cardText(_ proposal: Proposal) -> String {
+        var lines = [proposal.headline]
+        if !proposal.source.isEmpty { lines.append("From: \(proposal.source)") }
+        if !proposal.why.isEmpty { lines.append("Why: \(proposal.why)") }
+        lines.append("")
+        lines.append(proposal.message)
+        for (index, action) in proposal.actions.enumerated() {
+            lines.append("\(index + 1). \(action.typeLabel): \(action.text)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// What Discuss attaches: the card's text, its source files resolved
+    /// under the vault (only ones that exist, never outside it), and its
+    /// prepared files.
+    nonisolated static func discussion(for proposal: Proposal, vault: URL, data: URL?) -> Discussion {
+        let manager = FileManager.default
+        let vaultPath = vault.standardizedFileURL.path(percentEncoded: false)
+        var files: [URL] = []
+        for path in proposal.paths where !path.isEmpty {
+            let url = (path.hasPrefix("/") ? URL(fileURLWithPath: path) : vault.appending(path: path)).standardizedFileURL
+            guard url.path(percentEncoded: false).hasPrefix(vaultPath),
+                  manager.fileExists(atPath: url.path(percentEncoded: false)) else { continue }
+            files.append(url)
+        }
+        if let data {
+            for artifact in proposal.artifacts {
+                // Relative to the data dir (`artifacts/<id>/draft.md`), or to the card's folder.
+                let relative = artifact.hasPrefix("artifacts/") ? artifact : "artifacts/\(proposal.id)/\(artifact)"
+                let url = data.appending(path: relative).standardizedFileURL
+                if manager.fileExists(atPath: url.path(percentEncoded: false)) { files.append(url) }
+            }
+        }
+        var unique: [URL] = []
+        for url in files where !unique.contains(url) { unique.append(url) }
+        return Discussion(title: proposal.headline, cardText: cardText(proposal), files: unique)
+    }
+
+    // MARK: - Activity, Artifacts, Charter
+
+    /// The day Activity shows moves by `delta` days; nil is today.
+    func moveActivityDay(_ delta: Int, calendar: Calendar = .current) {
+        let current = activityDay.flatMap { ChiefOfStaffDates.day($0, calendar: calendar) } ?? calendar.startOfDay(for: now)
+        guard let next = calendar.date(byAdding: .day, value: delta, to: current) else { return }
+        let today = calendar.startOfDay(for: now)
+        activityDay = next >= today ? nil : ChiefOfStaffDates.string(next, calendar: calendar)
+        send(.loadActivity(day: activityDay))
+    }
+
+    /// Return or ⌘O on an artifact, or Edit charter: the file in its
+    /// default app. Never by itself.
+    func openFocusedFile() {
+        if viewMode == .charter, let path = charter?.path {
+            send(.open(URL(fileURLWithPath: path)))
+            return
+        }
+        guard let paths, let artifact = artifacts.first(where: { $0.id == focusedCardID }) else { return }
+        send(.open(artifact.url(in: paths)))
+    }
+
+    /// ⌘⌫ on a rung in the Charter: remove it.
+    func removeFocusedRung() {
+        guard viewMode == .charter, let rung = rungs.first(where: { $0.id == focusedCardID }) else { return }
+        send(.never(rung: rung.rung))
+    }
+
+    /// ⌘N in the Charter: a new rule; Return adds it.
+    func openAddRule() {
+        addRule = AddRule()
+    }
+
+    func submitAddRule() {
+        guard let draft = addRule else { return }
+        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        addRule = nil
+        send(.rule(text: text, section: draft.section))
     }
 
     // MARK: - Card actions
@@ -553,10 +812,12 @@ final class ChiefOfStaffModel {
     /// ⇧⌘↩: Do all visible TODAY rows. The first press arms it and says how
     /// many; the second runs them. Any other key disarms it.
     func doAllToday() {
-        let ids = today.filter { !(cards[$0.id]?.isRunning ?? false) }.map(\.id)
+        // The morning brief is read, not run: it keeps its own Got it.
+        let ids = today.filter { !$0.isMorning && !(cards[$0.id]?.isRunning ?? false) }.map(\.id)
         guard !ids.isEmpty else { return }
         if let armed = bulkArmed, armed == ids {
             bulkArmed = nil
+            bulkIDs.formUnion(ids)
             for id in ids { send(.doIt(id: id)) }
         } else {
             laterMenu = nil
@@ -797,6 +1058,34 @@ final class ChiefOfStaffModel {
             await addTask(title: title, project: project, due: due)
         case .loadTasks(let project):
             await loadTasks(project: project)
+        case .more(let id):
+            await feedback(id, .more(id: id), done: "More like this: noted.")
+        case .less(let id, let why):
+            await feedback(id, .less(id: id, why: why), done: "Less like this: noted.")
+        case .always(let id):
+            await simple(.always(id: id), done: "It will do this by itself from now on.")
+            await loadRungsIfShown()
+        case .never(let rung):
+            await simple(.never(rung: rung), done: "Removed. It asks again next time.")
+            await loadRungsIfShown()
+        case .undo(let id):
+            await verdict(id) { .undo(id: id) }
+        case .rule(let text, let section):
+            await simple(.rule(text: text, section: section), done: "Rule added.")
+            await loadCharter()
+        case .loadActivity(let day):
+            await loadActivity(day: day)
+        case .loadArtifacts:
+            await loadArtifacts()
+        case .loadCharter:
+            await loadCharter()
+        case .open(let url):
+            guard let fileOpener else { return }
+            do {
+                try await fileOpener.open(url)
+            } catch {
+                notice = "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
+            }
         case .recordTurn(let question, let answer, let names):
             await record(question: question, answer: answer, attachmentNames: names)
         case .refresh:
@@ -819,7 +1108,7 @@ final class ChiefOfStaffModel {
             switch call {
             case .no:
                 card.outcome = result.succeeded ? [OutcomeLine(ok: true, text: "Recorded as no.")] : OutcomeLine.lines(from: result)
-            case .later, .reopen:
+            case .later, .reopen, .undo:
                 let said = OutcomeLine.lastLine(of: result.stdout) ?? "Done."
                 card.outcome = [result.succeeded ? OutcomeLine(ok: true, text: said) : OutcomeLine.lines(from: result)[0]]
             default:
@@ -831,12 +1120,96 @@ final class ChiefOfStaffModel {
             card.outcome = [OutcomeLine(ok: false, text: "cos did not finish: \(error.localizedDescription)")]
         }
         card.isRunning = false
+        // "Always do this for <project>?" after a single Do it that ran.
+        if case .doIt = call, let proposal = proposal(id), proposal.offersRung,
+           card.outcome?.allSatisfy(\.ok) == true, !bulkIDs.contains(id) {
+            rungOffer = RungOffer(
+                proposalID: id,
+                project: proposal.projectName ?? (proposal.project.isEmpty ? "all projects" : proposal.project),
+                types: proposal.actions.map(\.typeLabel)
+            )
+        }
+        bulkIDs.remove(id)
         await reload(force: true)
         // The card left the view: the keyboard moves to its neighbour.
         if focusedCardID == nil || !focusOrder.contains(focusedCardID ?? ""), let index = order.firstIndex(of: id) {
             let rest = focusOrder
             focusedCardID = rest.isEmpty ? nil : rest[min(index, rest.count - 1)]
         }
+    }
+
+    /// One `cos` call whose outcome is one line of notice.
+    private func simple(_ command: CosCommand, done: String) async {
+        guard let runner else { return }
+        do {
+            let result = try await runner.run(command)
+            notice = result.succeeded ? done : "Failed: " + (OutcomeLine.lastLine(of: result.stderr) ?? "exit \(result.exitCode)")
+        } catch {
+            notice = "Failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func feedback(_ id: String, _ command: CosCommand, done: String) async {
+        await simple(command, done: done)
+        await reload(force: true)
+    }
+
+    private func loadActivity(day: String?) async {
+        guard let runner else { return }
+        do {
+            let result = try await runner.run(.activity(day: day))
+            guard day == activityDay else { return }
+            guard result.succeeded else {
+                viewProblem = "Activity: " + (OutcomeLine.lastLine(of: result.stderr) ?? "exit \(result.exitCode)")
+                return
+            }
+            activity = try CosActivity.decode(result.stdout)
+            viewProblem = nil
+        } catch {
+            viewProblem = "Activity could not be read: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadArtifacts() async {
+        guard let runner else { return }
+        do {
+            let result = try await runner.run(.artifacts)
+            guard result.succeeded else {
+                viewProblem = "Artifacts: " + (OutcomeLine.lastLine(of: result.stderr) ?? "exit \(result.exitCode)")
+                return
+            }
+            artifacts = try CosArtifact.decodeList(result.stdout)
+            viewProblem = nil
+        } catch {
+            viewProblem = "Artifacts could not be read: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadCharter() async {
+        guard let runner else { return }
+        do {
+            let result = try await runner.run(.charter)
+            guard result.succeeded else {
+                viewProblem = "Charter: " + (OutcomeLine.lastLine(of: result.stderr) ?? "exit \(result.exitCode)")
+                return
+            }
+            charter = try CosCharter.decode(result.stdout)
+            if let charter, !charter.rungs.isEmpty { rungs = charter.rungs }
+            viewProblem = nil
+        } catch {
+            viewProblem = "The charter could not be read: \(error.localizedDescription)"
+        }
+        await loadRungs()
+    }
+
+    private func loadRungsIfShown() async {
+        if viewMode == .charter { await loadRungs() }
+    }
+
+    private func loadRungs() async {
+        guard let runner, let result = try? await runner.run(.rungs), result.succeeded,
+              let list = try? CosRung.decodeList(result.stdout) else { return }
+        rungs = list
     }
 
     private func addTask(title: String, project: String, due: String?) async {
@@ -954,6 +1327,10 @@ enum ChiefOfStaffKeys {
         case laterMenu
         /// The Later menu's Pick date field: typing is the field's.
         case laterPicking
+        /// A prepared file in Artifacts.
+        case artifact
+        /// A consent rung in the Charter.
+        case rung
     }
 
     enum Action: Sendable, Equatable {
@@ -969,14 +1346,22 @@ enum ChiefOfStaffKeys {
         case later
         case no
         case bringBack
+        case more
+        case less
+        case undo
+        case discuss
+        /// Artifacts: open the file; Charter: open the charter file.
+        case openFile
+        case removeRung
+        case acceptRung
+        case activityDay(Int)
         case runEdit
         case cancelEdit
         case menuMove(Int)
         case menuPick(LaterChoice?)
         case menuClose
         // Anywhere in the pinned conversation.
-        case showList
-        case showBoard
+        case showView(ChiefOfStaffModel.ViewMode)
         case newTask
         case toggleHealth
         case pickProject
@@ -989,7 +1374,8 @@ enum ChiefOfStaffKeys {
         characters: String?,
         modifiers: NSEvent.ModifierFlags,
         place: Place,
-        hasCards: Bool
+        hasCards: Bool,
+        hasRungOffer: Bool = false
     ) -> Action? {
         let modifiers = modifiers.overlayRelevant
         let character = characters?.lowercased()
@@ -1016,15 +1402,19 @@ enum ChiefOfStaffKeys {
         }
 
         // The pinned conversation's own keys, from the composer or a card.
-        // ⌥⌘1 and ⌥⌘2: ⌘1 to ⌘9 stay the rail's, in this chat as in any.
+        // ⌥⌘1 to ⌥⌘5: ⌘1 to ⌘9 stay the rail's, in this chat as in any.
         if modifiers == [.command, .option] {
-            if character == "1" { return .showList }
-            if character == "2" { return .showBoard }
+            if let character, let number = Int(character), let view = ChiefOfStaffModel.ViewMode(rawValue: number) {
+                return .showView(view)
+            }
+            if character == "[" { return .activityDay(-1) }
+            if character == "]" { return .activityDay(1) }
         }
         if modifiers == [.command] {
             switch character {
             case "n": return .newTask
             case "i": return .toggleHealth
+            case "y" where hasRungOffer: return .acceptRung
             default: break
             }
         }
@@ -1041,6 +1431,18 @@ enum ChiefOfStaffKeys {
             // so a draft keeps its own caret keys.
             if modifiers == [.option] || (modifiers.isEmpty && draftIsEmpty) { return .focusCards }
             return nil
+        case .artifact, .rung:
+            if isArrow, modifiers.isEmpty || modifiers == [.option] { return .move(delta) }
+            if key == .escape, modifiers.isEmpty { return .toComposer }
+            if place == .artifact {
+                if key?.isReturn == true, modifiers.isEmpty { return .openFile }
+                if modifiers == [.command], character == "o" { return .openFile }
+                if modifiers == [.command], character == "d" { return .discuss }
+            } else {
+                if key == .delete, modifiers == [.command] { return .removeRung }
+                if modifiers == [.command], character == "o" { return .openFile }
+            }
+            return nil
         case .card(let board):
             if isArrow, modifiers.isEmpty || modifiers == [.option] { return .move(delta) }
             if board, key == .leftArrow || key == .rightArrow, modifiers.isEmpty {
@@ -1054,6 +1456,10 @@ enum ChiefOfStaffKeys {
                 case "e": return .edit
                 case "l": return .later
                 case "r": return .bringBack
+                case "=", "+": return .more
+                case "-": return .less
+                case "z": return .undo
+                case "d": return .discuss
                 default: return nil
                 }
             }

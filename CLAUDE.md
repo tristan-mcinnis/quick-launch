@@ -51,11 +51,14 @@ AI Chat is one conversation window over the same providers and tools. No autonom
 **Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
 organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
 acts only by calling the `cos` CLI (`do`, `edit`, `no`, `later`, `reopen`,
-`add`, `append`; reads `status`, `projects`, `tasks`) on an action the user
-takes; Quick Launch never writes the thread and its chat gets no write tools.
+`add`, `append`, `more`, `less`, `always`, `never`, `undo`, `rule`; reads
+`status`, `projects`, `tasks`, `activity`, `artifacts`, `charter`, `rungs`) on
+an action the user takes, per `../chief-of-staff/docs/CONTRACT.md`; Quick
+Launch never writes the thread or the charter, opens a file only on an
+explicit action, and its chat gets no write tools.
 It is additive: Quick AI and every other AI Chat conversation keep their
-provider, tools, keys and palette order, and its keys (`⌥⌘1` `⌥⌘2` `⌘N` `⌘I`
-`⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it
+provider, tools, keys and palette order, and its keys (`⌥⌘1` to `⌥⌘5`,
+`⌥⌘[` `⌥⌘]`, `⌘N` `⌘I` `⌘Y` `⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it
 (`ChiefOfStaffChatTests` guards this). The backing chat (`ChiefOfStaffModel.conversationID`)
 stays out of every chat list. Quick Launch is the one notification sender and
 touches `app.alive`; `UserNotificationRouter` is the app's one notification

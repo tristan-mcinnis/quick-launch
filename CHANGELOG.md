@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — 2026-09-23 (Chief of Staff contract v1)
+
+- **The Chief of Staff learns, runs by consent, and shows its work.** Every
+  card has quiet More and Less (`⌘=` `⌘-`; Less asks an optional why). After
+  a Do it on a card whose actions are all status notes, tasks or task closes,
+  and not DECIDE, the conversation offers "Always do this for <project>?"
+  (`⌘Y`, esc). Done and auto cards have Undo (`⌘Z`); what a rung ran shows
+  under FYI as "I did this", the reviewer's reason on hover. An escalated
+  card shows the reviewer's line; a card still waiting on the reviewer is
+  hidden. Morning and meeting cards have their own styles.
+- **Three pages beside List and Board:** Activity (`⌥⌘3`, the day's read,
+  proposed, reviewed, ran, closed, failed and your answers; `⌥⌘[` `⌥⌘]` move
+  a day), Artifacts (`⌥⌘4`, Prepare's drafts; Return opens one in its default
+  app, only when asked), and Charter (`⌥⌘5`, read only, `⌘N` Add rule, `⌘O`
+  Edit charter, the Always do rungs with Remove `⌘⌫`).
+- **Discuss (`⌘D`)** on a card or a draft opens a new ordinary AI Chat,
+  titled with the headline, the card's text and its source files (under
+  `~/vault` only) on the attachment tray. The pinned thread stays clean.
+- Notifications: a card a rung ran never notifies; a meeting card is an
+  active banner ten minutes before it starts; the morning brief is quiet.
+- Every verb is the `cos` CLI (`more`, `less`, `always`, `never`, `undo`,
+  `rule`; reads `activity`, `artifacts`, `charter`, `rungs`). All of it acts
+  only inside the pinned conversation.
+
 ## Unreleased — 2026-09-23 (Chief of Staff)
 
 - **Quick Launch is the Chief of Staff's face.** AI Chat pins a Chief of

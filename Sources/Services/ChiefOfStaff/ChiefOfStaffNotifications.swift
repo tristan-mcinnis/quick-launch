@@ -35,6 +35,9 @@ enum ChiefOfStaffNotice: Sendable, Equatable {
     case summary(count: Int, sources: [String], urgency: ChiefOfStaffUrgency)
     /// Background jobs that just turned red, named.
     case health(newlyRed: [String], headline: String)
+    /// A meeting card: an active banner ten minutes before it starts (at
+    /// once when that is already past).
+    case meeting(Proposal, deliverAt: Date?)
 }
 
 /// The notification rules, pure so they are tested without a notification
@@ -42,12 +45,15 @@ enum ChiefOfStaffNotice: Sendable, Equatable {
 enum ChiefOfStaffNotificationRules {
     /// This many quiet cards in one read become one summary.
     static let summaryThreshold = 3
+    /// A meeting card's banner comes this long before the meeting.
+    static let meetingLead: TimeInterval = 10 * 60
 
     /// The notices for `fresh` (cards new since the last read) and the jobs
     /// that turned red since then; none in quiet hours. DECIDE interrupts
     /// (time sensitive); TODAY and FYI go to Notification Centre only;
     /// WAITING never notifies; a health card is not a card, only a job that
-    /// newly turned red is.
+    /// newly turned red is. A card a rung ran never notifies; a meeting card
+    /// is an active banner ten minutes before; the morning brief is quiet.
     static func notices(
         for fresh: [Proposal],
         newlyRed: [String] = [],
@@ -61,9 +67,15 @@ enum ChiefOfStaffNotificationRules {
         if !newlyRed.isEmpty {
             notices.append(.health(newlyRed: newlyRed, headline: healthHeadline))
         }
-        let decide = fresh.filter { $0.tierKind == .decide }
+        let fresh = fresh.filter { !$0.auto }
+        for meeting in fresh where meeting.isMeeting {
+            let at = meeting.starts.map { $0.addingTimeInterval(-meetingLead) }
+            notices.append(.meeting(meeting, deliverAt: at.flatMap { $0 > now ? $0 : nil }))
+        }
+        let cards = fresh.filter { !$0.isMeeting }
+        let decide = cards.filter { $0.tierKind == .decide && !$0.isMorning }
         notices += decide.map { .card($0, .timeSensitive) }
-        let quiet = fresh.filter { $0.tierKind == .today || $0.tierKind == .fyi }
+        let quiet = cards.filter { $0.tierKind == .today || $0.tierKind == .fyi || $0.isMorning }
         if quiet.count >= summaryThreshold {
             var sources: [String] = []
             for source in quiet.map(\.source) where !source.isEmpty && !sources.contains(source) {

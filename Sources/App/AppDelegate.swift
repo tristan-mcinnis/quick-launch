@@ -1805,6 +1805,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startChiefOfStaff(viewModel vm: QuickViewModel) {
         UserNotificationRouter.shared.install()
         let model = ChiefOfStaffModel(paths: CosPaths.resolve(), notifier: ChiefOfStaffNotifier())
+        model.fileOpener = OpenCommandFileOpener()
         model.onOpen = { [weak self] proposalID in self?.showChiefOfStaff(proposalID: proposalID) }
         model.onReply = { [weak self] text in
             guard let self, let controller = self.aiChatWindowController() else { return }

@@ -1,4 +1,5 @@
 import Foundation
+import HouseChatCore
 
 /// One call to the `cos` CLI, the Chief of Staff's only writer. Each case is
 /// an argument array, never a shell string: a quote or a semicolon in a note
@@ -20,6 +21,22 @@ enum CosCommand: Sendable, Equatable {
     case tasks(project: String)
     /// A new canonical task (`task-tree.py add` behind `cos add`).
     case add(title: String, project: String, due: String?)
+    /// Feedback on a card; each writes a learned rule.
+    case more(id: String)
+    case less(id: String, why: String?)
+    /// A consent rung for the card's action types on its project.
+    case always(id: String)
+    /// Remove a rung.
+    case never(rung: String)
+    case rungs
+    /// Run the recorded undo steps of a done or auto card.
+    case undo(id: String)
+    /// What it did one day.
+    case activity(day: String?)
+    case artifacts
+    case charter
+    /// One line into a charter section.
+    case rule(text: String, section: String)
     /// Record a chat turn this app made. The text goes on stdin (`-`), so a
     /// long answer never meets an argument limit.
     case append(role: Role, text: String, meta: [String: String])
@@ -51,6 +68,27 @@ enum CosCommand: Sendable, Equatable {
             return ["projects", "--json"]
         case .tasks(let project):
             return ["tasks", "--project", project]
+        case .more(let id):
+            return ["more", id]
+        case .less(let id, let why):
+            guard let why = why?.trimmingCharacters(in: .whitespacesAndNewlines), !why.isEmpty else { return ["less", id] }
+            return ["less", id, "--why", why]
+        case .always(let id):
+            return ["always", id]
+        case .never(let rung):
+            return ["never", rung]
+        case .rungs:
+            return ["rungs", "--json"]
+        case .undo(let id):
+            return ["undo", id]
+        case .activity(let day):
+            return ["activity"] + (day.map { ["--day", $0] } ?? []) + ["--json"]
+        case .artifacts:
+            return ["artifacts", "--json"]
+        case .charter:
+            return ["charter", "--json"]
+        case .rule(let text, let section):
+            return ["rule", text, "--section", section]
         case .add(let title, let project, let due):
             // `--` would be safer, but argparse reads a leading dash in the
             // title as an option; one is refused before it gets here.
@@ -78,8 +116,11 @@ enum CosCommand: Sendable, Equatable {
     /// vault writers (an Outlook draft can take a while).
     var timeout: TimeInterval {
         switch self {
-        case .status, .no, .later, .reopen, .append, .projects, .tasks: 20
-        case .doIt, .edit, .add: 180
+        case .status, .no, .later, .reopen, .append, .projects, .tasks, .more, .less, .always, .never,
+             .rungs, .activity, .artifacts, .charter, .rule: 20
+        // A `prepare` action calls the model: the contract allows 250 s.
+        case .doIt, .edit: 260
+        case .add, .undo: 180
         }
     }
 }
@@ -228,5 +269,244 @@ struct CosTask: Sendable, Equatable, Identifiable, Decodable {
 
     static func decodeList(_ stdout: String) throws -> [CosTask] {
         try JSONDecoder().decode([CosTask].self, from: Data(stdout.utf8))
+    }
+}
+
+/// One thing the Chief of Staff did, from `cos activity --json`.
+struct CosActivityEvent: Sendable, Equatable, Identifiable, Decodable {
+    /// `read`, `proposed`, `reviewed`, `ran`, `closed_on_their_own`,
+    /// `failed`, or `answered`.
+    var kind: String
+    var text: String
+    var ts: Date?
+    /// "HH:MM" as `cos` prints it.
+    var time: String?
+    var card: String?
+    var index = 0
+
+    var id: String { "\(kind)-\(index)" }
+
+    private enum CodingKeys: String, CodingKey { case kind, text, ts, time, card }
+
+    init(kind: String, text: String, ts: Date? = nil, time: String? = nil, card: String? = nil) {
+        self.kind = kind
+        self.text = text
+        self.ts = ts
+        self.time = time
+        self.card = card
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        if let text = try? c.decodeIfPresent(String.self, forKey: .ts) {
+            ts = CosDate.parse(text)
+        } else if let seconds = try? c.decodeIfPresent(Double.self, forKey: .ts) {
+            ts = Date(timeIntervalSince1970: seconds)
+        }
+        time = try? c.decodeIfPresent(String.self, forKey: .time)
+        card = try? c.decodeIfPresent(String.self, forKey: .card)
+    }
+
+    /// The time the row shows: the one `cos` printed, else the stamp's.
+    var clock: String {
+        time ?? ts.map { $0.formatted(date: .omitted, time: .shortened) } ?? ""
+    }
+}
+
+/// `cos activity --json`: the day's events, grouped as the view draws them.
+struct CosActivity: Sendable, Equatable {
+    /// The groups in the order they are drawn, with what each is called.
+    static let groups: [(kind: String, title: String)] = [
+        ("read", "Read"), ("proposed", "Proposed"), ("reviewed", "Reviewed"), ("ran", "Ran"),
+        ("closed_on_their_own", "Closed on their own"), ("failed", "Failed"), ("answered", "Your answers"),
+    ]
+
+    var day: String?
+    /// How many runs that day.
+    var runs: Int?
+    var events: [CosActivityEvent]
+
+    func events(_ kind: String) -> [CosActivityEvent] { events.filter { $0.kind == kind } }
+
+    /// `{"day", "runs", "<group>": {"count", "items": [...]}}` (contract v1);
+    /// a bare array of events with a `kind` each also reads.
+    static func decode(_ stdout: String) throws -> CosActivity {
+        let data = Data(stdout.utf8)
+        var events: [CosActivityEvent] = []
+        var day: String?
+        var runs: Int?
+        if let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            day = object["day"] as? String
+            runs = object["runs"] as? Int
+            for (kind, _) in groups {
+                guard let group = object[kind] as? [String: Any], let items = group["items"] else { continue }
+                let itemData = try JSONSerialization.data(withJSONObject: items)
+                for var event in try JSONDecoder().decode([CosActivityEvent].self, from: itemData) {
+                    event.kind = kind
+                    events.append(event)
+                }
+            }
+        } else {
+            events = try JSONDecoder().decode([CosActivityEvent].self, from: data)
+        }
+        for index in events.indices { events[index].index = index }
+        return CosActivity(day: day, runs: runs, events: events)
+    }
+}
+
+/// One prepared file, from `cos artifacts --json`:
+/// `{card, path, rel, name, headline, project, bytes, modified}`.
+struct CosArtifact: Sendable, Equatable, Identifiable, Decodable {
+    var card: String
+    var path: String
+    var rel: String?
+    var title: String?
+    var headline: String?
+    var created: Date?
+    var project: String?
+
+    var id: String { "\(card)/\(rel ?? path)" }
+
+    private enum CodingKeys: String, CodingKey { case card, path, rel, name, title, headline, modified, created, project }
+
+    init(card: String, path: String, rel: String? = nil, title: String? = nil, headline: String? = nil,
+         created: Date? = nil, project: String? = nil) {
+        self.card = card
+        self.path = path
+        self.rel = rel
+        self.title = title
+        self.headline = headline
+        self.created = created
+        self.project = project
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        card = (try? c.decodeIfPresent(String.self, forKey: .card)) ?? ""
+        path = try c.decode(String.self, forKey: .path)
+        rel = try? c.decodeIfPresent(String.self, forKey: .rel)
+        title = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? (try? c.decodeIfPresent(String.self, forKey: .title))
+        headline = try? c.decodeIfPresent(String.self, forKey: .headline)
+        let stamp = (try? c.decodeIfPresent(String.self, forKey: .modified)) ?? (try? c.decodeIfPresent(String.self, forKey: .created))
+        created = stamp.flatMap(CosDate.parse)
+        project = try? c.decodeIfPresent(String.self, forKey: .project)
+    }
+
+    var name: String { title ?? (path as NSString).lastPathComponent }
+
+    /// The file on disk: an absolute path as given; else relative to the
+    /// data directory (`artifacts/<id>/draft.md`), or to the card's folder.
+    func url(in paths: CosPaths) -> URL {
+        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        let relative = rel ?? path
+        if relative.hasPrefix("artifacts/") { return paths.data.appending(path: relative) }
+        return paths.data.appending(path: "artifacts/\(card)/\(relative)")
+    }
+
+    static func decodeList(_ stdout: String) throws -> [CosArtifact] {
+        try JSONDecoder().decode([CosArtifact].self, from: Data(stdout.utf8))
+    }
+}
+
+/// `cos charter --json`: the charter's sections, read only, and the rungs
+/// under `## Autonomy`.
+struct CosCharter: Sendable, Equatable {
+    struct Section: Sendable, Equatable, Identifiable {
+        var key: String
+        var name: String
+        var lines: [String]
+
+        var id: String { key }
+    }
+
+    /// The sections `cos rule --section` takes.
+    static let ruleSections = ["watch", "people", "ignore", "style", "learned"]
+
+    var path: String?
+    var sections: [Section]
+    var rungs: [CosRung] = []
+
+    /// `{"path", "sections": [{"key", "title", "text", "items"}], "rungs"}`
+    /// (contract v1); an object keyed by section with lines also reads.
+    static func decode(_ stdout: String) throws -> CosCharter {
+        let data = Data(stdout.utf8)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let path = object["path"] as? String
+        var rungs: [CosRung] = []
+        if let list = object["rungs"] {
+            rungs = (try? JSONDecoder().decode([CosRung].self, from: JSONSerialization.data(withJSONObject: list))) ?? []
+        }
+        if let list = object["sections"] as? [[String: Any]] {
+            let sections = list.map { section in
+                let name = section["title"] as? String ?? section["name"] as? String ?? section["key"] as? String ?? ""
+                let lines = section["items"] as? [String] ?? section["lines"] as? [String]
+                    ?? (section["text"] as? String)?.split(separator: "\n").map(String.init) ?? []
+                return Section(key: section["key"] as? String ?? name.lowercased(), name: name, lines: lines)
+            }
+            return CosCharter(path: path, sections: sections, rungs: rungs)
+        }
+        let keyed = (object["sections"] as? [String: Any]) ?? object.filter { $0.key != "path" && $0.key != "rungs" }
+        return CosCharter(path: path, sections: keyed.keys.sorted().compactMap { key in
+            guard let lines = keyed[key] as? [String] else { return nil }
+            return Section(key: key.lowercased(), name: key.capitalized, lines: lines)
+        }, rungs: rungs)
+    }
+}
+
+/// One consent rung: `{"id": "status_note@<project>"|"task_add@*", "type",
+/// "project": str|null, "note"}`.
+struct CosRung: Sendable, Equatable, Identifiable, Decodable {
+    /// What `cos never` takes.
+    var rung: String
+    var type: String
+    /// A slug, or "*" for every project.
+    var project: String
+    var note: String?
+
+    var id: String { rung }
+
+    private enum CodingKeys: String, CodingKey { case id, rung, type, project, note }
+
+    init(rung: String, type: String, project: String, note: String? = nil) {
+        self.rung = rung
+        self.type = type
+        self.project = project
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let id = try? c.decodeIfPresent(String.self, forKey: .id) {
+            rung = id
+        } else {
+            rung = try c.decode(String.self, forKey: .rung)
+        }
+        type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        project = (try? c.decodeIfPresent(String.self, forKey: .project)) ?? "*"
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    static func decodeList(_ stdout: String) throws -> [CosRung] {
+        try JSONDecoder().decode([CosRung].self, from: Data(stdout.utf8))
+    }
+}
+
+/// A time as `cos` prints it: the thread's own format, or Python's
+/// `isoformat()` with or without fractions and an offset.
+enum CosDate {
+    static func parse(_ text: String) -> Date? {
+        if let date = HouseChatCoding.date(from: text) { return date }
+        let formatter = ISO8601DateFormatter()
+        for options: ISO8601DateFormatter.Options in [
+            [.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime],
+        ] {
+            formatter.formatOptions = options
+            if let date = formatter.date(from: text) { return date }
+        }
+        return nil
     }
 }

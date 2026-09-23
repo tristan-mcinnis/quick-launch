@@ -81,12 +81,12 @@ struct AIChatWindowView: View {
                     case .form: model.noteFocus(.cosForm, true)
                     }
                 }
-                // The Board takes the room above the composer; the List
-                // leaves the thread under it.
-                .frame(maxHeight: chiefOfStaff.viewMode == .board ? .infinity : nil, alignment: .top)
+                // The Board and the pages take the room above the composer;
+                // the List leaves the thread under it.
+                .frame(maxHeight: chiefOfStaff.viewMode == .list ? nil : .infinity, alignment: .top)
                 HouseDivider()
             }
-            if !(model.isChiefOfStaffOpen && model.chiefOfStaff?.viewMode == .board) {
+            if !(model.isChiefOfStaffOpen && model.chiefOfStaff.map { $0.viewMode != .list } == true) {
                 QuickAIThread(
                     viewModel: chat,
                     find: model.findHighlights,

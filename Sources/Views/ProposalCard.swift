@@ -20,6 +20,8 @@ struct ProposalCard: View {
     var onEdit: () -> Void = {}
     var onLater: () -> Void = {}
     var onNo: () -> Void = {}
+    var onDiscuss: () -> Void = {}
+    var feedback: FeedbackButtons?
     var onLaterChoice: (LaterChoice) -> Void = { _ in }
     var onLaterPickText: (String) -> Void = { _ in }
     var onRun: () -> Void = {}
@@ -46,6 +48,9 @@ struct ProposalCard: View {
                     .foregroundStyle(House.ColorToken.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+            }
+            if let review = proposal.review, review.isEscalation {
+                ReviewLine(review: review)
             }
             if !proposal.actions.isEmpty {
                 actions
@@ -101,6 +106,7 @@ struct ProposalCard: View {
                     .help("Due \(due)")
             }
             Spacer(minLength: House.Spacing.xs)
+            if let feedback { feedback }
             if let created = proposal.created {
                 Text(created, format: .dateTime.hour().minute())
                     .font(House.TypeToken.meta)
@@ -175,6 +181,8 @@ struct ProposalCard: View {
                 .help("Hide it until tonight, tomorrow, next week, or a day (⌘L)")
             CardButton(title: "No", keys: ["⌘", "⌫"], showsKeys: isFocused, action: onNo)
                 .help("Not needed. Nothing runs (⌘⌫)")
+            CardButton(title: "Discuss", keys: ["⌘", "D"], showsKeys: isFocused, action: onDiscuss)
+                .help("A new chat about this card, its sources attached (⌘D)")
         }
     }
 }

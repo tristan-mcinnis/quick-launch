@@ -26,6 +26,14 @@ actor RecordingCosRunner: CosRunning {
             return CosResult(exitCode: 0, stdout: Self.projectsJSON, stderr: "")
         case .tasks:
             return CosResult(exitCode: 0, stdout: #"[{"id": "t1", "lane": "requires_action", "title": "Send revised quote", "due": "2026-09-30"}]"#, stderr: "")
+        case .activity:
+            return CosResult(exitCode: 0, stdout: Self.activityJSON, stderr: "")
+        case .artifacts:
+            return CosResult(exitCode: 0, stdout: #"[{"card": "cc33dd44", "path": "/tmp/cos-artifacts/cc33dd44/quote-note.md", "rel": "artifacts/cc33dd44/quote-note.md", "name": "Quote note draft", "headline": "Sam approved the budget; confirm the quote date", "project": "sample-project", "bytes": 812, "modified": "2026-09-23T11:30:00+00:00"}]"#, stderr: "")
+        case .charter:
+            return CosResult(exitCode: 0, stdout: Self.charterJSON, stderr: "")
+        case .rungs:
+            return CosResult(exitCode: 0, stdout: #"[{"id": "status_note@sample-project", "type": "status_note", "project": "sample-project", "note": ""}, {"id": "task_close@*", "type": "task_close", "project": null, "note": ""}]"#, stderr: "")
         default:
             return CosResult(exitCode: 0, stdout: stdout, stderr: "")
         }
@@ -37,6 +45,33 @@ actor RecordingCosRunner: CosRunning {
       "overdue": 1, "waiting_cards": 2, "later_cards": 1, "waiting": 1, "source": "ledger", "risk": "red"},
      {"slug": "ops-desk", "name": "Ops Desk", "phase": null, "open_tasks": 2, "next_due": null,
       "overdue": 0, "waiting_cards": 0, "later_cards": 0, "waiting": 0, "source": "ledger", "risk": "ok"}]
+    """
+
+    /// `cos activity --json` as contract v1 prints it.
+    static let activityJSON = """
+    {"day": "2026-09-23", "runs": 38,
+     "read": {"count": 1, "items": [{"ts": "2026-09-23T08:00:00+00:00", "time": "16:00", "text": "4 mails and 2 Slack threads"}]},
+     "proposed": {"count": 1, "items": [{"ts": "2026-09-23T08:01:00+00:00", "time": "16:01", "text": "Budget approved: log it, add a task, draft a reply", "card": "cc33dd44"}]},
+     "reviewed": {"count": 1, "items": [{"ts": 1790150460, "time": "16:01", "text": "Escalated: the reply promises a date the task tree does not show", "card": "cc33dd44"}]},
+     "ran": {"count": 1, "items": [{"ts": "2026-09-23T11:00:05.000Z", "time": "19:00", "text": "Logged the budget approval (rung: status notes on Sample Project)", "card": "au777777"}]},
+     "closed_on_their_own": {"count": 1, "items": [{"time": "19:20", "text": "Merged 7 cards into one digest"}]},
+     "failed": {"count": 1, "items": [{"time": "19:40", "text": "Brain call timed out after 240 s"}]},
+     "answered": {"count": 1, "items": [{"time": "19:45", "text": "Do it: Alex asks who owns the ops rota", "card": "ee55ff66"}]}
+    }
+    """
+
+    /// `cos charter --json` as contract v1 prints it, rungs included.
+    static let charterJSON = """
+    {"path": "/tmp/chief-of-staff-charter.md", "sections": [
+     {"key": "watch", "title": "Watch", "text": "- Client mail on live projects\\n- Slack mentions in #ops", "items": ["Client mail on live projects", "Slack mentions in #ops"]},
+     {"key": "people", "title": "People", "text": "", "items": ["Charlie: Globex client lead"]},
+     {"key": "ignore", "title": "Ignore", "text": "", "items": ["Newsletters"]},
+     {"key": "style", "title": "Style", "text": "", "items": ["Plain short sentences"]},
+     {"key": "learned", "title": "Learned", "text": "", "items": ["Less like this: newsletter digests (2026-09-23)"]}
+    ], "rungs": [
+     {"id": "status_note@sample-project", "type": "status_note", "project": "sample-project", "note": "2026-09-23"},
+     {"id": "task_close@*", "type": "task_close", "project": null, "note": ""}
+    ]}
     """
 
     /// Every call but the reads.
@@ -98,13 +133,14 @@ struct ChiefOfStaffThreadTests {
         let proposals = try CosFixture.items().compactMap(\.proposal)
         #expect(proposals.map(\.id) == [
             "aa11bb22", "cc33dd44", "dd00ee11", "ee55ff66", "ff77aa88", "99887766",
-            "11aa22bb", "33cc44dd", "55ee66ff", "77aa88bb", "88bb99cc",
+            "11aa22bb", "33cc44dd", "55ee66ff", "77aa88bb", "88bb99cc", "mo123456", "me654321", "au777777", "rv000001",
         ])
         #expect(proposals.map(\.status) == [
             .done, .pending, .dismissed, .pending, .later, .handled, .pending, .pending, .pending, .pending, .pending,
+            .pending, .pending, .done, .pending,
         ])
         #expect(proposals.map(\.tierKind) == [
-            .today, .decide, .fyi, .today, .today, .system, .system, .waiting, .fyi, .today, .today,
+            .today, .decide, .fyi, .today, .today, .system, .system, .waiting, .fyi, .today, .today, .today, .decide, .fyi, .today,
         ])
         let budget = try #require(proposals.first { $0.id == "cc33dd44" })
         #expect(budget.headline == "Sam approved the budget; confirm the quote date")
@@ -349,8 +385,17 @@ struct ChiefOfStaffKeyTests {
 
     @Test func theConversationsOwnKeysWorkFromTheComposerAndACard() {
         for place in [ChiefOfStaffKeys.Place.composer(draftIsEmpty: false), .card(board: false)] {
-            #expect(route(nil, "1", [.command, .option], place) == .showList)
-            #expect(route(nil, "2", [.command, .option], place) == .showBoard)
+            #expect(route(nil, "1", [.command, .option], place) == .showView(.list))
+            #expect(route(nil, "2", [.command, .option], place) == .showView(.board))
+            #expect(route(nil, "3", [.command, .option], place) == .showView(.activity))
+            #expect(route(nil, "4", [.command, .option], place) == .showView(.artifacts))
+            #expect(route(nil, "5", [.command, .option], place) == .showView(.charter))
+            #expect(route(nil, "6", [.command, .option], place) == nil)
+            #expect(route(nil, "[", [.command, .option], place) == .activityDay(-1))
+            #expect(route(nil, "]", [.command, .option], place) == .activityDay(1))
+            // ⌘Y only while "Always do this?" is offered.
+            #expect(route(nil, "y", [.command], place) == nil)
+            #expect(ChiefOfStaffKeys.route(key: nil, characters: "y", modifiers: [.command], place: place, hasCards: true, hasRungOffer: true) == .acceptRung)
             // ⌘1 to ⌘9 stay the rail's, here as in every chat.
             #expect(route(nil, "1", [.command], place) == nil)
             #expect(route(nil, "2", [.command], place) == nil)
@@ -487,19 +532,21 @@ struct ChiefOfStaffModelTests {
 
     @Test func cardsSortIntoTiersAndHealthIsNotACard() async throws {
         let model = try await model()
-        #expect(model.decide.map(\.id) == ["cc33dd44"])
-        #expect(model.today.map(\.id) == ["88bb99cc", "77aa88bb", "ee55ff66"])
+        #expect(model.decide.map(\.id) == ["me654321", "cc33dd44"])
+        // The morning brief is pinned first in TODAY.
+        #expect(model.today.map(\.id) == ["mo123456", "88bb99cc", "77aa88bb", "ee55ff66"])
         #expect(model.waitingOnOthers.map(\.id) == ["33cc44dd"])
-        #expect(model.fyi.map(\.id) == ["55ee66ff"])
+        // FYI: the waiting FYI card, then what a rung ran ("I did this").
+        #expect(model.fyi.map(\.id) == ["55ee66ff", "au777777"])
         #expect(model.later.map(\.id) == ["ff77aa88"])
-        #expect(model.doneThisWeek.map(\.id) == ["aa11bb22"])
+        #expect(model.doneThisWeek.map(\.id) == ["au777777", "aa11bb22"])
         #expect(model.health?.id == "11aa22bb")
         #expect(model.healthLine == "2 background jobs are failing.")
-        #expect(model.waitingCount == 4)
-        #expect(model.summary == "4 waiting")
+        #expect(model.waitingCount == 6)
+        #expect(model.summary == "6 waiting")
         #expect(model.projects.map(\.slug) == ["sample-project", "ops-desk"])
         // Cards carry their project's name from the strip, not the slug.
-        #expect(model.today.map(\.source) == ["Sample Project", "Sample Project", "Ops Desk"])
+        #expect(model.today.map(\.source) == ["", "Sample Project", "Sample Project", "Ops Desk"])
         #expect(!model.focusOrder.contains("11aa22bb"))
     }
 
@@ -514,7 +561,7 @@ struct ChiefOfStaffModelTests {
         // Health is the whole Mac's, whatever the filter.
         #expect(model.health != nil)
         model.setProjectFilter(nil)
-        #expect(model.today.count == 3)
+        #expect(model.today.count == 4)
     }
 
     @Test func decideShowsThreeUntilShowAll() async throws {
@@ -530,12 +577,12 @@ struct ChiefOfStaffModelTests {
 
     @Test func listFocusWalksDecideTodayAndOpenSections() async throws {
         let model = try await model()
-        #expect(model.focusOrder == ["cc33dd44", "88bb99cc", "77aa88bb", "ee55ff66"])
+        #expect(model.focusOrder == ["me654321", "cc33dd44", "mo123456", "88bb99cc", "77aa88bb", "ee55ff66"])
         model.moveCardFocus(1)
-        #expect(model.focusedCardID == "cc33dd44")
+        #expect(model.focusedCardID == "me654321")
         model.moveCardFocus(-1)
-        #expect(model.focusedCardID == "cc33dd44")
-        for _ in 0..<3 { model.moveCardFocus(1) }
+        #expect(model.focusedCardID == "me654321")
+        for _ in 0..<5 { model.moveCardFocus(1) }
         #expect(model.focusedCardID == "ee55ff66")
         model.moveCardFocus(1)
         #expect(model.focusedCardID == nil)
@@ -548,7 +595,7 @@ struct ChiefOfStaffModelTests {
     @Test func theBoardMovesAcrossColumns() async throws {
         let model = try await model()
         model.viewMode = .board
-        #expect(model.column(.done).map(\.id) == ["aa11bb22"])
+        #expect(model.column(.done).map(\.id) == ["au777777", "aa11bb22"])
         model.focusCard("cc33dd44")
         model.moveColumnFocus(1)
         #expect(model.focusedCardID == "88bb99cc")
@@ -559,9 +606,9 @@ struct ChiefOfStaffModelTests {
         model.moveColumnFocus(1)
         #expect(model.focusedCardID == "ff77aa88")
         model.moveColumnFocus(1)
-        #expect(model.focusedCardID == "aa11bb22")
+        #expect(model.focusedCardID == "au777777")
         model.moveColumnFocus(1)
-        #expect(model.focusedCardID == "aa11bb22")
+        #expect(model.focusedCardID == "au777777")
     }
 
     @Test func cardKeysCallTheirVerbs() async throws {
@@ -621,6 +668,7 @@ struct ChiefOfStaffModelTests {
     @Test func doAllTodayAsksOnceThenRunsEveryVisibleRow() async throws {
         let model = try await model()
         model.doAllToday()
+        // The morning brief is not run by Do all.
         #expect(model.bulkArmed == ["88bb99cc", "77aa88bb", "ee55ff66"])
         model.moveCardFocus(1)
         #expect(model.bulkArmed == nil)
@@ -765,7 +813,7 @@ struct ChiefOfStaffChatTests {
         let rig = try await makeRig(history: [conversation("Budget review", minutes: 5), conversation("Kyoto trip", minutes: 50)])
         let items = rig.window.railItems
         #expect(items.first?.title == "Chief of Staff")
-        #expect(rig.window.railDetail(for: items[0]) == "4 waiting")
+        #expect(rig.window.railDetail(for: items[0]) == "6 waiting")
         #expect(rig.window.railNumber(at: 0) == nil)
         #expect(rig.window.railNumber(at: 1) == 1)
         rig.window.railIndex = 0
@@ -805,11 +853,11 @@ struct ChiefOfStaffChatTests {
         rig.window.openChiefOfStaff()
         #expect(rig.window.handleChiefOfStaffKey(key: .upArrow, characters: nil, modifiers: []))
         #expect(rig.window.focus == .cards)
-        #expect(cos.focusedCardID == "cc33dd44")
+        #expect(cos.focusedCardID == "me654321")
         #expect(rig.window.handleChiefOfStaffKey(key: .downArrow, characters: nil, modifiers: []))
-        #expect(cos.focusedCardID == "88bb99cc")
+        #expect(cos.focusedCardID == "cc33dd44")
         #expect(rig.window.handleChiefOfStaffKey(key: nil, characters: "l", modifiers: [.command]))
-        #expect(cos.laterMenu?.proposalID == "88bb99cc")
+        #expect(cos.laterMenu?.proposalID == "cc33dd44")
         #expect(rig.window.handleChiefOfStaffKey(key: .escape, characters: nil, modifiers: []))
         #expect(cos.laterMenu == nil)
         #expect(rig.window.handleChiefOfStaffKey(key: .upArrow, characters: nil, modifiers: []))
@@ -838,7 +886,7 @@ struct ChiefOfStaffChatTests {
         rig.launcher.input = "cos"
         #expect(rig.launcher.launcherMatches.first?.id == "command:\(QuickViewModel.chiefOfStaffCommandID)")
         let item = try #require(rig.launcher.catalogItem(kind: .command, itemID: QuickViewModel.chiefOfStaffCommandID))
-        #expect(item.detail.hasPrefix("4 waiting"))
+        #expect(item.detail.hasPrefix("6 waiting"))
     }
 
     // MARK: Guardrail: Quick AI and every other AI Chat conversation are unchanged
@@ -942,7 +990,7 @@ struct CosCLIIntegrationTests {
 
         let status = try await cli.run(.status)
         #expect(status.succeeded)
-        #expect(try CosStatus.decode(status.stdout).pending == 7)
+        #expect(try CosStatus.decode(status.stdout).pending == 10)
 
         let asked = try await cli.run(.append(role: .user, text: "Line one\nline \"two\"; three", meta: ["attachments": "a.pdf"]))
         #expect(asked.succeeded, "\(asked.stderr)")
@@ -960,8 +1008,401 @@ struct CosCLIIntegrationTests {
         #expect(proposals.first { $0.id == "88bb99cc" }?.status == .later)
         #expect(proposals.first { $0.id == "88bb99cc" }?.snoozedUntil != nil)
         #expect(proposals.first { $0.id == "ff77aa88" }?.status == .pending)
+        // The v1 reads decode as the real CLI prints them. (Writes such as
+        // more, less, rule, always and undo touch the real charter or the
+        // vault, so they are never run from a test.)
+        let activity = try await cli.run(.activity(day: nil))
+        #expect(activity.succeeded, "\(activity.stderr)")
+        _ = try CosActivity.decode(activity.stdout)
+        let artifacts = try await cli.run(.artifacts)
+        #expect(artifacts.succeeded)
+        _ = try CosArtifact.decodeList(artifacts.stdout)
+        let charter = try await cli.run(.charter)
+        #expect(charter.succeeded)
+        #expect(try CosCharter.decode(charter.stdout).sections.isEmpty == false)
+        let rungs = try await cli.run(.rungs)
+        #expect(rungs.succeeded)
+        _ = try CosRung.decodeList(rungs.stdout)
+
         let question = record.turns.first { $0.text == "Line one\nline \"two\"; three" }
         #expect(question?.appPayload?.values["surface"]?.stringValue == "quick-launch")
         #expect(question?.appPayload?.values["attachments"]?.stringValue == "a.pdf")
+    }
+}
+
+// MARK: - Contract v1
+
+/// Keeps the files it was asked to open.
+actor RecordingFileOpener: LocalFileOpening {
+    private(set) var opened: [URL] = []
+    func open(_ url: URL) async throws { opened.append(url) }
+}
+
+@Suite("Chief of Staff contract v1 data")
+struct ChiefOfStaffV1DataTests {
+    @Test func newVerbsAreArgumentArrays() throws {
+        #expect(try CosCommand.more(id: "a").arguments() == ["more", "a"])
+        #expect(try CosCommand.less(id: "a", why: nil).arguments() == ["less", "a"])
+        #expect(try CosCommand.less(id: "a", why: " newsletters again ").arguments() == ["less", "a", "--why", "newsletters again"])
+        #expect(try CosCommand.always(id: "a").arguments() == ["always", "a"])
+        #expect(try CosCommand.never(rung: "status_note@p").arguments() == ["never", "status_note@p"])
+        #expect(try CosCommand.rungs.arguments() == ["rungs", "--json"])
+        #expect(try CosCommand.undo(id: "a").arguments() == ["undo", "a"])
+        #expect(try CosCommand.activity(day: nil).arguments() == ["activity", "--json"])
+        #expect(try CosCommand.activity(day: "2026-09-22").arguments() == ["activity", "--day", "2026-09-22", "--json"])
+        #expect(try CosCommand.artifacts.arguments() == ["artifacts", "--json"])
+        #expect(try CosCommand.charter.arguments() == ["charter", "--json"])
+        #expect(try CosCommand.rule(text: "Ignore newsletters", section: "ignore").arguments()
+            == ["rule", "Ignore newsletters", "--section", "ignore"])
+    }
+
+    @Test func v1CardFieldsDecode() throws {
+        let proposals = try CosFixture.items().compactMap(\.proposal)
+        let budget = try #require(proposals.first { $0.id == "cc33dd44" })
+        #expect(budget.review == Proposal.Review(
+            verdict: "escalate", reason: "The reply promises a date the task tree does not show.", model: "deepseek-v4-pro"
+        ))
+        #expect(budget.review?.isEscalation == true)
+        #expect(budget.artifacts == ["artifacts/cc33dd44/quote-note.md"])
+        let auto = try #require(proposals.first { $0.id == "au777777" })
+        #expect(auto.auto && auto.hasUndo && auto.canUndo)
+        #expect(auto.statusWord == "I did this")
+        let done = try #require(proposals.first { $0.id == "aa11bb22" })
+        #expect(done.canUndo && done.feedback == "more")
+        let meeting = try #require(proposals.first { $0.id == "me654321" })
+        #expect(meeting.isMeeting && meeting.location == "Zoom" && meeting.source == "sample-project")
+        #expect(meeting.starts == Date(timeIntervalSince1970: 1_790_165_700))
+        // A card still waiting on the reviewer is hidden.
+        let held = try #require(proposals.first { $0.id == "rv000001" })
+        #expect(held.awaitsReview)
+        #expect(!ChiefOfStaffThread.waiting(in: try CosFixture.items()).contains { $0.id == "rv000001" })
+        #expect(Proposal(id: "x", status: .dismissed, message: "m", verdict: "undone").statusWord == "Undone")
+        #expect(proposals.first { $0.id == "mo123456" }?.isMorning == true)
+        // Pending cards cannot be undone.
+        #expect(!budget.canUndo)
+    }
+
+    @Test func alwaysIsOfferedOnlyForAutoEligibleCardsOutsideDecide() {
+        func card(_ types: [String], tier: String = "today", auto: Bool = false, kind: String = "email") -> Proposal {
+            Proposal(id: "x", eventKind: kind, message: "m", tier: tier, actions: types.map { ProposalAction(type: $0) }, auto: auto)
+        }
+        #expect(card(["status_note"]).offersRung)
+        #expect(card(["task_add", "task_close"]).offersRung)
+        #expect(!card(["status_note", "draft_reply"]).offersRung)
+        #expect(!card(["prepare"]).offersRung)
+        #expect(!card([]).offersRung)
+        #expect(!card(["status_note"], tier: "decide").offersRung)
+        #expect(!card(["status_note"], auto: true).offersRung)
+        #expect(!card(["task_add"], kind: "meeting").offersRung)
+    }
+
+    @Test func activityDecodesEitherShapeAndGroups() throws {
+        let activity = try CosActivity.decode(RecordingCosRunner.activityJSON)
+        #expect(activity.day == "2026-09-23" && activity.runs == 38)
+        #expect(activity.events.count == 7)
+        #expect(activity.events("reviewed").first?.ts == Date(timeIntervalSince1970: 1_790_150_460))
+        #expect(activity.events("read").first?.ts == Date(timeIntervalSince1970: 1_790_150_400))
+        #expect(activity.events("read").first?.clock == "16:00")
+        #expect(activity.events("ran").first?.card == "au777777")
+        #expect(activity.events("answered").first?.text == "Do it: Alex asks who owns the ops rota")
+        #expect(CosActivity.groups.map(\.kind) == ["read", "proposed", "reviewed", "ran", "closed_on_their_own", "failed", "answered"])
+        let bare = try CosActivity.decode(#"[{"kind": "failed", "text": "x"}]"#)
+        #expect(bare.day == nil && bare.events.map(\.kind) == ["failed"])
+        #expect(Set(activity.events.map(\.id)).count == 7)
+        // The empty day the real CLI prints.
+        let empty = try CosActivity.decode(#"{"day": "2026-09-23", "read": {"count": 0, "items": []}, "runs": 38}"#)
+        #expect(empty.events.isEmpty && empty.runs == 38)
+    }
+
+    @Test func artifactsCharterAndRungsDecode() throws {
+        let artifacts = try CosArtifact.decodeList(#"""
+        [{"card": "c1", "path": "/d/artifacts/c1/draft.md", "rel": "artifacts/c1/draft.md", "name": "draft.md",
+          "headline": "H", "project": "p", "bytes": 10, "modified": "2026-09-23T11:30:00+00:00"},
+         {"card": "c2", "path": "artifacts/c2/x.md"}, {"card": "c3", "path": "y.md"}]
+        """#)
+        #expect(artifacts.map(\.name) == ["draft.md", "x.md", "y.md"])
+        #expect(artifacts[0].created == Date(timeIntervalSince1970: 1_790_163_000))
+        #expect(artifacts[0].headline == "H")
+        let paths = CosPaths(data: URL(fileURLWithPath: "/data"), executable: URL(fileURLWithPath: "/bin/cos"))
+        #expect(artifacts[0].url(in: paths).path == "/d/artifacts/c1/draft.md")
+        #expect(artifacts[1].url(in: paths).path == "/data/artifacts/c2/x.md")
+        #expect(artifacts[2].url(in: paths).path == "/data/artifacts/c3/y.md")
+        let charter = try CosCharter.decode(RecordingCosRunner.charterJSON)
+        #expect(charter.path == "/tmp/chief-of-staff-charter.md")
+        #expect(charter.sections.map(\.key) == ["watch", "people", "ignore", "style", "learned"])
+        #expect(charter.sections.map(\.name) == ["Watch", "People", "Ignore", "Style", "Learned"])
+        #expect(charter.sections[0].lines == ["Client mail on live projects", "Slack mentions in #ops"])
+        #expect(charter.rungs.map(\.rung) == ["status_note@sample-project", "task_close@*"])
+        #expect(charter.rungs[1].project == "*")
+        let keyed = try CosCharter.decode(#"{"Watch": ["a"], "Ignore": ["b", "c"]}"#)
+        #expect(keyed.sections.map(\.key) == ["ignore", "watch"])
+        let rungs = try CosRung.decodeList(#"[{"id": "status_note@p", "type": "status_note", "project": "p", "note": ""}]"#)
+        #expect(rungs.first?.rung == "status_note@p")
+    }
+
+    @Test func discussAttachesTheCardAndOnlyItsFilesInsideTheVault() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "cos-discuss-\(UUID().uuidString)")
+        let vault = root.appending(path: "vault")
+        let data = root.appending(path: "data")
+        try FileManager.default.createDirectory(at: vault.appending(path: "kb/emails"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: data.appending(path: "artifacts/c1"), withIntermediateDirectories: true)
+        try Data("mail".utf8).write(to: vault.appending(path: "kb/emails/a.md"))
+        try Data("draft".utf8).write(to: data.appending(path: "artifacts/c1/note.md"))
+        try Data("secret".utf8).write(to: root.appending(path: "outside.md"))
+        let card = Proposal(
+            id: "c1", project: "p", message: "The readout moved.", headline: "Readout moved", why: "Sam asked.",
+            actions: [ProposalAction(type: "status_note", fields: ["note": "Log it"])],
+            artifacts: ["artifacts/c1/note.md", "missing.md"]
+        )
+        var withPaths = card
+        withPaths.paths = ["kb/emails/a.md", "kb/emails/missing.md", "../outside.md", root.appending(path: "outside.md").path]
+        let discussion = ChiefOfStaffModel.discussion(for: withPaths, vault: vault, data: data)
+        #expect(discussion.title == "Readout moved")
+        #expect(discussion.files.map(\.lastPathComponent) == ["a.md", "note.md"])
+        #expect(discussion.cardText.hasPrefix("Readout moved\nFrom: p\nWhy: Sam asked.\n\nThe readout moved."))
+        #expect(discussion.cardText.contains("1. Status note: Log it"))
+    }
+}
+
+@Suite("Chief of Staff contract v1 model", .serialized)
+@MainActor
+struct ChiefOfStaffV1ModelTests {
+    private func model(runner: RecordingCosRunner = RecordingCosRunner()) async throws -> ChiefOfStaffModel {
+        let model = ChiefOfStaffModel(paths: try CosFixture.home(), runner: runner, clock: { cosNow })
+        await model.reload(force: true)
+        return model
+    }
+
+    @Test func moreAndLessWithAnOptionalWhy() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        model.focusCard("ee55ff66")
+        model.moreFocused()
+        model.lessFocused()
+        #expect(model.lessPrompt?.proposalID == "ee55ff66")
+        model.lessPrompt?.why = "  "
+        model.submitLess()
+        #expect(model.lessPrompt == nil)
+        model.lessFocused()
+        model.lessPrompt?.why = "Slack rota questions are Alex's"
+        model.submitLess()
+        await model.perform(.more(id: "ee55ff66"))
+        await model.perform(.less(id: "ee55ff66", why: nil))
+        await model.perform(.less(id: "ee55ff66", why: "Slack rota questions are Alex's"))
+        #expect(await runner.writes == [
+            .more(id: "ee55ff66"), .less(id: "ee55ff66", why: nil), .less(id: "ee55ff66", why: "Slack rota questions are Alex's"),
+        ])
+        #expect(model.notice == "Less like this: noted.")
+    }
+
+    @Test func aDoItOnAnEligibleCardOffersAlways() async throws {
+        let runner = RecordingCosRunner()
+        await runner.setStdout("OK   task_add: added\n")
+        let model = try await model(runner: runner)
+        await model.perform(.doIt(id: "ee55ff66"))
+        #expect(model.rungOffer == ChiefOfStaffModel.RungOffer(proposalID: "ee55ff66", project: "Ops Desk", types: ["Task"]))
+        model.acceptRungOffer()
+        #expect(model.rungOffer == nil)
+        await model.perform(.always(id: "ee55ff66"))
+        #expect(await runner.writes.last == .always(id: "ee55ff66"))
+        // Not after a DECIDE card, nor after a failed run.
+        await model.perform(.doIt(id: "cc33dd44"))
+        #expect(model.rungOffer == nil)
+        await runner.setStdout("FAIL task_close: no such task\n")
+        await model.perform(.doIt(id: "77aa88bb"))
+        #expect(model.rungOffer == nil)
+    }
+
+    @Test func doAllTodayNeverOffersAlways() async throws {
+        let runner = RecordingCosRunner()
+        await runner.setStdout("OK   task_add: added\n")
+        let model = try await model(runner: runner)
+        model.doAllToday()
+        model.doAllToday()
+        await model.perform(.doIt(id: "ee55ff66"))
+        #expect(model.rungOffer == nil)
+    }
+
+    @Test func undoIsOnlyForDoneCardsWithSteps() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        model.focusCard("ee55ff66")
+        model.undoFocused()
+        model.viewMode = .board
+        model.focusCard("aa11bb22")
+        model.undoFocused()
+        model.focusCard("au777777")
+        model.undoFocused()
+        await model.perform(.undo(id: "au777777"))
+        #expect(await runner.writes.contains(.undo(id: "au777777")))
+        #expect(!(await runner.writes.contains(.undo(id: "ee55ff66"))))
+    }
+
+    @Test func pagesLoadWhenShownAndActOnTheirRows() async throws {
+        let runner = RecordingCosRunner()
+        let opener = RecordingFileOpener()
+        let model = try await model(runner: runner)
+        model.fileOpener = opener
+        await model.perform(.loadActivity(day: nil))
+        #expect(model.activity?.events("failed").first?.text == "Brain call timed out after 240 s")
+        model.moveActivityDay(-1, calendar: .utc)
+        #expect(model.activityDay == "2026-09-22")
+        model.moveActivityDay(1, calendar: .utc)
+        #expect(model.activityDay == nil)
+
+        model.viewMode = .artifacts
+        await model.perform(.loadArtifacts)
+        #expect(model.focusOrder == ["cc33dd44/artifacts/cc33dd44/quote-note.md"])
+        model.moveCardFocus(1)
+        model.openFocusedFile()
+        let opened = try #require(model.paths.map { model.artifacts[0].url(in: $0) })
+        await model.perform(.open(opened))
+        #expect(await opener.opened == [opened])
+        #expect(model.focusedDiscussion?.title == "Quote note draft")
+
+        model.viewMode = .charter
+        await model.perform(.loadCharter)
+        #expect(model.charter?.sections.count == 5)
+        #expect(model.rungs.map(\.rung) == ["status_note@sample-project", "task_close@*"])
+        model.focusCard("task_close@*")
+        model.removeFocusedRung()
+        await model.perform(.never(rung: "task_close@*"))
+        model.openAddRule()
+        model.addRule?.section = "ignore"
+        model.addRule?.text = "Newsletters"
+        model.submitAddRule()
+        await model.perform(.rule(text: "Newsletters", section: "ignore"))
+        model.openFocusedFile()
+        await model.perform(.open(URL(fileURLWithPath: "/tmp/chief-of-staff-charter.md")))
+        #expect(await opener.opened.last == URL(fileURLWithPath: "/tmp/chief-of-staff-charter.md"))
+        let writes = await runner.writes
+        #expect(writes.contains(.never(rung: "task_close@*")))
+        #expect(writes.contains(.rule(text: "Newsletters", section: "ignore")))
+    }
+
+    @Test func notificationsSkipAutoCardsTimeMeetingsAndQuietTheMorning() async throws {
+        let items = try CosFixture.items().compactMap(\.proposal)
+        let morning = try #require(items.first { $0.id == "mo123456" })
+        let meeting = try #require(items.first { $0.id == "me654321" })
+        let auto = try #require(items.first { $0.id == "au777777" })
+        let notices = ChiefOfStaffNotificationRules.notices(
+            for: [auto, morning, meeting], now: cosNow, quietHours: QuietHours(startHour: 0, endHour: 0)
+        )
+        #expect(notices == [
+            .meeting(meeting, deliverAt: cosNow.addingTimeInterval(5 * 60)),
+            .card(morning, .passive),
+        ])
+        let content = ChiefOfStaffNotificationContent(notices[0])
+        #expect(content.interruptionLevel == .active)
+        #expect(content.deliverAt == cosNow.addingTimeInterval(5 * 60))
+        // A meeting already under ten minutes away notifies at once.
+        let soon = ChiefOfStaffNotificationRules.notices(
+            for: [meeting], now: cosNow.addingTimeInterval(10 * 60), quietHours: QuietHours(startHour: 0, endHour: 0)
+        )
+        #expect(soon == [.meeting(meeting, deliverAt: nil)])
+    }
+
+    @Test func autoCardsLeaveEarlierForFYI() throws {
+        let items = try CosFixture.items()
+        #expect(!ChiefOfStaffThread.history(in: items).contains { $0.id == "au777777" || $0.proposal?.id == "au777777" })
+    }
+}
+
+@Suite("Chief of Staff contract v1 window", .serialized)
+@MainActor
+struct ChiefOfStaffV1WindowTests {
+    private func rig() async throws -> (AIChatWindowModel, ChiefOfStaffModel, RecordingCosRunner) {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = true
+        let chat = QuickViewModel(settings: settings, service: MockQuickService())
+        let suite = "ChiefOfStaffV1WindowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let window = AIChatWindowModel(chat: chat, defaults: defaults)
+        window.window = FakeAIChatWindow()
+        let runner = RecordingCosRunner()
+        let cos = ChiefOfStaffModel(paths: try CosFixture.home(), runner: runner, clock: { cosNow })
+        await cos.reload(force: true)
+        chat.chiefOfStaff = cos
+        chat.chiefOfStaffOpener = { window.openChiefOfStaff(proposalID: $0) }
+        return (window, cos, runner)
+    }
+
+    private func key(_ window: AIChatWindowModel, _ key: VirtualKey?, _ characters: String? = nil, _ modifiers: NSEvent.ModifierFlags = []) -> Bool {
+        window.handleChiefOfStaffKey(key: key, characters: characters, modifiers: modifiers)
+    }
+
+    @Test func cardKeysForFeedbackUndoAndDiscuss() async throws {
+        let (window, cos, _) = try await rig()
+        window.openChiefOfStaff(proposalID: "ee55ff66")
+        #expect(key(window, nil, "=", [.command]))
+        #expect(key(window, nil, "-", [.command]))
+        #expect(window.focus == .cosForm)
+        #expect(cos.lessPrompt?.proposalID == "ee55ff66")
+        #expect(window.handleEscape())
+        #expect(cos.lessPrompt == nil)
+        #expect(window.focus == .cards)
+        // ⌥⌘3 to ⌥⌘5 switch the pages; ⌘N in the Charter adds a rule.
+        #expect(key(window, nil, "5", [.command, .option]))
+        #expect(cos.viewMode == .charter)
+        #expect(key(window, nil, "n", [.command]))
+        #expect(cos.addRule != nil)
+        #expect(window.focus == .cosForm)
+        #expect(window.handleEscape())
+        #expect(cos.addRule == nil)
+        #expect(key(window, nil, "1", [.command, .option]))
+        #expect(cos.viewMode == .list)
+        withExtendedLifetime(cos) {}
+    }
+
+    @Test func aRungOfferIsAnsweredWithCommandYOrEscape() async throws {
+        let (window, cos, runner) = try await rig()
+        await runner.setStdout("OK   task_add: added\n")
+        window.openChiefOfStaff()
+        await cos.perform(.doIt(id: "ee55ff66"))
+        #expect(cos.rungOffer != nil)
+        #expect(window.handleEscape())
+        #expect(cos.rungOffer == nil)
+        await cos.perform(.doIt(id: "ee55ff66"))
+        #expect(key(window, nil, "y", [.command]))
+        #expect(cos.rungOffer == nil)
+        // No offer, no ⌘Y: the key stays unhandled.
+        #expect(!key(window, nil, "y", [.command]))
+    }
+
+    /// Discuss opens a NEW ordinary chat: the default provider and tools,
+    /// titled with the headline, the card and its files on the tray; the
+    /// pinned conversation is left and nothing is written to the thread.
+    @Test func discussOpensANewOrdinaryChat() async throws {
+        let (window, cos, runner) = try await rig()
+        window.openChiefOfStaff(proposalID: "cc33dd44")
+        let pinnedMessages = window.chat.currentConversation?.messages
+        #expect(key(window, nil, "d", [.command]))
+        #expect(!window.isChiefOfStaffOpen)
+        let conversation = try #require(window.chat.currentConversation)
+        #expect(conversation.id != ChiefOfStaffModel.conversationID)
+        #expect(conversation.customTitle == "Sam approved the budget; confirm the quote date")
+        #expect(conversation.enabledTools == nil)
+        #expect(conversation.providerID == window.chat.settings.quickAIProvider?.id)
+        #expect(conversation.messages.isEmpty)
+        let names = window.chat.attachmentTray.items.map(\.name)
+        #expect(names.first?.contains("Chief of Staff") == true)
+        #expect(window.focus == .composer)
+        #expect(await runner.writes.isEmpty)
+        #expect(pinnedMessages?.isEmpty == true)
+        withExtendedLifetime(cos) {}
+    }
+
+    @Test func theNewKeysDoNothingOutsideThePinnedConversation() async throws {
+        let (window, cos, _) = try await rig()
+        window.open(handoff: nil)
+        for (characters, modifiers) in [
+            ("=", NSEvent.ModifierFlags.command), ("-", [.command]), ("z", [.command]), ("d", [.command]),
+            ("y", [.command]), ("3", [.command, .option]), ("5", [.command, .option]), ("[", [.command, .option]),
+        ] as [(String, NSEvent.ModifierFlags)] {
+            #expect(!key(window, nil, characters, modifiers))
+        }
+        withExtendedLifetime(cos) {}
     }
 }

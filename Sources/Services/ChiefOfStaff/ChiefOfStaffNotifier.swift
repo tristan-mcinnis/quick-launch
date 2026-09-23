@@ -34,6 +34,8 @@ struct ChiefOfStaffNotificationContent: Sendable, Equatable {
     var threadIdentifier: String
     var proposalID: String?
     var urgency: ChiefOfStaffUrgency
+    /// When to show it; nil is now.
+    var deliverAt: Date?
 
     static let cardCategory = "chief-of-staff.card"
     /// A card with nothing to run (a health notice): Open and Reply only.
@@ -48,7 +50,17 @@ struct ChiefOfStaffNotificationContent: Sendable, Equatable {
 
     init(_ notice: ChiefOfStaffNotice) {
         title = "Chief of Staff"
+        deliverAt = nil
         switch notice {
+        case .meeting(let proposal, let at):
+            identifier = "chief-of-staff.\(proposal.id)"
+            subtitle = proposal.source.isEmpty ? "Meeting" : proposal.source
+            body = proposal.headline
+            category = Self.noticeCategory
+            threadIdentifier = proposal.project.isEmpty ? "chief-of-staff" : proposal.project
+            proposalID = proposal.id
+            urgency = .active
+            deliverAt = at
         case .card(let proposal, let urgency):
             identifier = "chief-of-staff.\(proposal.id)"
             subtitle = proposal.source
@@ -169,7 +181,11 @@ final class ChiefOfStaffNotifier: ChiefOfStaffNotifying {
         if let proposalID = plan.proposalID {
             content.userInfo = [ChiefOfStaffNotificationContent.proposalKey: proposalID]
         }
-        try? await center.add(UNNotificationRequest(identifier: plan.identifier, content: content, trigger: nil))
+        // A meeting's banner waits for ten minutes before it starts.
+        let trigger = plan.deliverAt.map {
+            UNTimeIntervalNotificationTrigger(timeInterval: max(1, $0.timeIntervalSinceNow), repeats: false)
+        }
+        try? await center.add(UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger))
     }
 }
 

@@ -36,6 +36,16 @@ struct ChiefOfStaffPanel: View {
             case .board:
                 sheets
                 ChiefOfStaffBoard(model: model, hasKeyboard: hasKeyboard, onFocus: onFocus)
+            case .activity, .artifacts, .charter:
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: House.Spacing.md) {
+                        sheets
+                        page
+                    }
+                    .padding(.vertical, House.Spacing.xxs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .padding(.horizontal, House.Spacing.lg)
@@ -63,7 +73,23 @@ struct ChiefOfStaffPanel: View {
     /// In the List they scroll with the sections, so the panel never grows
     /// past its share of the window.
     @ViewBuilder
+    private var page: some View {
+        switch model.viewMode {
+        case .activity: ChiefOfStaffActivityPage(model: model)
+        case .artifacts: ChiefOfStaffArtifactsPage(model: model, hasKeyboard: hasKeyboard)
+        case .charter: ChiefOfStaffCharterPage(model: model, hasKeyboard: hasKeyboard, onFocus: onFocus)
+        case .list, .board: EmptyView()
+        }
+    }
+
+    @ViewBuilder
     private var sheets: some View {
+        if let offer = model.rungOffer {
+            RungOfferStrip(offer: offer, onYes: model.acceptRungOffer, onNo: model.dismissRungOffer)
+        }
+        if model.lessPrompt != nil {
+            LessPromptView(model: model, onFocus: onFocus)
+        }
         if model.isHealthDetailShown, let health = model.health {
             HealthDetail(proposal: health)
         }
@@ -127,10 +153,13 @@ struct ChiefOfStaffPanel: View {
                         ForEach(model.fyi) { proposal in
                             OneLineRow(
                                 proposal: proposal,
-                                detail: proposal.source,
+                                detail: proposal.auto ? "I did this · \(proposal.source)" : proposal.source,
                                 isFocused: isFocused(proposal),
-                                action: ("Got it", ["⌘", "↩"], { model.send(.doIt(id: proposal.id)) })
+                                action: fyiAction(proposal),
+                                feedback: feedbackButtons(proposal)
                             )
+                            // Why a rung ran it: the reviewer's reason.
+                            .help(proposal.review?.reason ?? "")
                             .id(proposal.id)
                             .onTapGesture { model.focusCard(proposal.id) }
                         }
@@ -164,7 +193,21 @@ struct ChiefOfStaffPanel: View {
                     }
                 }
                 ForEach(model.visibleDecide) { proposal in
-                    card(proposal).id(proposal.id)
+                    Group {
+                        if proposal.isMeeting {
+                            MeetingCard(
+                                proposal: proposal,
+                                state: model.cards[proposal.id] ?? ProposalCardState(),
+                                isFocused: isFocused(proposal),
+                                now: model.now,
+                                feedback: feedbackButtons(proposal)
+                            ) { model.send(.doIt(id: proposal.id)) }
+                            .onTapGesture { model.focusCard(proposal.id) }
+                        } else {
+                            card(proposal)
+                        }
+                    }
+                    .id(proposal.id)
                 }
             }
         }
@@ -185,7 +228,24 @@ struct ChiefOfStaffPanel: View {
                 }
                 ForEach(model.today) { proposal in
                     Group {
-                        if model.cards[proposal.id]?.isEditing == true {
+                        if proposal.isMorning {
+                            MorningCard(
+                                proposal: proposal,
+                                state: model.cards[proposal.id] ?? ProposalCardState(),
+                                isFocused: isFocused(proposal),
+                                feedback: feedbackButtons(proposal)
+                            ) { model.send(.doIt(id: proposal.id)) }
+                            .onTapGesture { model.focusCard(proposal.id) }
+                        } else if proposal.isMeeting {
+                            MeetingCard(
+                                proposal: proposal,
+                                state: model.cards[proposal.id] ?? ProposalCardState(),
+                                isFocused: isFocused(proposal),
+                                now: model.now,
+                                feedback: feedbackButtons(proposal)
+                            ) { model.send(.doIt(id: proposal.id)) }
+                            .onTapGesture { model.focusCard(proposal.id) }
+                        } else if model.cards[proposal.id]?.isEditing == true {
                             card(proposal)
                         } else {
                             TodayRow(
@@ -196,7 +256,8 @@ struct ChiefOfStaffPanel: View {
                                 laterMenu: model.laterMenu,
                                 onDo: { model.send(.doIt(id: proposal.id)) },
                                 onLaterChoice: { model.chooseLater($0) },
-                                onLaterPickText: model.setLaterPickText
+                                onLaterPickText: model.setLaterPickText,
+                                feedback: feedbackButtons(proposal)
                             )
                             .onTapGesture { model.focusCard(proposal.id) }
                         }
@@ -205,6 +266,25 @@ struct ChiefOfStaffPanel: View {
                 }
             }
         }
+    }
+
+    /// Got it on a waiting FYI card; Undo on one a rung ran.
+    private func fyiAction(_ proposal: Proposal) -> (title: String, keys: [String], run: () -> Void)? {
+        if proposal.isWaiting { return ("Got it", ["⌘", "↩"], { model.send(.doIt(id: proposal.id)) }) }
+        if proposal.canUndo { return ("Undo", ["⌘", "Z"], { model.send(.undo(id: proposal.id)) }) }
+        return nil
+    }
+
+    private func feedbackButtons(_ proposal: Proposal) -> FeedbackButtons {
+        FeedbackButtons(
+            feedback: proposal.feedback,
+            showsKeys: isFocused(proposal),
+            onMore: { model.send(.more(id: proposal.id)) },
+            onLess: {
+                model.focusCard(proposal.id)
+                model.lessFocused()
+            }
+        )
     }
 
     private func isFocused(_ proposal: Proposal) -> Bool {
@@ -233,6 +313,8 @@ struct ChiefOfStaffPanel: View {
                 model.openLaterMenu()
             },
             onNo: { model.send(.no(id: proposal.id)) },
+            onDiscuss: { model.onDiscuss?(model.discussion(for: proposal)) },
+            feedback: feedbackButtons(proposal),
             onLaterChoice: { model.chooseLater($0) },
             onLaterPickText: model.setLaterPickText,
             onRun: { model.send(.runEdit(id: proposal.id)) },
@@ -299,35 +381,43 @@ struct ChiefOfStaffStatusBar: View {
             .help("Show every project (⇧⌘P)")
             .accessibilityLabel("Filter: \(project.shortName). Clear")
         }
-        // Never truncated: the health line gives way first, then the row wraps.
-        ViewSwitch(mode: model.viewMode) { model.viewMode = $0 }
-            .fixedSize()
+        // Never truncated: the health line gives way first, then the row
+        // wraps, and a very narrow window shows only the current view.
+        ViewThatFits(in: .horizontal) {
+            ViewSwitch(mode: model.viewMode) { model.viewMode = $0 }
+                .fixedSize()
+            ViewSwitch(mode: model.viewMode, compact: true) { model.viewMode = $0 }
+                .fixedSize()
+        }
     }
 }
 
-/// List ⌥⌘1 and Board ⌥⌘2, the current one in ink.
+/// List, Board, Activity, Artifacts, Charter (⌥⌘1 to ⌥⌘5), the current
+/// one in ink and selected.
 struct ViewSwitch: View {
     let mode: ChiefOfStaffModel.ViewMode
+    /// Only the current view, for a very narrow window; ⌥⌘1 to ⌥⌘5 still
+    /// reach the others.
+    var compact = false
     let onChange: (ChiefOfStaffModel.ViewMode) -> Void
 
     var body: some View {
         HStack(spacing: House.Spacing.xxs) {
-            item("List", "1", .list)
-            item("Board", "2", .board)
+            ForEach(compact ? [mode] : ChiefOfStaffModel.ViewMode.allCases, id: \.self) { item($0) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("View")
     }
 
-    private func item(_ title: String, _ key: String, _ value: ChiefOfStaffModel.ViewMode) -> some View {
+    private func item(_ value: ChiefOfStaffModel.ViewMode) -> some View {
         Button {
             onChange(value)
         } label: {
             HStack(spacing: House.Spacing.xxs) {
-                Text(title)
+                Text(value.title)
                     .font(House.TypeToken.meta)
                     .foregroundStyle(mode == value ? House.ColorToken.textPrimary : House.ColorToken.textTertiary)
-                KeyCapGroup(keys: ["⌥", "⌘", key])
+                if mode == value { KeyCapGroup(keys: ["⌥", "⌘", "\(value.rawValue)"]) }
             }
             .padding(.horizontal, House.Spacing.xs)
             .frame(height: House.Control.chip)
@@ -335,6 +425,7 @@ struct ViewSwitch: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("\(value.title) (⌥⌘\(value.rawValue))")
         .accessibilityAddTraits(mode == value ? .isSelected : [])
     }
 }
@@ -435,6 +526,7 @@ struct TodayRow: View {
     let onDo: () -> Void
     var onLaterChoice: (LaterChoice) -> Void = { _ in }
     var onLaterPickText: (String) -> Void = { _ in }
+    var feedback: FeedbackButtons?
 
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.xxs) {
@@ -452,6 +544,7 @@ struct TodayRow: View {
                         .truncationMode(.tail)
                 }
                 Spacer(minLength: House.Spacing.xs)
+                if let feedback { feedback }
                 if state.isRunning {
                     Text("Running…")
                         .font(House.TypeToken.meta)
@@ -471,6 +564,7 @@ struct TodayRow: View {
                     if !proposal.isNotice { KeyHint(label: "Edit", keys: ["⌘", "E"]) }
                     KeyHint(label: "Later", keys: ["⌘", "L"])
                     KeyHint(label: "No", keys: ["⌘", "⌫"])
+                    KeyHint(label: "Discuss", keys: ["⌘", "D"])
                 }
             }
             if let outcome = state.outcome, !outcome.isEmpty, !state.isRunning {
@@ -508,6 +602,7 @@ struct OneLineRow: View {
     let detail: String
     let isFocused: Bool
     var action: (title: String, keys: [String], run: () -> Void)?
+    var feedback: FeedbackButtons?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: House.Spacing.xs) {
@@ -522,6 +617,7 @@ struct OneLineRow: View {
                 .foregroundStyle(House.ColorToken.textTertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let feedback { feedback }
             if let action {
                 CardButton(title: action.title, keys: action.keys, showsKeys: isFocused, action: action.run)
             }
@@ -751,6 +847,8 @@ struct BoardTile: View {
             }
         } else if proposal.canBringBack {
             KeyHint(label: "Bring back", keys: ["⌘", "R"])
+        } else if proposal.canUndo {
+            KeyHint(label: "Undo", keys: ["⌘", "Z"])
         }
     }
 }
@@ -1190,6 +1288,8 @@ struct ChiefOfStaffKeyStrip: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: House.Spacing.md) { hints(all: true) }
             HStack(spacing: House.Spacing.md) { hints(all: false) }
+            KeyHint(label: "Cards", keys: ["⌥", "↑"]).fixedSize()
+            Color.clear.frame(height: 0)
         }
         .padding(.horizontal, House.Spacing.lg)
         .frame(maxWidth: .infinity, minHeight: House.Control.chip, alignment: .leading)
@@ -1197,15 +1297,20 @@ struct ChiefOfStaffKeyStrip: View {
         .accessibilityLabel("Chief of Staff keys")
     }
 
+    /// Each hint keeps its size; a narrow window drops the last ones.
     @ViewBuilder
     private func hints(all: Bool) -> some View {
-        KeyHint(label: "Cards", keys: ["⌥", "↑"])
-        KeyHint(label: "New task", keys: ["⌘", "N"])
-        KeyHint(label: "Project", keys: ["⇧", "⌘", "P"])
-        if all {
-            KeyHint(label: "Do all Today", keys: ["⇧", "⌘", "↩"])
-            if model.health != nil { KeyHint(label: "Health", keys: ["⌘", "I"]) }
-            if model.viewMode == .board { KeyHint(label: "Tasks", keys: ["⇧", "⌘", "T"]) }
+        Group {
+            KeyHint(label: "Cards", keys: ["⌥", "↑"])
+            KeyHint(label: model.viewMode == .charter ? "Add rule" : "New task", keys: ["⌘", "N"])
+            KeyHint(label: "Views", keys: ["⌥", "⌘", "1–5"])
+            KeyHint(label: "Project", keys: ["⇧", "⌘", "P"])
+            if all {
+                KeyHint(label: "Do all Today", keys: ["⇧", "⌘", "↩"])
+                if model.health != nil { KeyHint(label: "Health", keys: ["⌘", "I"]) }
+                if model.viewMode == .board { KeyHint(label: "Tasks", keys: ["⇧", "⌘", "T"]) }
+            }
         }
+        .fixedSize()
     }
 }

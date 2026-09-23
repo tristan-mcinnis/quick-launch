@@ -35,6 +35,16 @@ struct Proposal: Sendable, Equatable, Identifiable {
         case system
     }
 
+    /// What the reviewer (a second model) said before the card showed.
+    struct Review: Sendable, Equatable {
+        /// `ok`, `block`, or `escalate`.
+        var verdict: String
+        var reason: String
+        var model: String
+
+        var isEscalation: Bool { verdict == "escalate" }
+    }
+
     /// One line of what running the actions did, as `cos` recorded it.
     struct Result: Sendable, Equatable, Hashable {
         var type: String
@@ -73,6 +83,19 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var decided: Date?
     var verdict: String?
     var results: [Result]
+    var review: Review?
+    /// A consent rung ran it without a tap: FYI, "I did this".
+    var auto: Bool
+    /// Undo steps were recorded when its actions ran (`cos undo`).
+    var hasUndo: Bool
+    /// Prepared files, relative to `artifacts/<id>/`.
+    var artifacts: [String]
+    /// `more` or `less` once given.
+    var feedback: String?
+    /// A meeting card's start, where, and who is in it.
+    var starts: Date?
+    var location: String?
+    var attendees: [String]
 
     init(
         id: String,
@@ -95,7 +118,15 @@ struct Proposal: Sendable, Equatable, Identifiable {
         created: Date? = nil,
         decided: Date? = nil,
         verdict: String? = nil,
-        results: [Result] = []
+        results: [Result] = [],
+        review: Review? = nil,
+        auto: Bool = false,
+        hasUndo: Bool = false,
+        artifacts: [String] = [],
+        feedback: String? = nil,
+        starts: Date? = nil,
+        location: String? = nil,
+        attendees: [String] = []
     ) {
         self.id = id
         self.status = status
@@ -119,6 +150,14 @@ struct Proposal: Sendable, Equatable, Identifiable {
         self.decided = decided
         self.verdict = verdict
         self.results = results
+        self.review = review
+        self.auto = auto
+        self.hasUndo = hasUndo
+        self.artifacts = artifacts
+        self.feedback = feedback
+        self.starts = starts
+        self.location = location
+        self.attendees = attendees
     }
 
     /// Nil when the values are not a proposal or have no id.
@@ -147,7 +186,23 @@ struct Proposal: Sendable, Equatable, Identifiable {
             created: values["created"]?.stringValue.flatMap(HouseChatCoding.date(from:)) ?? fallbackDate,
             decided: values["decided"]?.stringValue.flatMap(HouseChatCoding.date(from:)),
             verdict: values["verdict"]?.stringValue,
-            results: values["results"]?.arrayValue?.compactMap(Self.result(from:)) ?? []
+            results: values["results"]?.arrayValue?.compactMap(Self.result(from:)) ?? [],
+            review: values["review"]?.objectValue.map {
+                Review(
+                    verdict: $0["verdict"]?.stringValue ?? "",
+                    reason: $0["reason"]?.stringValue ?? "",
+                    model: $0["model"]?.stringValue ?? ""
+                )
+            },
+            auto: values["auto"]?.boolValue ?? false,
+            hasUndo: !(values["undo"]?.arrayValue?.isEmpty ?? true),
+            artifacts: values["artifacts"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+            feedback: values["feedback"]?.stringValue,
+            // `meeting: {subject, start, end, location, online}` (contract v1).
+            starts: (values["meeting"]?.objectValue?["start"]?.stringValue ?? values["starts"]?.stringValue)
+                .flatMap(CosDate.parse),
+            location: values["meeting"]?.objectValue?["location"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
+            attendees: values["attendees"]?.arrayValue?.compactMap(\.stringValue) ?? []
         )
     }
 
@@ -162,12 +217,32 @@ struct Proposal: Sendable, Equatable, Identifiable {
 
     var isWaiting: Bool { status == .pending }
 
+    /// The reviewer has not checked it yet: faces hide it and `cos do`
+    /// refuses it (contract v1, section 3).
+    var awaitsReview: Bool { review?.verdict == "pending" }
+
     /// The tier the face sorts by: a health card is always `system`, and a
     /// card from before tiers is `today`.
     var tierKind: Tier {
         if eventKind == "health" { return .system }
         return Tier(rawValue: tier) ?? .today
     }
+
+    /// The action types a consent rung may cover (contract section 4).
+    static let autoEligibleTypes: Set<String> = ["status_note", "task_add", "task_close"]
+
+    /// After a Do it, "Always do this for <project>?" is offered: every
+    /// action is auto-eligible, it is not DECIDE, and a rung did not run it.
+    var offersRung: Bool {
+        !actions.isEmpty && actions.allSatisfy { Self.autoEligibleTypes.contains($0.type) }
+            && tierKind != .decide && !auto && eventKind != "morning" && eventKind != "meeting"
+    }
+
+    /// Done (by a tap or a rung) with undo steps recorded: ⌘Z undoes it.
+    var canUndo: Bool { status == .done && hasUndo }
+
+    var isMorning: Bool { eventKind == "morning" }
+    var isMeeting: Bool { eventKind == "meeting" }
 
     /// Later, No, handled or expired: `cos reopen` can bring it back.
     var canBringBack: Bool {
@@ -221,8 +296,13 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var statusWord: String {
         switch status {
         case .pending: "Waiting"
-        case .done: verdict == "edit" ? "Done after edit" : "Done"
-        case .skipped, .dismissed: "No"
+        case .done: auto ? "I did this" : verdict == "edit" ? "Done after edit" : "Done"
+        case .skipped, .dismissed:
+            switch verdict {
+            case "undone": "Undone"
+            case "blocked": "Blocked"
+            default: "No"
+            }
         case .later: "Later"
         case .handled: "Handled"
         case .expired: "Expired"
