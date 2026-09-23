@@ -195,12 +195,13 @@ struct Proposal: Sendable, Equatable, Identifiable {
                 )
             },
             auto: values["auto"]?.boolValue ?? false,
-            hasUndo: !(values["undo"]?.arrayValue?.isEmpty ?? true),
+            // Undo shows while a recorded step is not undone yet.
+            hasUndo: values["undo"]?.arrayValue?.contains { $0.objectValue?["done"]?.boolValue != true } ?? false,
             artifacts: values["artifacts"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             feedback: values["feedback"]?.stringValue,
             // `meeting: {subject, start, end, location, online}` (contract v1).
             starts: (values["meeting"]?.objectValue?["start"]?.stringValue ?? values["starts"]?.stringValue)
-                .flatMap(CosDate.parse),
+                .flatMap { CosDate.parse($0) },
             location: values["meeting"]?.objectValue?["location"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
             attendees: values["attendees"]?.arrayValue?.compactMap(\.stringValue) ?? []
         )

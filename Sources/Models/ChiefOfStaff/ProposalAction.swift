@@ -12,6 +12,8 @@ struct ProposalAction: Sendable, Equatable, Hashable {
         case taskAdd = "task_add"
         case draftReply = "draft_reply"
         case taskClose = "task_close"
+        /// Pi drafts a file into the artifacts; never auto.
+        case prepare
         case other
     }
 
@@ -35,7 +37,8 @@ struct ProposalAction: Sendable, Equatable, Hashable {
         case .taskAdd: "title"
         case .draftReply: "body"
         case .taskClose: "what"
-        case .other: ["note", "title", "body", "what"].first { fields[$0] != nil } ?? "note"
+        case .prepare: "brief"
+        case .other: ["note", "title", "body", "what", "brief"].first { fields[$0] != nil } ?? "note"
         }
     }
 
@@ -46,6 +49,7 @@ struct ProposalAction: Sendable, Equatable, Hashable {
         case .taskAdd: "Task"
         case .draftReply: "Draft reply"
         case .taskClose: "Close task"
+        case .prepare: "Prepare"
         case .other: type
         }
     }

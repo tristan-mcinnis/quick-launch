@@ -390,11 +390,13 @@ struct CosArtifact: Sendable, Equatable, Identifiable, Decodable {
         title = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? (try? c.decodeIfPresent(String.self, forKey: .title))
         headline = try? c.decodeIfPresent(String.self, forKey: .headline)
         let stamp = (try? c.decodeIfPresent(String.self, forKey: .modified)) ?? (try? c.decodeIfPresent(String.self, forKey: .created))
-        created = stamp.flatMap(CosDate.parse)
+        created = stamp.flatMap { CosDate.parse($0) }
         project = try? c.decodeIfPresent(String.self, forKey: .project)
     }
 
-    var name: String { title ?? (path as NSString).lastPathComponent }
+    /// What a row calls it: the card's headline (cos's advice), else the
+    /// file's name.
+    var name: String { headline ?? title ?? (path as NSString).lastPathComponent }
 
     /// The file on disk: an absolute path as given; else relative to the
     /// data directory (`artifacts/<id>/draft.md`), or to the card's folder.
@@ -422,7 +424,8 @@ struct CosCharter: Sendable, Equatable {
     }
 
     /// The sections `cos rule --section` takes.
-    static let ruleSections = ["watch", "people", "ignore", "style", "learned"]
+    /// (Autonomy lines come from Always, not from a typed rule.)
+    static let ruleSections = ["watch", "people", "ignore", "style", "quiet", "learned"]
 
     var path: String?
     var sections: [Section]
@@ -495,10 +498,12 @@ struct CosRung: Sendable, Equatable, Identifiable, Decodable {
     }
 }
 
-/// A time as `cos` prints it: the thread's own format, or Python's
-/// `isoformat()` with or without fractions and an offset.
+/// A time as `cos` prints it: the thread's own format, Python's
+/// `isoformat()` with or without fractions and an offset, or a local time
+/// with no zone ("YYYY-MM-DDTHH:MM[:SS]", a meeting's start, an
+/// artifact's modified time).
 enum CosDate {
-    static func parse(_ text: String) -> Date? {
+    static func parse(_ text: String, timeZone: TimeZone = .current) -> Date? {
         if let date = HouseChatCoding.date(from: text) { return date }
         let formatter = ISO8601DateFormatter()
         for options: ISO8601DateFormatter.Options in [
@@ -506,6 +511,13 @@ enum CosDate {
         ] {
             formatter.formatOptions = options
             if let date = formatter.date(from: text) { return date }
+        }
+        let local = DateFormatter()
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = timeZone
+        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm"] {
+            local.dateFormat = format
+            if let date = local.date(from: text) { return date }
         }
         return nil
     }

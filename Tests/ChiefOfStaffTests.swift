@@ -1072,6 +1072,18 @@ struct ChiefOfStaffV1DataTests {
         let meeting = try #require(proposals.first { $0.id == "me654321" })
         #expect(meeting.isMeeting && meeting.location == "Zoom" && meeting.source == "sample-project")
         #expect(meeting.starts == Date(timeIntervalSince1970: 1_790_165_700))
+        // Undo shows while a step is not undone yet.
+        func undoable(_ steps: String) throws -> Bool {
+            let json = #"{"kind": "proposal", "id": "u", "status": "done", "message": "m", "undo": \#(steps)}"#
+            let values = try JSONDecoder().decode(ExtraFields.self, from: Data(json.utf8))
+            return try #require(Proposal(values: values, fallbackText: "", fallbackDate: nil)).canUndo
+        }
+        #expect(try undoable(#"[{"type": "status_note", "done": false}]"#))
+        #expect(try undoable(#"[{"type": "status_note", "done": true}, {"type": "task_add", "done": false}]"#))
+        #expect(try !undoable(#"[{"type": "status_note", "done": true}]"#))
+        #expect(try !undoable("[]"))
+        #expect(ProposalAction(type: "prepare", fields: ["brief": "A one-page note", "format": "md"]).typeLabel == "Prepare")
+        #expect(ProposalAction(type: "prepare", fields: ["brief": "A one-page note"]).text == "A one-page note")
         // A card still waiting on the reviewer is hidden.
         let held = try #require(proposals.first { $0.id == "rv000001" })
         #expect(held.awaitsReview)
@@ -1114,13 +1126,23 @@ struct ChiefOfStaffV1DataTests {
         #expect(empty.events.isEmpty && empty.runs == 38)
     }
 
+    /// A meeting's start and an artifact's time are local, with no zone.
+    @Test func localTimesWithNoZoneParse() throws {
+        let shanghai = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        #expect(CosDate.parse("2026-09-23T20:15", timeZone: shanghai) == Date(timeIntervalSince1970: 1_790_165_700))
+        #expect(CosDate.parse("2026-09-23T20:15:00", timeZone: shanghai) == Date(timeIntervalSince1970: 1_790_165_700))
+        #expect(CosDate.parse("2026-09-23T12:15:00+00:00") == Date(timeIntervalSince1970: 1_790_165_700))
+        #expect(CosDate.parse("soon") == nil)
+    }
+
     @Test func artifactsCharterAndRungsDecode() throws {
         let artifacts = try CosArtifact.decodeList(#"""
         [{"card": "c1", "path": "/d/artifacts/c1/draft.md", "rel": "artifacts/c1/draft.md", "name": "draft.md",
           "headline": "H", "project": "p", "bytes": 10, "modified": "2026-09-23T11:30:00+00:00"},
          {"card": "c2", "path": "artifacts/c2/x.md"}, {"card": "c3", "path": "y.md"}]
         """#)
-        #expect(artifacts.map(\.name) == ["draft.md", "x.md", "y.md"])
+        // A row names a draft by its card's headline, else its file.
+        #expect(artifacts.map(\.name) == ["H", "x.md", "y.md"])
         #expect(artifacts[0].created == Date(timeIntervalSince1970: 1_790_163_000))
         #expect(artifacts[0].headline == "H")
         let paths = CosPaths(data: URL(fileURLWithPath: "/data"), executable: URL(fileURLWithPath: "/bin/cos"))
@@ -1258,7 +1280,7 @@ struct ChiefOfStaffV1ModelTests {
         let opened = try #require(model.paths.map { model.artifacts[0].url(in: $0) })
         await model.perform(.open(opened))
         #expect(await opener.opened == [opened])
-        #expect(model.focusedDiscussion?.title == "Quote note draft")
+        #expect(model.focusedDiscussion?.title == "Sam approved the budget; confirm the quote date")
 
         model.viewMode = .charter
         await model.perform(.loadCharter)

@@ -278,6 +278,9 @@ struct ActionEditor: View {
                 case .taskClose:
                     CardField(prompt: "What was delivered", text: $draft.text, lines: 1...3)
                         .focused(focus, equals: draft.id)
+                case .prepare:
+                    CardField(prompt: "What to prepare", text: $draft.text, lines: 2...6)
+                        .focused(focus, equals: draft.id)
                 case .statusNote, .other:
                     CardField(prompt: "Note", text: $draft.text, lines: 2...6)
                         .focused(focus, equals: draft.id)
