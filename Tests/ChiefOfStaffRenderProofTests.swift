@@ -138,7 +138,8 @@ struct ChiefOfStaffRenderProofTests {
             await pagesCos.perform(.loadCharter)
             try Self.save(try Self.render(pages, size: Self.normal, appearance: appearance), name: "cos-charter-\(suffix).png")
             pagesCos.openAddRule()
-            pagesCos.addRule?.section = "ignore"
+            pagesCos.addRule?.project = "sample-project"
+            pagesCos.setAddRuleScope(.project)
             pagesCos.addRule?.text = "Newsletters, unless a client sent them"
             try Self.save(try Self.render(pages, size: Self.narrow, appearance: appearance), name: "cos-charter-narrow-\(suffix).png")
 
@@ -154,7 +155,33 @@ struct ChiefOfStaffRenderProofTests {
             #expect(offerCos.rungOffer != nil)
             try Self.save(try Self.render(offer, size: Self.normal, appearance: appearance), name: "cos-always-\(suffix).png")
             try Self.save(try Self.render(offer, size: Self.narrow, appearance: appearance), name: "cos-always-narrow-\(suffix).png")
-            withExtendedLifetime([listCos, boardCos, sheetCos, railCos, pagesCos, offerCos]) {}
+            // Memory design: a run a crash cut off, one running now, and two
+            // learnings that disagree.
+            let (states, statesCos) = try await makeWindow(appearance: preference)
+            var items = try CosFixture.items()
+            var cut = Proposal(
+                id: "cut01", project: "sample-project", eventKind: "email", message: "Budget approved.",
+                headline: "Log the budget approval", tier: "decide", why: "The last run stopped halfway.",
+                actions: [ProposalAction(type: "status_note", fields: ["note": "Budget approved."])]
+            )
+            cut.outcomeUnknownSince = cosNow
+            var busy = Proposal(
+                id: "run01", project: "ops-desk", message: "m", headline: "Add the rota task", tier: "today",
+                actions: [ProposalAction(type: "task_add", fields: ["title": "Rota"])]
+            )
+            busy.runningSince = cosNow
+            var conflict = Proposal(id: "lc01", eventKind: "learnings", message: "m", headline: "Two of your rules for Sample Project disagree", tier: "today")
+            conflict.conflict = Proposal.Conflict(
+                scope: "project:sample-project", keys: ["a", "b"],
+                texts: ["Charlie's date changes are always DECIDE", "Date changes are FYI unless a client asks"]
+            )
+            items += [.proposal(turnID: "x1", cut), .proposal(turnID: "x2", busy), .proposal(turnID: "x3", conflict)]
+            statesCos.override(items: items, status: statesCos.status)
+            statesCos.focusCard("lc01")
+            states.focusCards("lc01")
+            try Self.save(try Self.render(states, size: CGSize(width: Self.normal.width, height: 2_400), appearance: appearance), name: "cos-states-\(suffix).png")
+            try Self.save(try Self.render(states, size: CGSize(width: Self.narrow.width, height: 2_400), appearance: appearance), name: "cos-states-narrow-\(suffix).png")
+            withExtendedLifetime([listCos, boardCos, sheetCos, railCos, pagesCos, offerCos, statesCos]) {}
         }
     }
 

@@ -228,7 +228,15 @@ struct ChiefOfStaffPanel: View {
                 }
                 ForEach(model.today) { proposal in
                     Group {
-                        if proposal.isMorning {
+                        if proposal.conflict != nil {
+                            LearningsConflictCard(
+                                proposal: proposal,
+                                isFocused: isFocused(proposal),
+                                scope: CosLearning(key: "", text: "", scope: proposal.conflict?.scope ?? "all")
+                                    .scopeLabel { slug in model.projects.first { $0.slug == slug }?.shortName }
+                            ) { index in model.forgetConflict(index, on: proposal) }
+                            .onTapGesture { model.focusCard(proposal.id) }
+                        } else if proposal.isMorning {
                             MorningCard(
                                 proposal: proposal,
                                 state: model.cards[proposal.id] ?? ProposalCardState(),
@@ -545,10 +553,13 @@ struct TodayRow: View {
                 }
                 Spacer(minLength: House.Spacing.xs)
                 if let feedback { feedback }
-                if state.isRunning {
+                if state.isRunning || proposal.isRunning {
                     Text("Running…")
                         .font(House.TypeToken.meta)
                         .foregroundStyle(House.ColorToken.textTertiary)
+                } else if proposal.outcomeUnknown {
+                    // Check before retrying: no Do it here.
+                    EmptyView()
                 } else {
                     CardButton(
                         title: proposal.isNotice ? "Got it" : "Do it",
@@ -559,6 +570,7 @@ struct TodayRow: View {
                     )
                 }
             }
+            RunStateLine(proposal: proposal)
             if isFocused {
                 HStack(spacing: House.Spacing.sm) {
                     if !proposal.isNotice { KeyHint(label: "Edit", keys: ["⌘", "E"]) }
@@ -841,7 +853,10 @@ struct BoardTile: View {
     private var keys: some View {
         if proposal.isWaiting {
             VStack(alignment: .leading, spacing: House.Spacing.xxs) {
-                KeyHint(label: proposal.isNotice ? "Got it" : "Do it", keys: ["⌘", "↩"])
+                RunStateLine(proposal: proposal)
+                if proposal.canDoIt {
+                    KeyHint(label: proposal.isNotice ? "Got it" : "Do it", keys: ["⌘", "↩"])
+                }
                 KeyHint(label: "Later", keys: ["⌘", "L"])
                 KeyHint(label: "No", keys: ["⌘", "⌫"])
             }

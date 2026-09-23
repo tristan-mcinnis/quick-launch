@@ -21,7 +21,7 @@ actor RecordingCosRunner: CosRunning {
         commands.append(command)
         switch command {
         case .status:
-            return CosResult(exitCode: 0, stdout: #"{"paused": false, "total": 11, "pending": 7}"#, stderr: "")
+            return CosResult(exitCode: 0, stdout: Self.statusJSON, stderr: "")
         case .projects:
             return CosResult(exitCode: 0, stdout: Self.projectsJSON, stderr: "")
         case .tasks:
@@ -32,6 +32,8 @@ actor RecordingCosRunner: CosRunning {
             return CosResult(exitCode: 0, stdout: #"[{"card": "cc33dd44", "path": "/tmp/cos-artifacts/cc33dd44/quote-note.md", "rel": "artifacts/cc33dd44/quote-note.md", "name": "Quote note draft", "headline": "Sam approved the budget; confirm the quote date", "project": "sample-project", "bytes": 812, "modified": "2026-09-23T11:30:00+00:00"}]"#, stderr: "")
         case .charter:
             return CosResult(exitCode: 0, stdout: Self.charterJSON, stderr: "")
+        case .learnings:
+            return CosResult(exitCode: 0, stdout: Self.learningsJSON, stderr: "")
         case .rungs:
             return CosResult(exitCode: 0, stdout: #"[{"id": "status_note@sample-project", "type": "status_note", "project": "sample-project", "note": ""}, {"id": "task_close@*", "type": "task_close", "project": null, "note": ""}]"#, stderr: "")
         default:
@@ -45,6 +47,21 @@ actor RecordingCosRunner: CosRunning {
       "overdue": 1, "waiting_cards": 2, "later_cards": 1, "waiting": 1, "source": "ledger", "risk": "red"},
      {"slug": "ops-desk", "name": "Ops Desk", "phase": null, "open_tasks": 2, "next_due": null,
       "overdue": 0, "waiting_cards": 0, "later_cards": 0, "waiting": 0, "source": "ledger", "risk": "ok"}]
+    """
+
+    /// `cos status --json` with the call budget (contract §11).
+    static let statusJSON = """
+    {"paused": false, "total": 11, "pending": 7, "decided": 4, "accepted": 4, "auto_closed": 7, "auto_ran": 1,
+     "rungs": 2, "learnings": 2, "today": 2, "cap": 8,
+     "model_calls": {"maker": 12, "reviewer": 3, "cap": {"maker": 40, "reviewer": 10}, "failures_in_row": 0, "paused_until": null}}
+    """
+
+    /// `cos learnings --json`, newest first.
+    static let learningsJSON = """
+    [{"key": "k-newsletters", "text": "Less like this: newsletter digests", "scope": "all", "source": "user",
+      "confidence": 1.0, "created": "2026-09-23T10:00:00Z", "weight": 1.0},
+     {"key": "k-charlie", "text": "Charlie's date changes are always DECIDE", "scope": "project:sample-project",
+      "source": "inferred", "confidence": 0.6, "created": "2026-09-20T09:00:00Z", "card": "aa11bb22", "weight": 0.55}]
     """
 
     /// `cos activity --json` as contract v1 prints it.
@@ -1054,6 +1071,10 @@ struct CosCLIIntegrationTests {
         let rungs = try await cli.run(.rungs)
         #expect(rungs.succeeded)
         _ = try CosRung.decodeList(rungs.stdout)
+        let learnings = try await cli.run(.learnings)
+        #expect(learnings.succeeded)
+        _ = try CosLearning.decodeList(learnings.stdout)
+        #expect(try CosStatus.decode(status.stdout).modelCalls != nil)
 
         let question = record.turns.first { $0.text == "Line one\nline \"two\"; three" }
         #expect(question?.appPayload?.values["surface"]?.stringValue == "quick-launch")
@@ -1083,8 +1104,12 @@ struct ChiefOfStaffV1DataTests {
         #expect(try CosCommand.activity(day: "2026-09-22").arguments() == ["activity", "--day", "2026-09-22", "--json"])
         #expect(try CosCommand.artifacts.arguments() == ["artifacts", "--json"])
         #expect(try CosCommand.charter.arguments() == ["charter", "--json"])
-        #expect(try CosCommand.rule(text: "Ignore newsletters", section: "ignore").arguments()
-            == ["rule", "Ignore newsletters", "--section", "ignore"])
+        #expect(try CosCommand.rule(text: "Ignore newsletters", scope: "all").arguments()
+            == ["rule", "Ignore newsletters", "--scope", "all"])
+        #expect(try CosCommand.rule(text: "Dates matter", scope: "project:globex").arguments()
+            == ["rule", "Dates matter", "--scope", "project:globex"])
+        #expect(try CosCommand.learnings.arguments() == ["learnings", "--json"])
+        #expect(try CosCommand.forget(key: "k-1").arguments() == ["forget", "k-1"])
     }
 
     @Test func v1CardFieldsDecode() throws {
@@ -1321,16 +1346,15 @@ struct ChiefOfStaffV1ModelTests {
         model.removeFocusedRung()
         await model.perform(.never(rung: "task_close@*"))
         model.openAddRule()
-        model.addRule?.section = "ignore"
         model.addRule?.text = "Newsletters"
         model.submitAddRule()
-        await model.perform(.rule(text: "Newsletters", section: "ignore"))
+        await model.perform(.rule(text: "Newsletters", scope: "all"))
         model.openFocusedFile()
         await model.perform(.open(URL(fileURLWithPath: "/tmp/chief-of-staff-charter.md")))
         #expect(await opener.opened.last == URL(fileURLWithPath: "/tmp/chief-of-staff-charter.md"))
         let writes = await runner.writes
         #expect(writes.contains(.never(rung: "task_close@*")))
-        #expect(writes.contains(.rule(text: "Newsletters", section: "ignore")))
+        #expect(writes.contains(.rule(text: "Newsletters", scope: "all")))
     }
 
     @Test func notificationsSkipAutoCardsTimeMeetingsAndQuietTheMorning() async throws {
@@ -1457,5 +1481,152 @@ struct ChiefOfStaffV1WindowTests {
             #expect(!key(window, nil, characters, modifiers))
         }
         withExtendedLifetime(cos) {}
+    }
+}
+
+// MARK: - Memory design
+
+@Suite("Chief of Staff memory design")
+struct ChiefOfStaffMemoryDataTests {
+    @Test func learningsDecodeAndNameTheirScope() throws {
+        let rows = try CosLearning.decodeList(RecordingCosRunner.learningsJSON)
+        #expect(rows.map(\.key) == ["k-newsletters", "k-charlie"])
+        #expect(rows[0].created == Date(timeIntervalSince1970: 1_790_157_600))
+        #expect(rows[1].source == "inferred" && rows[1].weight == 0.55)
+        #expect(rows[0].scopeLabel() == "Everywhere")
+        #expect(rows[1].scopeLabel { $0 == "sample-project" ? "Sample Project" : nil } == "Project: Sample Project")
+        #expect(CosLearning(key: "k", text: "t", scope: "sender:Charlie").scopeLabel() == "Sender: Charlie")
+        #expect(CosLearning(key: "k", text: "t", scope: "kind:meeting").scopeLabel() == "Cards: meeting")
+        #expect(try CosLearning.decodeList("[]").isEmpty)
+    }
+
+    @Test func statusCarriesTheCallBudget() throws {
+        let status = try CosStatus.decode(RecordingCosRunner.statusJSON)
+        let calls = try #require(status.modelCalls)
+        #expect(calls.maker == 12 && calls.cap.maker == 40 && calls.reviewer == 3 && calls.cap.reviewer == 10)
+        #expect(calls.line == "Model calls today: 12 of 40, reviews 3 of 10")
+        let paused = try CosStatus.decode(#"""
+        {"paused": false, "model_calls": {"maker": 40, "reviewer": 1, "cap": {"maker": 40, "reviewer": 10},
+         "failures_in_row": 3, "paused_until": "2026-09-24T10:30"}}
+        """#)
+        #expect(paused.modelCalls?.line.hasPrefix("Model calls today: 40 of 40, reviews 1 of 10. Paused until ") == true)
+        #expect(paused.modelCalls?.line.hasSuffix("after 3 failures") == true)
+        // An older cos without the budget still reads.
+        #expect(try CosStatus.decode(#"{"paused": true}"#).modelCalls == nil)
+    }
+
+    @Test func runningCutOffAndConflictCardsDecode() throws {
+        func card(_ extra: String) throws -> Proposal {
+            let json = #"{"kind": "proposal", "id": "c", "status": "pending", "message": "m", "actions": [{"type": "status_note", "note": "n"}]\#(extra)}"#
+            let values = try JSONDecoder().decode(ExtraFields.self, from: Data(json.utf8))
+            return try #require(Proposal(values: values, fallbackText: "", fallbackDate: nil))
+        }
+        let plain = try card("")
+        #expect(plain.canDoIt && !plain.isRunning && !plain.outcomeUnknown)
+        let running = try card(#", "running": {"since": "2026-09-24T09:00:00Z", "pid": 42}"#)
+        #expect(running.isRunning && !running.canDoIt)
+        #expect(running.runningSince == Date(timeIntervalSince1970: 1_790_240_400))
+        let cut = try card(#", "outcome_unknown": {"since": "2026-09-24T09:00:00Z"}, "tier": "decide""#)
+        #expect(cut.outcomeUnknown && !cut.canDoIt)
+        let conflict = try card(#", "event_kind": "learnings", "conflict": {"scope": "project:globex", "keys": ["a", "b"], "texts": ["Always", "Never"]}"#)
+        #expect(conflict.conflict == Proposal.Conflict(scope: "project:globex", keys: ["a", "b"], texts: ["Always", "Never"]))
+        let activity = try CosActivity.decode(#"{"day": "d", "ran": {"count": 1, "items": [{"time": "09:00", "text": "Status note", "state": "running", "run": "r1", "action": 0}]}}"#)
+        #expect(activity.events("ran").first?.didNotFinish == true)
+    }
+
+    @Test func conflictKeysOnlyOnAConflictCard() {
+        func route(_ c: String, conflict: Bool) -> ChiefOfStaffKeys.Action? {
+            ChiefOfStaffKeys.route(key: nil, characters: c, modifiers: [], place: .card(board: false), hasCards: true, onConflict: conflict)
+        }
+        #expect(route("1", conflict: true) == .forgetConflict(0))
+        #expect(route("2", conflict: true) == .forgetConflict(1))
+        #expect(route("3", conflict: true) == nil)
+        #expect(route("1", conflict: false) == nil)
+    }
+}
+
+@Suite("Chief of Staff memory design model", .serialized)
+@MainActor
+struct ChiefOfStaffMemoryModelTests {
+    private func model(runner: RecordingCosRunner = RecordingCosRunner()) async throws -> ChiefOfStaffModel {
+        let model = ChiefOfStaffModel(paths: try CosFixture.home(), runner: runner, clock: { cosNow })
+        await model.reload(force: true)
+        return model
+    }
+
+    @Test func aCutOffOrRunningCardNeverRunsFromAKey() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        var cut = Proposal(id: "cut", message: "m", tier: "today", actions: [ProposalAction(type: "status_note", fields: ["note": "n"])])
+        cut.outcomeUnknownSince = cosNow
+        var busy = Proposal(id: "busy", message: "m", tier: "today", actions: [ProposalAction(type: "task_add", fields: ["title": "t"])])
+        busy.runningSince = cosNow
+        let ok = Proposal(id: "ok", message: "m", tier: "today", actions: [ProposalAction(type: "task_add", fields: ["title": "t"])])
+        model.override(items: [.proposal(turnID: "1", cut), .proposal(turnID: "2", busy), .proposal(turnID: "3", ok)], status: nil)
+        model.focusCard("cut")
+        model.doFocused()
+        model.focusCard("busy")
+        model.doFocused()
+        model.doAllToday()
+        #expect(model.bulkArmed == ["ok"])
+        // Edit stays: an edited run is Tristan's explicit choice.
+        model.focusCard("cut")
+        model.editFocused()
+        #expect(model.isEditingFocusedCard)
+        #expect(await runner.writes.isEmpty)
+    }
+
+    @Test func charterShowsLearningsAndForgetsThem() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        model.viewMode = .charter
+        await model.perform(.loadCharter)
+        #expect(model.learnings.map(\.key) == ["k-newsletters", "k-charlie"])
+        #expect(model.focusOrder.prefix(2) == ["learning:k-newsletters", "learning:k-charlie"])
+        model.focusCard("learning:k-charlie")
+        model.removeFocusedRung()
+        await model.perform(.forget(key: "k-charlie"))
+        #expect(await runner.writes.contains(.forget(key: "k-charlie")))
+        #expect(model.notice == "Forgotten.")
+    }
+
+    @Test func addRuleOffersThisProjectAndThisSenderFromTheCard() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        model.openAddRule()
+        #expect(model.addRule?.isAvailable(.project) == false)
+        #expect(model.addRule?.isAvailable(.sender) == false)
+        model.setAddRuleScope(.project)
+        #expect(model.addRule?.scope == .everywhere)
+        model.addRule = nil
+        model.focusCard("cc33dd44")
+        model.viewMode = .charter
+        model.openAddRule()
+        #expect(model.addRule?.project == "sample-project")
+        #expect(model.addRule?.sender == "Sam Client")
+        model.setAddRuleScope(.sender)
+        model.addRule?.text = "Sam's dates are firm"
+        model.submitAddRule()
+        await model.perform(.rule(text: "Sam's dates are firm", scope: "sender:Sam Client"))
+        #expect(await runner.writes.contains(.rule(text: "Sam's dates are firm", scope: "sender:Sam Client")))
+        #expect(ChiefOfStaffModel.senderName("Charlie <w@example.com>") == "Charlie")
+        #expect(ChiefOfStaffModel.senderName("Alex") == "Alex")
+    }
+
+    @Test func aConflictCardForgetsTheRowItNames() async throws {
+        let runner = RecordingCosRunner()
+        let model = try await model(runner: runner)
+        var conflict = Proposal(id: "lc", eventKind: "learnings", message: "Two rules disagree", tier: "today")
+        conflict.conflict = Proposal.Conflict(scope: "project:globex", keys: ["a", "b"], texts: ["Always", "Never"])
+        model.override(items: [.proposal(turnID: "1", conflict)], status: nil)
+        model.focusCard("lc")
+        model.forgetConflict(1)
+        await model.perform(.forget(key: "b"))
+        #expect(await runner.writes == [.forget(key: "b")])
+    }
+
+    @Test func activityShowsTodaysCallBudget() async throws {
+        let model = try await model()
+        #expect(model.status?.modelCalls?.line == "Model calls today: 12 of 40, reviews 3 of 10")
     }
 }

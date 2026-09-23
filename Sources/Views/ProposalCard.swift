@@ -52,6 +52,7 @@ struct ProposalCard: View {
             if let review = proposal.review, review.isEscalation {
                 ReviewLine(review: review)
             }
+            RunStateLine(proposal: proposal)
             if !proposal.actions.isEmpty {
                 actions
             }
@@ -167,7 +168,13 @@ struct ProposalCard: View {
                 .help("Run the edited actions (⌘↩)")
             CardButton(title: "Cancel", keys: ["esc"], showsKeys: isFocused, action: onCancel)
         } else {
-            if proposal.isNotice {
+            if !proposal.canDoIt {
+                // Running, or cut off by a crash: nothing runs from here
+                // until it is checked. Edit, Later and No stay.
+                if !proposal.isNotice {
+                    CardButton(title: "Edit", keys: ["⌘", "E"], showsKeys: isFocused, action: onEdit)
+                }
+            } else if proposal.isNotice {
                 // Nothing to run: one acknowledgement.
                 CardButton(title: "Got it", keys: ["⌘", "↩"], showsKeys: isFocused, prominent: true, action: onDo)
                     .help("Mark as seen. Nothing runs (⌘↩)")

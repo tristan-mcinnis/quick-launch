@@ -59,7 +59,8 @@ final class ChiefOfStaffModel {
         case always(id: String)
         case never(rung: String)
         case undo(id: String)
-        case rule(text: String, section: String)
+        case rule(text: String, scope: String)
+        case forget(key: String)
         case loadActivity(day: String?)
         case loadArtifacts
         case loadCharter
@@ -102,10 +103,47 @@ final class ChiefOfStaffModel {
         let types: [String]
     }
 
-    /// ⌘N in the Charter: a new rule in one section.
+    /// ⌘N in the Charter: a new learning, Everywhere, for this project, or
+    /// for this sender (the project and sender of the card or filter it was
+    /// opened on).
     struct AddRule: Sendable, Equatable {
-        var section = "learned"
+        enum Scope: String, CaseIterable, Sendable {
+            case everywhere
+            case project
+            case sender
+
+            var title: String {
+                switch self {
+                case .everywhere: "Everywhere"
+                case .project: "This project"
+                case .sender: "This sender"
+                }
+            }
+        }
+
+        var scope: Scope = .everywhere
         var text = ""
+        /// The slug "This project" means, when there is one.
+        var project: String?
+        /// The name "This sender" means, when there is one.
+        var sender: String?
+
+        func isAvailable(_ scope: Scope) -> Bool {
+            switch scope {
+            case .everywhere: true
+            case .project: project != nil
+            case .sender: sender != nil
+            }
+        }
+
+        /// The `--scope` value `cos rule` takes.
+        var scopeArgument: String {
+            switch scope {
+            case .everywhere: "all"
+            case .project: project.map { "project:\($0)" } ?? "all"
+            case .sender: sender.map { "sender:\($0)" } ?? "all"
+            }
+        }
     }
 
     /// ⌘D: what Discuss opens in a new ordinary chat.
@@ -193,7 +231,11 @@ final class ChiefOfStaffModel {
     /// Active projects, from `cos projects --json`.
     private(set) var projects: [CosProject] = []
     /// The card the keyboard is on, or nil (the composer has it).
-    var focusedCardID: String?
+    var focusedCardID: String? {
+        didSet { if let proposal = proposal(focusedCardID) { lastFocusedProposal = proposal } }
+    }
+    /// The last card the keyboard was on, for Add rule's "This project".
+    @ObservationIgnored private var lastFocusedProposal: Proposal?
     /// Bumped to move the keyboard into the focused card's first field.
     private(set) var editFocusRequest = 0
     /// Why the last turn could not be recorded in the thread.
@@ -206,7 +248,10 @@ final class ChiefOfStaffModel {
             guard viewMode != oldValue else { return }
             refocus()
             switch viewMode {
-            case .activity: send(.loadActivity(day: activityDay))
+            case .activity:
+                send(.loadActivity(day: activityDay))
+                // The model-call line is today's, read fresh.
+                send(.refresh)
             case .artifacts: send(.loadArtifacts)
             case .charter: send(.loadCharter)
             case .list, .board: break
@@ -222,6 +267,8 @@ final class ChiefOfStaffModel {
     private(set) var artifacts: [CosArtifact] = []
     private(set) var charter: CosCharter?
     private(set) var rungs: [CosRung] = []
+    /// Learnings, newest first (`cos learnings --json`).
+    private(set) var learnings: [CosLearning] = []
     /// Why Activity, Artifacts or the Charter could not be read.
     private(set) var viewProblem: String?
     /// Cards run by ⇧⌘↩: no "Always" offer for a bulk run.
@@ -470,7 +517,7 @@ final class ChiefOfStaffModel {
         case .board: Column.allCases.flatMap { column($0).map(\.id) }
         case .activity: []
         case .artifacts: artifacts.map(\.id)
-        case .charter: rungs.map(\.id)
+        case .charter: learnings.map { "learning:\($0.key)" } + rungs.map(\.id)
         }
     }
 
@@ -706,15 +753,34 @@ final class ChiefOfStaffModel {
         send(.open(artifact.url(in: paths)))
     }
 
-    /// ⌘⌫ on a rung in the Charter: remove it.
+    /// ⌘⌫ on a row in the Charter: forget a learning, or remove a rung.
     func removeFocusedRung() {
-        guard viewMode == .charter, let rung = rungs.first(where: { $0.id == focusedCardID }) else { return }
-        send(.never(rung: rung.rung))
+        guard viewMode == .charter, let id = focusedCardID else { return }
+        if id.hasPrefix("learning:") {
+            send(.forget(key: String(id.dropFirst("learning:".count))))
+        } else if let rung = rungs.first(where: { $0.id == id }) {
+            send(.never(rung: rung.rung))
+        }
     }
 
-    /// ⌘N in the Charter: a new rule; Return adds it.
-    func openAddRule() {
-        addRule = AddRule()
+    /// ⌘N in the Charter: a new learning; Return adds it. "This project"
+    /// and "This sender" come from the filter or the last focused card.
+    func openAddRule(from proposal: Proposal? = nil) {
+        let card = proposal ?? focusedProposal ?? lastFocusedProposal
+        let project = projectFilter ?? card.flatMap { $0.project.isEmpty ? nil : $0.project }
+        let sender = card.flatMap { $0.sender.isEmpty ? nil : Self.senderName($0.sender) }
+        addRule = AddRule(project: project, sender: sender)
+    }
+
+    /// "Sam Client <sam@example.com>" is "Sam Client".
+    static func senderName(_ sender: String) -> String {
+        let name = sender.split(separator: "<").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? sender
+        return name.isEmpty ? sender : name
+    }
+
+    func setAddRuleScope(_ scope: AddRule.Scope) {
+        guard addRule?.isAvailable(scope) == true else { return }
+        addRule?.scope = scope
     }
 
     func submitAddRule() {
@@ -722,7 +788,14 @@ final class ChiefOfStaffModel {
         let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         addRule = nil
-        send(.rule(text: text, section: draft.section))
+        send(.rule(text: text, scope: draft.scopeArgument))
+    }
+
+    /// A learnings card: forget one of the two rows that disagree.
+    func forgetConflict(_ index: Int, on proposal: Proposal? = nil) {
+        guard let card = proposal ?? focusedProposal, let conflict = card.conflict,
+              conflict.keys.indices.contains(index) else { return }
+        send(.forget(key: conflict.keys[index]))
     }
 
     // MARK: - Card actions
@@ -731,6 +804,8 @@ final class ChiefOfStaffModel {
     /// while editing.
     func doFocused() {
         guard let proposal = focusedProposal, proposal.isWaiting else { return }
+        // Busy, or cut off by a crash: nothing runs from a key.
+        guard card(proposal.id).isEditing || proposal.canDoIt else { return }
         dismissTransient()
         send(card(proposal.id).isEditing ? .runEdit(id: proposal.id) : .doIt(id: proposal.id))
     }
@@ -813,7 +888,7 @@ final class ChiefOfStaffModel {
     /// many; the second runs them. Any other key disarms it.
     func doAllToday() {
         // The morning brief is read, not run: it keeps its own Got it.
-        let ids = today.filter { !$0.isMorning && !(cards[$0.id]?.isRunning ?? false) }.map(\.id)
+        let ids = today.filter { !$0.isMorning && $0.canDoIt && !(cards[$0.id]?.isRunning ?? false) }.map(\.id)
         guard !ids.isEmpty else { return }
         if let armed = bulkArmed, armed == ids {
             bulkArmed = nil
@@ -1070,9 +1145,13 @@ final class ChiefOfStaffModel {
             await loadRungsIfShown()
         case .undo(let id):
             await verdict(id) { .undo(id: id) }
-        case .rule(let text, let section):
-            await simple(.rule(text: text, section: section), done: "Rule added.")
+        case .rule(let text, let scope):
+            await simple(.rule(text: text, scope: scope), done: "Learning added.")
             await loadCharter()
+        case .forget(let key):
+            await simple(.forget(key: key), done: "Forgotten.")
+            await reload(force: true)
+            if viewMode == .charter { await loadLearnings() }
         case .loadActivity(let day):
             await loadActivity(day: day)
         case .loadArtifacts:
@@ -1200,6 +1279,13 @@ final class ChiefOfStaffModel {
             viewProblem = "The charter could not be read: \(error.localizedDescription)"
         }
         await loadRungs()
+        await loadLearnings()
+    }
+
+    private func loadLearnings() async {
+        guard let runner, let result = try? await runner.run(.learnings), result.succeeded,
+              let list = try? CosLearning.decodeList(result.stdout) else { return }
+        learnings = list
     }
 
     private func loadRungsIfShown() async {
@@ -1355,6 +1441,8 @@ enum ChiefOfStaffKeys {
         case removeRung
         case acceptRung
         case activityDay(Int)
+        /// A learnings card: forget the first (0) or second (1) row.
+        case forgetConflict(Int)
         case runEdit
         case cancelEdit
         case menuMove(Int)
@@ -1375,7 +1463,8 @@ enum ChiefOfStaffKeys {
         modifiers: NSEvent.ModifierFlags,
         place: Place,
         hasCards: Bool,
-        hasRungOffer: Bool = false
+        hasRungOffer: Bool = false,
+        onConflict: Bool = false
     ) -> Action? {
         let modifiers = modifiers.overlayRelevant
         let character = characters?.lowercased()
@@ -1445,6 +1534,10 @@ enum ChiefOfStaffKeys {
             return nil
         case .card(let board):
             if isArrow, modifiers.isEmpty || modifiers == [.option] { return .move(delta) }
+            // A learnings card: 1 or 2 forgets that row.
+            if onConflict, modifiers.isEmpty, let character, let number = Int(character), (1...2).contains(number) {
+                return .forgetConflict(number - 1)
+            }
             if board, key == .leftArrow || key == .rightArrow, modifiers.isEmpty {
                 return .moveColumn(key == .leftArrow ? -1 : 1)
             }

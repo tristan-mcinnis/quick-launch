@@ -166,7 +166,8 @@ struct MeetingCard: View {
             ForEach(Array(proposal.actions.enumerated()), id: \.offset) { index, action in
                 ActionLine(number: index + 1, action: action)
             }
-            if !state.isRunning {
+            RunStateLine(proposal: proposal)
+            if !state.isRunning && proposal.canDoIt {
                 // Its open items run as any card's do; with none, it is read.
                 CardButton(
                     title: proposal.isNotice ? "Got it" : "Do it",
@@ -279,5 +280,81 @@ struct LessPromptView: View {
 
     private var whyBinding: Binding<String> {
         Binding(get: { model.lessPrompt?.why ?? "" }, set: { model.lessPrompt?.why = $0 })
+    }
+}
+
+/// A card whose actions are running now, or whose run a crash cut off:
+/// a status dot and the words, never colour alone.
+struct RunStateLine: View {
+    let proposal: Proposal
+
+    var body: some View {
+        if proposal.outcomeUnknown {
+            line(House.ColorToken.warning, "Did not finish; check before retrying.")
+        } else if proposal.isRunning {
+            line(House.ColorToken.textTertiary, "Running now.")
+        }
+    }
+
+    private func line(_ color: Color, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: House.Spacing.xs) {
+            StatusDot(color: color)
+            Text(text)
+                .font(House.TypeToken.label)
+                .foregroundStyle(House.ColorToken.textPrimary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Two of Tristan's learnings in one scope disagree: both texts, each
+/// with Forget (1 or 2 while the card has the keyboard). A forget closes
+/// the card.
+struct LearningsConflictCard: View {
+    let proposal: Proposal
+    let isFocused: Bool
+    var scope: String
+    let onForget: (Int) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: House.Spacing.xs) {
+            HStack(spacing: House.Spacing.xs) {
+                SectionLabel(text: "Learnings")
+                Text(scope)
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textTertiary)
+                Spacer(minLength: 0)
+            }
+            Text(proposal.headline)
+                .font(House.TypeToken.label)
+                .foregroundStyle(House.ColorToken.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let conflict = proposal.conflict {
+                ForEach(Array(conflict.texts.enumerated()), id: \.offset) { index, text in
+                    HStack(alignment: .firstTextBaseline, spacing: House.Spacing.xs) {
+                        ActionNumber(number: index + 1)
+                        Text(text)
+                            .font(House.TypeToken.bodySmall)
+                            .foregroundStyle(House.ColorToken.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        Spacer(minLength: House.Spacing.xs)
+                        CardButton(title: "Forget", keys: ["\(index + 1)"], showsKeys: isFocused) { onForget(index) }
+                    }
+                }
+            }
+        }
+        .padding(House.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: House.Radius.lg, style: .continuous)
+                .fill(House.ColorToken.surfaceTint)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: House.Radius.lg, style: .continuous)
+                .strokeBorder(isFocused ? House.ColorToken.strokeStrong : House.ColorToken.stroke, lineWidth: House.hairline)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Learnings disagree: \(proposal.headline)")
     }
 }

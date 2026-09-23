@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — 2026-09-24 (Chief of Staff memory design)
+
+- **Learnings are rows.** The Charter view lists them from `cos learnings`
+  (text, where it applies, who taught it, how long ago), each with Forget
+  (`⌘⌫` when focused) → `cos forget`. The charter keeps only the policy.
+- **Add rule has a scope:** Everywhere, This project, or This sender (the
+  project and sender of the card or filter it was opened on) → `cos rule
+  --scope`.
+- **Activity shows today's model calls** against their caps, and when the
+  breaker holds them.
+- **A card a crash cut off** says "Did not finish; check before retrying."
+  and has no Do it (Edit, Later and No stay). A card whose actions run now
+  says so and runs nothing more. A learnings card shows two rules that
+  disagree, each with Forget (1, 2).
+
 ## Unreleased — 2026-09-23 (Chief of Staff contract v1)
 
 - **The Chief of Staff learns, runs by consent, and shows its work.** Every

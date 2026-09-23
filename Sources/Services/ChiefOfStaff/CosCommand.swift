@@ -35,8 +35,11 @@ enum CosCommand: Sendable, Equatable {
     case activity(day: String?)
     case artifacts
     case charter
-    /// One line into a charter section.
-    case rule(text: String, section: String)
+    /// A learning (`all`, `project:<slug>`, `sender:<name>`, `kind:<kind>`).
+    case rule(text: String, scope: String)
+    case learnings
+    /// Remove one learning by its key.
+    case forget(key: String)
     /// Record a chat turn this app made. The text goes on stdin (`-`), so a
     /// long answer never meets an argument limit.
     case append(role: Role, text: String, meta: [String: String])
@@ -87,8 +90,12 @@ enum CosCommand: Sendable, Equatable {
             return ["artifacts", "--json"]
         case .charter:
             return ["charter", "--json"]
-        case .rule(let text, let section):
-            return ["rule", text, "--section", section]
+        case .rule(let text, let scope):
+            return ["rule", text, "--scope", scope]
+        case .learnings:
+            return ["learnings", "--json"]
+        case .forget(let key):
+            return ["forget", key]
         case .add(let title, let project, let due):
             // `--` would be safer, but argparse reads a leading dash in the
             // title as an option; one is refused before it gets here.
@@ -117,7 +124,7 @@ enum CosCommand: Sendable, Equatable {
     var timeout: TimeInterval {
         switch self {
         case .status, .no, .later, .reopen, .append, .projects, .tasks, .more, .less, .always, .never,
-             .rungs, .activity, .artifacts, .charter, .rule: 20
+             .rungs, .activity, .artifacts, .charter, .rule, .learnings, .forget: 20
         // A `prepare` action calls the model: the contract allows 250 s.
         case .doIt, .edit: 260
         case .add, .undo: 180
@@ -173,9 +180,41 @@ struct CosStatus: Sendable, Equatable, Decodable {
     var accepted: Int = 0
     var today: Int = 0
     var cap: Int = 8
+    /// Today's model calls against their caps, and the breaker.
+    var modelCalls: ModelCalls?
+
+    struct ModelCalls: Sendable, Equatable, Decodable {
+        struct Cap: Sendable, Equatable, Decodable {
+            var maker: Int
+            var reviewer: Int
+        }
+
+        var maker: Int
+        var reviewer: Int
+        var cap: Cap
+        var failuresInRow: Int
+        /// Set while the breaker holds model calls ("YYYY-MM-DDTHH:MM").
+        var pausedUntil: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case maker, reviewer, cap
+            case failuresInRow = "failures_in_row"
+            case pausedUntil = "paused_until"
+        }
+
+        /// "Model calls today: 12 of 40, reviews 3 of 10".
+        var line: String {
+            var line = "Model calls today: \(maker) of \(cap.maker), reviews \(reviewer) of \(cap.reviewer)"
+            if let pausedUntil, let date = CosDate.parse(pausedUntil) {
+                line += ". Paused until \(date.formatted(date: .omitted, time: .shortened)) after \(failuresInRow) failures"
+            }
+            return line
+        }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case paused, total, pending, decided, accepted, today, cap
+        case modelCalls = "model_calls"
     }
 
     init(paused: Bool) {
@@ -192,6 +231,7 @@ struct CosStatus: Sendable, Equatable, Decodable {
         accepted = try c.decodeIfPresent(Int.self, forKey: .accepted) ?? 0
         today = try c.decodeIfPresent(Int.self, forKey: .today) ?? 0
         cap = try c.decodeIfPresent(Int.self, forKey: .cap) ?? 8
+        modelCalls = try? c.decodeIfPresent(ModelCalls.self, forKey: .modelCalls)
     }
 
     static func decode(_ stdout: String) throws -> CosStatus {
@@ -282,11 +322,13 @@ struct CosActivityEvent: Sendable, Equatable, Identifiable, Decodable {
     /// "HH:MM" as `cos` prints it.
     var time: String?
     var card: String?
+    /// On ran and failed items: `running` (it never finished), `ok`, `failed`.
+    var state: String?
     var index = 0
 
     var id: String { "\(kind)-\(index)" }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, ts, time, card }
+    private enum CodingKeys: String, CodingKey { case kind, text, ts, time, card, state }
 
     init(kind: String, text: String, ts: Date? = nil, time: String? = nil, card: String? = nil) {
         self.kind = kind
@@ -307,7 +349,11 @@ struct CosActivityEvent: Sendable, Equatable, Identifiable, Decodable {
         }
         time = try? c.decodeIfPresent(String.self, forKey: .time)
         card = try? c.decodeIfPresent(String.self, forKey: .card)
+        state = try? c.decodeIfPresent(String.self, forKey: .state)
     }
+
+    /// An action cut off by a crash: its row says so.
+    var didNotFinish: Bool { state == "running" }
 
     /// The time the row shows: the one `cos` printed, else the stamp's.
     var clock: String {
@@ -520,5 +566,57 @@ enum CosDate {
             if let date = local.date(from: text) { return date }
         }
         return nil
+    }
+}
+
+/// One learning, from `cos learnings --json`: a typed row, not charter
+/// prose. The latest row per key wins; `cos forget <key>` removes it.
+struct CosLearning: Sendable, Equatable, Identifiable, Decodable {
+    var key: String
+    var text: String
+    /// `all`, `project:<slug>`, `sender:<name>`, or `kind:<event_kind>`.
+    var scope: String
+    /// `user` (More, Less, Add rule) or `inferred`.
+    var source: String
+    var created: Date?
+    var weight: Double?
+
+    var id: String { key }
+
+    private enum CodingKeys: String, CodingKey { case key, text, scope, source, created, weight }
+
+    init(key: String, text: String, scope: String = "all", source: String = "user", created: Date? = nil, weight: Double? = nil) {
+        self.key = key
+        self.text = text
+        self.scope = scope
+        self.source = source
+        self.created = created
+        self.weight = weight
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        scope = (try? c.decodeIfPresent(String.self, forKey: .scope)) ?? "all"
+        source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? "user"
+        created = (try? c.decodeIfPresent(String.self, forKey: .created))?.flatMap { CosDate.parse($0) }
+        weight = try? c.decodeIfPresent(Double.self, forKey: .weight)
+    }
+
+    /// "Everywhere", "Project: Acme Amplify", "Sender: Charlie", "Cards: meeting".
+    func scopeLabel(projectName: (String) -> String? = { _ in nil }) -> String {
+        let parts = scope.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return "Everywhere" }
+        switch parts[0] {
+        case "project": return "Project: " + (projectName(parts[1]) ?? parts[1])
+        case "sender": return "Sender: " + parts[1]
+        case "kind": return "Cards: " + parts[1]
+        default: return scope
+        }
+    }
+
+    static func decodeList(_ stdout: String) throws -> [CosLearning] {
+        try JSONDecoder().decode([CosLearning].self, from: Data(stdout.utf8))
     }
 }

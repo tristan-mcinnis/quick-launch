@@ -92,6 +92,19 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var artifacts: [String]
     /// `more` or `less` once given.
     var feedback: String?
+    /// Its actions are running now (`running.since`): busy, no Do it.
+    var runningSince: Date?
+    /// A crash cut an action off (`outcome_unknown.since`): check first.
+    var outcomeUnknownSince: Date?
+    /// A learnings card: two of Tristan's rows in one scope disagree.
+    var conflict: Conflict?
+
+    struct Conflict: Sendable, Equatable {
+        var scope: String
+        var keys: [String]
+        var texts: [String]
+    }
+
     /// A meeting card's start, where, and who is in it.
     var starts: Date?
     var location: String?
@@ -134,6 +147,9 @@ struct Proposal: Sendable, Equatable, Identifiable {
         projectName = nil
         self.eventKind = eventKind
         self.title = title
+        runningSince = nil
+        outcomeUnknownSince = nil
+        conflict = nil
         self.sender = sender
         self.paths = paths
         self.reason = reason
@@ -205,6 +221,17 @@ struct Proposal: Sendable, Equatable, Identifiable {
             location: values["meeting"]?.objectValue?["location"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
             attendees: values["attendees"]?.arrayValue?.compactMap(\.stringValue) ?? []
         )
+        runningSince = values["running"]?.objectValue?["since"]?.stringValue.flatMap { CosDate.parse($0) }
+            ?? (values["running"]?.objectValue != nil ? Date.distantPast : nil)
+        outcomeUnknownSince = values["outcome_unknown"]?.objectValue?["since"]?.stringValue.flatMap { CosDate.parse($0) }
+            ?? (values["outcome_unknown"]?.objectValue != nil ? Date.distantPast : nil)
+        conflict = values["conflict"]?.objectValue.map { object in
+            Conflict(
+                scope: object["scope"]?.stringValue ?? "all",
+                keys: object["keys"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+                texts: object["texts"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            )
+        }
     }
 
     private static func result(from json: JSONValue) -> Result? {
@@ -243,6 +270,10 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var canUndo: Bool { status == .done && hasUndo }
 
     var isMorning: Bool { eventKind == "morning" }
+    var isRunning: Bool { runningSince != nil }
+    var outcomeUnknown: Bool { outcomeUnknownSince != nil }
+    /// Do it is offered: not while it runs, not after a cut-off run (check first).
+    var canDoIt: Bool { isWaiting && !isRunning && !outcomeUnknown }
     var isMeeting: Bool { eventKind == "meeting" }
 
     /// Later, No, handled or expired: `cos reopen` can bring it back.

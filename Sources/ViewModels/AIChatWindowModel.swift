@@ -346,7 +346,8 @@ protocol AIChatWindowPresenting: AnyObject {
             modifiers: modifiers,
             place: place,
             hasCards: chiefOfStaff.firstFocusable != nil,
-            hasRungOffer: chiefOfStaff.rungOffer != nil
+            hasRungOffer: chiefOfStaff.rungOffer != nil,
+            onConflict: chiefOfStaff.focusedProposal?.conflict != nil
         ) else { return false }
         perform(action, on: chiefOfStaff)
         return true
@@ -411,6 +412,8 @@ protocol AIChatWindowPresenting: AnyObject {
             chiefOfStaff.removeFocusedRung()
         case .acceptRung:
             chiefOfStaff.acceptRungOffer()
+        case .forgetConflict(let index):
+            chiefOfStaff.forgetConflict(index)
         case .activityDay(let delta):
             if chiefOfStaff.viewMode == .activity { chiefOfStaff.moveActivityDay(delta) }
         case .toggleHealth:

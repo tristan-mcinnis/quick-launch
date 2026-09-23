@@ -51,8 +51,9 @@ AI Chat is one conversation window over the same providers and tools. No autonom
 **Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
 organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
 acts only by calling the `cos` CLI (`do`, `edit`, `no`, `later`, `reopen`,
-`add`, `append`, `more`, `less`, `always`, `never`, `undo`, `rule`; reads
-`status`, `projects`, `tasks`, `activity`, `artifacts`, `charter`, `rungs`) on
+`add`, `append`, `more`, `less`, `always`, `never`, `undo`, `rule`, `forget`;
+reads `status`, `projects`, `tasks`, `activity`, `artifacts`, `charter`,
+`rungs`, `learnings`) on
 an action the user takes, per `../chief-of-staff/docs/CONTRACT.md`; Quick
 Launch never writes the thread or the charter, opens a file only on an
 explicit action, and its chat gets no write tools.
