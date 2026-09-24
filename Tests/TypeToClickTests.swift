@@ -1,7 +1,33 @@
 import AppKit
 import ApplicationServices
+import Synchronization
 import XCTest
 @testable import QuickLaunch
+
+/// Test time for Type to Click: `now` moves only by the delays the controller
+/// sleeps (each sleep still waits for real), so the menu-retry budget and the
+/// staleness window count the controller's own steps, never how long a busy
+/// machine took to run them.
+final class StepClock: Sendable {
+    private let current = Mutex(Date(timeIntervalSince1970: 1_000_000))
+
+    var clock: TypeToClickClock {
+        TypeToClickClock(
+            now: { [self] in current.withLock { $0 } },
+            sleep: { [self] duration in
+                let start = current.withLock { $0 }
+                try? await Task.sleep(for: duration)
+                let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+                current.withLock { $0 = max($0, start.addingTimeInterval(seconds)) }
+            }
+        )
+    }
+}
+
+/// How long a test waits before calling a hang a failure. Generous: a busy
+/// machine may run the controller's steps many times slower, and waiting
+/// longer costs a passing test nothing.
+private let hangGuard: TimeInterval = 120
 
 final class TypeToClickTests: XCTestCase {
 
@@ -328,12 +354,12 @@ final class TypeToClickTests: XCTestCase {
     func testUntrustedPermissionMessageStaysOpenAndNeverScans() throws {
         _ = NSApplication.shared
         let service = UntrustedTypeToClickService()
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
 
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
         XCTAssertTrue(controller.isActive)
@@ -350,8 +376,10 @@ final class TypeToClickTests: XCTestCase {
     @MainActor
     func testOneOverlaySurfacePerScreenSurvivesDisplayReconfiguration() throws {
         _ = NSApplication.shared
-        let controller = TypeToClickController(service: UntrustedTypeToClickService())
+        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock)
         controller.start(in: 123)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
 
         func visibleSurfaceCount() -> Int {
             NSApp.windows.count { $0 is TypeToClickPanel && $0.isVisible }
@@ -388,11 +416,11 @@ final class TypeToClickTests: XCTestCase {
     @MainActor
     func testEscapeAlwaysExitsTheOverlay() throws {
         _ = NSApplication.shared
-        let controller = TypeToClickController(service: UntrustedTypeToClickService())
+        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
 
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 53, characters: "\u{1b}"))
 
@@ -414,11 +442,11 @@ final class TypeToClickTests: XCTestCase {
             ),
             performed: performed
         )
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
         await fulfillment(of: [performed], timeout: 0.5)
@@ -439,11 +467,11 @@ final class TypeToClickTests: XCTestCase {
             height: 30
         )
         let service = BufferedTypeToClickService(frame: frame, performed: performed)
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
 
         for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
             panel.sendEvent(try keyEvent(
@@ -454,7 +482,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [performed], timeout: 15)
+        await fulfillment(of: [performed], timeout: hangGuard)
         XCTAssertEqual(service.performedAction, .activate)
         controller.dismiss()
     }
@@ -477,12 +505,12 @@ final class TypeToClickTests: XCTestCase {
             refreshStarted: refreshStarted,
             performed: performed
         )
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
-        await fulfillment(of: [firstScanReturned], timeout: 15)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
+        await fulfillment(of: [firstScanReturned], timeout: hangGuard)
         try await Task.sleep(for: .milliseconds(50))
 
         for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
@@ -499,11 +527,11 @@ final class TypeToClickTests: XCTestCase {
             characters: "r",
             modifiers: .command
         ))
-        await fulfillment(of: [refreshStarted], timeout: 15)
+        await fulfillment(of: [refreshStarted], timeout: hangGuard)
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
         service.releaseRefresh()
 
-        await fulfillment(of: [performed], timeout: 15)
+        await fulfillment(of: [performed], timeout: hangGuard)
         XCTAssertEqual(service.performedLabel, "Save Beta")
         controller.dismiss()
     }
@@ -524,11 +552,11 @@ final class TypeToClickTests: XCTestCase {
             menuOpened: menuOpened,
             visibleCommandsReturned: visibleCommandsReturned
         )
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
 
         for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
             panel.sendEvent(try keyEvent(
@@ -539,7 +567,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [menuOpened, visibleCommandsReturned], timeout: 15)
+        await fulfillment(of: [menuOpened, visibleCommandsReturned], timeout: hangGuard)
         let badgeAppeared = await eventually {
             NSApp.windows
                 .compactMap { $0.contentView as? TypeToClickOverlayView }
@@ -568,12 +596,12 @@ final class TypeToClickTests: XCTestCase {
             ),
             performed: performed
         )
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.configureContinuation(.singleAction)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
 
         for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
             panel.sendEvent(try keyEvent(
@@ -584,7 +612,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [performed], timeout: 15)
+        await fulfillment(of: [performed], timeout: hangGuard)
         let dismissed = await eventually { !controller.isActive }
         XCTAssertTrue(dismissed)
         XCTAssertEqual(service.targetCalls, 1)
@@ -608,11 +636,11 @@ final class TypeToClickTests: XCTestCase {
             secondPerformed: secondPerformed,
             rescanned: rescanned
         )
-        let controller = TypeToClickController(service: service)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
         controller.start(in: 123)
-        let panel = try XCTUnwrap(NSApp.windows.first {
-            $0 is TypeToClickPanel && $0.isVisible
-        } as? TypeToClickPanel)
+        // A test that stops early never leaves its overlay for the next one.
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
 
         for (keyCode, character) in [(3, "f"), (34, "i"), (37, "l"), (14, "e")] {
             panel.sendEvent(try keyEvent(
@@ -623,7 +651,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [firstPerformed], timeout: 15)
+        await fulfillment(of: [firstPerformed], timeout: hangGuard)
         // Type the next step while the first target is still pulsing. These
         // keys must be buffered rather than leaked to the controlled app.
         for (keyCode, character) in [(31, "o"), (35, "p"), (14, "e"), (45, "n")] {
@@ -635,7 +663,7 @@ final class TypeToClickTests: XCTestCase {
         }
         panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
 
-        await fulfillment(of: [rescanned, secondPerformed], timeout: 15)
+        await fulfillment(of: [rescanned, secondPerformed], timeout: hangGuard)
         XCTAssertTrue(controller.isActive)
         XCTAssertEqual(service.performedLabels, ["File", "Open"])
         controller.dismiss()
@@ -675,7 +703,7 @@ final class TypeToClickTests: XCTestCase {
 
     @MainActor
     private func eventually(
-        timeout: TimeInterval = 15,
+        timeout: TimeInterval = hangGuard,
         condition: () -> Bool
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)

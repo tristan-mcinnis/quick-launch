@@ -158,6 +158,13 @@ Run `swift test` after source changes. For packaging or identity changes, also
 run `SIGN_IDENTITY=- ./scripts/build-app.sh` and verify the resulting
 `build/Quick Launch.app` metadata.
 
+`swift test` is the pre-push gate and must pass on a busy machine: a test
+waits on the work itself (an injected clock such as `TypeToClickClock`, an
+`AttachmentDeadline`, or a model's own tasks, as `TranslatorModel.settled()`),
+never on a wall-clock budget. Speed budgets are opt-in and run on a quiet
+machine: `QUICK_LAUNCH_PERF=1 swift test --filter LauncherPerformanceBudgetTests`.
+Never push with `SKIP_TESTS=1`; a flaky gate is a bug to fix.
+
 The native rail focus proof takes the keyboard and runs separately from other
 window tests. After the main suite, run
 `QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --skip-build --filter PaletteRailFocusProofTests`.

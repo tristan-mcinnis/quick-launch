@@ -11,9 +11,17 @@ import UniformTypeIdentifiers
 @Suite("Attachment tray")
 @MainActor
 struct AttachmentTrayTests {
-    private func make(timeout: Duration = .seconds(5)) -> (AttachmentTray, FakeAttachmentExtractor) {
+    /// A tray whose reads never time out, unless a test names a `timeout`:
+    /// then the clock runs it. A drop or read on a busy machine is waited
+    /// for, so no outcome depends on the machine's speed.
+    private func make(timeout: Duration? = nil) -> (AttachmentTray, FakeAttachmentExtractor) {
         let extractor = FakeAttachmentExtractor()
-        return (AttachmentTray(extractor: extractor, readTimeout: timeout), extractor)
+        let tray = AttachmentTray(
+            extractor: extractor,
+            readTimeout: timeout ?? .seconds(5),
+            deadline: timeout == nil ? .never : .clock
+        )
+        return (tray, extractor)
     }
 
     private func file(_ name: String) -> AttachmentSource {

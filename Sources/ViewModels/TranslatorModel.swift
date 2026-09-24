@@ -273,6 +273,26 @@ final class TranslatorModel {
         }
     }
 
+    /// Returns once the typing pause and the request it started are over:
+    /// what a caller (or a test) waits on instead of the clock.
+    func settled() async {
+        while true {
+            if let debounceTask {
+                await debounceTask.value
+                // A debounce that ran started a request; one that was
+                // replaced left a newer debounce in its place.
+                if self.debounceTask == debounceTask { self.debounceTask = nil }
+                continue
+            }
+            if let requestTask {
+                await requestTask.value
+                if self.requestTask == requestTask { self.requestTask = nil }
+                continue
+            }
+            return
+        }
+    }
+
     func requestSourceFocus() {
         sourceFocusRevision += 1
     }

@@ -131,6 +131,7 @@ final class AttachmentTray {
 
     @ObservationIgnored private let extractor: any AttachmentExtracting
     @ObservationIgnored private let readTimeout: Duration
+    @ObservationIgnored private let deadline: AttachmentDeadline
     /// The reads themselves, by chip. A read runs on its own task, so a
     /// hand-off (`handOff()`, `adopt(_:)`) can move it to another tray
     /// without starting it again.
@@ -140,10 +141,12 @@ final class AttachmentTray {
 
     init(
         extractor: any AttachmentExtracting,
-        readTimeout: Duration = AttachmentLimits.extractionTimeout
+        readTimeout: Duration = AttachmentLimits.extractionTimeout,
+        deadline: AttachmentDeadline = .clock
     ) {
         self.extractor = extractor
         self.readTimeout = readTimeout
+        self.deadline = deadline
     }
 
     // MARK: - Reading the tray
@@ -243,17 +246,18 @@ final class AttachmentTray {
     private func startReading(_ item: Item) {
         let extractor = extractor
         let timeout = readTimeout
+        let deadline = deadline
         let read = Task {
             let source: AttachmentSource?
             if let drop = item.dropSource {
-                source = await drop.resolve(timeout: timeout)
+                source = await drop.resolve(timeout: timeout, deadline: deadline)
             } else {
                 source = item.source
             }
             guard !Task.isCancelled else { return Result<AttachmentContent, AttachmentReadFailure>.failure(.init("Cancelled")) }
             guard let source else { return .failure(.init(Self.nothingToAttachNotice)) }
             if case .file(let url) = source, Self.isFolder(url) { return .failure(.folder) }
-            return await Self.read(source, with: extractor, timeout: timeout)
+            return await Self.read(source, with: extractor, timeout: timeout, deadline: deadline)
         }
         watch(item.id, read)
     }
@@ -271,13 +275,15 @@ final class AttachmentTray {
     nonisolated private static func read(
         _ source: AttachmentSource,
         with extractor: any AttachmentExtracting,
-        timeout: Duration
+        timeout: Duration,
+        deadline: AttachmentDeadline
     ) async -> Result<AttachmentContent, AttachmentReadFailure> {
         do {
             let content = try await withThrowingTaskGroup(of: AttachmentContent?.self) { group in
                 group.addTask { try await extractor.content(for: source) }
                 group.addTask {
-                    try await Task.sleep(for: timeout)
+                    await deadline.wait(timeout)
+                    try Task.checkCancellation()
                     return nil
                 }
                 defer { group.cancelAll() }
@@ -700,12 +706,12 @@ final class AttachmentTray {
             await AttachmentTray.source(from: provider)
         }
 
-        func resolve(timeout: Duration) async -> AttachmentSource? {
+        func resolve(timeout: Duration, deadline: AttachmentDeadline) async -> AttachmentSource? {
             if let resolvedSource { return resolvedSource }
             let source = await withTaskGroup(of: AttachmentSource?.self) { group in
                 group.addTask { await self.loadSource() }
                 group.addTask {
-                    try? await Task.sleep(for: timeout)
+                    await deadline.wait(timeout)
                     return nil
                 }
                 let first = await group.next() ?? nil
@@ -836,5 +842,19 @@ private final class DropLoad<Value: Sendable>: @unchecked Sendable {
         let progress = lock.withLock { self.progress }
         finish(nil)
         progress?.cancel()
+    }
+}
+
+/// When a tray read gives up: after the timeout on the clock in the app. A
+/// test whose outcome must not depend on the machine's speed passes `never`,
+/// so a slow provider or extractor is waited for rather than timed out.
+struct AttachmentDeadline: Sendable {
+    /// Returns when the time is up, or at once when the task is cancelled.
+    var wait: @Sendable (Duration) async -> Void
+
+    static let clock = AttachmentDeadline { try? await Task.sleep(for: $0) }
+    static let never = AttachmentDeadline { _ in
+        // Until cancelled: a year is past any test's run.
+        try? await Task.sleep(for: .seconds(31_536_000))
     }
 }

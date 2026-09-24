@@ -185,6 +185,17 @@ private enum TypeToClickShortcutKey {
     static let commandR: UInt16 = 15
 }
 
+/// The time Type to Click's budgets and delays run on: the wall clock in the
+/// app. A test passes a clock whose `now` moves only by the delays slept, so
+/// the retry budget and staleness never depend on how busy the machine is.
+struct TypeToClickClock: Sendable {
+    var now: @Sendable () -> Date
+    /// Returns early when the task is cancelled, as `try? Task.sleep` does.
+    var sleep: @Sendable (Duration) async -> Void
+
+    static let system = TypeToClickClock(now: { Date() }, sleep: { try? await Task.sleep(for: $0) })
+}
+
 /// Coordinates the Type to Click search overlay. Input fuzzy-searches labels,
 /// roles, and the active application's menu hierarchy. Return acts on the best
 /// match, then rescans and stays open so several UI steps can be chained.
@@ -238,12 +249,18 @@ final class TypeToClickController {
     private var accessibilityTrusted = false
     private var notice: TypeToClickNotice?
 
-    init(service: TypeToClickServicing = TypeToClickService()) {
+    private let clock: TypeToClickClock
+
+    init(service: TypeToClickServicing = TypeToClickService(), clock: TypeToClickClock = .system) {
         self.service = service
+        self.clock = clock
         configureSurfaces()
     }
 
     var isActive: Bool { surfaces.contains { $0.panel.isVisible } }
+    /// The panel that takes the keys: a test sends its events here, never
+    /// to whichever overlay window happens to be first on screen.
+    var inputPanel: TypeToClickPanel? { keyPanel }
     var isCapturingKeyboard: Bool {
         if let keyboardEventTap { return CGEvent.tapIsEnabled(tap: keyboardEventTap) }
         return keyPanel?.isKeyWindow == true
@@ -397,7 +414,7 @@ final class TypeToClickController {
         }
         rebuildSearchIndex()
         wasTruncated = result.wasTruncated
-        lastScanFinishedAt = Date()
+        lastScanFinishedAt = clock.now()
         scanTask = nil
         loadTask = nil
         notice = targets.isEmpty
@@ -452,7 +469,7 @@ final class TypeToClickController {
             openedMenuRetryDeadline = nil
             return false
         }
-        guard let deadline = openedMenuRetryDeadline, Date() < deadline else {
+        guard let deadline = openedMenuRetryDeadline, clock.now() < deadline else {
             awaitingOpenedMenuLabel = nil
             openedMenuRetryDeadline = nil
             notice = TypeToClickNotice(
@@ -467,8 +484,8 @@ final class TypeToClickController {
             tone: .busy
         )
         postActionRefreshTask?.cancel()
-        postActionRefreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: Self.openedMenuRetryDelay)
+        postActionRefreshTask = Task { @MainActor [weak self, clock] in
+            await clock.sleep(Self.openedMenuRetryDelay)
             guard !Task.isCancelled, let self, self.isActive else { return }
             self.postActionRefreshTask = nil
             self.requestScan(force: true)
@@ -478,7 +495,7 @@ final class TypeToClickController {
 
     private var treeIsStale: Bool {
         guard let lastScanFinishedAt else { return true }
-        return Date().timeIntervalSince(lastScanFinishedAt) > Self.staleTreeInterval
+        return clock.now().timeIntervalSince(lastScanFinishedAt) > Self.staleTreeInterval
     }
 
     private func refreshIfStale() {
@@ -488,8 +505,8 @@ final class TypeToClickController {
     private func scheduleRefreshAfterScroll() {
         guard activePID != 0, isActive else { return }
         refreshTask?.cancel()
-        refreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(180))
+        refreshTask = Task { @MainActor [weak self, clock] in
+            await clock.sleep(.milliseconds(180))
             guard !Task.isCancelled, let self, self.isActive else { return }
             self.requestScan(force: true)
         }
@@ -608,7 +625,7 @@ final class TypeToClickController {
                 guard let self else { return }
                 if event.type == .scrollWheel {
                     self.scheduleRefreshAfterScroll()
-                } else if Date() >= self.ignoreMouseEventsUntil {
+                } else if clock.now() >= self.ignoreMouseEventsUntil {
                     // Let the physical click choose its own app. Reactivating
                     // the original target here would steal focus back.
                     self.dismiss(reactivateTarget: false)
@@ -842,16 +859,16 @@ final class TypeToClickController {
         actionGeneration = generation
         bufferedPostActionQuery = ""
         bufferedPostActionAction = nil
-        ignoreMouseEventsUntil = Date().addingTimeInterval(
+        ignoreMouseEventsUntil = clock.now().addingTimeInterval(
             Self.syntheticClickSuppressionInterval
         )
         pulsingTarget = target
         notice = TypeToClickNotice(text: "Clicking \(target.label)…", tone: .busy)
         render()
-        actionTask = Task { @MainActor [weak self] in
+        actionTask = Task { @MainActor [weak self, clock] in
             // Keep the bright pulse visible for one beat before dispatching the
             // Accessibility action, so Return has tangible click feedback.
-            try? await Task.sleep(for: Self.activationPulseLeadDelay)
+            await clock.sleep(Self.activationPulseLeadDelay)
             guard let self,
                   !Task.isCancelled,
                   self.isActive,
@@ -867,7 +884,7 @@ final class TypeToClickController {
             self.recaptureKeyboard()
             // Hold the pulse after dispatch long enough to read as feedback,
             // while the underlying interface begins its transition.
-            try? await Task.sleep(for: Self.activationPulseTailDelay)
+            await clock.sleep(Self.activationPulseTailDelay)
             guard !Task.isCancelled,
                   self.isActive,
                   self.actionGeneration == generation
@@ -907,7 +924,7 @@ final class TypeToClickController {
         awaitingOpenedMenuLabel = openedMenuLabel
         openedMenuRetryDeadline = openedMenuLabel == nil
             ? nil
-            : Date().addingTimeInterval(Self.openedMenuRetryBudget)
+            : clock.now().addingTimeInterval(Self.openedMenuRetryBudget)
         if let nextAction {
             pendingAction = PendingTypeToClickAction(
                 action: nextAction,
@@ -927,8 +944,8 @@ final class TypeToClickController {
         recaptureKeyboard()
 
         postActionRefreshTask?.cancel()
-        postActionRefreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: Self.postActionRefreshDelay)
+        postActionRefreshTask = Task { @MainActor [weak self, clock] in
+            await clock.sleep(Self.postActionRefreshDelay)
             guard !Task.isCancelled, let self, self.isActive else { return }
             self.postActionRefreshTask = nil
             self.requestScan(force: true)

@@ -121,6 +121,29 @@ struct ApplicationLauncherWorkflowTests {
         #expect(vm.applicationConfigurationConflict(for: weChat) != nil)
     }
 
+    /// The real catalog finds the apps on this Mac and filters them. Its
+    /// speed is a separate budget (`LauncherPerformanceBudgetTests`), which
+    /// the default run leaves out.
+    @Test func realCatalogFindsAndFiltersTheApplications() {
+        let catalog = ApplicationCatalogService()
+        let vm = QuickViewModel(applicationCatalog: catalog)
+        vm.input = "finder"
+        #expect(!catalog.applications.isEmpty)
+        #expect(catalog.applications.contains { $0.name == "Finder" })
+        #expect(vm.applicationMatches.contains { $0.name == "Finder" })
+    }
+}
+
+/// The launcher's speed budget: a catalog scan and 100 filters each under
+/// 250 ms. Wall-clock numbers mean nothing while other builds and suites
+/// share the machine, so this runs only when asked, on a quiet machine:
+/// `QUICK_LAUNCH_PERF=1 swift test --filter LauncherPerformanceBudgetTests`.
+@Suite(
+    "Launcher performance budget",
+    .enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PERF"] == "1")
+)
+@MainActor
+struct LauncherPerformanceBudgetTests {
     @Test func realCatalogAndFilteringStayWithinLauncherBudget() {
         let clock = ContinuousClock()
         let scanStart = clock.now
@@ -136,7 +159,6 @@ struct ApplicationLauncherWorkflowTests {
         let filterTime = filterStart.duration(to: clock.now)
 
         #expect(!catalog.applications.isEmpty)
-        #expect(catalog.applications.contains { $0.name == "Finder" })
         #expect(scanTime < .milliseconds(250))
         #expect(filterTime < .milliseconds(250))
     }

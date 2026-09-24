@@ -15,20 +15,10 @@ struct TranslatorModelTests {
         return (model, mock, spy)
     }
 
-    /// Suites run in parallel; wait for the request instead of sleeping a fixed
-    /// time. The budget is generous because the wait is for a debounce plus a
-    /// mocked stream on a machine that may be running other suites, a build, or
-    /// both: a tight budget expired under load and then fell through into the
-    /// caller's assertions, which reported a nil pinyin rather than the timeout
-    /// that actually happened. Timing out is now said out loud.
-    private func settle(_ model: TranslatorModel, timeout: Duration = .seconds(15)) async {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
-            if !model.isTranslating, !model.translation.isEmpty { return }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("the translation did not settle within \(timeout)")
+    /// Waits on the model's own typing pause and request, not on the clock:
+    /// on a busy machine they take longer, never a different path.
+    private func settle(_ model: TranslatorModel) async {
+        await model.settled()
     }
 
     @Test func directionRuleAndRecognition() {
