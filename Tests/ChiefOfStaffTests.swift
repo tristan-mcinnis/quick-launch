@@ -80,6 +80,7 @@ actor RecordingCosRunner: CosRunning {
     /// `cos charter --json` as contract v1 prints it, rungs included.
     static let charterJSON = """
     {"path": "/tmp/chief-of-staff-charter.md", "sections": [
+     {"key": "voice", "title": "Voice", "text": "I am Tristan's chief of staff: calm, direct,\\non his side.\\n\\nNo flattery, no filler.\\n\\n- \\"Charlie approved. / Next: log it.\\"", "items": ["\\"Charlie approved. / Next: log it.\\""]},
      {"key": "watch", "title": "Watch", "text": "- Client mail on live projects\\n- Slack mentions in #ops", "items": ["Client mail on live projects", "Slack mentions in #ops"]},
      {"key": "people", "title": "People", "text": "", "items": ["Charlie: Globex client lead"]},
      {"key": "ignore", "title": "Ignore", "text": "", "items": ["Newsletters"]},
@@ -95,7 +96,7 @@ actor RecordingCosRunner: CosRunning {
     var writes: [CosCommand] {
         commands.filter {
             switch $0 {
-            case .status, .projects, .tasks: false
+            case .status, .projects, .tasks, .charter, .rungs, .learnings, .activity, .artifacts: false
             default: true
             }
         }
@@ -1109,6 +1110,8 @@ struct ChiefOfStaffV1DataTests {
         #expect(try CosCommand.rule(text: "Dates matter", scope: "project:globex").arguments()
             == ["rule", "Dates matter", "--scope", "project:globex"])
         #expect(try CosCommand.learnings.arguments() == ["learnings", "--json"])
+        #expect(try CosCommand.charterLine(text: "Warmer with clients", section: "voice").arguments()
+            == ["rule", "Warmer with clients", "--section", "voice"])
         #expect(try CosCommand.forget(key: "k-1").arguments() == ["forget", "k-1"])
     }
 
@@ -1207,9 +1210,14 @@ struct ChiefOfStaffV1DataTests {
         #expect(artifacts[2].url(in: paths).path == "/data/artifacts/c3/y.md")
         let charter = try CosCharter.decode(RecordingCosRunner.charterJSON)
         #expect(charter.path == "/tmp/chief-of-staff-charter.md")
-        #expect(charter.sections.map(\.key) == ["watch", "people", "ignore", "style", "learned"])
-        #expect(charter.sections.map(\.name) == ["Watch", "People", "Ignore", "Style", "Learned"])
-        #expect(charter.sections[0].lines == ["Client mail on live projects", "Slack mentions in #ops"])
+        #expect(charter.sections.map(\.key) == ["voice", "watch", "people", "ignore", "style", "learned"])
+        #expect(charter.sections.map(\.name) == ["Voice", "Watch", "People", "Ignore", "Style", "Learned"])
+        // Voice is prose first (each paragraph on one line), then its examples.
+        #expect(charter.sections[0].prose == ["I am Tristan's chief of staff: calm, direct, on his side.", "No flattery, no filler."])
+        #expect(charter.sections[0].lines == ["\"Charlie approved. / Next: log it.\""])
+        // A section that is only "- " lines has no prose to repeat.
+        #expect(charter.sections[1].prose.isEmpty)
+        #expect(charter.sections[1].lines == ["Client mail on live projects", "Slack mentions in #ops"])
         #expect(charter.rungs.map(\.rung) == ["status_note@sample-project", "task_close@*"])
         #expect(charter.rungs[1].project == "*")
         let keyed = try CosCharter.decode(#"{"Watch": ["a"], "Ignore": ["b", "c"]}"#)
@@ -1340,7 +1348,7 @@ struct ChiefOfStaffV1ModelTests {
 
         model.viewMode = .charter
         await model.perform(.loadCharter)
-        #expect(model.charter?.sections.count == 5)
+        #expect(model.charter?.sections.count == 6)
         #expect(model.rungs.map(\.rung) == ["status_note@sample-project", "task_close@*"])
         model.focusCard("task_close@*")
         model.removeFocusedRung()
@@ -1528,6 +1536,9 @@ struct ChiefOfStaffMemoryDataTests {
         #expect(running.runningSince == Date(timeIntervalSince1970: 1_790_240_400))
         let cut = try card(#", "outcome_unknown": {"since": "2026-09-24T09:00:00Z"}, "tier": "decide""#)
         #expect(cut.outcomeUnknown && !cut.canDoIt)
+        let offline = try card(#", "event_kind": "morning", "made_offline": true, "made_by": "rules""#)
+        #expect(offline.madeOffline && offline.madeBy == "rules")
+        #expect(!plain.madeOffline && plain.madeBy == nil)
         let conflict = try card(#", "event_kind": "learnings", "conflict": {"scope": "project:globex", "keys": ["a", "b"], "texts": ["Always", "Never"]}"#)
         #expect(conflict.conflict == Proposal.Conflict(scope: "project:globex", keys: ["a", "b"], texts: ["Always", "Never"]))
         let activity = try CosActivity.decode(#"{"day": "d", "ran": {"count": 1, "items": [{"time": "09:00", "text": "Status note", "state": "running", "run": "r1", "action": 0}]}}"#)
@@ -1609,6 +1620,13 @@ struct ChiefOfStaffMemoryModelTests {
         model.submitAddRule()
         await model.perform(.rule(text: "Sam's dates are firm", scope: "sender:Sam Client"))
         #expect(await runner.writes.contains(.rule(text: "Sam's dates are firm", scope: "sender:Sam Client")))
+        // Voice is a charter line, not a learning, and needs no card.
+        model.openAddRule()
+        model.setAddRuleScope(.voice)
+        model.addRule?.text = "Warmer with clients"
+        model.submitAddRule()
+        await model.perform(.charterLine(text: "Warmer with clients", section: "voice"))
+        #expect(await runner.writes.last == .charterLine(text: "Warmer with clients", section: "voice"))
         #expect(ChiefOfStaffModel.senderName("Charlie <w@example.com>") == "Charlie")
         #expect(ChiefOfStaffModel.senderName("Alex") == "Alex")
     }

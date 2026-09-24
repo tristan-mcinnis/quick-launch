@@ -60,6 +60,7 @@ final class ChiefOfStaffModel {
         case never(rung: String)
         case undo(id: String)
         case rule(text: String, scope: String)
+        case charterLine(text: String, section: String)
         case forget(key: String)
         case loadActivity(day: String?)
         case loadArtifacts
@@ -111,12 +112,15 @@ final class ChiefOfStaffModel {
             case everywhere
             case project
             case sender
+            /// A line of the charter's Voice section, not a learning.
+            case voice
 
             var title: String {
                 switch self {
                 case .everywhere: "Everywhere"
                 case .project: "This project"
                 case .sender: "This sender"
+                case .voice: "Voice"
                 }
             }
         }
@@ -130,7 +134,7 @@ final class ChiefOfStaffModel {
 
         func isAvailable(_ scope: Scope) -> Bool {
             switch scope {
-            case .everywhere: true
+            case .everywhere, .voice: true
             case .project: project != nil
             case .sender: sender != nil
             }
@@ -142,6 +146,7 @@ final class ChiefOfStaffModel {
             case .everywhere: "all"
             case .project: project.map { "project:\($0)" } ?? "all"
             case .sender: sender.map { "sender:\($0)" } ?? "all"
+            case .voice: "all"
             }
         }
     }
@@ -788,7 +793,11 @@ final class ChiefOfStaffModel {
         let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         addRule = nil
-        send(.rule(text: text, scope: draft.scopeArgument))
+        if draft.scope == .voice {
+            send(.charterLine(text: text, section: "voice"))
+        } else {
+            send(.rule(text: text, scope: draft.scopeArgument))
+        }
     }
 
     /// A learnings card: forget one of the two rows that disagree.
@@ -1147,6 +1156,9 @@ final class ChiefOfStaffModel {
             await verdict(id) { .undo(id: id) }
         case .rule(let text, let scope):
             await simple(.rule(text: text, scope: scope), done: "Learning added.")
+            await loadCharter()
+        case .charterLine(let text, let section):
+            await simple(.charterLine(text: text, section: section), done: "Added to the charter.")
             await loadCharter()
         case .forget(let key):
             await simple(.forget(key: key), done: "Forgotten.")

@@ -256,6 +256,15 @@ struct CharterSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.xxs) {
             SectionHeader(title: section.name, count: section.lines.count) { EmptyView() }
+            // The prose first (Voice is mostly prose), then the lines.
+            ForEach(Array(section.prose.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(House.TypeToken.bodySmall)
+                    .foregroundStyle(House.ColorToken.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.bottom, House.Spacing.xxs)
+            }
             ForEach(Array(section.lines.enumerated()), id: \.offset) { _, line in
                 Text(line)
                     .font(House.TypeToken.bodySmall)
@@ -379,7 +388,7 @@ struct AddRuleSheet: View {
     /// "This project (Acme Amplify)", "This sender (Charlie)".
     private func title(_ scope: ChiefOfStaffModel.AddRule.Scope, draft: ChiefOfStaffModel.AddRule) -> String {
         switch scope {
-        case .everywhere: return scope.title
+        case .everywhere, .voice: return scope.title
         case .project:
             let name = draft.project.map { slug in model.projects.first { $0.slug == slug }?.shortName ?? slug }
             return name.map { "\(scope.title) (\($0))" } ?? scope.title

@@ -74,6 +74,7 @@ struct MorningCard: View {
                         .foregroundStyle(House.ColorToken.textTertiary)
                 }
                 Spacer(minLength: 0)
+                OfflineMark(proposal: proposal)
                 if let feedback { feedback }
             }
             Text(proposal.headline)
@@ -144,6 +145,7 @@ struct MeetingCard: View {
                         .truncationMode(.tail)
                 }
                 Spacer(minLength: 0)
+                OfflineMark(proposal: proposal)
                 if let feedback { feedback }
             }
             Text(proposal.headline)
@@ -356,5 +358,29 @@ struct LearningsConflictCard: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Learnings disagree: \(proposal.headline)")
+    }
+}
+
+/// A quiet "Made offline" on a morning or meeting card the online model did
+/// not write; who made it (a local model or plain rules) on hover.
+struct OfflineMark: View {
+    let proposal: Proposal
+
+    var body: some View {
+        if proposal.madeOffline {
+            Text("Made offline")
+                .font(House.TypeToken.caption)
+                .foregroundStyle(House.ColorToken.textTertiary)
+                .help(help)
+                .accessibilityLabel("Made offline, \(help)")
+        }
+    }
+
+    private var help: String {
+        switch proposal.madeBy {
+        case "local-model": "by the local model"
+        case "rules": "by rules, with no model"
+        default: "without the online model"
+        }
     }
 }

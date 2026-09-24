@@ -37,6 +37,8 @@ enum CosCommand: Sendable, Equatable {
     case charter
     /// A learning (`all`, `project:<slug>`, `sender:<name>`, `kind:<kind>`).
     case rule(text: String, scope: String)
+    /// One line into a charter section (`voice` and the like).
+    case charterLine(text: String, section: String)
     case learnings
     /// Remove one learning by its key.
     case forget(key: String)
@@ -92,6 +94,8 @@ enum CosCommand: Sendable, Equatable {
             return ["charter", "--json"]
         case .rule(let text, let scope):
             return ["rule", text, "--scope", scope]
+        case .charterLine(let text, let section):
+            return ["rule", text, "--section", section]
         case .learnings:
             return ["learnings", "--json"]
         case .forget(let key):
@@ -124,7 +128,7 @@ enum CosCommand: Sendable, Equatable {
     var timeout: TimeInterval {
         switch self {
         case .status, .no, .later, .reopen, .append, .projects, .tasks, .more, .less, .always, .never,
-             .rungs, .activity, .artifacts, .charter, .rule, .learnings, .forget: 20
+             .rungs, .activity, .artifacts, .charter, .rule, .charterLine, .learnings, .forget: 20
         // A `prepare` action calls the model: the contract allows 250 s.
         case .doIt, .edit: 260
         case .add, .undo: 180
@@ -465,8 +469,21 @@ struct CosCharter: Sendable, Equatable {
         var key: String
         var name: String
         var lines: [String]
+        /// The section as written: prose paragraphs and "- " lines.
+        var text: String = ""
 
         var id: String { key }
+
+        /// The prose paragraphs of `text`, each on one line, without the
+        /// "- " lines `lines` already carries.
+        var prose: [String] {
+            text.components(separatedBy: "\n\n").compactMap { paragraph in
+                let lines = paragraph.split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty && !$0.hasPrefix("- ") && $0 != "-" }
+                return lines.isEmpty ? nil : lines.joined(separator: " ")
+            }
+        }
     }
 
     /// The sections `cos rule --section` takes.
@@ -494,7 +511,12 @@ struct CosCharter: Sendable, Equatable {
                 let name = section["title"] as? String ?? section["name"] as? String ?? section["key"] as? String ?? ""
                 let lines = section["items"] as? [String] ?? section["lines"] as? [String]
                     ?? (section["text"] as? String)?.split(separator: "\n").map(String.init) ?? []
-                return Section(key: section["key"] as? String ?? name.lowercased(), name: name, lines: lines)
+                return Section(
+                    key: section["key"] as? String ?? name.lowercased(),
+                    name: name,
+                    lines: lines,
+                    text: section["text"] as? String ?? ""
+                )
             }
             return CosCharter(path: path, sections: sections, rungs: rungs)
         }

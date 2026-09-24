@@ -176,6 +176,13 @@ struct ChiefOfStaffRenderProofTests {
                 texts: ["Charlie's date changes are always DECIDE", "Date changes are FYI unless a client asks"]
             )
             items += [.proposal(turnID: "x1", cut), .proposal(turnID: "x2", busy), .proposal(turnID: "x3", conflict)]
+            // The morning brief made offline, by rules.
+            items = items.map { item in
+                guard case .proposal(let turn, var card) = item, card.isMorning else { return item }
+                card.madeOffline = true
+                card.madeBy = "rules"
+                return .proposal(turnID: turn, card)
+            }
             statesCos.override(items: items, status: statesCos.status)
             statesCos.focusCard("lc01")
             states.focusCards("lc01")

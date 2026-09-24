@@ -149,6 +149,8 @@ struct Proposal: Sendable, Equatable, Identifiable {
         self.title = title
         runningSince = nil
         outcomeUnknownSince = nil
+        madeOffline = false
+        madeBy = nil
         conflict = nil
         self.sender = sender
         self.paths = paths
@@ -225,6 +227,8 @@ struct Proposal: Sendable, Equatable, Identifiable {
             ?? (values["running"]?.objectValue != nil ? Date.distantPast : nil)
         outcomeUnknownSince = values["outcome_unknown"]?.objectValue?["since"]?.stringValue.flatMap { CosDate.parse($0) }
             ?? (values["outcome_unknown"]?.objectValue != nil ? Date.distantPast : nil)
+        madeOffline = values["made_offline"]?.boolValue ?? false
+        madeBy = values["made_by"]?.stringValue
         conflict = values["conflict"]?.objectValue.map { object in
             Conflict(
                 scope: object["scope"]?.stringValue ?? "all",
@@ -270,6 +274,10 @@ struct Proposal: Sendable, Equatable, Identifiable {
     var canUndo: Bool { status == .done && hasUndo }
 
     var isMorning: Bool { eventKind == "morning" }
+    /// The online model did not write it (failed, timed out, or paused).
+    var madeOffline: Bool
+    /// `local-model` or `rules`, when made offline.
+    var madeBy: String?
     var isRunning: Bool { runningSince != nil }
     var outcomeUnknown: Bool { outcomeUnknownSince != nil }
     /// Do it is offered: not while it runs, not after a cut-off run (check first).
