@@ -54,8 +54,8 @@ enum CosCommand: Sendable, Equatable {
     enum TellSurface: String, Sendable {
         /// The pinned conversation.
         case pinned = "quick-launch"
-        /// A Discuss chat's Tell Chief of Staff.
-        case discuss
+        /// A branch: every message in it.
+        case branch
     }
 
     enum Role: String, Sendable {

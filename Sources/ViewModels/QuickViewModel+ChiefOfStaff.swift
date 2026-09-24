@@ -91,8 +91,12 @@ extension QuickViewModel {
     /// The Chief of Staff's system message for a request in chat `id`, put
     /// before an assistant's own when both apply.
     func pinnedSystemMessage(forChat id: UUID, assistant: String?) -> String? {
-        let discussing = currentConversation?.id == id ? currentConversation?.cosCard : nil
-        guard let pinned = chiefOfStaff?.systemMessage(forChat: id, discussing: discussing) else { return assistant }
+        let branch = currentConversation?.id == id ? currentConversation : nil
+        guard let pinned = chiefOfStaff?.systemMessage(
+            forChat: id,
+            discussing: branch?.cosCard,
+            made: branch?.messages.compactMap(\.cosTell?.card) ?? []
+        ) else { return assistant }
         return [pinned, assistant].compactMap { $0 }.joined(separator: "\n\n")
     }
 
@@ -103,59 +107,128 @@ extension QuickViewModel {
         submitFromComposer()
     }
 
-    // MARK: - Discuss
+    // MARK: - Branches
 
-    /// The card the open chat discusses, while the Chief of Staff is there.
+    /// The card the open chat is a branch about, while the Chief of Staff
+    /// is there.
     var discussedCardID: String? {
         guard let chiefOfStaff, chiefOfStaff.isAvailable else { return nil }
         return currentConversation?.cosCard
     }
 
-    /// A Tell Chief of Staff is running for the open chat.
+    /// A `cos tell` is running for the open branch.
     var isTellingChiefOfStaff: Bool {
-        currentConversation.map { chiefOfStaff?.telling.contains($0.id) == true } ?? false
+        currentConversation.map { chiefOfStaff?.telling[$0.id] != nil } ?? false
     }
 
-    /// Tell Chief of Staff (⇧⌘↩) in a Discuss chat: the draft, else the last
-    /// question, goes to `cos tell` about the card. The reply joins the chat
-    /// as the Chief of Staff's, with the card it made drawn under it and the
-    /// keyboard on that card.
-    func tellChiefOfStaff() {
-        guard let chiefOfStaff, let card = discussedCardID, let chat = currentConversation,
-              !chiefOfStaff.telling.contains(chat.id) else { return }
-        let draft = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text: String
-        if !draft.isEmpty {
-            text = draft
-            input = ""
-            appendMessage(QuickMessage(role: .user, content: draft), toChat: chat.id)
-        } else if let last = chat.messages.last(where: { $0.role == .user }) {
-            text = CosTellReply.message(last.content, attachments: last.attachmentRefs)
-        } else {
-            errorMessage = "Type what to tell the Chief of Staff first."
-            return
+    /// The newest branch about `card` among the saved chats.
+    func branchConversation(for card: String) -> QuickConversation? {
+        history.filter { $0.cosCard == card }.max { $0.updatedAt < $1.updatedAt }
+    }
+
+    /// Every branch, newest first.
+    var branchConversations: [QuickConversation] {
+        history.filter { $0.cosCard != nil }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// A message was asked in branch `conversation`: it also goes to `cos
+    /// tell` about the card, and the first one links the branch to it.
+    func branchDidAsk(_ conversation: QuickConversation, text: String) {
+        guard let chiefOfStaff, chiefOfStaff.isAvailable, let card = conversation.cosCard else { return }
+        if chiefOfStaff.onTold == nil {
+            chiefOfStaff.onTold = { [weak self] chat, outcome in self?.chiefOfStaffTold(outcome, inChat: chat) }
         }
-        errorMessage = nil
-        chiefOfStaff.send(.tell(text: text, card: card, chat: chat.id))
+        if conversation.messages.filter({ $0.role == .user }).count == 1 {
+            chiefOfStaff.send(.linkBranch(card: card, branch: conversation.id, title: title(of: conversation)))
+        }
+        chiefOfStaff.send(.tell(text: text, card: card, chat: conversation.id))
     }
 
-    /// A Tell Chief of Staff came back for chat `id`: the reply joins it,
-    /// and the keyboard goes onto the card it made while the chat is open.
+    /// A branch's `cos tell` came back for chat `id`: a card it made joins
+    /// the branch under the answer (after the answer, when one is still
+    /// streaming), with the keyboard on it while the draft is empty. An
+    /// answer stays in the thread's branch turns; the chat model answers here.
     func chiefOfStaffTold(_ outcome: Result<CosTellReply, any Error>, inChat id: UUID) {
         switch outcome {
         case .success(let reply):
-            let made = reply.kind == .proposal ? reply.card : nil
-            // Named, so it never reads as this chat's model talking.
-            appendMessage(
-                QuickMessage(role: .assistant, content: "Chief of Staff: " + reply.text, cosTell: CosTold(card: made)),
-                toChat: id
-            )
-            if let made, currentConversation?.id == id {
-                chiefOfStaff?.focusTold(made)
+            guard reply.kind == .proposal, reply.card != nil else { return }
+            if isStreaming, currentConversation?.id == id {
+                deferredChiefOfStaffReplies.append((id, reply))
+                return
+            }
+            if let card = appendToldReply(reply, toChat: id), currentConversation?.id == id, input.isEmpty {
+                chiefOfStaff?.focusTold(card)
             }
         case .failure(let error):
             guard currentConversation?.id == id else { return }
             errorMessage = "The Chief of Staff did not take it: \(error.localizedDescription)"
         }
+    }
+
+    /// The replies that waited for a stream to finish, into their chats.
+    /// Returns the last card made in the open chat.
+    @discardableResult
+    func flushDeferredChiefOfStaffReplies() -> String? {
+        let replies = deferredChiefOfStaffReplies
+        deferredChiefOfStaffReplies = []
+        var made: String?
+        for (id, reply) in replies {
+            if let card = appendToldReply(reply, toChat: id), currentConversation?.id == id { made = card }
+        }
+        return made
+    }
+
+    /// A proposal reply as the Chief of Staff's turn, named, with its card.
+    private func appendToldReply(_ reply: CosTellReply, toChat id: UUID) -> String? {
+        guard let card = reply.card else { return nil }
+        appendMessage(
+            QuickMessage(role: .assistant, content: "Chief of Staff: " + reply.text, cosTell: CosTold(card: card)),
+            toChat: id
+        )
+        return card
+    }
+
+    /// The merge-back line of branch `conversation`: the done card's
+    /// headline (else the newest card's, else the model's last answer),
+    /// and how many actions its cards ran.
+    func branchSummary(of conversation: QuickConversation) -> String? {
+        guard let chiefOfStaff, conversation.cosCard != nil,
+              conversation.messages.contains(where: { $0.role == .user }) else { return nil }
+        let made = conversation.messages.compactMap(\.cosTell?.card).compactMap { chiefOfStaff.proposal($0) }
+        let done = made.filter { $0.status == .done }
+        let actions = done.reduce(0) { $0 + $1.actions.count }
+        let answer = conversation.messages.last { $0.role == .assistant && $0.cosTell == nil }?.content
+        let line = done.last?.headline ?? made.last?.headline ?? answer.map(Self.oneLine) ?? title(of: conversation)
+        return "Discussed: \(line) · \(actions) \(actions == 1 ? "action" : "actions") done"
+    }
+
+    /// The first sentence of an answer, plain, cut at a word near 100
+    /// characters.
+    nonisolated static func oneLine(_ text: String) -> String {
+        let plain = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        let first = plain.split(whereSeparator: \.isNewline).first.map(String.init) ?? plain
+        var sentence = first.range(of: ". ").map { String(first[..<$0.lowerBound]) } ?? first
+        sentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        guard sentence.count > 100 else { return sentence }
+        let cut = sentence.prefix(100)
+        return (cut.lastIndex(of: " ").map { String(cut[..<$0]) } ?? String(cut)) + "…"
+    }
+
+    /// Branch `id` merges back: one line under its card, unless nothing
+    /// was said since the last one (`force` writes it anyway, after a Do it).
+    func mergeBranch(_ id: UUID, force: Bool = false) {
+        guard let chiefOfStaff,
+              let conversation = currentConversation?.id == id ? currentConversation : history.first(where: { $0.id == id }),
+              let card = conversation.cosCard, let text = branchSummary(of: conversation) else { return }
+        let turns = conversation.messages.count
+        if !force, chiefOfStaff.lastSummary(of: id)?.turns == turns { return }
+        chiefOfStaff.send(.branchSummary(card: card, branch: id, text: text, turns: turns))
+    }
+
+    /// Do it ran on card `id`: the branch that made it merges back.
+    func chiefOfStaffCardDone(_ id: String) {
+        let owner = ([currentConversation].compactMap { $0 } + history)
+            .first { $0.cosCard != nil && $0.messages.contains { $0.cosTell?.card == id } }
+        if let owner { mergeBranch(owner.id, force: true) }
     }
 }

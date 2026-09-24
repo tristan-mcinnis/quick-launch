@@ -68,8 +68,12 @@ final class ChiefOfStaffModel {
         /// Open a file in its default app (an explicit action only).
         case open(URL)
         case recordTurn(question: String, answer: String, attachmentNames: [String])
-        /// Tell Chief of Staff from Discuss chat `chat` about `card`.
+        /// A message in branch `chat` about `card`, to `cos tell`.
         case tell(text: String, card: String, chat: UUID)
+        /// A branch opened on `card`: the card lists it (`cos append --meta`).
+        case linkBranch(card: String, branch: UUID, title: String)
+        /// A branch merges back: one line under its card.
+        case branchSummary(card: String, branch: UUID, text: String, turns: Int)
         case refresh
     }
 
@@ -241,11 +245,15 @@ final class ChiefOfStaffModel {
     private(set) var projects: [CosProject] = []
     /// The card the next pinned-chat message is about (`setSubject`).
     private(set) var subjectCardID: String?
-    /// Discuss chats whose Tell Chief of Staff is running.
-    private(set) var telling: Set<UUID> = []
+    /// Branches with a `cos tell` running, and how many.
+    private(set) var telling: [UUID: Int] = [:]
+    /// The branch conversation about a card, from the chat's records.
+    @ObservationIgnored var branchLookup: ((String) -> UUID?)?
+    /// A Do it on card `id` ran: its branch, if any, merges back.
+    @ObservationIgnored var onCardDone: ((String) -> Void)?
     /// Puts the window's keyboard on a card a reply just made.
     @ObservationIgnored var onFocusCard: ((String) -> Void)?
-    /// A Discuss chat's Tell Chief of Staff finished: its reply, or why not.
+    /// A branch's `cos tell` finished: its reply, or why not.
     @ObservationIgnored var onTold: ((UUID, Result<CosTellReply, any Error>) -> Void)?
     /// The card the keyboard is on, or nil (the composer has it).
     var focusedCardID: String? {
@@ -501,9 +509,15 @@ final class ChiefOfStaffModel {
     /// instruction, the waiting cards and the last twelve proposals; in a
     /// Discuss chat (`discussing` names its card), the Discuss instruction.
     /// Nil for any other chat.
-    func systemMessage(forChat id: UUID, discussing: String? = nil) -> String? {
+    func systemMessage(forChat id: UUID, discussing: String? = nil, made: [String] = []) -> String? {
         if id != Self.conversationID, let discussing {
-            return ChiefOfStaffPrompt.discussMessage(card: proposal(discussing))
+            let card = proposal(discussing)
+            return ChiefOfStaffPrompt.branchMessage(
+                card: card,
+                project: card.flatMap { $0.projectName ?? ($0.project.isEmpty ? nil : $0.project) },
+                charter: charterCore,
+                made: made.compactMap { proposal($0) }
+            )
         }
         guard id == Self.conversationID else { return nil }
         return ChiefOfStaffPrompt.systemMessage(
@@ -534,22 +548,60 @@ final class ChiefOfStaffModel {
         }
     }
 
-    /// Discuss's Tell Chief of Staff: `text` to `cos tell` about `card`,
-    /// then a fresh read so the card it made is there to draw, then the
-    /// reply to `onTold` for chat `chat`.
-    private func discussTell(_ text: String, about card: String, fromChat chat: UUID) async {
-        guard let runner, !telling.contains(chat) else { return }
-        telling.insert(chat)
+    /// A branch message to `cos tell` about `card`, then a fresh read so
+    /// the card it made is there to draw, then the reply to `onTold` for
+    /// branch `chat`. Messages run one after another per branch, in order.
+    private func branchTell(_ text: String, about card: String, fromChat chat: UUID) async {
+        guard let runner else { return }
+        telling[chat, default: 0] += 1
         let outcome: Result<CosTellReply, any Error>
         do {
-            outcome = .success(try CosTellReply.parse(try await runner.run(.tell(text: text, card: card, surface: .discuss))))
+            outcome = .success(try CosTellReply.parse(try await runner.run(.tell(text: text, card: card, surface: .branch))))
             await reload(force: true)
         } catch {
             outcome = .failure(error)
         }
-        telling.remove(chat)
+        telling[chat, default: 1] -= 1
+        if telling[chat] == 0 { telling[chat] = nil }
         onTold?(chat, outcome)
     }
+
+    // MARK: - Branches
+
+    /// The branch conversation about `card`, newest first: the chat's own
+    /// record, else the thread's link.
+    func branch(for card: String) -> UUID? {
+        branchLookup?(card) ?? ChiefOfStaffThread.branches(in: items)[card]?.last
+    }
+
+    /// The last merge-back line written for `branch`, with the branch's
+    /// message count then.
+    func lastSummary(of branch: UUID) -> ChiefOfStaffThread.BranchLink? {
+        for case .branch(_, let link, let summary?) in items.reversed() where link.branch == branch && !summary.isEmpty {
+            return link
+        }
+        return nil
+    }
+
+    /// The charter's policy core for a branch's system message: Voice,
+    /// Watch, Ignore, Style and Quiet, within the budget `cos` uses.
+    var charterCore: String? {
+        guard let charter else { return nil }
+        let keys = ["voice", "watch", "ignore", "style", "quiet"]
+        let text = charter.sections
+            .filter { keys.contains($0.key) }
+            .map { section in
+                let body = (section.prose + section.lines.map { "- \($0)" })
+                    .filter { !$0.isEmpty }.joined(separator: "\n")
+                return body.isEmpty ? "" : "\(section.name.uppercased())\n\(body)"
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        guard !text.isEmpty else { return nil }
+        return text.count > Self.charterCoreLimit ? String(text.prefix(Self.charterCoreLimit)) + "…" : text
+    }
+
+    nonisolated static let charterCoreLimit = 1500
 
     /// The card the next message in the pinned chat is about: typing on a
     /// card, ↩ on it, or a notification Reply names it.
@@ -1248,7 +1300,11 @@ final class ChiefOfStaffModel {
         case .recordTurn(let question, let answer, let names):
             await record(question: question, answer: answer, attachmentNames: names)
         case .tell(let text, let card, let chat):
-            await discussTell(text, about: card, fromChat: chat)
+            await branchTell(text, about: card, fromChat: chat)
+        case .linkBranch(let card, let branch, let title):
+            await appendBranch(kind: "branch", card: card, branch: branch, text: "Branch opened: \(title)", turns: nil)
+        case .branchSummary(let card, let branch, let text, let turns):
+            await appendBranch(kind: "branch_summary", card: card, branch: branch, text: text, turns: turns)
         case .refresh:
             await reload(force: true)
         }
@@ -1292,6 +1348,8 @@ final class ChiefOfStaffModel {
         }
         bulkIDs.remove(id)
         await reload(force: true)
+        // A card a branch made merges its branch back once it ran.
+        if case .doIt = call, proposal(id)?.status == .done { onCardDone?(id) }
         // The card left the view: the keyboard moves to its neighbour.
         if focusedCardID == nil || !focusOrder.contains(focusedCardID ?? ""), let index = order.firstIndex(of: id) {
             let rest = focusOrder
@@ -1404,6 +1462,22 @@ final class ChiefOfStaffModel {
         } catch {
             tasksProblem = error.localizedDescription
         }
+    }
+
+    /// A branch's link or merge-back line, as an assistant turn `cos`
+    /// records with its meta.
+    private func appendBranch(kind: String, card: String, branch: UUID, text: String, turns: Int?) async {
+        guard let runner else { return }
+        var meta = ["kind": kind, "card": card, "branch": branch.uuidString]
+        if let turns { meta["turns"] = String(turns) }
+        do {
+            let result = try await runner.run(.append(role: .assistant, text: text, meta: meta))
+            recordProblem = result.succeeded ? nil
+                : "Could not record the branch: " + (OutcomeLine.lastLine(of: result.stderr) ?? "exit \(result.exitCode)")
+        } catch {
+            recordProblem = "Could not record the branch: \(error.localizedDescription)"
+        }
+        await reload(force: false)
     }
 
     /// Both turns of a question answered in Quick Launch, into the one
@@ -1530,8 +1604,8 @@ enum ChiefOfStaffKeys {
         /// ↩ or a typed character on a card: a message about it, in the
         /// composer, starting with the character.
         case reply(String?)
-        /// ⇧⌘↩ in a Discuss chat: Tell Chief of Staff.
-        case tell
+        /// ⇧⌘W in a branch: merge back and return to the pinned chat.
+        case closeBranch
         case runEdit
         case cancelEdit
         case menuMove(Int)
@@ -1546,18 +1620,20 @@ enum ChiefOfStaffKeys {
         case toggleTasks
     }
 
-    /// The keys in a Discuss chat: ⇧⌘↩ Tell Chief of Staff from the
-    /// composer, and on the card a reply made, that card's own keys. ↑↓
-    /// leave it; nothing else of the pinned conversation's acts here.
-    static func routeDiscuss(
+    /// The keys in a branch: ⇧⌘W Close branch, and on a card the branch
+    /// made, that card's own keys. ↑↓ leave it; nothing else of the pinned
+    /// conversation's acts here.
+    static func routeBranch(
         key: VirtualKey?,
         characters: String?,
         modifiers: NSEvent.ModifierFlags,
         place: Place
     ) -> Action? {
-        if key?.isReturn == true, modifiers.overlayRelevant == [.command, .shift] {
-            if case .composer = place { return .tell }
-            if case .card = place { return .tell }
+        if modifiers.overlayRelevant == [.command, .shift], characters?.lowercased() == "w" {
+            switch place {
+            case .composer, .card: return .closeBranch
+            default: break
+            }
         }
         if case .composer = place { return nil }
         let action = route(key: key, characters: characters, modifiers: modifiers, place: place, hasCards: true)

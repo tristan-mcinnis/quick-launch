@@ -51,17 +51,21 @@ struct ToldCard: View {
     }
 }
 
-/// Above the composer of a Discuss chat: what it discusses, and Tell Chief
-/// of Staff (⇧⌘↩), which sends the draft, else the last question, to the
-/// Chief of Staff about the card.
-struct DiscussStrip: View {
+/// Above the composer of a branch: what it is about, a quiet line while
+/// the Chief of Staff reads a message, and Close branch (⇧⌘W), which
+/// merges it back under the card.
+struct BranchStrip: View {
     let model: ChiefOfStaffModel
     let cardID: String
     let isTelling: Bool
-    let onTell: () -> Void
+    let onClose: () -> Void
 
     var body: some View {
         HStack(spacing: House.Spacing.sm) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(House.TypeToken.caption)
+                .foregroundStyle(House.ColorToken.textTertiary)
+                .accessibilityHidden(true)
             Text(about)
                 .font(House.TypeToken.meta)
                 .foregroundStyle(House.ColorToken.textSecondary)
@@ -74,20 +78,19 @@ struct DiscussStrip: View {
                     .foregroundStyle(House.ColorToken.textSecondary)
                     .fixedSize()
                     .accessibilityAddTraits(.updatesFrequently)
-            } else {
-                CardButton(title: "Tell Chief of Staff", keys: ["⇧", "⌘", "↩"], showsKeys: true, action: onTell)
-                    .help("Send your draft, or your last message, to the Chief of Staff to act on")
             }
+            CardButton(title: "Close branch", keys: ["⇧", "⌘", "W"], showsKeys: true, action: onClose)
+                .help("Merge this branch back under its card and return to the Chief of Staff")
         }
         .padding(.horizontal, House.Spacing.lg)
         .frame(maxWidth: .infinity, minHeight: House.Control.chip, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Discussing a Chief of Staff card")
+        .accessibilityLabel("Branch of the Chief of Staff")
     }
 
     private var about: String {
-        guard let card = model.proposal(cardID) else { return "About a Chief of Staff card" }
-        return "About: \(card.headline)"
+        guard let card = model.proposal(cardID) else { return "Branch of the Chief of Staff" }
+        return "Branch · \(card.headline)"
     }
 }
 
@@ -116,5 +119,33 @@ struct SubjectChip: View {
         .frame(height: House.Control.chip)
         .background(Capsule().fill(House.ColorToken.chipFill))
         .help("Your next message is about this card. Esc clears it.")
+    }
+}
+
+/// Under a card in the pinned thread: what its branch came to, merged back,
+/// with Open branch.
+struct BranchSummaryLine: View {
+    let text: String
+    let onOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: House.Spacing.xs) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(House.TypeToken.caption)
+                .foregroundStyle(House.ColorToken.textTertiary)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(House.TypeToken.meta)
+                .foregroundStyle(House.ColorToken.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open branch", action: onOpen)
+                .buttonStyle(.plain)
+                .font(House.TypeToken.meta)
+                .foregroundStyle(House.ColorToken.textPrimary)
+                .fixedSize()
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

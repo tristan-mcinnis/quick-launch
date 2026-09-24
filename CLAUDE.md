@@ -59,10 +59,15 @@ Launch never writes the thread or the charter, opens a file only on an
 explicit action, and its chat gets no write tools.
 Every message in the pinned conversation goes to `cos tell` (with `--card`
 when it is about a card), never to a model: an answer shows as a reply, a
-proposal as its card under the reply with the keyboard on it. A Discuss chat
-(`QuickConversation.cosCard`) stays an ordinary chat with the Discuss
-instruction (`ChiefOfStaffPrompt.discussInstructions`) and adds Tell Chief of
-Staff (`⇧⌘↩`, `cos tell --surface discuss`).
+proposal as its card under the reply with the keyboard on it. Discuss opens a
+branch: an ordinary chat (`QuickConversation.cosCard`) linked both ways
+(HouseChatCore `sessionLinks` `cos-branch-of` and `cos-card`; `cos append`
+`kind: branch`), seeded with the card, its files, the charter core and the
+project (`ChiefOfStaffPrompt.branchMessage`). Each branch message also goes to
+`cos tell --card <id> --surface branch`; a card it makes joins the branch.
+Close branch (`⇧⌘W`) or a Do it on such a card merges it back as one
+`kind: branch_summary` line under the card. Branches nest under the pinned
+row in the rail, and a card with one offers Continue branch.
 It is additive: Quick AI and every other AI Chat conversation keep their
 provider, tools, keys and palette order, and its keys (`⌥⌘1` to `⌥⌘5`,
 `⌥⌘[` `⌥⌘]`, `⌘N` `⌘I` `⌘Y` `⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it

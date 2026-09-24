@@ -1,13 +1,16 @@
 import AppKit
 import Foundation
+import HouseChatCore
 import Testing
 @testable import QuickLaunch
 
 // `cos tell`: the pinned chat's every message goes to it (with the card it
 // is about), an answer shows as a reply and a proposal as its card, focused,
-// under the message; a Discuss chat keeps the ordinary chat with the Discuss
-// instruction and adds Tell Chief of Staff. Built against the contract shape
-// `{kind: answer|proposal, text, card?}` with `RecordingCosRunner.tellJSON`.
+// under the message. Discuss opens a branch: an ordinary chat linked to the
+// pinned conversation and the card, seeded with the card, its files, the
+// charter core and the project; each branch message also goes to
+// `cos tell --surface branch`, and the branch merges back as one line under
+// the card. `RecordingCosRunner.tellJSON` stands in for the model.
 
 @Suite("Chief of Staff tell: the contract")
 struct ChiefOfStaffTellContractTests {
@@ -16,8 +19,8 @@ struct ChiefOfStaffTellContractTests {
         #expect(try pinned.arguments() == ["tell", "-", "--surface", "quick-launch", "--card", "ee55ff66", "--json"])
         #expect(pinned.stdin == Data("Charlie approved; close it".utf8))
         #expect(pinned.timeout == 200)
-        let discuss = CosCommand.tell(text: "x", card: nil, surface: .discuss)
-        #expect(try discuss.arguments() == ["tell", "-", "--surface", "discuss", "--json"])
+        let branch = CosCommand.tell(text: "x", card: nil, surface: .branch)
+        #expect(try branch.arguments() == ["tell", "-", "--surface", "branch", "--json"])
     }
 
     @Test func theReplyReadsAsAnAnswerOrAProposal() throws {
@@ -60,34 +63,33 @@ struct ChiefOfStaffTellContractTests {
         #expect(CosTellReply.message("Close it.", attachments: []) == "Close it.")
     }
 
-    /// A Tell reply after an answer never reaches a model: turns alternate.
-    @Test @MainActor func aChiefOfStaffReplyAfterAnAnswerIsLeftOutOfModelRequests() {
+    /// A card a branch made never reaches the model as a turn: its system
+    /// message lists the cards instead.
+    @Test @MainActor func aChiefOfStaffReplyIsLeftOutOfModelRequests() {
         let messages = [
             QuickMessage(role: .user, content: "Charlie approved it."),
             QuickMessage(role: .assistant, content: "I will close the costing card."),
-            QuickMessage(role: .assistant, content: "Made a card.", cosTell: CosTold(card: "ee55ff66")),
+            QuickMessage(role: .assistant, content: "Chief of Staff: Got it.", cosTell: CosTold(card: "ee55ff66")),
             QuickMessage(role: .user, content: "Thanks. What next?"),
         ]
         #expect(QuickViewModel.answeredTurns(messages).map(\.content) == [
             "Charlie approved it.", "I will close the costing card.", "Thanks. What next?",
         ])
-        // Told from the draft, the reply is that question's answer.
-        let told = [
-            QuickMessage(role: .user, content: "Close it."),
-            QuickMessage(role: .assistant, content: "Made a card.", cosTell: CosTold(card: "ee55ff66")),
-        ]
-        #expect(QuickViewModel.answeredTurns(told).count == 2)
     }
 
-    @Test func theDiscussInstructionTakesTristanAtHisWord() {
-        let text = ChiefOfStaffPrompt.discussInstructions
+    @Test func theBranchInstructionTakesTristanAtHisWordWithFullContext() {
+        let text = ChiefOfStaffPrompt.branchInstructions
         #expect(text.contains("Tristan's statements are true."))
         #expect(text.contains("Never ask him to prove what he says"))
         #expect(text.contains("say in one line what you will do"))
-        #expect(text.contains("Tell Chief of Staff"))
         #expect(!text.contains("—"))
         let card = Proposal(id: "ee55ff66", message: "Alex asks who owns the ops rota.", tier: "today")
-        #expect(ChiefOfStaffPrompt.discussMessage(card: card).contains("[ee55ff66]"))
+        let made = Proposal(id: "ab12cd34", message: "Close the rota task.", tier: "today")
+        let message = ChiefOfStaffPrompt.branchMessage(card: card, project: "Ops Desk", charter: "WATCH\n- Client mail", made: [made])
+        #expect(message.contains("PROJECT\nOps Desk"))
+        #expect(message.contains("THE CARD\n[ee55ff66]"))
+        #expect(message.contains("- Client mail"))
+        #expect(message.contains("CARDS THIS BRANCH MADE\n[ab12cd34]"))
     }
 
     @Test func typingOrReturnOnACardStartsAMessageAboutIt() {
@@ -109,11 +111,13 @@ struct ChiefOfStaffTellContractTests {
         #expect(route(.upArrow, "\u{F700}") == .move(-1))
     }
 
-    @Test func discussKeysAreTellAndTheToldCardsOwn() {
+    @Test func branchKeysAreCloseAndTheCardsOwn() {
         func route(_ key: VirtualKey?, _ characters: String?, _ modifiers: NSEvent.ModifierFlags, _ place: ChiefOfStaffKeys.Place) -> ChiefOfStaffKeys.Action? {
-            ChiefOfStaffKeys.routeDiscuss(key: key, characters: characters, modifiers: modifiers, place: place)
+            ChiefOfStaffKeys.routeBranch(key: key, characters: characters, modifiers: modifiers, place: place)
         }
-        #expect(route(.return, "\r", [.command, .shift], .composer(draftIsEmpty: false)) == .tell)
+        #expect(route(nil, "w", [.command, .shift], .composer(draftIsEmpty: false)) == .closeBranch)
+        #expect(route(nil, "W", [.command, .shift], .card(board: false)) == .closeBranch)
+        #expect(route(.return, "\r", [.command, .shift], .composer(draftIsEmpty: false)) == nil)
         #expect(route(.return, "\r", [.command], .composer(draftIsEmpty: false)) == nil)
         #expect(route(.upArrow, nil, [], .composer(draftIsEmpty: true)) == nil)
         #expect(route(.return, "\r", [.command], .card(board: false)) == .doIt)
@@ -122,6 +126,49 @@ struct ChiefOfStaffTellContractTests {
         // The pinned conversation's own keys do nothing here.
         #expect(route(nil, "1", [.command, .option], .card(board: false)) == nil)
         #expect(route(nil, "n", [.command], .card(board: false)) == nil)
+    }
+
+    /// The thread's branch turns: the link lists the card's branches, the
+    /// merge-back line sits under its card, and a branch's own tell turns
+    /// stay out of the pinned history.
+    @Test func branchTurnsReadAsLinksAndMergeBackLines() throws {
+        let branch = UUID()
+        func turn(_ id: String, role: TurnRole = .assistant, _ text: String, _ values: [String: String]) -> TurnRecord {
+            var fields = ExtraFields()
+            for (key, value) in values { fields[key] = .string(value) }
+            return TurnRecord(id: id, role: role, text: text, appPayload: AppPayload(namespace: ChiefOfStaffThread.namespace, values: fields))
+        }
+        var record = try ChiefOfStaffThread.decode(CosFixture.data())
+        record.turns += [
+            turn("b1", "Branch opened: Budget", ["kind": "branch", "card": "aa11bb22", "branch": branch.uuidString]),
+            turn("b2", role: .user, "Charlie approved it.", ["kind": "chat", "surface": "branch"]),
+            turn("b3", "Discussed: Budget approved · 2 actions done",
+                 ["kind": "branch_summary", "card": "aa11bb22", "branch": branch.uuidString, "turns": "4"]),
+        ]
+        let items = ChiefOfStaffThread.items(in: record)
+        #expect(ChiefOfStaffThread.branches(in: items) == ["aa11bb22": [branch]])
+        let history = ChiefOfStaffThread.history(in: items)
+        #expect(!history.contains { $0.id == "b1" || $0.id == "b2" })
+        let earlier = ChiefOfStaffThread.earlier(history, in: items).map(\.id)
+        let card = try #require(earlier.firstIndex(of: record.turns.first { $0.appPayload?.values["id"]?.stringValue == "aa11bb22" }?.id ?? ""))
+        #expect(earlier[card + 1] == "b3")
+    }
+
+    /// A branch's archived record links to the pinned conversation and its
+    /// card; an ordinary chat's links to nothing; a rewrite keeps the links.
+    @Test func aBranchRecordCarriesItsSessionLinks() {
+        let branch = QuickConversation(providerID: UUID(), model: "m", customTitle: "Budget", cosCard: "aa11bb22")
+        let links = ChatArchive.record(for: branch).sessionLinks
+        #expect(links == [
+            SessionLink(kind: "cos-branch-of", id: ChiefOfStaffModel.conversationID.uuidString, label: "Chief of Staff"),
+            SessionLink(kind: "cos-card", id: "aa11bb22"),
+        ])
+        #expect(ChatArchive.record(for: QuickConversation(providerID: UUID(), model: "m")).sessionLinks.isEmpty)
+        var live = ChatArchive.record(for: branch)
+        let stored = live
+        live.sessionLinks = []
+        #expect(ChatArchive.merge(live: live, into: stored).sessionLinks == links)
+        #expect(QuickViewModel.oneLine("I will close the **costing** task. Then log it.") == "I will close the costing task")
     }
 }
 
@@ -224,77 +271,132 @@ struct ChiefOfStaffTellWindowTests {
         #expect(rig.cos.subjectCardID == nil)
     }
 
-    /// Discuss keeps the ordinary chat (its provider, tools and model call)
-    /// with the Discuss instruction on every request.
-    @Test func aDiscussChatCarriesTheDiscussInstruction() async throws {
-        let rig = try await rig()
-        defer { rig.loop.cancel() }
-        rig.window.openChiefOfStaff(proposalID: "ee55ff66")
+    /// Discuss opens a branch: linked to the pinned conversation and the
+    /// card, seeded with the card, its files, the charter core and the
+    /// project, on the ordinary chat's model and tools.
+    private func openBranch(_ rig: Rig, card: String = "ee55ff66") async {
+        rig.window.openChiefOfStaff(proposalID: card)
         rig.cos.discussFocused()
-        #expect(rig.window.discussedCardID == "ee55ff66")
-        await rig.service.setResponses([StreamDelta(text: "I will close the costing task.", finishReason: "stop")])
-        await ask(rig, "Charlie approved the costing. Close it.")
-        let sent = await rig.service.lastMessages
-        #expect(sent.first?.role == .system)
-        #expect(sent.first?.content.contains("Tristan's statements are true.") == true)
-        #expect(sent.first?.content.contains("[ee55ff66]") == true)
-        #expect(sent.last?.content.hasSuffix("Charlie approved the costing. Close it.") == true)
-        #expect(!(await rig.runner.writes.contains { if case .tell = $0 { true } else { false } }))
+        _ = await cosWaitFor { rig.cos.charter != nil }
     }
 
-    /// Tell Chief of Staff (⇧⌘↩) sends the last message about the card and
-    /// shows the card it made, focused, under the Chief of Staff's reply.
-    @Test func tellChiefOfStaffFromDiscussShowsTheCardFocused() async throws {
+    @Test func aBranchOpensWithFullContext() async throws {
         let rig = try await rig()
         defer { rig.loop.cancel() }
-        rig.window.openChiefOfStaff(proposalID: "ee55ff66")
-        rig.cos.discussFocused()
-        let chatID = try #require(rig.window.chat.currentConversation?.id)
-        await rig.service.setResponses([StreamDelta(text: "I will close the costing task.", finishReason: "stop")])
-        await ask(rig, "Charlie approved the costing. Close it.")
-        #expect(rig.window.handleChiefOfStaffKey(key: .return, characters: "\r", modifiers: [.command, .shift]))
+        await openBranch(rig)
+        let branch = try #require(rig.window.chat.currentConversation)
+        #expect(branch.cosCard == "ee55ff66")
+        #expect(branch.id != ChiefOfStaffModel.conversationID)
+        #expect(rig.window.chat.attachmentTray.items.first?.name.contains("Chief of Staff") == true)
+        await rig.service.setResponses([StreamDelta(text: "I will close the rota task.", finishReason: "stop")])
+        await ask(rig, "Alex owns the rota from Monday.")
+        let system = try #require(await rig.service.lastMessages.first)
+        #expect(system.role == .system)
+        #expect(system.content.contains("Tristan's statements are true."))
+        #expect(system.content.contains("PROJECT\nOps Desk"))
+        #expect(system.content.contains("THE CARD\n[ee55ff66]"))
+        #expect(system.content.contains("TRISTAN'S CHARTER"))
+        #expect(await rig.service.lastMessages.last?.content.hasSuffix("Alex owns the rota from Monday.") == true)
+    }
+
+    /// Every branch message also goes to `cos tell --card --surface branch`;
+    /// the first links the branch to its card. A proposal joins the branch
+    /// after the model's answer, focused; an answer adds nothing.
+    @Test func branchMessagesGoToCosTellAndProposalsShowInline() async throws {
+        let rig = try await rig()
+        defer { rig.loop.cancel() }
+        await openBranch(rig)
+        let branchID = try #require(rig.window.chat.currentConversation?.id)
+        await rig.service.setDelay(.milliseconds(40))
+        await rig.service.setResponses([StreamDelta(text: "I will close the rota task.", finishReason: "stop")])
+        await ask(rig, "Alex owns the rota from Monday.")
         #expect(await cosWaitFor { rig.window.chat.currentConversation?.messages.last?.cosTell != nil })
-        #expect(await rig.runner.writes.contains(.tell(text: "Charlie approved the costing. Close it.", card: "ee55ff66", surface: .discuss)))
-        let reply = try #require(rig.window.chat.currentConversation?.messages.last)
-        #expect(reply.cosTell == CosTold(card: "ee55ff66"))
-        #expect(rig.window.chat.currentConversation?.id == chatID)
+        let messages = try #require(rig.window.chat.currentConversation?.messages)
+        #expect(messages.map(\.role) == [.user, .assistant, .assistant])
+        #expect(messages[1].content == "I will close the rota task.")
+        #expect(messages[2].content == "Chief of Staff: I will add the task and close the costing card.")
+        #expect(messages[2].cosTell == CosTold(card: "ee55ff66"))
         #expect(rig.cos.focusedCardID == "ee55ff66")
         #expect(rig.window.focus == .cards)
-        // The card's own keys work here; the pinned conversation's do not.
-        #expect(!rig.window.handleChiefOfStaffKey(key: nil, characters: "2", modifiers: [.command, .option]))
+        let writes = await rig.runner.writes
+        #expect(writes.contains(.append(role: .assistant, text: "Branch opened: Alex asks who owns the ops rota",
+                                        meta: ["kind": "branch", "card": "ee55ff66", "branch": branchID.uuidString])))
+        #expect(writes.contains(.tell(text: "Alex owns the rota from Monday.", card: "ee55ff66", surface: .branch)))
+        // The card's own keys work in the branch.
         #expect(rig.window.handleChiefOfStaffKey(key: .return, characters: "\r", modifiers: [.command]))
         #expect(await cosWaitFor { rig.cos.card("ee55ff66").outcome != nil })
-        #expect(await rig.runner.writes.contains(.doIt(id: "ee55ff66")))
+        // A question: the model answers, and no card joins; no second link.
+        await rig.service.setDelay(.zero)
+        rig.window.focusComposer()
+        await ask(rig, "Who else is on the rota?")
+        #expect(await cosWaitFor { rig.cos.telling.isEmpty })
+        #expect(rig.window.chat.currentConversation?.messages.last?.cosTell == nil)
+        let links = await rig.runner.writes.filter { if case .append(_, _, let meta) = $0 { meta["kind"] == "branch" } else { false } }
+        #expect(links.count == 1)
     }
 
-    /// With a draft, Tell sends the draft instead, as Tristan's message.
-    @Test func tellSendsTheDraftWhenThereIsOne() async throws {
+    /// Close branch (⇧⌘W) merges it back as one line under the card, then
+    /// the pinned conversation opens. A Do it on a card the branch made
+    /// merges it too. Reopening the card continues the branch.
+    /// The merge-back lines written so far, once `count` of them are.
+    private func summaries(_ rig: Rig, count: Int = 1) async -> [CosCommand] {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        var found: [CosCommand] = []
+        repeat {
+            found = await rig.runner.writes.filter {
+                if case .append(_, _, let meta) = $0 { meta["kind"] == "branch_summary" } else { false }
+            }
+            if found.count >= count { return found }
+            try? await Task.sleep(for: .milliseconds(2))
+        } while ContinuousClock.now < deadline
+        Issue.record("only \(found.count) merge-back lines")
+        return found
+    }
+
+    @Test func aBranchMergesBackAndContinues() async throws {
         let rig = try await rig()
         defer { rig.loop.cancel() }
+        await openBranch(rig)
+        let branchID = try #require(rig.window.chat.currentConversation?.id)
+        await rig.service.setResponses([StreamDelta(text: "Understood. I will close the rota task.", finishReason: "stop")])
+        await ask(rig, "Alex owns the rota from Monday.")
+        #expect(await cosWaitFor { rig.window.chat.currentConversation?.messages.last?.cosTell != nil })
+        rig.window.focusComposer()
+        #expect(rig.window.handleChiefOfStaffKey(key: nil, characters: "w", modifiers: [.command, .shift]))
+        #expect(rig.window.isChiefOfStaffOpen)
+        let summary = CosCommand.append(
+            role: .assistant, text: "Discussed: Alex asks who owns the ops rota · 0 actions done",
+            meta: ["kind": "branch_summary", "card": "ee55ff66", "branch": branchID.uuidString, "turns": "3"]
+        )
+        #expect(await summaries(rig) == [summary])
+        // A Do it on the branch's card merges it back again, at once.
+        rig.window.chat.chiefOfStaffCardDone("ee55ff66")
+        #expect(await summaries(rig, count: 2).count == 2)
+        // Reopening the card continues the branch.
+        #expect(rig.cos.branch(for: "ee55ff66") == branchID)
         rig.window.openChiefOfStaff(proposalID: "ee55ff66")
         rig.cos.discussFocused()
-        rig.window.chat.input = "Alex owns the rota from Monday."
-        rig.window.tellChiefOfStaff()
-        #expect(rig.window.chat.input.isEmpty)
-        #expect(await cosWaitFor { rig.window.chat.currentConversation?.messages.count == 2 })
-        let messages = try #require(rig.window.chat.currentConversation?.messages)
-        #expect(messages.map(\.role) == [.user, .assistant])
-        #expect(messages[0].content == "Alex owns the rota from Monday.")
-        #expect(await rig.runner.writes.contains(.tell(text: "Alex owns the rota from Monday.", card: "ee55ff66", surface: .discuss)))
-        #expect(await rig.service.lastMessages.isEmpty)
+        #expect(rig.window.chat.currentConversation?.id == branchID)
+        // The rail nests the branch under the Chief of Staff, unnumbered.
+        let items = rig.window.railItems
+        #expect(items.first.map { AIChatWindowModel.isChiefOfStaffItem($0.itemID) } == true)
+        #expect(items[1].itemID == branchID.uuidString)
+        #expect(rig.window.isNestedBranch(items[1]))
+        #expect(rig.window.railNumber(at: 1) == nil)
     }
 
-    /// An ordinary chat has no Tell and no Discuss instruction.
-    @Test func anOrdinaryChatHasNoTell() async throws {
+    /// An ordinary chat is not a branch: no tell, no branch keys, no system
+    /// message.
+    @Test func anOrdinaryChatIsNotABranch() async throws {
         let rig = try await rig()
         defer { rig.loop.cancel() }
         rig.window.open(handoff: nil)
         #expect(rig.window.discussedCardID == nil)
-        rig.window.chat.input = "Ship Friday?"
-        #expect(!rig.window.handleChiefOfStaffKey(key: .return, characters: "\r", modifiers: [.command, .shift]))
-        rig.window.tellChiefOfStaff()
-        #expect(rig.window.chat.input == "Ship Friday?")
+        await rig.service.setResponses([StreamDelta(text: "Friday.", finishReason: "stop")])
+        await ask(rig, "Ship Friday?")
+        #expect(!rig.window.handleChiefOfStaffKey(key: nil, characters: "w", modifiers: [.command, .shift]))
         #expect(await rig.runner.writes.isEmpty)
+        #expect(await rig.service.lastMessages.first?.role != .system)
         #expect(rig.cos.systemMessage(forChat: UUID(), discussing: nil) == nil)
     }
 }

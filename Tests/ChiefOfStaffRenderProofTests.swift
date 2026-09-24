@@ -197,7 +197,8 @@ struct ChiefOfStaffRenderProofTests {
     /// width, so nothing overflows.
     /// `cos tell`: a question answered, a statement turned into a card
     /// focused under its reply, a message about a card (the subject chip),
-    /// and a Discuss chat before and after Tell Chief of Staff.
+    /// a branch with the card it made, the rail with the branch nested, and
+    /// the merge-back line under its card.
     @Test func rendersTell() async throws {
         for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
             let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
@@ -222,7 +223,8 @@ struct ChiefOfStaffRenderProofTests {
             subject.chat.input = "Sam confirmed Friday."
             try Self.save(try Self.render(subject, size: Self.normal, appearance: appearance), name: "cos-subject-\(suffix).png")
 
-            // Discuss: the ordinary chat, the strip, then Tell's card.
+            // A branch: the ordinary chat's answer, then the card the Chief
+            // of Staff made from the same message, under it.
             let (discuss, discussCos) = try await makeWindow(appearance: preference)
             let loop = Task { await discussCos.run() }
             defer { loop.cancel() }
@@ -230,15 +232,27 @@ struct ChiefOfStaffRenderProofTests {
             discussCos.discussFocused()
             let service = try #require(discuss.chat.service as? MockQuickService)
             await service.setResponses([StreamDelta(text: "I will close the costing task and log the approved figure.", finishReason: "stop")])
+            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-branch-new-\(suffix).png")
             discuss.chat.input = "Charlie approved the costing at 12,400. Close it."
             await discuss.chat.submit()
-            #expect(await cosWaitFor { discuss.chat.currentConversation?.messages.count == 2 && !discuss.chat.isStreaming })
-            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-discuss-\(suffix).png")
-            discuss.tellChiefOfStaff()
-            #expect(await cosWaitFor { discuss.chat.currentConversation?.messages.last?.cosTell != nil })
+            #expect(await cosWaitFor { discuss.chat.currentConversation?.messages.last?.cosTell != nil && !discuss.chat.isStreaming })
             #expect(discuss.focus == .cards)
-            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-discuss-tell-\(suffix).png")
-            try Self.save(try Self.render(discuss, size: Self.narrow, appearance: appearance), name: "cos-discuss-tell-narrow-\(suffix).png")
+            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-branch-\(suffix).png")
+            try Self.save(try Self.render(discuss, size: Self.narrow, appearance: appearance), name: "cos-branch-narrow-\(suffix).png")
+            // The rail: the branch nested under the Chief of Staff.
+            discuss.showRail()
+            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-branch-rail-\(suffix).png")
+            // The pinned thread with a merge-back line under the card.
+            var items = try CosFixture.items()
+            let branchID = try #require(discuss.chat.currentConversation?.id)
+            items.append(.branch(
+                turnID: "summary",
+                link: ChiefOfStaffThread.BranchLink(card: "aa11bb22", branch: branchID, turns: 3),
+                summary: "Discussed: Budget approved at the revised figure · 2 actions done"
+            ))
+            discussCos.override(items: items, status: nil)
+            discuss.openChiefOfStaff()
+            try Self.save(try Self.render(discuss, size: CGSize(width: Self.normal.width, height: 2_600), appearance: appearance), name: "cos-branch-merged-\(suffix).png")
             withExtendedLifetime((pinnedCos, subjectCos, discussCos)) {}
         }
     }

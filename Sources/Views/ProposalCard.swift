@@ -21,6 +21,8 @@ struct ProposalCard: View {
     var onLater: () -> Void = {}
     var onNo: () -> Void = {}
     var onDiscuss: () -> Void = {}
+    /// "Continue branch" once the card has one.
+    var discussTitle = "Discuss"
     var feedback: FeedbackButtons?
     var onLaterChoice: (LaterChoice) -> Void = { _ in }
     var onLaterPickText: (String) -> Void = { _ in }
@@ -188,7 +190,7 @@ struct ProposalCard: View {
                 .help("Hide it until tonight, tomorrow, next week, or a day (⌘L)")
             CardButton(title: "No", keys: ["⌘", "⌫"], showsKeys: isFocused, action: onNo)
                 .help("Not needed. Nothing runs (⌘⌫)")
-            CardButton(title: "Discuss", keys: ["⌘", "D"], showsKeys: isFocused, action: onDiscuss)
+            CardButton(title: discussTitle, keys: ["⌘", "D"], showsKeys: isFocused, action: onDiscuss)
                 .help("A new chat about this card, its sources attached (⌘D)")
         }
     }

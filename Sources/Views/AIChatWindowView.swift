@@ -110,11 +110,11 @@ struct AIChatWindowView: View {
                 }
                 ChiefOfStaffKeyStrip(model: chiefOfStaff)
             } else if let chiefOfStaff = model.chiefOfStaff, let card = model.discussedCardID {
-                DiscussStrip(
+                BranchStrip(
                     model: chiefOfStaff,
                     cardID: card,
                     isTelling: chat.isTellingChiefOfStaff,
-                    onTell: model.tellChiefOfStaff
+                    onClose: model.closeBranch
                 )
             }
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
@@ -140,7 +140,7 @@ struct AIChatWindowView: View {
         return AnyView(ChiefOfStaffHistory(
             entries: chiefOfStaff.earlier,
             problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
-        ))
+        ) { branch in model.openChat(itemID: branch.uuidString) })
     }
 
     /// Under a Chief of Staff reply that made a card: that card, with its
@@ -487,6 +487,8 @@ struct AIChatRail: View {
                 .help(snippet == nil ? item.title : "\(item.title), \(detail)")
             }
         }
+        // A branch sits indented under the Chief of Staff's row.
+        .padding(.leading, model.isNestedBranch(item) ? House.Spacing.md : 0)
         .contextMenu {
             ForEach(AIChatWindowModel.isChiefOfStaffItem(item.itemID) ? [] : AIChatWindowModel.RailAction.allCases) { action in
                 Button(role: action == .delete ? .destructive : nil) {

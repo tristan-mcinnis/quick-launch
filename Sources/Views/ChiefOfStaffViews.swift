@@ -337,6 +337,7 @@ struct WaitingProposalCard: View {
             },
             onNo: { model.send(.no(id: proposal.id)) },
             onDiscuss: { model.onDiscuss?(model.discussion(for: proposal)) },
+            discussTitle: model.branch(for: proposal.id) == nil ? "Discuss" : "Continue branch",
             feedback: FeedbackButtons(
                 feedback: proposal.feedback,
                 showsKeys: hasKeyboard && focused,
@@ -1135,6 +1136,8 @@ struct ProjectPickerView: View {
 struct ChiefOfStaffHistory: View {
     let entries: [ChiefOfStaffThread.EarlierEntry]
     var problem: String?
+    /// Open branch on a merge-back line.
+    var onOpenBranch: (UUID) -> Void = { _ in }
     @State private var expanded: Set<String> = []
 
     var body: some View {
@@ -1220,6 +1223,11 @@ struct ChiefOfStaffHistory: View {
             } else {
                 MarkdownTextView(markdown: text, isStreaming: false, scrolls: false, instanceID: "cos-\(item.id)")
                     .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+            }
+        case .branch(_, let link, let summary):
+            if let summary {
+                BranchSummaryLine(text: summary) { onOpenBranch(link.branch) }
+                    .padding(.leading, House.Spacing.sm)
             }
         case .verdict:
             EmptyView()

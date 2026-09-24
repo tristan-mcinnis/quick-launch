@@ -10,12 +10,16 @@ enum ChiefOfStaffThreadItem: Sendable, Equatable, Identifiable {
     /// A chat turn. `surface` names who recorded it: `quick-launch` for a
     /// turn this app appended, nil for `cos ask` and older turns.
     case chat(turnID: String, fromUser: Bool, text: String, date: Date?, surface: String?)
+    /// A branch opened on a card (`kind: branch`), or its merge-back line
+    /// (`kind: branch_summary`): "Discussed: … · N actions done".
+    case branch(turnID: String, link: ChiefOfStaffThread.BranchLink, summary: String?)
 
     var id: String {
         switch self {
         case .proposal(let turnID, _): turnID
         case .verdict(let turnID, _, _, _, _): turnID
         case .chat(let turnID, _, _, _, _): turnID
+        case .branch(let turnID, _, _): turnID
         }
     }
 
@@ -33,6 +37,27 @@ enum ChiefOfStaffThread {
     static let namespace = "chief-of-staff"
     /// The `surface` this app writes on the chat turns it appends.
     static let surface = "quick-launch"
+    /// The `surface` of a branch's `cos tell` turns; they stay in the branch.
+    static let branchSurface = "branch"
+
+    /// A branch of the pinned conversation: an AI Chat conversation about
+    /// one card.
+    struct BranchLink: Sendable, Equatable, Hashable {
+        var card: String
+        var branch: UUID
+        /// The branch's message count when this line was written, so a close
+        /// with nothing new writes no second line.
+        var turns: Int?
+    }
+
+    /// Every branch the thread records, card by card, newest last.
+    static func branches(in items: [ChiefOfStaffThreadItem]) -> [String: [UUID]] {
+        var result: [String: [UUID]] = [:]
+        for case .branch(_, let link, _) in items where result[link.card]?.contains(link.branch) != true {
+            result[link.card, default: []].append(link.branch)
+        }
+        return result
+    }
 
     static func decode(_ data: Data) throws -> ConversationRecord {
         try HouseChatCoding.makeDecoder().decode(ConversationRecord.self, from: data)
@@ -76,7 +101,9 @@ enum ChiefOfStaffThread {
             // A card a rung ran shows under FYI as "I did this".
             case .proposal(_, let proposal): !proposal.isWaiting && proposal.status != .later && !proposal.auto
             case .verdict: false
-            case .chat(_, _, _, _, let surface): surface != Self.surface
+            // A branch's own turns stay in the branch; its summary line shows.
+            case .chat(_, _, _, _, let surface): surface != Self.surface && surface != Self.branchSurface
+            case .branch(_, _, let summary): summary != nil
             }
         }
     }
@@ -116,7 +143,21 @@ enum ChiefOfStaffThread {
             if autoNotes[proposal.id]?.hasPrefix(mergedNote) == true { continue }
             closed.append(proposal)
         }
-        return closed.isEmpty ? entries : [.closedOnTheirOwn(closed)] + entries
+        // A branch's summary sits under its card when the card is here.
+        var placed: [EarlierEntry] = []
+        let summaries = entries.filter { if case .item(.branch) = $0 { true } else { false } }
+        let cards = Set(entries.compactMap { entry -> String? in
+            if case .item(.proposal(_, let proposal)) = entry { return proposal.id }
+            return nil
+        })
+        for entry in entries {
+            if case .item(.branch(_, let link, _)) = entry, cards.contains(link.card) { continue }
+            placed.append(entry)
+            if case .item(.proposal(_, let proposal)) = entry {
+                placed += summaries.filter { if case .item(.branch(_, let link, _)) = $0 { link.card == proposal.id } else { false } }
+            }
+        }
+        return closed.isEmpty ? placed : [.closedOnTheirOwn(closed)] + placed
     }
 
     static func item(for turn: TurnRecord) -> ChiefOfStaffThreadItem? {
@@ -135,6 +176,13 @@ enum ChiefOfStaffThread {
                 text: turn.text,
                 date: turn.createdAt
             )
+        case "branch", "branch_summary":
+            guard let card = values["card"]?.stringValue,
+                  let branch = values["branch"]?.stringValue.flatMap(UUID.init(uuidString:)) else { return nil }
+            let turns = values["turns"]?.stringValue.flatMap { Int($0) }
+            let link = BranchLink(card: card, branch: branch, turns: turns)
+            let isSummary = values["kind"]?.stringValue == "branch_summary"
+            return .branch(turnID: turn.id, link: link, summary: isSummary ? turn.text : nil)
         case "chat", nil:
             let surface = values["surface"]?.stringValue
             switch turn.role {

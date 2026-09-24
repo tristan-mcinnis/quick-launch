@@ -255,9 +255,17 @@ protocol AIChatWindowPresenting: AnyObject {
     /// new chat does: the default provider and tools, no Chief of Staff
     /// instruction. The pinned thread stays as it is.
     func discuss(_ discussion: ChiefOfStaffModel.Discussion) {
+        // Continue branch: a card that has one opens it again.
+        if let card = discussion.cardID, let branch = chat.branchConversation(for: card) {
+            openChat(itemID: branch.id.uuidString)
+            return
+        }
         releaseCards()
         closeFind()
-        if let chiefOfStaff { wire(chiefOfStaff) }
+        if let chiefOfStaff {
+            wire(chiefOfStaff)
+            chiefOfStaff.send(.loadCharter)
+        }
         if chat.isStreaming {
             chat.cancel()
             chat.persistCurrentConversation()
@@ -284,18 +292,26 @@ protocol AIChatWindowPresenting: AnyObject {
         chiefOfStaff.onDiscuss = { [weak self] in self?.discuss($0) }
         chiefOfStaff.onFocusCard = { [weak self] in self?.focusCards($0) }
         chiefOfStaff.onTold = { [weak self] chat, outcome in self?.chat.chiefOfStaffTold(outcome, inChat: chat) }
+        chiefOfStaff.branchLookup = { [weak self] card in self?.chat.branchConversation(for: card)?.id }
+        chiefOfStaff.onCardDone = { [weak self] card in self?.chat.chiefOfStaffCardDone(card) }
     }
 
     /// A Discuss chat is open: its card, while the Chief of Staff is there.
     var discussedCardID: String? { chiefOfStaff == nil ? nil : chat.discussedCardID }
 
-    /// ⇧⌘↩ or the button in a Discuss chat: the draft, else the last
-    /// question, to the Chief of Staff about the card.
-    func tellChiefOfStaff() {
-        guard let chiefOfStaff, discussedCardID != nil else { return }
+    /// ⇧⌘W or the button in a branch: it merges back (one line under its
+    /// card in the pinned thread) and the pinned conversation opens, on the
+    /// card while it waits.
+    func closeBranch() {
+        guard let chiefOfStaff, let card = discussedCardID, let branch = chat.currentConversation?.id else { return }
         wire(chiefOfStaff)
-        releaseCards()
-        chat.tellChiefOfStaff()
+        if chat.isStreaming {
+            chat.cancel()
+            chat.persistCurrentConversation()
+        }
+        chat.mergeBranch(branch)
+        let waiting = chiefOfStaff.proposal(card)?.isWaiting == true
+        openChiefOfStaff(proposalID: waiting ? card : nil)
     }
 
     /// The keyboard onto the waiting cards: `id`'s, or the newest.
@@ -382,7 +398,7 @@ protocol AIChatWindowPresenting: AnyObject {
         return true
     }
 
-    /// A Discuss chat's keys (`ChiefOfStaffKeys.routeDiscuss`).
+    /// A branch's keys (`ChiefOfStaffKeys.routeBranch`).
     private func handleDiscussKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard let chiefOfStaff else { return false }
         let place: ChiefOfStaffKeys.Place
@@ -407,7 +423,7 @@ protocol AIChatWindowPresenting: AnyObject {
         default:
             return false
         }
-        guard let action = ChiefOfStaffKeys.routeDiscuss(key: key, characters: characters, modifiers: modifiers, place: place)
+        guard let action = ChiefOfStaffKeys.routeBranch(key: key, characters: characters, modifiers: modifiers, place: place)
         else { return false }
         perform(action, on: chiefOfStaff)
         return true
@@ -421,8 +437,8 @@ protocol AIChatWindowPresenting: AnyObject {
             if isChiefOfStaffOpen { chiefOfStaff.setSubject(chiefOfStaff.focusedCardID) }
             focusComposer()
             if let typed { chat.input += typed }
-        case .tell:
-            tellChiefOfStaff()
+        case .closeBranch:
+            closeBranch()
         case .focusCards:
             focusCards()
         case .move(let delta):
@@ -515,7 +531,35 @@ protocol AIChatWindowPresenting: AnyObject {
     var railItems: [LauncherCatalogItem] {
         let chats = chat.chatItems(matching: railQuery)
         guard let chiefOfStaffRailItem else { return chats }
-        return [chiefOfStaffRailItem] + chats
+        // Unsearched, the Chief of Staff's branches sit under its row,
+        // newest first; a search ranks them with every other chat.
+        let branches = nestedBranchIDs
+        guard !branches.isEmpty else { return [chiefOfStaffRailItem] + chats }
+        let nested = branches.compactMap { id in chats.first { $0.itemID == id } }.map { item in
+            var item = item
+            item.isPinned = true
+            return item
+        }
+        return [chiefOfStaffRailItem] + nested + chats.filter { !branches.contains($0.itemID) }
+    }
+
+    /// The branch rows nested under the Chief of Staff, newest first; none
+    /// while searching or without the Chief of Staff.
+    private var nestedBranchIDs: [String] {
+        guard chiefOfStaff != nil, !isRailSearching else { return [] }
+        return chat.branchConversations.map(\.id.uuidString)
+    }
+
+    /// A rail row is a branch nested under the Chief of Staff.
+    func isNestedBranch(_ item: LauncherCatalogItem) -> Bool {
+        nestedBranchIDs.contains(item.itemID)
+    }
+
+    /// The rows ⌘1 to ⌘9 number: every chat but the Chief of Staff and its
+    /// nested branches.
+    private var numberedRailItems: [LauncherCatalogItem] {
+        let branches = nestedBranchIDs
+        return chat.chatItems(matching: railQuery).filter { !branches.contains($0.itemID) }
     }
 
     /// While a query is typed the rail is one ranked list under "Results";
@@ -572,7 +616,9 @@ protocol AIChatWindowPresenting: AnyObject {
     /// among the chats: the pinned Chief of Staff row above them takes none,
     /// so every chat keeps the number it had.
     func railNumber(at index: Int) -> Int? {
-        let offset = chiefOfStaffRailItem == nil ? 0 : 1
+        // The Chief of Staff's row and its nested branches lead the rail
+        // unnumbered.
+        let offset = chiefOfStaffRailItem == nil ? 0 : 1 + nestedBranchIDs.count
         let position = index - offset
         return position >= 0 && position < Self.jumpRowCount ? position + 1 : nil
     }
@@ -663,6 +709,12 @@ protocol AIChatWindowPresenting: AnyObject {
         closeFind()
         chat.continueConversation(itemID: itemID)
         chat.isQuickAIPresented = true
+        // A branch reads the charter for its system message and hears back
+        // from the Chief of Staff here.
+        if let chiefOfStaff, discussedCardID != nil {
+            wire(chiefOfStaff)
+            chiefOfStaff.send(.loadCharter)
+        }
         railIndex = railItems.firstIndex { $0.itemID == itemID } ?? railIndex
         railActionsPresented = false
         deleteArmedChatID = nil
@@ -673,7 +725,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// not the rail is showing.
     @discardableResult
     func jumpToRailRow(_ number: Int) -> Bool {
-        let items = chat.chatItems(matching: railQuery)
+        let items = numberedRailItems
         guard number >= 1, number <= Self.jumpRowCount, items.indices.contains(number - 1) else { return false }
         openChat(itemID: items[number - 1].itemID)
         return true

@@ -884,6 +884,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     // MARK: - Private
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
+    /// Chief of Staff cards a branch made while its answer streamed: they
+    /// join the chat after that answer.
+    @ObservationIgnored var deferredChiefOfStaffReplies: [(chat: UUID, reply: CosTellReply)] = []
     /// Bumped by every model request and by `cancel()` and a thread reset.
     /// A stream task writes state only while its generation is current, so
     /// a stopped stream that ends late (by a `CancellationError`, or by a
@@ -9015,6 +9018,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
+        // A branch's message also goes to the Chief of Staff, about its card.
+        if tellService == nil, let conversation = currentConversation, conversation.cosCard != nil {
+            branchDidAsk(conversation, text: CosTellReply.message(submittedInput, attachments: attachments.map(\.ref)))
+        }
         // One model request at a time: a request still live is stopped here,
         // and text it buffered but never drew is dropped, so none of it
         // lands in this answer.
@@ -9270,7 +9277,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 }
                 // A card the Chief of Staff just made takes the keyboard, so
                 // ⌘↩ does it; otherwise the composer does.
-                if toldCard.map({ chiefOfStaff?.focusTold($0) == true }) != true {
+                // A branch's card that came back meanwhile joins after it.
+                let madeCard = toldCard ?? flushDeferredChiefOfStaffReplies()
+                if madeCard.map({ chiefOfStaff?.focusTold($0) == true }) != true {
                     requestInputFocus()
                 }
             } catch is CancellationError {
@@ -9304,6 +9313,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
+                flushDeferredChiefOfStaffReplies()
                 isFollowUpQueued = false
                 recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
                 requestInputFocus()
@@ -9317,6 +9327,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 streamingStatus = nil
                 isStreaming = false
                 inFlightTurn = nil
+                flushDeferredChiefOfStaffReplies()
                 threadError = ThreadError(messageID: submittedMessage.id, message: error.localizedDescription)
                 // The failure is durable with the text that arrived.
                 if let chatArchive, let archivedConversationID {
@@ -9391,11 +9402,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// no answer after it (stopped before any text, or a provider error),
     /// so the request alternates as the providers expect.
     static func answeredTurns(_ messages: [QuickMessage]) -> [QuickMessage] {
-        // A Chief of Staff reply after an answer (Tell Chief of Staff in a
-        // Discuss chat) is not a turn the model takes: turns alternate.
-        let messages = messages.enumerated().filter { index, message in
-            !(message.cosTell != nil && index > 0 && messages[index - 1].role == .assistant)
-        }.map(\.element)
+        // A Chief of Staff reply (a card a branch made) is not a turn the
+        // model takes: the branch's system message lists those cards.
+        let messages = messages.filter { $0.cosTell == nil }
         return messages.enumerated().compactMap { index, message in
             let next = messages.indices.contains(index + 1) ? messages[index + 1] : nil
             if message.role == .user, next?.role == .user { return nil }
@@ -9984,6 +9993,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // Stop keeps the question and what the model said so far, as the
             // turn's answer; `⌘R` asks the same turn again.
             keepStoppedAnswer()
+            // A branch's card that came back meanwhile joins after it.
+            flushDeferredChiefOfStaffReplies()
             // A stopped answer is terminal in the archive, never left looking
             // like it is still streaming.
             if let chatArchive, let conversationID = currentConversation?.id.uuidString,

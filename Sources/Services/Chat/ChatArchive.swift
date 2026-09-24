@@ -461,6 +461,8 @@ actor ChatArchive {
             )
         }
         if merged.createdAt == nil { merged.createdAt = live.createdAt }
+        // Links only accumulate: a link the stored record lacks is added.
+        merged.sessionLinks += live.sessionLinks.filter { !stored.sessionLinks.contains($0) }
         merged.updatedAt = later(live.updatedAt, stored.updatedAt)
         merged.turns = mergeTurns(live: live.turns, stored: stored.turns)
         return merged
@@ -473,6 +475,8 @@ actor ChatArchive {
         merged.attachments = mergeAttachments(live: live.attachments, stored: stored.attachments)
         merged.appPayload = mergingAppPayload(live: live.appPayload, stored: stored.appPayload, owned: turnOwnedKeys)
         if merged.createdAt == nil { merged.createdAt = live.createdAt }
+        // Links only accumulate: a link the stored record lacks is added.
+        merged.sessionLinks += live.sessionLinks.filter { !stored.sessionLinks.contains($0) }
         return merged
     }
 
@@ -1037,10 +1041,25 @@ actor ChatArchive {
             title: conversation.title,
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
+            sessionLinks: sessionLinks(for: conversation),
             turns: conversation.messages.map(turn(for:)),
             appPayload: payload
         )
     }
+
+    /// A Chief of Staff branch links to its parent, the pinned conversation,
+    /// and to the card it is about. Every other chat links to nothing.
+    static func sessionLinks(for conversation: QuickConversation) -> [SessionLink] {
+        guard let card = conversation.cosCard else { return [] }
+        return [
+            SessionLink(kind: branchParentLink, id: ChiefOfStaffModel.conversationID.uuidString, label: ChiefOfStaffModel.title),
+            SessionLink(kind: branchCardLink, id: card),
+        ]
+    }
+
+    /// The `SessionLink` kinds of a branch.
+    static let branchParentLink = "cos-branch-of"
+    static let branchCardLink = "cos-card"
 
     /// One legacy message as a turn, keeping the card and the tool records in
     /// the turn's own namespaced payload.
