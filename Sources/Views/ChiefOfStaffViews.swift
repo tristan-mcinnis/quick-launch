@@ -306,12 +306,27 @@ struct ChiefOfStaffPanel: View {
     }
 
     private func card(_ proposal: Proposal) -> some View {
+        WaitingProposalCard(model: model, proposal: proposal, hasKeyboard: hasKeyboard, onFocus: onFocus)
+    }
+}
+
+/// One waiting card as a full Proposal card, wired to the model: in the
+/// List, and under the reply that made it in a chat.
+struct WaitingProposalCard: View {
+    @Bindable var model: ChiefOfStaffModel
+    let proposal: Proposal
+    /// The keyboard is on the cards.
+    let hasKeyboard: Bool
+    var onFocus: (ChiefOfStaffFocus) -> Void = { _ in }
+
+    var body: some View {
         let state = model.cards[proposal.id] ?? ProposalCardState()
-        return ProposalCard(
+        let focused = model.focusedCardID == proposal.id
+        ProposalCard(
             proposal: proposal,
             state: state,
-            isFocused: isFocused(proposal) || (state.isEditing && model.focusedCardID == proposal.id),
-            editFocusRequest: model.focusedCardID == proposal.id ? model.editFocusRequest : 0,
+            isFocused: (hasKeyboard && focused) || (state.isEditing && focused),
+            editFocusRequest: focused ? model.editFocusRequest : 0,
             laterMenu: model.laterMenu,
             now: model.now,
             onDo: { model.send(.doIt(id: proposal.id)) },
@@ -322,7 +337,15 @@ struct ChiefOfStaffPanel: View {
             },
             onNo: { model.send(.no(id: proposal.id)) },
             onDiscuss: { model.onDiscuss?(model.discussion(for: proposal)) },
-            feedback: feedbackButtons(proposal),
+            feedback: FeedbackButtons(
+                feedback: proposal.feedback,
+                showsKeys: hasKeyboard && focused,
+                onMore: { model.send(.more(id: proposal.id)) },
+                onLess: {
+                    model.focusCard(proposal.id)
+                    model.lessFocused()
+                }
+            ),
             onLaterChoice: { model.chooseLater($0) },
             onLaterPickText: model.setLaterPickText,
             onRun: { model.send(.runEdit(id: proposal.id)) },

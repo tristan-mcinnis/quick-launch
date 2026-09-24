@@ -28,6 +28,10 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// `content` stays what was typed. Nil on answers, on questions without
     /// attachments, and on every message saved before attachments.
     var attachments: [ChatAttachmentRef]?
+    /// Set on an answer from the Chief of Staff (`cos tell`), with the card
+    /// it made, drawn under the answer. A model request leaves out such an
+    /// answer when it follows another answer.
+    var cosTell: CosTold?
 
     init(
         id: UUID = UUID(),
@@ -35,7 +39,8 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
         content: String,
         askUserQuestion: AskUserQuestion? = nil,
         toolRecords: [ChatToolRecord]? = nil,
-        attachments: [ChatAttachmentRef]? = nil
+        attachments: [ChatAttachmentRef]? = nil,
+        cosTell: CosTold? = nil
     ) {
         self.id = id
         self.role = role
@@ -43,6 +48,7 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.askUserQuestion = askUserQuestion
         self.toolRecords = toolRecords
         self.attachments = attachments
+        self.cosTell = cosTell
     }
 
     /// The tool lines, empty when there are none.
@@ -57,4 +63,9 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
         var seen = Set<String>()
         return tools.flatMap(\.sources).filter { seen.insert($0.id).inserted }
     }
+}
+
+/// A `cos tell` reply in a chat: the card it made, if it made one.
+struct CosTold: Codable, Sendable, Equatable, Hashable {
+    var card: String?
 }

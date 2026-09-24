@@ -235,7 +235,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// when a notification named one.
     func openChiefOfStaff(proposalID: String? = nil) {
         guard let chiefOfStaff else { return }
-        chiefOfStaff.onDiscuss = { [weak self] in self?.discuss($0) }
+        wire(chiefOfStaff)
         closeFind()
         chat.openChiefOfStaffChat()
         railIndex = currentRailIndex ?? railIndex
@@ -257,19 +257,45 @@ protocol AIChatWindowPresenting: AnyObject {
     func discuss(_ discussion: ChiefOfStaffModel.Discussion) {
         releaseCards()
         closeFind()
+        if let chiefOfStaff { wire(chiefOfStaff) }
         if chat.isStreaming {
             chat.cancel()
             chat.persistCurrentConversation()
         }
         chat.startNewConversation()
         if let provider = chat.activeProvider, let model = chat.activeModelID {
-            chat.currentConversation = QuickConversation(providerID: provider.id, model: model, customTitle: discussion.title)
+            chat.currentConversation = QuickConversation(
+                providerID: provider.id,
+                model: model,
+                customTitle: discussion.title,
+                cosCard: discussion.cardID
+            )
         }
         chat.attachmentTray.add(.selection(discussion.cardText, appName: ChiefOfStaffModel.title))
         chat.attachmentTray.add(contentsOf: discussion.files.map(AttachmentSource.file))
         chat.isQuickAIPresented = true
         railIndex = currentRailIndex ?? railIndex
         focusComposer()
+    }
+
+    /// The Chief of Staff's ways back into this window: Discuss, the
+    /// keyboard onto a card a reply made, and a Discuss chat's Tell reply.
+    private func wire(_ chiefOfStaff: ChiefOfStaffModel) {
+        chiefOfStaff.onDiscuss = { [weak self] in self?.discuss($0) }
+        chiefOfStaff.onFocusCard = { [weak self] in self?.focusCards($0) }
+        chiefOfStaff.onTold = { [weak self] chat, outcome in self?.chat.chiefOfStaffTold(outcome, inChat: chat) }
+    }
+
+    /// A Discuss chat is open: its card, while the Chief of Staff is there.
+    var discussedCardID: String? { chiefOfStaff == nil ? nil : chat.discussedCardID }
+
+    /// ⇧⌘↩ or the button in a Discuss chat: the draft, else the last
+    /// question, to the Chief of Staff about the card.
+    func tellChiefOfStaff() {
+        guard let chiefOfStaff, discussedCardID != nil else { return }
+        wire(chiefOfStaff)
+        releaseCards()
+        chat.tellChiefOfStaff()
     }
 
     /// The keyboard onto the waiting cards: `id`'s, or the newest.
@@ -290,6 +316,9 @@ protocol AIChatWindowPresenting: AnyObject {
     /// List, ⌥⌘2 Board, ⌘N New task, ⌘I health, ⇧⌘P project, ⇧⌘↩ Do all TODAY,
     /// ⇧⌘T tasks. True when the key was used; every other chat is untouched.
     func handleChiefOfStaffKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
+        if !isChiefOfStaffOpen, discussedCardID != nil {
+            return handleDiscussKey(key: key, characters: characters, modifiers: modifiers)
+        }
         guard isChiefOfStaffOpen, let chiefOfStaff else { return false }
         if focus == .cosForm {
             // The sheet's fields type; ⌘↩ adds the task or the rule.
@@ -353,8 +382,47 @@ protocol AIChatWindowPresenting: AnyObject {
         return true
     }
 
+    /// A Discuss chat's keys (`ChiefOfStaffKeys.routeDiscuss`).
+    private func handleDiscussKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard let chiefOfStaff else { return false }
+        let place: ChiefOfStaffKeys.Place
+        switch focus {
+        case .composer:
+            switch chat.topLayer {
+            case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser, .modelChooser,
+                 .assistantChooser, .captureChooser, .addContextMenu, .slashCommandPalette, .recentChats:
+                return false
+            default:
+                if chat.isAskQuestionActive { return false }
+            }
+            place = .composer(draftIsEmpty: chat.input.isEmpty)
+        case .cards:
+            if let menu = chiefOfStaff.laterMenu {
+                place = menu.isPicking ? .laterPicking : .laterMenu
+            } else {
+                place = .card(board: false)
+            }
+        case .cardEdit:
+            place = .editing
+        default:
+            return false
+        }
+        guard let action = ChiefOfStaffKeys.routeDiscuss(key: key, characters: characters, modifiers: modifiers, place: place)
+        else { return false }
+        perform(action, on: chiefOfStaff)
+        return true
+    }
+
     private func perform(_ action: ChiefOfStaffKeys.Action, on chiefOfStaff: ChiefOfStaffModel) {
         switch action {
+        case .reply(let typed):
+            // In the pinned chat the message is about the card; in a Discuss
+            // chat the chat already is.
+            if isChiefOfStaffOpen { chiefOfStaff.setSubject(chiefOfStaff.focusedCardID) }
+            focusComposer()
+            if let typed { chat.input += typed }
+        case .tell:
+            tellChiefOfStaff()
         case .focusCards:
             focusCards()
         case .move(let delta):
@@ -984,6 +1052,9 @@ protocol AIChatWindowPresenting: AnyObject {
             focus = .cards
         } else if focus == .cards {
             focusComposer()
+        } else if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.subjectCardID != nil {
+            // The next message is not about that card after all.
+            chiefOfStaff.setSubject(nil)
         } else if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.isHealthDetailShown || chiefOfStaff.newTask != nil
                     || chiefOfStaff.projectPicker != nil || chiefOfStaff.addRule != nil {
             chiefOfStaff.isHealthDetailShown = false

@@ -45,6 +45,18 @@ enum CosCommand: Sendable, Equatable {
     /// Record a chat turn this app made. The text goes on stdin (`-`), so a
     /// long answer never meets an argument limit.
     case append(role: Role, text: String, meta: [String: String])
+    /// Tell the Chief of Staff something: it answers, or turns a fact or an
+    /// instruction into a card (`cos tell`). The text goes on stdin; `card`
+    /// is the card the message is about.
+    case tell(text: String, card: String?, surface: TellSurface)
+
+    /// Where a `cos tell` came from.
+    enum TellSurface: String, Sendable {
+        /// The pinned conversation.
+        case pinned = "quick-launch"
+        /// A Discuss chat's Tell Chief of Staff.
+        case discuss
+    }
 
     enum Role: String, Sendable {
         case user
@@ -114,13 +126,20 @@ enum CosCommand: Sendable, Equatable {
                 arguments += ["--meta", String(decoding: try encoder.encode(meta), as: UTF8.self)]
             }
             return arguments + ["-"]
+        case .tell(_, let card, let surface):
+            var arguments = ["tell", "-", "--surface", surface.rawValue]
+            if let card, !card.isEmpty { arguments += ["--card", card] }
+            return arguments + ["--json"]
         }
     }
 
-    /// What goes on the child's stdin: the appended turn's text, else nothing.
+    /// What goes on the child's stdin: the appended turn's or the told
+    /// text, else nothing.
     var stdin: Data? {
-        if case .append(_, let text, _) = self { return Data(text.utf8) }
-        return nil
+        switch self {
+        case .append(_, let text, _), .tell(let text, _, _): Data(text.utf8)
+        default: nil
+        }
     }
 
     /// Seconds the call may run before it is stopped. Do and Edit run the
@@ -132,6 +151,8 @@ enum CosCommand: Sendable, Equatable {
         // A `prepare` action calls the model: the contract allows 250 s.
         case .doIt, .edit: 260
         case .add, .undo: 180
+        // A maker call and maybe a review: 60 s and 90 s in the contract.
+        case .tell: 200
         }
     }
 }

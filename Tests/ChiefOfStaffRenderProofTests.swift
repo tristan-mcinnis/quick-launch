@@ -195,6 +195,54 @@ struct ChiefOfStaffRenderProofTests {
     /// Offered less than the window's minimum width, the root view takes
     /// exactly the offer, in the List and on the Board: nothing forces a
     /// width, so nothing overflows.
+    /// `cos tell`: a question answered, a statement turned into a card
+    /// focused under its reply, a message about a card (the subject chip),
+    /// and a Discuss chat before and after Tell Chief of Staff.
+    @Test func rendersTell() async throws {
+        for (appearance, suffix) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+            let preference: AppearancePreference = appearance == .darkAqua ? .dark : .light
+
+            let (pinned, pinnedCos) = try await makeWindow(appearance: preference)
+            #expect(await cosWaitFor { pinned.chat.currentConversation?.messages.count == 2 && !pinned.chat.isStreaming })
+            pinned.chat.input = "Charlie approved the costing at 12,400. Close the costing task."
+            await pinned.chat.submit()
+            #expect(await cosWaitFor { pinned.chat.currentConversation?.messages.last?.cosTell?.card != nil })
+            #expect(pinnedCos.focusedCardID == "ee55ff66")
+            try Self.save(try Self.render(pinned, size: Self.normal, appearance: appearance), name: "cos-tell-\(suffix).png")
+            try Self.save(try Self.render(pinned, size: Self.narrow, appearance: appearance), name: "cos-tell-narrow-\(suffix).png")
+            // Tall enough that the thread under the List shows the reply and its card.
+            try Self.save(try Self.render(pinned, size: CGSize(width: Self.normal.width, height: 2_600), appearance: appearance), name: "cos-tell-tall-\(suffix).png")
+
+            // Typing on a card: the message is about it.
+            let (subject, subjectCos) = try await makeWindow(appearance: preference)
+            subject.chat.input = ""
+            subject.focusCards("cc33dd44")
+            key(subject, nil, "S", [.shift])
+            #expect(subjectCos.subject?.id == "cc33dd44")
+            subject.chat.input = "Sam confirmed Friday."
+            try Self.save(try Self.render(subject, size: Self.normal, appearance: appearance), name: "cos-subject-\(suffix).png")
+
+            // Discuss: the ordinary chat, the strip, then Tell's card.
+            let (discuss, discussCos) = try await makeWindow(appearance: preference)
+            let loop = Task { await discussCos.run() }
+            defer { loop.cancel() }
+            discuss.openChiefOfStaff(proposalID: "ee55ff66")
+            discussCos.discussFocused()
+            let service = try #require(discuss.chat.service as? MockQuickService)
+            await service.setResponses([StreamDelta(text: "I will close the costing task and log the approved figure.", finishReason: "stop")])
+            discuss.chat.input = "Charlie approved the costing at 12,400. Close it."
+            await discuss.chat.submit()
+            #expect(await cosWaitFor { discuss.chat.currentConversation?.messages.count == 2 && !discuss.chat.isStreaming })
+            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-discuss-\(suffix).png")
+            discuss.tellChiefOfStaff()
+            #expect(await cosWaitFor { discuss.chat.currentConversation?.messages.last?.cosTell != nil })
+            #expect(discuss.focus == .cards)
+            try Self.save(try Self.render(discuss, size: Self.normal, appearance: appearance), name: "cos-discuss-tell-\(suffix).png")
+            try Self.save(try Self.render(discuss, size: Self.narrow, appearance: appearance), name: "cos-discuss-tell-narrow-\(suffix).png")
+            withExtendedLifetime((pinnedCos, subjectCos, discussCos)) {}
+        }
+    }
+
     @Test func theRootReflowsAtNarrowWidths() async throws {
         let (window, cos) = try await makeWindow(appearance: .dark)
         key(window, .upArrow, nil, [.option])

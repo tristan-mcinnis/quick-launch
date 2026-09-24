@@ -22,6 +22,8 @@ struct StreamDelta: Sendable {
     /// Token usage the provider reported for the turn so far, or nil when it
     /// reported none. Never invented.
     var usage: TokenUsage? = nil
+    /// The Chief of Staff card this answer made (`cos tell`), drawn under it.
+    var cosCard: String? = nil
 }
 
 extension TokenUsage {

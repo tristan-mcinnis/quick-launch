@@ -23,6 +23,10 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
     /// Its instructions and context skills are the chat's system message;
     /// nil is a plain chat. A deleted assistant leaves a plain chat.
     var assistantID: UUID?
+    /// Set on a Discuss chat: the Chief of Staff card it is about. Such a
+    /// chat gets the Discuss instruction and Tell Chief of Staff; nil is
+    /// every other chat.
+    var cosCard: String?
 
     init(
         id: UUID = UUID(),
@@ -35,7 +39,8 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         titleSource: String? = nil,
         isPinned: Bool = false,
         enabledTools: Set<ChatToolKind>? = nil,
-        assistantID: UUID? = nil
+        assistantID: UUID? = nil,
+        cosCard: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -48,11 +53,12 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         self.isPinned = isPinned
         self.enabledTools = enabledTools
         self.assistantID = assistantID
+        self.cosCard = cosCard
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAt, updatedAt, providerID, model, messages, customTitle, titleSource, isPinned, enabledTools, assistantID
-        case tasksEnabled
+        case tasksEnabled, cosCard
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +77,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
             enabledTools?.insert(.tasks)
         }
         assistantID = try c.decodeIfPresent(UUID.self, forKey: .assistantID)
+        cosCard = try c.decodeIfPresent(String.self, forKey: .cosCard)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -90,6 +97,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
             try c.encode(tasksEnabled, forKey: .tasksEnabled)
         }
         try c.encodeIfPresent(assistantID, forKey: .assistantID)
+        try c.encodeIfPresent(cosCard, forKey: .cosCard)
     }
 
     /// The chat's name without the saved-prompt list, so no leading

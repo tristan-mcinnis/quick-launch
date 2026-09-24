@@ -50,13 +50,19 @@ AI Chat is one conversation window over the same providers and tools. No autonom
 
 **Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
 organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
-acts only by calling the `cos` CLI (`do`, `edit`, `no`, `later`, `reopen`,
+acts only by calling the `cos` CLI (`tell`, `do`, `edit`, `no`, `later`, `reopen`,
 `add`, `append`, `more`, `less`, `always`, `never`, `undo`, `rule`, `forget`;
 reads `status`, `projects`, `tasks`, `activity`, `artifacts`, `charter`,
 `rungs`, `learnings`) on
 an action the user takes, per `../chief-of-staff/docs/CONTRACT.md`; Quick
 Launch never writes the thread or the charter, opens a file only on an
 explicit action, and its chat gets no write tools.
+Every message in the pinned conversation goes to `cos tell` (with `--card`
+when it is about a card), never to a model: an answer shows as a reply, a
+proposal as its card under the reply with the keyboard on it. A Discuss chat
+(`QuickConversation.cosCard`) stays an ordinary chat with the Discuss
+instruction (`ChiefOfStaffPrompt.discussInstructions`) and adds Tell Chief of
+Staff (`⇧⌘↩`, `cos tell --surface discuss`).
 It is additive: Quick AI and every other AI Chat conversation keep their
 provider, tools, keys and palette order, and its keys (`⌥⌘1` to `⌥⌘5`,
 `⌥⌘[` `⌥⌘]`, `⌘N` `⌘I` `⌘Y` `⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it

@@ -91,7 +91,8 @@ struct AIChatWindowView: View {
                     viewModel: chat,
                     find: model.findHighlights,
                     onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) },
-                    header: chiefOfStaffHistory
+                    header: chiefOfStaffHistory,
+                    accessory: toldCard
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // The scroll view would otherwise draw up under the header
@@ -102,7 +103,19 @@ struct AIChatWindowView: View {
                     .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
             }
             if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
+                if let subject = chiefOfStaff.subject {
+                    SubjectChip(proposal: subject) { chiefOfStaff.setSubject(nil) }
+                        .padding(.horizontal, House.Spacing.lg)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 ChiefOfStaffKeyStrip(model: chiefOfStaff)
+            } else if let chiefOfStaff = model.chiefOfStaff, let card = model.discussedCardID {
+                DiscussStrip(
+                    model: chiefOfStaff,
+                    cardID: card,
+                    isTelling: chat.isTellingChiefOfStaff,
+                    onTell: model.tellChiefOfStaff
+                )
             }
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
@@ -128,6 +141,24 @@ struct AIChatWindowView: View {
             entries: chiefOfStaff.earlier,
             problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
         ))
+    }
+
+    /// Under a Chief of Staff reply that made a card: that card, with its
+    /// buttons and keys. Nil under every other message.
+    private func toldCard(_ message: QuickMessage) -> AnyView? {
+        guard let card = message.cosTell?.card, let chiefOfStaff = model.chiefOfStaff else { return nil }
+        return AnyView(ToldCard(
+            model: chiefOfStaff,
+            cardID: card,
+            hasKeyboard: model.focus == .cards || model.focus == .cardEdit,
+            takesKeyboard: !model.isChiefOfStaffOpen
+        ) { place in
+            switch place {
+            case .cards: model.noteFocus(.cards, true)
+            case .editing: model.noteFocus(.cardEdit, true)
+            case .form: model.noteFocus(.cosForm, true)
+            }
+        })
     }
 
     // MARK: - Header

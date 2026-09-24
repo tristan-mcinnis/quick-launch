@@ -91,7 +91,8 @@ extension QuickViewModel {
     /// The Chief of Staff's system message for a request in chat `id`, put
     /// before an assistant's own when both apply.
     func pinnedSystemMessage(forChat id: UUID, assistant: String?) -> String? {
-        guard let pinned = chiefOfStaff?.systemMessage(forChat: id) else { return assistant }
+        let discussing = currentConversation?.id == id ? currentConversation?.cosCard : nil
+        guard let pinned = chiefOfStaff?.systemMessage(forChat: id, discussing: discussing) else { return assistant }
         return [pinned, assistant].compactMap { $0 }.joined(separator: "\n\n")
     }
 
@@ -100,5 +101,61 @@ extension QuickViewModel {
         openChiefOfStaffChat()
         input = text
         submitFromComposer()
+    }
+
+    // MARK: - Discuss
+
+    /// The card the open chat discusses, while the Chief of Staff is there.
+    var discussedCardID: String? {
+        guard let chiefOfStaff, chiefOfStaff.isAvailable else { return nil }
+        return currentConversation?.cosCard
+    }
+
+    /// A Tell Chief of Staff is running for the open chat.
+    var isTellingChiefOfStaff: Bool {
+        currentConversation.map { chiefOfStaff?.telling.contains($0.id) == true } ?? false
+    }
+
+    /// Tell Chief of Staff (⇧⌘↩) in a Discuss chat: the draft, else the last
+    /// question, goes to `cos tell` about the card. The reply joins the chat
+    /// as the Chief of Staff's, with the card it made drawn under it and the
+    /// keyboard on that card.
+    func tellChiefOfStaff() {
+        guard let chiefOfStaff, let card = discussedCardID, let chat = currentConversation,
+              !chiefOfStaff.telling.contains(chat.id) else { return }
+        let draft = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text: String
+        if !draft.isEmpty {
+            text = draft
+            input = ""
+            appendMessage(QuickMessage(role: .user, content: draft), toChat: chat.id)
+        } else if let last = chat.messages.last(where: { $0.role == .user }) {
+            text = CosTellReply.message(last.content, attachments: last.attachmentRefs)
+        } else {
+            errorMessage = "Type what to tell the Chief of Staff first."
+            return
+        }
+        errorMessage = nil
+        chiefOfStaff.send(.tell(text: text, card: card, chat: chat.id))
+    }
+
+    /// A Tell Chief of Staff came back for chat `id`: the reply joins it,
+    /// and the keyboard goes onto the card it made while the chat is open.
+    func chiefOfStaffTold(_ outcome: Result<CosTellReply, any Error>, inChat id: UUID) {
+        switch outcome {
+        case .success(let reply):
+            let made = reply.kind == .proposal ? reply.card : nil
+            // Named, so it never reads as this chat's model talking.
+            appendMessage(
+                QuickMessage(role: .assistant, content: "Chief of Staff: " + reply.text, cosTell: CosTold(card: made)),
+                toChat: id
+            )
+            if let made, currentConversation?.id == id {
+                chiefOfStaff?.focusTold(made)
+            }
+        case .failure(let error):
+            guard currentConversation?.id == id else { return }
+            errorMessage = "The Chief of Staff did not take it: \(error.localizedDescription)"
+        }
     }
 }

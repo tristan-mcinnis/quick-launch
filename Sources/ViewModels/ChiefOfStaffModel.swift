@@ -68,6 +68,8 @@ final class ChiefOfStaffModel {
         /// Open a file in its default app (an explicit action only).
         case open(URL)
         case recordTurn(question: String, answer: String, attachmentNames: [String])
+        /// Tell Chief of Staff from Discuss chat `chat` about `card`.
+        case tell(text: String, card: String, chat: UUID)
         case refresh
     }
 
@@ -158,6 +160,8 @@ final class ChiefOfStaffModel {
         var cardText: String
         /// Its source files that exist on this Mac.
         var files: [URL]
+        /// The card Tell Chief of Staff names (`cos tell --card`).
+        var cardID: String?
     }
 
     /// The collapsible sections of the list.
@@ -235,6 +239,14 @@ final class ChiefOfStaffModel {
     private(set) var cards: [String: ProposalCardState] = [:]
     /// Active projects, from `cos projects --json`.
     private(set) var projects: [CosProject] = []
+    /// The card the next pinned-chat message is about (`setSubject`).
+    private(set) var subjectCardID: String?
+    /// Discuss chats whose Tell Chief of Staff is running.
+    private(set) var telling: Set<UUID> = []
+    /// Puts the window's keyboard on a card a reply just made.
+    @ObservationIgnored var onFocusCard: ((String) -> Void)?
+    /// A Discuss chat's Tell Chief of Staff finished: its reply, or why not.
+    @ObservationIgnored var onTold: ((UUID, Result<CosTellReply, any Error>) -> Void)?
     /// The card the keyboard is on, or nil (the composer has it).
     var focusedCardID: String? {
         didSet { if let proposal = proposal(focusedCardID) { lastFocusedProposal = proposal } }
@@ -486,9 +498,13 @@ final class ChiefOfStaffModel {
     // MARK: - The pinned chat
 
     /// The system message for a request in chat `id`: the Chief of Staff
-    /// instruction, the waiting cards and the last twelve proposals. Nil
-    /// for any other chat.
-    func systemMessage(forChat id: UUID) -> String? {
+    /// instruction, the waiting cards and the last twelve proposals; in a
+    /// Discuss chat (`discussing` names its card), the Discuss instruction.
+    /// Nil for any other chat.
+    func systemMessage(forChat id: UUID, discussing: String? = nil) -> String? {
+        if id != Self.conversationID, let discussing {
+            return ChiefOfStaffPrompt.discussMessage(card: proposal(discussing))
+        }
         guard id == Self.conversationID else { return nil }
         return ChiefOfStaffPrompt.systemMessage(
             waiting: pending.filter { $0.tierKind != .system },
@@ -502,6 +518,58 @@ final class ChiefOfStaffModel {
     func chatDidAnswer(id: UUID, question: String, answer: String, attachmentNames: [String]) {
         guard id == Self.conversationID else { return }
         send(.recordTurn(question: question, answer: answer, attachmentNames: attachmentNames))
+    }
+
+    // MARK: - Tell
+
+    /// The answerer of a question in chat `id`: in the pinned chat, one
+    /// `cos tell` call, about the subject card when there is one (the
+    /// subject is then used up). Nil in every other chat.
+    func tellService(forChat id: UUID, text: String) -> (any QuickService)? {
+        guard id == Self.conversationID, isAvailable, let runner else { return nil }
+        let card = subjectCardID
+        subjectCardID = nil
+        return CosTellService(runner: runner, command: .tell(text: text, card: card, surface: .pinned)) { [weak self] _ in
+            await self?.reload(force: true)
+        }
+    }
+
+    /// Discuss's Tell Chief of Staff: `text` to `cos tell` about `card`,
+    /// then a fresh read so the card it made is there to draw, then the
+    /// reply to `onTold` for chat `chat`.
+    private func discussTell(_ text: String, about card: String, fromChat chat: UUID) async {
+        guard let runner, !telling.contains(chat) else { return }
+        telling.insert(chat)
+        let outcome: Result<CosTellReply, any Error>
+        do {
+            outcome = .success(try CosTellReply.parse(try await runner.run(.tell(text: text, card: card, surface: .discuss))))
+            await reload(force: true)
+        } catch {
+            outcome = .failure(error)
+        }
+        telling.remove(chat)
+        onTold?(chat, outcome)
+    }
+
+    /// The card the next message in the pinned chat is about: typing on a
+    /// card, ↩ on it, or a notification Reply names it.
+    func setSubject(_ id: String?) {
+        subjectCardID = id.flatMap { proposal($0) == nil ? nil : $0 }
+    }
+
+    var subject: Proposal? { proposal(subjectCardID) }
+
+    /// A reply made card `id`: the keyboard goes onto it, in the List,
+    /// when it waits there (a card still in review is not shown yet).
+    /// False leaves the keyboard where it was.
+    @discardableResult
+    func focusTold(_ id: String) -> Bool {
+        guard let card = proposal(id), card.isWaiting, !card.awaitsReview else { return false }
+        if viewMode != .list { viewMode = .list }
+        focusCard(id)
+        guard focusedCardID == id else { return false }
+        onFocusCard?(id)
+        return true
     }
 
     // MARK: - Keyboard focus
@@ -693,7 +761,7 @@ final class ChiefOfStaffModel {
         if let card { text += "\n\n" + Self.cardText(card) }
         let url = paths.map { artifact.url(in: $0) }
         let files = [url].compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
-        return Discussion(title: artifact.name, cardText: text, files: files)
+        return Discussion(title: artifact.name, cardText: text, files: files, cardID: artifact.card)
     }
 
     /// The card as the text a new chat starts from: headline, why, the
@@ -733,7 +801,7 @@ final class ChiefOfStaffModel {
         }
         var unique: [URL] = []
         for url in files where !unique.contains(url) { unique.append(url) }
-        return Discussion(title: proposal.headline, cardText: cardText(proposal), files: unique)
+        return Discussion(title: proposal.headline, cardText: cardText(proposal), files: unique, cardID: proposal.id)
     }
 
     // MARK: - Activity, Artifacts, Charter
@@ -1179,6 +1247,8 @@ final class ChiefOfStaffModel {
             }
         case .recordTurn(let question, let answer, let names):
             await record(question: question, answer: answer, attachmentNames: names)
+        case .tell(let text, let card, let chat):
+            await discussTell(text, about: card, fromChat: chat)
         case .refresh:
             await reload(force: true)
         }
@@ -1376,7 +1446,9 @@ final class ChiefOfStaffModel {
                 }
                 return
             }
-            onReply?(Self.replyMessage(text, about: card))
+            // The reply is about this card: `cos tell --card` gets its id.
+            setSubject(card?.id)
+            onReply?(text)
         }
     }
 
@@ -1455,6 +1527,11 @@ enum ChiefOfStaffKeys {
         case activityDay(Int)
         /// A learnings card: forget the first (0) or second (1) row.
         case forgetConflict(Int)
+        /// ↩ or a typed character on a card: a message about it, in the
+        /// composer, starting with the character.
+        case reply(String?)
+        /// ⇧⌘↩ in a Discuss chat: Tell Chief of Staff.
+        case tell
         case runEdit
         case cancelEdit
         case menuMove(Int)
@@ -1467,6 +1544,31 @@ enum ChiefOfStaffKeys {
         case pickProject
         case doAllToday
         case toggleTasks
+    }
+
+    /// The keys in a Discuss chat: ⇧⌘↩ Tell Chief of Staff from the
+    /// composer, and on the card a reply made, that card's own keys. ↑↓
+    /// leave it; nothing else of the pinned conversation's acts here.
+    static func routeDiscuss(
+        key: VirtualKey?,
+        characters: String?,
+        modifiers: NSEvent.ModifierFlags,
+        place: Place
+    ) -> Action? {
+        if key?.isReturn == true, modifiers.overlayRelevant == [.command, .shift] {
+            if case .composer = place { return .tell }
+            if case .card = place { return .tell }
+        }
+        if case .composer = place { return nil }
+        let action = route(key: key, characters: characters, modifiers: modifiers, place: place, hasCards: true)
+        switch action {
+        case .move: return .toComposer
+        case .toComposer, .doIt, .edit, .later, .no, .bringBack, .more, .undo, .reply, .discuss,
+             .runEdit, .cancelEdit, .menuMove, .menuPick, .menuClose:
+            return action
+        default:
+            return nil
+        }
     }
 
     static func route(
@@ -1556,6 +1658,16 @@ enum ChiefOfStaffKeys {
             if key == .escape, modifiers.isEmpty { return .toComposer }
             if key?.isReturn == true, modifiers == [.command] { return .doIt }
             if key == .delete, modifiers == [.command] { return .no }
+            // A bare ↩ never decides a card: it starts a message about it,
+            // as typing does.
+            if key?.isReturn == true, modifiers.isEmpty { return .reply(nil) }
+            if modifiers.isEmpty || modifiers == [.shift], let typed = characters, typed.count == 1,
+               let scalar = typed.unicodeScalars.first,
+               !CharacterSet.whitespacesAndNewlines.contains(scalar), !CharacterSet.controlCharacters.contains(scalar),
+               // Arrows and the other function keys arrive as private-use characters.
+               !(0xF700...0xF8FF).contains(scalar.value) {
+                return .reply(typed)
+            }
             if modifiers == [.command] {
                 switch character {
                 case "e": return .edit

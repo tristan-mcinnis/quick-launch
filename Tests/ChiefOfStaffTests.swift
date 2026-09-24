@@ -34,11 +34,21 @@ actor RecordingCosRunner: CosRunning {
             return CosResult(exitCode: 0, stdout: Self.charterJSON, stderr: "")
         case .learnings:
             return CosResult(exitCode: 0, stdout: Self.learningsJSON, stderr: "")
+        case .tell(let text, _, _):
+            return CosResult(exitCode: 0, stdout: Self.tellJSON(text), stderr: "")
         case .rungs:
             return CosResult(exitCode: 0, stdout: #"[{"id": "status_note@sample-project", "type": "status_note", "project": "sample-project", "note": ""}, {"id": "task_close@*", "type": "task_close", "project": null, "note": ""}]"#, stderr: "")
         default:
             return CosResult(exitCode: 0, stdout: stdout, stderr: "")
         }
+    }
+
+    /// The `cos tell --json` contract, as a fixture until the verb ships: a
+    /// question is answered; a statement becomes the ops-desk TODAY card.
+    static func tellJSON(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?")
+            ? #"{"kind": "answer", "text": "Two cards wait on you: the quote date and the ops rota."}"#
+            : #"{"kind": "proposal", "text": "I will add the task and close the costing card.", "card": "ee55ff66"}"#
     }
 
     /// The shape `cos projects --json` prints, extra keys and all.
@@ -131,6 +141,20 @@ enum CosFixture {
         try data().write(to: root.appending(path: "thread/chief-of-staff.json"))
         return CosPaths(data: root, executable: URL(fileURLWithPath: "/usr/bin/true"))
     }
+}
+
+/// Waits for a condition a stream or the command loop makes true, and says
+/// so when it never does.
+@MainActor
+func cosWaitFor(_ timeout: Duration = .seconds(15), _ condition: @MainActor () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(2))
+    }
+    if condition() { return true }
+    Issue.record("cosWaitFor timed out after \(timeout)")
+    return false
 }
 
 /// 2026-09-23 12:00 UTC, the fixture's afternoon.
@@ -424,7 +448,8 @@ struct ChiefOfStaffKeyTests {
         #expect(route(.delete, nil, [.command], .card(board: false)) == .no)
         #expect(route(nil, "r", [.command], .card(board: false)) == .bringBack)
         #expect(route(.escape, nil, [], .card(board: false)) == .toComposer)
-        #expect(route(.return, nil, [], .card(board: false)) == nil)
+        // A bare ↩ never decides a card: it starts a message about it.
+        #expect(route(.return, nil, [], .card(board: false)) == .reply(nil))
         #expect(route(.delete, nil, [], .card(board: false)) == nil)
         #expect(route(.rightArrow, nil, [], .card(board: false)) == nil)
         #expect(route(.rightArrow, nil, [], .card(board: true)) == .moveColumn(1))
@@ -760,7 +785,9 @@ struct ChiefOfStaffModelTests {
         #expect(ChiefOfStaffModel.taskTitle(in: "Task:") == nil)
         #expect(ChiefOfStaffModel.taskTitle(in: "do it") == nil)
         model.handle(.reply(proposalID: "cc33dd44", text: "do it but due Friday"))
-        #expect(replies == ["About card cc33dd44 (Sam approved the budget; confirm the quote date): do it but due Friday"])
+        // The reply goes to the pinned chat as typed, about that card.
+        #expect(replies == ["do it but due Friday"])
+        #expect(model.subjectCardID == "cc33dd44")
     }
 
     @Test func tasksLoadForTheFilteredProject() async throws {
@@ -874,24 +901,24 @@ struct ChiefOfStaffChatTests {
         withExtendedLifetime(rig.chiefOfStaff) {}
     }
 
-    @Test func aQuestionRunsOnThePipelineWithTheSystemMessageAndIsRecorded() async throws {
+    /// Every message in the pinned chat goes to `cos tell`, never to a
+    /// model, and `cos tell` records both turns itself (no `cos append`).
+    @Test func aQuestionInThePinnedChatGoesToCosTell() async throws {
         let rig = try await makeRig()
         rig.window.openChiefOfStaff()
         #expect(rig.window.isChiefOfStaffOpen)
         #expect(rig.window.chat.currentConversation?.enabledTools == ChiefOfStaffModel.tools)
         #expect(rig.window.chat.quickAITitle == "Chief of Staff")
-        await rig.service.setResponses([StreamDelta(text: "Card cc33dd44 waits on you.", finishReason: "stop")])
+        await rig.service.setResponses([StreamDelta(text: "A model answer.", finishReason: "stop")])
         rig.window.chat.input = "What waits for me?"
         await rig.window.chat.submit()
-        let sent = await rig.service.lastMessages
-        #expect(sent.first?.role == .system)
-        #expect(sent.first?.content.contains("[cc33dd44] Waiting") == true)
-        #expect(sent.last?.content == "What waits for me?")
-        await rig.chiefOfStaff?.perform(.recordTurn(question: "What waits for me?", answer: "Card cc33dd44 waits on you.", attachmentNames: []))
-        #expect(await rig.runner.writes == [
-            .append(role: .user, text: "What waits for me?", meta: [:]),
-            .append(role: .assistant, text: "Card cc33dd44 waits on you.", meta: [:]),
-        ])
+        #expect(await cosWaitFor { rig.window.chat.currentConversation?.messages.last?.role == .assistant })
+        #expect(await rig.service.lastMessages.isEmpty)
+        #expect(await rig.runner.writes == [.tell(text: "What waits for me?", card: nil, surface: .pinned)])
+        let answer = try #require(rig.window.chat.currentConversation?.messages.last)
+        #expect(answer.role == .assistant)
+        #expect(answer.content == "Two cards wait on you: the quote date and the ops rota.")
+        #expect(answer.cosTell == CosTold(card: nil))
         #expect(rig.window.chat.history.contains { $0.id == ChiefOfStaffModel.conversationID })
         #expect(!rig.launcher.chatItems(matching: "").contains { $0.itemID == ChiefOfStaffModel.conversationID.uuidString })
     }
@@ -1457,8 +1484,9 @@ struct ChiefOfStaffV1WindowTests {
     }
 
     /// Discuss opens a NEW ordinary chat: the default provider and tools,
-    /// titled with the headline, the card and its files on the tray; the
-    /// pinned conversation is left and nothing is written to the thread.
+    /// titled with the headline, the card and its files on the tray, and
+    /// the card's id kept for Tell Chief of Staff; the pinned conversation
+    /// is left and nothing is written to the thread.
     @Test func discussOpensANewOrdinaryChat() async throws {
         let (window, cos, runner) = try await rig()
         window.openChiefOfStaff(proposalID: "cc33dd44")
@@ -1471,6 +1499,7 @@ struct ChiefOfStaffV1WindowTests {
         #expect(conversation.enabledTools == nil)
         #expect(conversation.providerID == window.chat.settings.quickAIProvider?.id)
         #expect(conversation.messages.isEmpty)
+        #expect(conversation.cosCard == "cc33dd44")
         let names = window.chat.attachmentTray.items.map(\.name)
         #expect(names.first?.contains("Chief of Staff") == true)
         #expect(window.focus == .composer)
@@ -1551,8 +1580,9 @@ struct ChiefOfStaffMemoryDataTests {
         }
         #expect(route("1", conflict: true) == .forgetConflict(0))
         #expect(route("2", conflict: true) == .forgetConflict(1))
-        #expect(route("3", conflict: true) == nil)
-        #expect(route("1", conflict: false) == nil)
+        // Any other character starts a message about the card.
+        #expect(route("3", conflict: true) == .reply("3"))
+        #expect(route("1", conflict: false) == .reply("1"))
     }
 }
 

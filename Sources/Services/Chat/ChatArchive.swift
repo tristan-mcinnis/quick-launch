@@ -44,10 +44,10 @@ actor ChatArchive {
     /// payload; everything else on disk is preserved across a rewrite.
     static let conversationOwnedKeys: Set<String> = [
         "providerID", "model", "customTitle", "titleSource", "isPinned",
-        "enabledTools", "assistantID",
+        "enabledTools", "assistantID", "cosCard",
     ]
     /// The keys the live `QuickMessage` owns on the turn payload.
-    static let turnOwnedKeys: Set<String> = ["askUserQuestion", "toolRecords"]
+    static let turnOwnedKeys: Set<String> = ["askUserQuestion", "toolRecords", "cosTell"]
 
     nonisolated let root: URL
     nonisolated let attachments: AttachmentArchive
@@ -1027,6 +1027,9 @@ actor ChatArchive {
         if let assistantID = conversation.assistantID {
             payload["assistantID"] = .string(assistantID.uuidString)
         }
+        if let cosCard = conversation.cosCard {
+            payload["cosCard"] = .string(cosCard)
+        }
 
         return ConversationRecord(
             id: conversation.id.uuidString,
@@ -1048,6 +1051,9 @@ actor ChatArchive {
         }
         if let tools = message.toolRecords {
             payload["toolRecords"] = jsonValue(tools)
+        }
+        if let told = message.cosTell {
+            payload["cosTell"] = jsonValue(told)
         }
         return TurnRecord(
             id: message.id.uuidString,
@@ -1116,7 +1122,8 @@ actor ChatArchive {
             titleSource: payload?["titleSource"]?.stringValue,
             isPinned: payload?["isPinned"]?.boolValue ?? false,
             enabledTools: enabledTools,
-            assistantID: assistantID
+            assistantID: assistantID,
+            cosCard: payload?["cosCard"]?.stringValue
         )
     }
 
@@ -1131,7 +1138,8 @@ actor ChatArchive {
             content: turn.text,
             askUserQuestion: payload?["askUserQuestion"].flatMap { Self.decodeValue($0, as: AskUserQuestion.self) },
             toolRecords: payload?["toolRecords"].flatMap { Self.decodeValue($0, as: [ChatToolRecord].self) },
-            attachments: turn.attachments.isEmpty ? nil : turn.attachments.map(legacyReference(for:))
+            attachments: turn.attachments.isEmpty ? nil : turn.attachments.map(legacyReference(for:)),
+            cosTell: payload?["cosTell"].flatMap { Self.decodeValue($0, as: CosTold.self) }
         )
     }
 
