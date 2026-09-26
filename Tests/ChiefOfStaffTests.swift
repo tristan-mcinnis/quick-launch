@@ -405,6 +405,11 @@ struct ChiefOfStaffDateTests {
         #expect(parse("1/5") == "2027-01-05")
         #expect(parse("someday") == nil)
         #expect(parse("") == nil)
+        // A day the month does not have is refused, never rolled forward.
+        #expect(parse("2026-09-31") == nil)
+        #expect(parse("9/31") == nil)
+        #expect(parse("31 sep") == nil)
+        #expect(ChiefOfStaffDates.relativeDue("2026-02-30", now: cosNow, calendar: calendar) == nil)
     }
 
     @Test func laterSaysWhenItComesBack() {

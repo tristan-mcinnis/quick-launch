@@ -4,11 +4,20 @@ import Foundation
 /// phrase ("by tomorrow"), when a Later card comes back, and a typed day
 /// ("fri", "tomorrow", "2026-09-30") as the `YYYY-MM-DD` `cos` takes.
 enum ChiefOfStaffDates {
-    /// A `YYYY-MM-DD` day at the start of that day, in `calendar`.
+    /// A `YYYY-MM-DD` day at the start of that day, in `calendar`. A day
+    /// the month does not have (`2026-09-31`) is nil, not rolled forward.
     static func day(_ text: String, calendar: Calendar = .current) -> Date? {
         let parts = text.prefix(10).split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else { return nil }
-        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+        return exactDate(year: parts[0], month: parts[1], day: parts[2], calendar: calendar)
+    }
+
+    /// `Calendar` rolls an impossible day over (31 Sep is 1 Oct); a typed
+    /// due day must not move silently, so only a real day comes back.
+    private static func exactDate(year: Int, month: Int, day: Int, calendar: Calendar) -> Date? {
+        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        let back = calendar.dateComponents([.year, .month, .day], from: date)
+        return back.year == year && back.month == month && back.day == day ? date : nil
     }
 
     static func string(_ date: Date, calendar: Calendar = .current) -> String {
@@ -120,9 +129,10 @@ enum ChiefOfStaffDates {
     /// That month and day this year, or next year once it has passed.
     private static func upcoming(month: Int, day: Int, today: Date, calendar: Calendar) -> String? {
         let year = calendar.component(.year, from: today)
-        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
-        if date >= today { return string(date, calendar: calendar) }
-        return calendar.date(from: DateComponents(year: year + 1, month: month, day: day)).map { string($0, calendar: calendar) }
+        if let date = exactDate(year: year, month: month, day: day, calendar: calendar), date >= today {
+            return string(date, calendar: calendar)
+        }
+        return exactDate(year: year + 1, month: month, day: day, calendar: calendar).map { string($0, calendar: calendar) }
     }
 }
 
