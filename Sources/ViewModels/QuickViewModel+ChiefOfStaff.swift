@@ -1,11 +1,12 @@
 import Foundation
 
-/// The Chief of Staff's pinned conversation, on the ordinary chat pipeline.
-/// Its questions run through this view model's providers, tools, and
-/// attachments on one backing chat (`ChiefOfStaffModel.conversationID`),
-/// with the Chief of Staff's system message on every request, and each
-/// answered turn goes to the `cos` thread through `cos append`. The backing
-/// chat never shows in a chat list; the pinned row is its one way in.
+/// The Chief of Staff's pinned conversation, on the ordinary chat pipeline
+/// with one backing chat (`ChiefOfStaffModel.conversationID`). While `cos` is
+/// installed, every message there is answered by `cos tell`, which records
+/// both turns in its thread itself (`ChiefOfStaffModel.tellService`); only
+/// without it does a model answer, and that turn goes to the thread through
+/// `cos append`. The backing chat never shows in a chat list; the pinned row
+/// is its one way in.
 extension QuickViewModel {
     /// The root-search command that opens the pinned conversation.
     static let chiefOfStaffCommandID = "chiefofstaff.open"
