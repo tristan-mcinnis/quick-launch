@@ -83,12 +83,20 @@ struct CommandQuickService: QuickService, Sendable {
         )
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
+                // A read can stop inside a character; decoding each read on
+                // its own dropped that whole read.
+                var decoder = UTF8ChunkDecoder()
                 do {
                     for try await data in chunks {
                         try Task.checkCancellation()
-                        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+                        let text = decoder.decode(data)
+                        if !text.isEmpty {
                             continuation.yield(StreamDelta(text: text, finishReason: nil))
                         }
+                    }
+                    let tail = decoder.flush()
+                    if !tail.isEmpty {
+                        continuation.yield(StreamDelta(text: tail, finishReason: nil))
                     }
                     continuation.yield(StreamDelta(text: nil, finishReason: "stop"))
                     continuation.finish()
@@ -114,5 +122,49 @@ struct CommandQuickService: QuickService, Sendable {
             let label = message.role == .user ? "User" : "Assistant"
             return "\(label): \(message.content)"
         }.joined(separator: "\n\n") + "\n\nAssistant:"
+    }
+}
+
+/// Decodes UTF-8 that arrives in arbitrary pieces, such as pipe reads. A
+/// piece can end partway through a character; those bytes wait for the next
+/// piece instead of failing the whole piece's decode.
+struct UTF8ChunkDecoder: Sendable {
+    private var pending = Data()
+
+    /// The text the bytes so far complete. An incomplete character at the
+    /// end is kept for the next call.
+    mutating func decode(_ chunk: Data) -> String {
+        pending.append(chunk)
+        let complete = Self.completeLength(of: pending)
+        let text = String(decoding: pending.prefix(complete), as: UTF8.self)
+        pending = Data(pending.dropFirst(complete))
+        return text
+    }
+
+    /// Whatever is left when the stream ends, invalid bytes shown as U+FFFD.
+    mutating func flush() -> String {
+        defer { pending = Data() }
+        return String(decoding: pending, as: UTF8.self)
+    }
+
+    /// How many leading bytes end on a character boundary: all of them,
+    /// unless the last lead byte starts a sequence the bytes do not finish.
+    static func completeLength(of bytes: Data) -> Int {
+        let count = bytes.count
+        var offset = count - 1
+        while offset >= 0, count - offset <= 4 {
+            let byte = bytes[bytes.startIndex + offset]
+            guard byte & 0xC0 == 0x80 else {
+                let needed = switch byte {
+                case 0xF0...0xF7: 4
+                case 0xE0...0xEF: 3
+                case 0xC0...0xDF: 2
+                default: 1
+                }
+                return count - offset < needed ? offset : count
+            }
+            offset -= 1
+        }
+        return count
     }
 }
