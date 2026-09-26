@@ -346,6 +346,9 @@ fallback.
 - This beta hard-locks owned capture. Capture is off by default, switched on in
   its own Settings tab, stored only on this Mac, and stays locked until its
   privacy review and soak test pass. Browser capture is not available.
+- It is Quick Launch's own collector. It is not the `screenctx` timeline
+  (`screenctx timeline` and `screenctx search`) that Memory.app switches on
+  and off.
 
 ## Learning and the interaction journal
 
