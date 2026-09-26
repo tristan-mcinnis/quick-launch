@@ -288,7 +288,9 @@ struct CosCommandTests {
         #expect(try CosCommand.status.arguments() == ["status", "--json"])
         #expect(try CosCommand.doIt(id: "cc33dd44").arguments() == ["do", "cc33dd44"])
         #expect(try CosCommand.no(id: "a", reason: nil).arguments() == ["no", "a"])
-        #expect(try CosCommand.no(id: "a", reason: "  not mine ").arguments() == ["no", "a", "--reason", "not mine"])
+        #expect(try CosCommand.no(id: "a", reason: "  not mine ").arguments() == ["no", "a", "--reason=not mine"])
+        // A typed value that starts with a dash is still a value to argparse.
+        #expect(try CosCommand.no(id: "a", reason: "-late").arguments() == ["no", "a", "--reason=-late"])
         #expect(try CosCommand.later(id: "a", until: "tomorrow").arguments() == ["later", "a", "--until", "tomorrow"])
         #expect(try CosCommand.reopen(id: "a").arguments() == ["reopen", "a"])
         #expect(try CosCommand.projects.arguments() == ["projects", "--json"])
@@ -1123,7 +1125,7 @@ struct ChiefOfStaffV1DataTests {
     @Test func newVerbsAreArgumentArrays() throws {
         #expect(try CosCommand.more(id: "a").arguments() == ["more", "a"])
         #expect(try CosCommand.less(id: "a", why: nil).arguments() == ["less", "a"])
-        #expect(try CosCommand.less(id: "a", why: " newsletters again ").arguments() == ["less", "a", "--why", "newsletters again"])
+        #expect(try CosCommand.less(id: "a", why: " newsletters again ").arguments() == ["less", "a", "--why=newsletters again"])
         #expect(try CosCommand.always(id: "a").arguments() == ["always", "a"])
         #expect(try CosCommand.never(rung: "status_note@p").arguments() == ["never", "status_note@p"])
         #expect(try CosCommand.rungs.arguments() == ["rungs", "--json"])
@@ -1133,12 +1135,14 @@ struct ChiefOfStaffV1DataTests {
         #expect(try CosCommand.artifacts.arguments() == ["artifacts", "--json"])
         #expect(try CosCommand.charter.arguments() == ["charter", "--json"])
         #expect(try CosCommand.rule(text: "Ignore newsletters", scope: "all").arguments()
-            == ["rule", "Ignore newsletters", "--scope", "all"])
+            == ["rule", "--scope", "all", "--", "Ignore newsletters"])
+        #expect(try CosCommand.rule(text: "-no emoji", scope: "all").arguments()
+            == ["rule", "--scope", "all", "--", "-no emoji"])
         #expect(try CosCommand.rule(text: "Dates matter", scope: "project:globex").arguments()
-            == ["rule", "Dates matter", "--scope", "project:globex"])
+            == ["rule", "--scope", "project:globex", "--", "Dates matter"])
         #expect(try CosCommand.learnings.arguments() == ["learnings", "--json"])
         #expect(try CosCommand.charterLine(text: "Warmer with clients", section: "voice").arguments()
-            == ["rule", "Warmer with clients", "--section", "voice"])
+            == ["rule", "--section", "voice", "--", "Warmer with clients"])
         #expect(try CosCommand.forget(key: "k-1").arguments() == ["forget", "k-1"])
     }
 

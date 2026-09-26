@@ -63,7 +63,10 @@ enum CosCommand: Sendable, Equatable {
         case assistant
     }
 
-    /// The arguments after the executable.
+    /// The arguments after the executable. `cos` parses with argparse, which
+    /// reads a typed value that starts with a dash ("-terse") as an option and
+    /// refuses the call. So typed text goes after `--` when it is positional,
+    /// and joins its flag with `=` when it is an option value.
     func arguments() throws -> [String] {
         switch self {
         case .status:
@@ -76,7 +79,7 @@ enum CosCommand: Sendable, Equatable {
             guard let reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty else {
                 return ["no", id]
             }
-            return ["no", id, "--reason", reason]
+            return ["no", id, "--reason=\(reason)"]
         case .later(let id, let until):
             return ["later", id, "--until", until]
         case .reopen(let id):
@@ -89,7 +92,7 @@ enum CosCommand: Sendable, Equatable {
             return ["more", id]
         case .less(let id, let why):
             guard let why = why?.trimmingCharacters(in: .whitespacesAndNewlines), !why.isEmpty else { return ["less", id] }
-            return ["less", id, "--why", why]
+            return ["less", id, "--why=\(why)"]
         case .always(let id):
             return ["always", id]
         case .never(let rung):
@@ -105,16 +108,17 @@ enum CosCommand: Sendable, Equatable {
         case .charter:
             return ["charter", "--json"]
         case .rule(let text, let scope):
-            return ["rule", text, "--scope", scope]
+            return ["rule", "--scope", scope, "--", text]
         case .charterLine(let text, let section):
-            return ["rule", text, "--section", section]
+            return ["rule", "--section", section, "--", text]
         case .learnings:
             return ["learnings", "--json"]
         case .forget(let key):
             return ["forget", key]
         case .add(let title, let project, let due):
-            // `--` would be safer, but argparse reads a leading dash in the
-            // title as an option; one is refused before it gets here.
+            // A leading dash in the title is refused before it gets here:
+            // `cos add` hands it on to `task-tree.py --title`, which would
+            // read it as an option.
             var arguments = ["add", title, "--project", project]
             if let due, !due.isEmpty { arguments += ["--due", due] }
             return arguments
