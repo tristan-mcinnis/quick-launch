@@ -49,7 +49,8 @@ and actions can be added, instead of waiting on someone else's roadmap.
   card, `⌘↩` Do it, `⌘E` Edit, `⌘L` Later, `⌘⌫` No, `⌘R` Bring back, `⌘=`
   `⌘-` More and Less, `⌘Z` Undo, `⌘D` Discuss in a new chat; `⌘N` adds a
   task. Activity, Artifacts and Charter are `⌥⌘3` to `⌥⌘5`. Its notifications come from Quick Launch. Type `cos` in the
-  launcher to open it.
+  launcher to open it. This pinned conversation is the only Chief of Staff
+  face: the old ChiefOfStaff.app is retired and not installed.
 
 **Capture and screen**
 
@@ -64,7 +65,9 @@ and actions can be added, instead of waiting on someone else's roadmap.
 - A Translator window for selected or typed text.
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions and Agent Watch.
-- Emoji and symbols, and local Screen History search.
+- Emoji and symbols, and local Screen History search. Screen History is Quick
+  Launch's own collector: opt-in, off by default and locked. It is not the
+  `screenctx` timeline that Memory.app switches on and off.
 
 **Models and providers**
 
