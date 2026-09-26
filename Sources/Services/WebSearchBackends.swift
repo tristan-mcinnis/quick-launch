@@ -409,31 +409,51 @@ struct WebSearchRouter: WebSearchServicing {
 
         if WebSearchQuery.containsCJK(query), hasBochaKey() {
             attempted.append("Bocha")
-            if let result = try? await bocha.search(query), !result.isEmpty {
+            if let result = try await Self.attempt({ try await bocha.search(query) }) {
                 return result
             }
         }
 
         if hasTavilyKey() {
             attempted.append("Tavily")
-            if let result = try? await tavily.search(query), !result.isEmpty {
+            if let result = try await Self.attempt({ try await tavily.search(query) }) {
                 return result
             }
         }
 
         attempted.append("SearXNG")
-        if let result = try? await searxng.search(query, provider: .automatic), !result.isEmpty {
+        if let result = try await Self.attempt({ try await searxng.search(query, provider: .automatic) }) {
             return result
         }
 
         if hasBraveKey() {
             attempted.append("Brave")
-            if let result = try? await brave.search(query), !result.isEmpty {
+            if let result = try await Self.attempt({ try await brave.search(query) }) {
                 return result
             }
         }
 
         throw WebSearchError.failed("No results from " + attempted.joined(separator: ", "))
+    }
+
+    /// One step of the chain: its text, or nil so the chain moves on. A
+    /// cancelled search stops the chain instead: an Escape must not try each
+    /// later backend and end on "No results from ...". URLSession reports a
+    /// cancelled task as `URLError.cancelled`, so the task's own flag is
+    /// checked after any failure too.
+    private static func attempt(
+        _ step: () async throws -> String
+    ) async throws -> String? {
+        try Task.checkCancellation()
+        do {
+            let result = try await step()
+            return result.isEmpty ? nil : result
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return nil
+        }
     }
 
     static func missingKeyMessage(for provider: WebSearchProvider) -> String {

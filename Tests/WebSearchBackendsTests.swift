@@ -274,6 +274,43 @@ struct WebSearchBackendsTests {
         }
     }
 
+    @Test func aCancelledStepStopsTheChain() async {
+        let searxng = RecordingStubSearch(.text("searxng result"))
+        let brave = RecordingStubSearch(.text("brave result"))
+        let router = makeRouter(
+            searxng: searxng,
+            tavily: RecordingStubSearch(.cancelled),
+            brave: brave,
+            hasTavilyKey: true,
+            hasBraveKey: true
+        )
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await router.search("q", provider: .automatic)
+        }
+        #expect(await searxng.callCount() == 0)
+        #expect(await brave.callCount() == 0)
+    }
+
+    @Test func aSearchCancelledMidRequestTriesNoLaterBackend() async {
+        let searxng = RecordingStubSearch(.text("searxng result"))
+        let brave = RecordingStubSearch(.text("brave result"))
+        let router = makeRouter(
+            searxng: searxng,
+            tavily: RecordingStubSearch(.cancelsTheTask),
+            brave: brave,
+            hasTavilyKey: true,
+            hasBraveKey: true
+        )
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await #expect(throws: CancellationError.self) {
+            _ = try await search.value
+        }
+        #expect(await searxng.callCount() == 0)
+        #expect(await brave.callCount() == 0)
+    }
+
     @Test func chineseLaneDetectionFollowsIdeographsOnly() {
         #expect(WebSearchQuery.containsCJK("上海咖啡"))
         #expect(WebSearchQuery.containsCJK("東京"))
@@ -359,6 +396,11 @@ private actor RecordingStubSearch: WebSearchServicing {
         case text(String)
         case empty
         case failure
+        /// The step itself is cancelled.
+        case cancelled
+        /// The search task is cancelled mid-request, and the request fails
+        /// the way URLSession reports it.
+        case cancelsTheTask
     }
 
     private let outcome: Outcome
@@ -376,6 +418,10 @@ private actor RecordingStubSearch: WebSearchServicing {
         case .text(let value): return value
         case .empty: throw WebSearchError.empty
         case .failure: throw WebSearchError.failed("stub failure")
+        case .cancelled: throw CancellationError()
+        case .cancelsTheTask:
+            withUnsafeCurrentTask { $0?.cancel() }
+            throw URLError(.cancelled)
         }
     }
 }
