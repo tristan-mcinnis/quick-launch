@@ -158,6 +158,64 @@ struct ProcessRunnerTests {
         }
     }
 
+    /// Cancelling must end the call once the child has gone, not wait
+    /// until a backgrounded job closes the inherited stdout (five minutes
+    /// here). `exit 0` covers a child already gone at the cancel; `wait`
+    /// one that the cancel has to terminate.
+    @Test(.timeLimit(.minutes(1)), arguments: ["exit 0", "wait"])
+    func cancelIsNotHeldOpenByAGrandchildOnThePipe(ending: String) async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ql-runner-\(UUID().uuidString).pid")
+        let script = try Self.writeScript("""
+        #!/bin/sh
+        sleep 300 &
+        echo $! > '\(pidFile.path)'
+        \(ending)
+        """)
+        defer {
+            if let text = try? String(contentsOf: pidFile, encoding: .utf8),
+               let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+            try? FileManager.default.removeItem(at: pidFile)
+            try? FileManager.default.removeItem(at: script)
+        }
+
+        let call = Task {
+            try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [script.path]
+            )
+        }
+        // Wait on the work itself: the job has started once its pid is out.
+        while (try? String(contentsOf: pidFile, encoding: .utf8))?.hasSuffix("\n") != true {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        call.cancel()
+        await #expect(throws: CancellationError.self) {
+            _ = try await call.value
+        }
+    }
+
+    /// A task cancelled before the call starts must not launch anything.
+    @Test func anAlreadyCancelledCallRunsNothing() async throws {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ql-runner-\(UUID().uuidString).ran")
+        defer { try? FileManager.default.removeItem(at: marker) }
+
+        let call = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: "/usr/bin/touch"),
+                arguments: [marker.path]
+            )
+        }
+        await #expect(throws: CancellationError.self) {
+            _ = try await call.value
+        }
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
     @Test func streamYieldsStdoutAndFinishes() async throws {
         let script = try Self.writeScript("""
         #!/bin/sh

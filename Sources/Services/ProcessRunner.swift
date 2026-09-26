@@ -45,8 +45,10 @@ enum ProcessRunner {
     /// - `timeout`: seconds before the process is terminated and
     ///   ``ProcessRunnerError/timedOut`` is thrown.
     ///
-    /// Task cancellation terminates the child and rethrows as
-    /// `CancellationError`.
+    /// Task cancellation terminates the child and throws
+    /// `CancellationError` once the child has exited, without waiting for a
+    /// grandchild that still holds a pipe. A task cancelled before the launch
+    /// runs nothing.
     static func run(
         executable: URL,
         arguments: [String],
@@ -68,6 +70,7 @@ enum ProcessRunner {
         box.process.standardError = stderrPipe
         box.process.standardInput = stdinPipe ?? FileHandle.nullDevice
 
+        let cancel = CancelState()
         let result: ProcessResult = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let queue = DispatchQueue.global(qos: .userInitiated)
@@ -78,6 +81,12 @@ enum ProcessRunner {
                 let timeoutError = timeout.map {
                     ProcessRunnerError.timedOut(executable: executable.lastPathComponent, seconds: $0)
                 }
+                // onCancel can run before this closure (a task already
+                // cancelled), so the flag is read here, not assumed.
+                if cancel.attach(finish) {
+                    finish(.failure(CancellationError()))
+                    return
+                }
 
                 // Termination must be wired before run() so a process that
                 // exits instantly is never missed. Once the timeout has
@@ -87,6 +96,7 @@ enum ProcessRunner {
                 // their end would let the call outlive its timeout.
                 group.enter()
                 box.process.terminationHandler = { _ in
+                    if cancel.markExited() { finish(.failure(CancellationError())) }
                     if timedOut.fired, let timeoutError { finish(.failure(timeoutError)) }
                     group.leave()
                 }
@@ -101,6 +111,8 @@ enum ProcessRunner {
                     )))
                     return
                 }
+                // A cancel that arrived while the child was starting.
+                if cancel.markLaunched() { stop(box, on: queue) }
 
                 // Drain both pipes concurrently, before waiting on exit.
                 group.enter()
@@ -131,12 +143,7 @@ enum ProcessRunner {
                             if let timeoutError { finish(.failure(timeoutError)) }
                             return
                         }
-                        box.process.terminate()
-                        // A child that ignores SIGTERM is killed.
-                        let pid = box.process.processIdentifier
-                        queue.asyncAfter(deadline: .now() + killGrace) {
-                            if box.process.isRunning { kill(pid, SIGKILL) }
-                        }
+                        stop(box, on: queue)
                     }
                     timer = item
                     queue.asyncAfter(deadline: .now() + timeout, execute: item)
@@ -156,10 +163,28 @@ enum ProcessRunner {
                 }
             }
         } onCancel: {
-            if box.process.isRunning { box.process.terminate() }
+            switch cancel.cancel() {
+            case .notLaunched:
+                break // the launch path reads the flag
+            case .running:
+                stop(box, on: DispatchQueue.global(qos: .userInitiated))
+            case .exited(let finish):
+                // Only an inherited pipe is left; do not wait for it.
+                finish?(.failure(CancellationError()))
+            }
         }
         try Task.checkCancellation()
         return result
+    }
+
+    /// SIGTERM now, and SIGKILL for a child that ignores it.
+    private static func stop(_ box: ProcessBox, on queue: DispatchQueue) {
+        guard box.process.isRunning else { return }
+        box.process.terminate()
+        let pid = box.process.processIdentifier
+        queue.asyncAfter(deadline: .now() + killGrace) {
+            if box.process.isRunning { kill(pid, SIGKILL) }
+        }
     }
 
     /// Streams stdout as it arrives. stderr is collected in the background;
@@ -308,6 +333,54 @@ enum ProcessRunner {
         var fired: Bool {
             get { lock.withLock { value } }
             set { lock.withLock { value = newValue } }
+        }
+    }
+
+    /// Where a `run` call is when its task is cancelled. One lock orders the
+    /// cancel against the launch and the exit, so exactly one side acts.
+    private final class CancelState: @unchecked Sendable {
+        enum Moment {
+            case notLaunched
+            case running
+            case exited(ResumeOnce?)
+        }
+
+        private let lock = NSLock()
+        private var cancelled = false
+        private var launched = false
+        private var exited = false
+        private var finish: ResumeOnce?
+
+        /// Keeps the continuation; true when the task is already cancelled.
+        func attach(_ finish: ResumeOnce) -> Bool {
+            lock.withLock {
+                self.finish = finish
+                return cancelled
+            }
+        }
+
+        /// True when a cancel arrived before the launch finished.
+        func markLaunched() -> Bool {
+            lock.withLock {
+                launched = true
+                return cancelled
+            }
+        }
+
+        /// True when the call was cancelled while the child ran.
+        func markExited() -> Bool {
+            lock.withLock {
+                exited = true
+                return cancelled
+            }
+        }
+
+        func cancel() -> Moment {
+            lock.withLock {
+                cancelled = true
+                if !launched { return .notLaunched }
+                return exited ? .exited(finish) : .running
+            }
         }
     }
 
