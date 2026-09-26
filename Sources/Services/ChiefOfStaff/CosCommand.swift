@@ -116,12 +116,12 @@ enum CosCommand: Sendable, Equatable {
         case .forget(let key):
             return ["forget", key]
         case .add(let title, let project, let due):
-            // A leading dash in the title is refused before it gets here:
-            // `cos add` hands it on to `task-tree.py --title`, which would
-            // read it as an option.
-            var arguments = ["add", title, "--project", project]
+            // The title is positional, so it goes after `--`: a title that
+            // starts with a dash is still the title. cos hands it on to
+            // `task-tree.py` as `--title=<title>`.
+            var arguments = ["add", "--project", project]
             if let due, !due.isEmpty { arguments += ["--due", due] }
-            return arguments
+            return arguments + ["--", title]
         case .append(let role, _, let meta):
             var arguments = ["append", "--role", role.rawValue, "--surface", ChiefOfStaffThread.surface]
             if !meta.isEmpty {

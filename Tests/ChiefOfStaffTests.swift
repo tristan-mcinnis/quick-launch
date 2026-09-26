@@ -296,8 +296,13 @@ struct CosCommandTests {
         #expect(try CosCommand.projects.arguments() == ["projects", "--json"])
         #expect(try CosCommand.tasks(project: "acme-amplify").arguments() == ["tasks", "--project", "acme-amplify"])
         #expect(try CosCommand.add(title: "Send the quote; today", project: "p", due: "2026-10-02").arguments()
-            == ["add", "Send the quote; today", "--project", "p", "--due", "2026-10-02"])
-        #expect(try CosCommand.add(title: "t", project: "p", due: nil).arguments() == ["add", "t", "--project", "p"])
+            == ["add", "--project", "p", "--due", "2026-10-02", "--", "Send the quote; today"])
+        #expect(try CosCommand.add(title: "t", project: "p", due: nil).arguments() == ["add", "--project", "p", "--", "t"])
+        // A title that starts with a dash is still the title, not an option.
+        #expect(try CosCommand.add(title: "-late fee", project: "p", due: nil).arguments()
+            == ["add", "--project", "p", "--", "-late fee"])
+        #expect(try CosCommand.add(title: "--json", project: "p", due: nil).arguments()
+            == ["add", "--project", "p", "--", "--json"])
     }
 
     @Test func editKeepsFieldsItDoesNotEditAndDropsEmptyOnes() throws {
@@ -782,6 +787,17 @@ struct ChiefOfStaffModelTests {
         model.setProjectFilter("sample-project")
         model.openNewTask()
         #expect(model.newTask?.projectSlug == "sample-project")
+    }
+
+    /// cos passes the title on as `--title=<title>` now, so a title that
+    /// starts with a dash is a task like any other, not a refusal.
+    @Test func aTaskThatStartsWithADashIsAdded() async throws {
+        let model = try await model()
+        model.openNewTask()
+        model.newTask?.title = "-late fee notice"
+        model.newTask?.projectQuery = "ops"
+        model.submitNewTask()
+        #expect(model.newTask == nil, "the sheet closes: nothing was refused")
     }
 
     @Test func aReplyStartingWithTaskAddsATaskOnTheCardsProject() async throws {

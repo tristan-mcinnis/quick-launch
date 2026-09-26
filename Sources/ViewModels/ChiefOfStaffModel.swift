@@ -1096,11 +1096,6 @@ final class ChiefOfStaffModel {
             newTask = draft
             return
         }
-        guard !title.hasPrefix("-") else {
-            draft.problem = "A task cannot start with a dash."
-            newTask = draft
-            return
-        }
         guard let project else {
             draft.problem = "Pick a project."
             newTask = draft

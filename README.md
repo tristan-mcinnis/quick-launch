@@ -50,7 +50,7 @@ and actions can be added, instead of waiting on someone else's roadmap.
   `⌘-` More and Less, `⌘Z` Undo, `⌘D` Discuss in a new chat; `⌘N` adds a
   task. Activity, Artifacts and Charter are `⌥⌘3` to `⌥⌘5`. Its notifications come from Quick Launch. Type `cos` in the
   launcher to open it. This pinned conversation is the only Chief of Staff
-  face: the old ChiefOfStaff.app is retired and its code removed.
+  face: the old ChiefOfStaff.app is retired.
 - AI Chat is the House's general chat. RTI keeps its own chats because they
   are grounded in a meeting or a recording session; anything not about a
   meeting belongs here.
