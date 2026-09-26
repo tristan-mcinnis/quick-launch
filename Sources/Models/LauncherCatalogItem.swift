@@ -53,14 +53,13 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     }
 
     /// Whether "Hide from Quick Launch" applies to this row. A local answer,
-    /// the Ask AI row, a typed web address, the fixed emoji grid, and a
-    /// time-stamped screen moment are computed, fixed, or short-lived, so
-    /// hiding one would be a lie. Every user-owned catalog row (apps,
+    /// the Ask AI row, a typed web address, and the fixed emoji grid are
+    /// computed, fixed, or short-lived, so hiding one would be a lie. Every user-owned catalog row (apps,
     /// snippets, Quicklinks, commands, clipboard entries, folders,
     /// screenshots, colors, and chats) can be hidden.
     var canBeHidden: Bool {
         switch kind {
-        case .answer, .askAI, .emoji, .screenHistory:
+        case .answer, .askAI, .emoji:
             return false
         case .quickLink:
             return !itemID.hasPrefix("typed:")
@@ -128,7 +127,6 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .askAI: "Ask"
         case .folder: "Open"
         case .answer: "Copy"
-        case .screenHistory: "Open moment"
         case .color: "Paste"
         }
     }
@@ -160,7 +158,6 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .askAI: return "sparkles"
         case .folder: return "folder"
         case .answer: return "equal.circle"
-        case .screenHistory: return "clock.arrow.circlepath"
         case .color: return "eyedropper"
         }
     }
@@ -204,7 +201,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case commands
     case folders
     case vaultSearch
-    case screenHistory
     case colors
 
     var id: String { rawValue }
@@ -220,7 +216,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .commands: "Commands"
         case .folders: "Folders"
         case .vaultSearch: "Vault Search"
-        case .screenHistory: "Screen History"
         case .colors: "Colors"
         }
     }
@@ -236,7 +231,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .commands: ["commands", "window management", "windows", "toggles", "settings panes"]
         case .folders: ["folders", "folder", "places", "locations", "finder"]
         case .vaultSearch: ["vault search", "vault", "projects", "project search"]
-        case .screenHistory: ["screen history", "screen memory", "what i saw", "coast", "rewind"]
         case .colors: ["colors", "colours", "color picker", "colour picker", "pick color", "eyedropper", "hex", "swatches"]
         }
     }
@@ -252,7 +246,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .commands: "command"
         case .folders: "folder"
         case .vaultSearch: "magnifyingglass"
-        case .screenHistory: "clock.arrow.circlepath"
         case .colors: "eyedropper"
         }
     }

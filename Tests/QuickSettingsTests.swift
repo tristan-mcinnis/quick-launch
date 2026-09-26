@@ -25,7 +25,6 @@ struct QuickSettingsTests {
         #expect(settings.checkForUpdatesOnLaunch == false)
         #expect(settings.hasSeenWelcome == false)
         #expect(settings.configurationVersion == 26)
-        #expect(!settings.screenHistorySameUserAccessRiskAccepted)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)
@@ -44,20 +43,53 @@ struct QuickSettingsTests {
         })
     }
 
-    @Test func screenHistorySameUserRiskAcceptanceRoundTripsAndDefaultsClosed() throws {
-        let defaults = freshDefaults()
-        var settings = QuickSettings()
-        #expect(!settings.screenHistorySameUserAccessRiskAccepted)
-        settings.screenHistorySameUserAccessRiskAccepted = true
-        settings.save(to: defaults)
-        #expect(QuickSettings.load(from: defaults).screenHistorySameUserAccessRiskAccepted)
-
-        struct LegacySettings: Encodable { var configurationVersion = 18 }
-        let legacy = try JSONDecoder().decode(
+    /// Screen History was retired. Settings a build with it saved still load
+    /// every other value, and the next save carries none of its keys.
+    @Test func settingsSavedWithScreenHistoryKeepEverythingElse() throws {
+        let saved: [String: Any] = [
+            "configurationVersion": 26,
+            "autoCopy": false,
+            "showMenuBar": false,
+            "searchLegacyCoastHistory": true,
+            "screenHistoryCaptureEnabled": true,
+            "screenHistoryCaptureConfirmed": true,
+            "screenHistorySameUserAccessRiskAccepted": true,
+            "screenHistoryRetentionDays": 30,
+            "screenHistoryStorageCapGB": 20,
+            "screenHistoryExcludedBundleIDs": ["com.example.private"],
+            "screenHistoryExcludedDomains": ["example.org"],
+        ]
+        let decoded = try JSONDecoder().decode(
             QuickSettings.self,
-            from: JSONEncoder().encode(LegacySettings())
+            from: JSONSerialization.data(withJSONObject: saved)
         )
-        #expect(!legacy.screenHistorySameUserAccessRiskAccepted)
+        #expect(decoded.autoCopy == false)
+        #expect(decoded.showMenuBar == false)
+
+        let resaved = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        )
+        #expect(!resaved.keys.contains { $0.hasPrefix("screenHistory") || $0 == "searchLegacyCoastHistory" })
+    }
+
+    /// A hidden or aliased Screen History row saved before the retirement is
+    /// dropped on its own. It must not fail the whole blob, which would reset
+    /// every setting to its default.
+    @Test func aRetiredItemKindDropsOnlyItsOwnRecord() throws {
+        let defaults = freshDefaults()
+        let saved: [String: Any] = [
+            "configurationVersion": 26,
+            "autoCopy": false,
+            "launcherItemConfigurations": [
+                ["kind": "screenHistory", "itemID": "owned:1", "alias": "", "isPinned": false, "isHidden": true],
+                ["kind": "folder", "itemID": "downloads", "alias": "dl", "isPinned": false, "isHidden": false],
+            ],
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: saved), forKey: QuickSettings.defaultsKey)
+
+        let loaded = QuickSettings.load(from: defaults)
+        #expect(loaded.autoCopy == false, "the other settings survive")
+        #expect(loaded.launcherItemConfigurations.map(\.id) == ["folder:downloads"])
     }
 
     @Test func typeToClickContinuationPersistsAndLegacySettingsStayContinuous() throws {
@@ -113,64 +145,6 @@ struct QuickSettingsTests {
         let loaded = QuickSettings.load(from: defaults)
 
         #expect(loaded.launcherItemConfigurations == settings.launcherItemConfigurations)
-    }
-
-    @Test func screenHistoryDomainExclusionsRoundTrip() {
-        let defaults = freshDefaults()
-        var settings = QuickSettings()
-        settings.screenHistoryExcludedDomains = ["private.example.com", "example.org"]
-
-        settings.save(to: defaults)
-        let loaded = QuickSettings.load(from: defaults)
-
-        #expect(loaded.screenHistoryExcludedDomains == settings.screenHistoryExcludedDomains)
-    }
-
-    @Test func screenHistoryCommunicationSourcesCanBeIncludedCaseByCase() {
-        var settings = QuickSettings()
-        #expect(settings.screenHistoryIncludes(
-            bundleIdentifiers: ["com.tinyspeck.slackmacgap"]
-        ))
-        #expect(settings.screenHistoryIncludes(domains: ["web.whatsapp.com"]))
-
-        settings.setScreenHistoryIncluded(
-            false,
-            bundleIdentifiers: ["com.tinyspeck.slackmacgap"]
-        )
-        settings.setScreenHistoryIncluded(false, domains: ["web.whatsapp.com"])
-
-        #expect(!settings.screenHistoryIncludes(
-            bundleIdentifiers: ["COM.TINYSPECK.SLACKMACGAP"]
-        ))
-        #expect(!settings.screenHistoryIncludes(domains: ["https://web.whatsapp.com/chat"]))
-        #expect(settings.screenHistoryIncludes(
-            bundleIdentifiers: ["com.microsoft.outlook"]
-        ))
-
-        settings.setScreenHistoryIncluded(
-            true,
-            bundleIdentifiers: ["com.tinyspeck.slackmacgap"],
-            domains: ["web.whatsapp.com"]
-        )
-        #expect(settings.screenHistoryIncludes(
-            bundleIdentifiers: ["com.tinyspeck.slackmacgap"],
-            domains: ["web.whatsapp.com"]
-        ))
-    }
-
-    @Test func legacySettingsGainSafeScreenHistoryDomainDefaults() throws {
-        struct LegacySettings: Encodable {
-            var configurationVersion = 16
-            var screenHistoryExcludedBundleIDs = ["com.example.private"]
-        }
-        let decoded = try JSONDecoder().decode(
-            QuickSettings.self,
-            from: JSONEncoder().encode(LegacySettings())
-        )
-
-        #expect(decoded.configurationVersion == 26)
-        #expect(decoded.screenHistoryExcludedBundleIDs == ["com.example.private"])
-        #expect(decoded.screenHistoryExcludedDomains == ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted())
     }
 
     @Test func testLegacySettingsGainPiSearchActionOnce() throws {

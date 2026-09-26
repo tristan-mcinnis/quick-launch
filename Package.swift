@@ -24,7 +24,6 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("ServiceManagement"),
-                .linkedLibrary("sqlite3"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

@@ -241,45 +241,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let vaultSearchService = SSHVaultSearchService()
     /// `recall` over `~/memory`: the model's memory tools and Capture to Memory.
     private let recall = RecallCLI()
-    private let screenHistoryStore = try? SQLiteScreenHistoryStore()
-    private let coastLegacyReader = CoastLegacyReader()
-    private lazy var screenHistoryCoastImporter: ScreenHistoryCoastImportService? = {
-        guard let screenHistoryStore else { return nil }
-        return ScreenHistoryCoastImportService(
-            reader: coastLegacyReader,
-            store: screenHistoryStore,
-            legacyContentRootURL: coastLegacyReader.contentRootURL
-        )
-    }()
-    private lazy var screenHistoryRetirementReviewer: ScreenHistoryRetirementReviewService? = {
-        guard let screenHistoryStore else { return nil }
-        return ScreenHistoryRetirementReviewService(sampler: screenHistoryStore)
-    }()
-    private let screenHistorySoakReceipt = try? ScreenHistorySoakReceiptService()
-    private let screenHistoryCoastFreezeReceipt = try? ScreenHistoryCoastFreezeReceiptService()
-    private let screenHistoryVaultSaver = ScreenHistoryVaultSaveService()
-    private let screenHistorySecurityChecker = FileVaultScreenHistorySecurityChecker()
-    private lazy var screenHistoryCaptureSink: ScreenHistorySegmentedCaptureSink? = {
-        guard let screenHistoryStore,
-              let writer = try? AVFoundationScreenHistoryMediaSegmentWriter(
-                  mediaRootURL: SQLiteScreenHistoryStore.defaultMediaDirectoryURL()
-              )
-        else { return nil }
-        return ScreenHistorySegmentedCaptureSink(
-            store: screenHistoryStore,
-            writer: writer
-        )
-    }()
-    private lazy var screenHistoryCaptureService: ScreenHistoryCaptureService? = {
-        guard let screenHistoryCaptureSink else { return nil }
-        return ScreenHistoryCaptureService(
-            frameSource: ScreenCaptureKitHistoryFrameSource(),
-            activityReader: SystemScreenHistoryActivityReader(),
-            textRecognizer: VisionScreenHistoryTextRecognizer(),
-            sink: screenHistoryCaptureSink,
-            securityChecker: screenHistorySecurityChecker
-        )
-    }()
     private let pageReader = WebPageReader()
     private let windowManager = WindowManager()
     private let agentSessions = AgentSessionWatcher(folders: AgentSessionWatcher.defaultFolders())
@@ -302,10 +263,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let maintenance = ScreenHistoryMaintenanceCommand.parse(CommandLine.arguments) {
-            runMaintenanceCommand(maintenance)
-            return
-        }
         // Whatever image is already on the clipboard at launch was copied
         // before this run: it is not a fresh copy to offer. Without this,
         // every relaunch attached the same old clipboard image once more.
@@ -319,14 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             colorSampler: colorSampler,
             webSearchService: webSearchService,
             vaultSearchService: vaultSearchService,
-            screenHistoryStore: screenHistoryStore,
-            coastLegacyReader: coastLegacyReader,
-            screenHistoryCaptureService: screenHistoryCaptureService,
-            screenHistoryVaultSaver: screenHistoryVaultSaver,
-            screenHistoryCoastImporter: screenHistoryCoastImporter,
-            screenHistoryRetirementReviewer: screenHistoryRetirementReviewer,
-            screenHistorySoakReceipt: screenHistorySoakReceipt,
-            screenHistoryCoastFreezeReceipt: screenHistoryCoastFreezeReceipt,
             pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
@@ -373,62 +322,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func runMaintenanceCommand(_ command: ScreenHistoryMaintenanceCommand) {
-        Task { [weak self] in
-            guard let self else { Darwin.exit(1) }
-            var missing: [String] = []
-            if screenHistoryStore == nil { missing.append("store") }
-            if screenHistoryCoastImporter == nil { missing.append("importer") }
-            if screenHistoryRetirementReviewer == nil { missing.append("reviewer") }
-            guard missing.isEmpty,
-                  let store = screenHistoryStore,
-                  let importer = screenHistoryCoastImporter,
-                  let reviewer = screenHistoryRetirementReviewer else {
-                FileHandle.standardError.write(
-                    Data("Screen History maintenance is unavailable: \(missing.joined(separator: ", ")).\n".utf8)
-                )
-                Darwin.exit(1)
-            }
-            let freezeReceipt: ScreenHistoryCoastFreezeReceiptService
-            do {
-                freezeReceipt = try screenHistoryCoastFreezeReceipt
-                    ?? ScreenHistoryCoastFreezeReceiptService()
-            } catch {
-                FileHandle.standardError.write(
-                    Data("Screen History freeze receipt failed to initialize: \(String(describing: error)).\n".utf8)
-                )
-                Darwin.exit(1)
-            }
-            do {
-                let runner = ScreenHistoryMaintenanceRunner(
-                    store: store,
-                    importer: importer,
-                    freezeReceipt: freezeReceipt,
-                    reviewer: reviewer
-                )
-                let receipt: ScreenHistoryMaintenanceReceipt
-                switch command {
-                case .prepareImport:
-                    receipt = try await runner.prepareImport(
-                        policy: QuickSettings.load().screenHistoryMigrationPolicy
-                    )
-                }
-                let encoder = JSONEncoder()
-                encoder.dateEncodingStrategy = .iso8601
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                var data = try encoder.encode(receipt)
-                data.append(0x0A)
-                FileHandle.standardOutput.write(data)
-                Darwin.exit(0)
-            } catch {
-                FileHandle.standardError.write(
-                    Data("Screen History maintenance failed: \(String(describing: error))\n".utf8)
-                )
-                Darwin.exit(1)
-            }
-        }
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         // A stream in either view stops and keeps its question and what
         // arrived; the history file is on disk before the process ends.
@@ -449,23 +342,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         launcherItemHotKeys.removeAll()
         if let monitor = mouseMonitor  { NSEvent.removeMonitor(monitor) }
         caffeinateManager.releaseForQuit()
-        Task { await screenHistoryCaptureService?.stop() }
     }
 
     // MARK: - Bootstrap
 
     private func bootstrap(viewModel: QuickViewModel) async {
         // a. Load settings from UserDefaults
-        var settings = QuickSettings.load()
-        // Ambient capture needs one explicit Start in the visible Screen
-        // History settings on every launch. A persisted value is not consent
-        // to restart recording in the background.
-        settings.screenHistoryCaptureConfirmed = false
+        let settings = QuickSettings.load()
         viewModel.settings = settings
         // Stored colors are written in whichever notation settings ask for.
         colorHistory.preferredFormat = settings.colorFormat
-        await viewModel.screenHistory.prepareCaptureForBootstrap()
-        await viewModel.screenHistory.applyRetention()
         caffeinateManager.onChange = { [weak viewModel] in
             viewModel?.syncCaffeinateState()
         }
@@ -1339,11 +1225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func syncStatusItemVisibilityAndPresentation(viewModel: QuickViewModel) {
-        let presentation = ScreenHistoryMenuBarPresentation.make(
-            status: viewModel.screenHistory.captureStatus
-        )
-        let shouldShow = viewModel.settings.showMenuBar || presentation.forcesVisibility
-        if shouldShow {
+        if viewModel.settings.showMenuBar {
             setupStatusItem()
         } else if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
@@ -1355,15 +1237,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Status item (DESIGN.md): the app-icon glyph as a template image at
         // `Control.statusGlyph`, medium weight; outline idle, `.fill` = on.
         let image = NSImage(
-            systemSymbolName: presentation.symbolName,
-            accessibilityDescription: presentation.accessibilityName
+            systemSymbolName: Self.statusGlyphName,
+            accessibilityDescription: Self.statusAccessibilityName
         )?.withSymbolConfiguration(
             NSImage.SymbolConfiguration(pointSize: House.Control.statusGlyph, weight: .medium)
         )
         image?.isTemplate = true
         button.image = image
-        button.setAccessibilityLabel(presentation.accessibilityName)
+        button.setAccessibilityLabel(Self.statusAccessibilityName)
     }
+
+    /// The status item's one glyph, and what VoiceOver reads for it.
+    static let statusGlyphName = "bolt"
+    static let statusAccessibilityName = "Quick Launch"
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else {
@@ -1386,9 +1272,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 settings: viewModel?.settings ?? QuickSettings(),
                 isCaffeinating: viewModel?.isCaffeinating == true,
                 hasCaffeinateSession: viewModel?.hasCaffeinateSession == true,
-                screenHistory: ScreenHistoryStatusPresentation.make(
-                    status: viewModel?.screenHistory.captureStatus
-                ),
                 version: Bundle.main.shortVersion
             ),
             target: self,
@@ -1402,7 +1285,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .openAIChat: showAIChatFromMenu()
         case .openSettings: openSettingsFromMenu()
         case .toggleCaffeinate: toggleCaffeinateFromMenu()
-        case .stopScreenHistory: stopScreenHistoryFromMenu()
         case .showWelcome: showWelcomeFromMenu()
         case .openWebsite: openWebsite()
         case .quit: NSApp.terminate(nil)
@@ -1456,11 +1338,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             _ = viewModel.screenshotIndexProgress
             _ = viewModel.screenshotFiles
             _ = viewModel.clipboardEntries
-            _ = viewModel.screenHistory.captureStatus
-            // Screen History loads frames asynchronously and can flip into
-            // the timeline; both change the row count the window must fit.
-            _ = viewModel.screenHistory.showsTimeline
-            _ = viewModel.screenHistory.frames.count
             _ = viewModel.settings.showMenuBar
         } onChange: { [weak self, weak viewModel] in
             Task { @MainActor in
@@ -1664,12 +1541,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                   $0.itemID == "caffeinate.toggle"
               }) else { return }
         viewModel.performSystemCommand(item)
-    }
-
-    @objc private func stopScreenHistoryFromMenu() {
-        Task { @MainActor [weak viewModel] in
-            await viewModel?.screenHistory.pauseCapture()
-        }
     }
 
     @objc private func openWebsite() {

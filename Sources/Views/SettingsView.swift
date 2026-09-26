@@ -183,13 +183,13 @@ struct SettingsView: View {
         }
         .onAppear { scheduleFocusFade() }
         .onChange(of: tab) { _, newTab in
-            // ⌘1…⌘8 and rail clicks move panes without clearing a reveal, so
+            // ⌘1…⌘7 and rail clicks move panes without clearing a reveal, so
             // clear it here: the highlight belongs to the pane that was asked
             // for, not to whatever pane the user moved to next.
             if let current = focus, current.pane != newTab { focus = nil }
         }
         .background {
-            // ⌘1…⌘8 switch tabs, like Raycast.
+            // ⌘1…⌘7 switch tabs, like Raycast.
             ForEach(Array(SettingsTab.allCases.enumerated()), id: \.element.id) { index, item in
                 Button("") { tab = item }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command])
@@ -217,7 +217,6 @@ struct SettingsView: View {
                 case .items: ItemsSettingsView(viewModel: viewModel)
                 case .models: ProviderSettingsView(viewModel: viewModel)
                 case .clipboard: ClipboardLinksSettingsView(viewModel: viewModel)
-                case .screenHistory: ScreenHistorySettingsView(viewModel: viewModel)
                 case .prompts: SavedPromptsTab(viewModel: viewModel)
                 case .about: AboutTab(viewModel: viewModel)
                 }
@@ -653,12 +652,6 @@ private struct GeneralTab: View {
             SettingsRow(title: "Show menu bar icon") {
                 Toggle("Show menu bar icon", isOn: viewModel.settingsBinding(\.showMenuBar))
                     .toggleStyle(InkToggleStyle())
-                    .disabled(!viewModel.screenHistory.menuBarCanBeHidden)
-            }
-            if !viewModel.screenHistory.menuBarCanBeHidden {
-                CardNote {
-                    CardText("The menu bar status stays visible while Screen History capture is on.")
-                }
             }
 
             SettingsRow(title: "Double-tap right \u{2318} sends the focused window to AI") {

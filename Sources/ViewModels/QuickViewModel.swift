@@ -794,9 +794,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// VoiceOver announcements the view model makes itself ("Answer ready"
     /// in AI Chat). Tests record them instead.
     @ObservationIgnored var announce: (String) -> Void = { QuickAIAnnouncement.post($0, priority: .medium) }
-    /// Screen History lives behind this one hook; the core only knows the
-    /// catalog scope, the ⌘K form, and the pause/resume command.
-    let screenHistory: ScreenHistoryController
     /// Reads pages whose URLs appear in the prompt, so answers can use the
     /// live content instead of the model's stale training data.
     var pageReader: (any WebPageReading)?
@@ -1001,14 +998,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         colorSampler: (any ScreenColorSampling)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
         vaultSearchService: (any VaultSearchServicing)? = nil,
-        screenHistoryStore: (any ScreenHistoryStoring)? = nil,
-        coastLegacyReader: (any CoastLegacyReading)? = nil,
-        screenHistoryCaptureService: ScreenHistoryCaptureService? = nil,
-        screenHistoryVaultSaver: (any ScreenHistoryVaultSaving)? = nil,
-        screenHistoryCoastImporter: (any ScreenHistoryCoastImporting)? = nil,
-        screenHistoryRetirementReviewer: (any ScreenHistoryRetirementReviewing)? = nil,
-        screenHistorySoakReceipt: (any ScreenHistorySoakReceipting)? = nil,
-        screenHistoryCoastFreezeReceipt: (any ScreenHistoryCoastFreezeReceipting)? = nil,
         pageReader: (any WebPageReading)? = nil,
         windowManager: (any WindowManaging)? = nil,
         caffeinateManager: (any CaffeinateManaging)? = nil,
@@ -1047,16 +1036,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.colorSampler = colorSampler
         self.webSearchService = webSearchService
         self.vaultSearchService = vaultSearchService
-        self.screenHistory = ScreenHistoryController(
-            store: screenHistoryStore,
-            coastLegacyReader: coastLegacyReader,
-            captureService: screenHistoryCaptureService,
-            vaultSaver: screenHistoryVaultSaver,
-            coastImporter: screenHistoryCoastImporter,
-            retirementReviewer: screenHistoryRetirementReviewer,
-            soakReceipt: screenHistorySoakReceipt,
-            coastFreezeReceipter: screenHistoryCoastFreezeReceipt
-        )
         self.pageReader = pageReader
         self.windowManager = windowManager
         self.caffeinateManager = caffeinateManager
@@ -1078,7 +1057,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.houseCommandCatalog = houseCommandCatalog
         self.currentVersion = currentVersion
         self.colorHistory?.preferredFormat = settings.colorFormat
-        self.screenHistory.host = self
         self.screenshotTextIndex.onProgress = { [weak self] progress in
             self?.screenshotIndexProgress = progress
             // Newly recognized text changes what queries match; drop cached
@@ -1491,19 +1469,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             value: "settings.open",
             keywords: "settings preferences configure quick launch"
         )
-        let screenHistoryControl: LauncherCatalogItem? = {
-            guard screenHistory.captureIsActive || screenHistory.captureCanResume else { return nil }
-            return LauncherCatalogItem(
-                kind: .command,
-                itemID: "screenHistory.toggleCapture",
-                title: screenHistory.captureIsActive ? "Pause Screen History" : "Resume Screen History",
-                detail: screenHistory.captureIsActive
-                    ? "Stop ambient capture now. Local history remains searchable"
-                    : "Resume capture after you start it once in Screen History settings",
-                value: "screenHistory.toggleCapture",
-                keywords: "screen history capture pause resume stop recording"
-            )
-        }()
         var commands: [LauncherCatalogItem] = []
         commands.append(contentsOf: layouts)
         commands.append(contentsOf: screenshots)
@@ -1513,7 +1478,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if aiChatOpener != nil { commands.append(aiChatCommand) }
         if let chiefOfStaffCommand { commands.append(chiefOfStaffCommand) }
         if let speechStopRow { commands.append(speechStopRow) }
-        if let screenHistoryControl { commands.append(screenHistoryControl) }
         commands.append(settings)
         commands.append(contentsOf: utilityCommands)
         // Everything the other house apps publish, last: this app's own
@@ -1810,7 +1774,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .commands: return systemCommands
         case .folders: return folderItems
         case .vaultSearch: return vaultSearchItems
-        case .screenHistory: return screenHistory.items
         case .colors: return colorItems
         }
     }
@@ -1940,12 +1903,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Quicklinks join the preview-worthy set so a row's stored value is
     /// readable before it is pasted or opened.
     static let detailPaneScopes: Set<LauncherCatalogScope> = [
-        .screenshots, .clipboard, .screenHistory, .snippets, .quickLinks, .colors,
+        .screenshots, .clipboard, .snippets, .quickLinks, .colors,
     ]
 
     /// Item kinds the detail pane knows how to draw.
     static let detailPaneKinds: Set<LauncherItemKind> = [
-        .screenshot, .clipboard, .screenHistory, .snippet, .quickLink, .color,
+        .screenshot, .clipboard, .snippet, .quickLink, .color,
     ]
 
     /// Preview-worthy local catalogs share one stable two-pane layout. The
@@ -2049,9 +2012,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             paneTop: PanelSizing.inputHeight
                 + (hasPendingAttachment ? PanelSizing.attachmentHeight : 0)
         )
-        if let floor = activeItemActionForm?.minimumWindowHeight {
-            total = max(total, floor)
-        }
         return total
     }
 
@@ -2131,7 +2091,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     var catalogMatches: [LauncherCatalogItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if catalogScope == .screenHistory { return Array(visibleLauncherItems(screenHistory.items).prefix(Self.maxLauncherRows)) }
         // The Chats catalog is Recent Chats' list: the same order (pinned,
         // then newest), the same search (title and message text), every
         // chat. Learned favourites never reorder it. `chatItems` already
@@ -2251,8 +2210,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
         parts.append(String(clipboardHistory?.revision ?? 0))
-        parts.append(String(screenHistory.items.count))
-        parts.append(screenHistory.showsTimeline ? "timeline" : "results")
         parts.append(String(history.count))
         let pinnedChats = history.filter { $0.isPinned }.count
         parts.append(String(pinnedChats))
@@ -2483,12 +2440,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if catalogScope == .screenshots, screenshotIndexProgress.isRunning {
             return "Reading text \(screenshotIndexProgress.completed)/\(screenshotIndexProgress.total)"
         }
-        if catalogScope == .screenHistory {
-            let place = screenHistory.showsTimeline
-                ? "Timeline"
-                : (screenHistory.loadState == .loading ? "Searching" : "Results")
-            return "Screen History · \(place) · \(screenHistory.captureStatusLabel)"
-        }
         switch inputMode {
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
@@ -2519,8 +2470,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return [FooterHint(label: "Save", keys: ["⌘", "↩"]), cancel]
         case .alias, .hotkey:
             return [FooterHint(label: "Done", keys: ["⌘", "↩"]), cancel]
-        case .screenHistorySave:
-            return [FooterHint(label: "Save moment", keys: ["⌘", "↩"]), cancel]
         }
     }
 
@@ -2591,18 +2540,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let matches = launcherMatches
         if !matches.isEmpty {
             let index = min(applicationSelectionIndex, matches.count - 1)
-            if catalogScope == .screenHistory, case .item = matches[index] {
-                var hints = [
-                    FooterHint(label: "Open moment", keys: ["↩"]),
-                    FooterHint(label: "Copy text", keys: ["⌘", "↩"]),
-                    FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)),
-                    FooterHint(label: "Back", keys: ["⌫"]),
-                ]
-                if !screenHistory.showsTimeline {
-                    hints.insert(FooterHint(label: "Timeline", keys: ["⌘", "Y"]), at: 1)
-                }
-                return hints
-            }
             var hints = [FooterHint(label: primaryActionTitle(for: matches[index]), keys: ["↩"])]
             if case .item = matches[index], catalogScope != nil {
                 hints.append(FooterHint(label: "Copy", keys: ["⌘", "C"]))
@@ -2902,9 +2839,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         if contextualCatalogItemID.hasPrefix("color:") {
             return colorItems.first { $0.id == contextualCatalogItemID }
-        }
-        if contextualCatalogItemID.hasPrefix("screenHistory:") {
-            return screenHistory.items.first { $0.id == contextualCatalogItemID }
         }
         return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
@@ -3395,9 +3329,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let offset = (applicationSelectionIndex + delta) % matches.count
         applicationSelectionIndex = offset < 0 ? offset + matches.count : offset
         announceCurrentLauncherSelection()
-        if catalogScope == .screenHistory {
-            screenHistory.setAnnouncement(launcherSelectionAnnouncement)
-        }
         noteInteraction()
     }
 
@@ -3824,11 +3755,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         errorMessage = nil
         requestInputFocus()
         noteInteraction()
-        if scope == .screenHistory { screenHistory.enterCatalogScope() }
     }
 
     func leaveCatalog() {
-        if screenHistory.leaveCatalogIfTimeline() { return }
         let previousScope = catalogScope
         reset([.layers, .mode, .input])
         // Back returns to the catalog's root row, so Return enters it again.
@@ -3871,7 +3800,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         inputMode = nil
         input = ""
         applicationSelectionIndex = 0
-        screenHistory.isRetirementReviewing = false
         requestInputFocus()
     }
 
@@ -3892,7 +3820,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .commands: return visible(systemCommands)
         case .folders: return visible(folderItems)
         case .vaultSearch: return vaultSearchItems.count
-        case .screenHistory: return visible(screenHistory.items)
         }
     }
 
@@ -4088,13 +4015,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             input = ""
             rootAnswer = nil
             overlayPresenter.dismissOverlay()
-        case .screenHistory:
-            guard let frame = screenHistory.frame(for: item) else {
-                errorMessage = "This screen moment is no longer available."
-                requestInputFocus()
-                return
-            }
-            screenHistory.openMoment(frame)
         case .askAI:
             if item.value.isEmpty {
                 // Empty root row or global hotkey: open Quick AI empty.
@@ -4142,10 +4062,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
             if item.value == "screenshot.pasteLatest" {
                 await pasteLatestScreenshot()
-                return
-            }
-            if item.value == "screenHistory.toggleCapture" {
-                await screenHistory.toggleCaptureFromCommand()
                 return
             }
             performSystemCommand(item)
@@ -6268,35 +6184,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 actions.append(hide)
             }
         }
-        if case .item(let item) = result, item.kind == .screenHistory {
-            if screenHistory.showsTimeline {
-                actions.removeAll { $0.kind == .showTimeline }
-            }
-            if screenHistory.isRetirementReviewing {
-                actions.removeAll { $0.kind == .showTimeline || $0.kind == .saveToVault }
-                actions.insert(ItemAction(
-                    kind: .acceptScreenHistoryReview,
-                    title: "Accept imported moment",
-                    systemImage: "checkmark.circle",
-                    shortcut: .command("1")
-                ), at: 0)
-                actions.insert(ItemAction(
-                    kind: .flagScreenHistoryReview,
-                    title: "Flag imported moment",
-                    systemImage: "flag",
-                    shortcut: .command("2")
-                ), at: 1)
-            }
-            if let control = systemCommands.first(where: { $0.value == "screenHistory.toggleCapture" }) {
-                actions.append(ItemAction(
-                    kind: .runCommand,
-                    title: control.title,
-                    systemImage: screenHistory.captureIsActive ? "pause.circle" : "record.circle",
-                    shortcut: nil,
-                    commandValue: control.value
-                ))
-            }
-        }
         // In the Screenshots catalog the capture and AI commands ride along
         // in every ⌘K pane; the list itself stays a pure file list.
         if catalogScope == .screenshots {
@@ -6498,7 +6385,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         isActionPalettePresented = false
         actionQuery = ""
         activeItemActionForm = form
-        if form != .screenHistorySave { screenHistory.saveError = nil }
         deleteArmedItemID = nil
         noteInteraction()
     }
@@ -6509,7 +6395,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         contextualCatalogItemID = nil
         contextualApplicationID = nil
         activeItemActionForm = nil
-        screenHistory.saveError = nil
         deleteArmedItemID = nil
         actionQuery = ""
         requestInputFocus()
@@ -6688,7 +6573,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func dismissItemActionLayer() {
         if activeItemActionForm != nil {
             activeItemActionForm = nil
-            screenHistory.saveError = nil
             deleteArmedItemID = nil
             noteInteraction()
         } else {
@@ -6942,24 +6826,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             else { return }
             closeItemActionPane()
             await performLauncherItem(command)
-        case .saveToVault:
-            guard case .item(let item) = result,
-                  screenHistory.frame(for: item) != nil,
-                  screenHistory.vaultSaver != nil
-            else {
-                screenHistory.saveError = "Save to Vault is unavailable. Check the local vault helper and try again."
-                openActionPane(for: result, form: .screenHistorySave)
-                return
-            }
-            screenHistory.saveError = nil
-            openActionPane(for: result, form: .screenHistorySave)
-        case .acceptScreenHistoryReview, .flagScreenHistoryReview:
-            guard case .item(let item) = result,
-                  let frame = screenHistory.frame(for: item) else { return }
-            await screenHistory.decideRetirementMoment(
-                frame: frame,
-                decision: action.kind == .acceptScreenHistoryReview ? .accepted : .flagged
-            )
         default:
             break
         }
@@ -6971,19 +6837,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     private func performSynchronously(_ action: ItemAction, on result: LauncherSearchResult) -> Bool {
         if action.kind != .delete { deleteArmedItemID = nil }
         switch action.kind {
-        case .primary, .copyAndPaste, .runCommand, .saveToVault,
-                .acceptScreenHistoryReview, .flagScreenHistoryReview:
+        case .primary, .copyAndPaste, .runCommand:
             return false
-        case .showTimeline:
-            guard case .item(let item) = result,
-                  let frame = screenHistory.frame(for: item) else { return true }
-            closeItemActionPane()
-            Task { await screenHistory.openSequence(for: frame) }
-        case .openMoment:
-            guard case .item(let item) = result,
-                  let frame = screenHistory.frame(for: item) else { return true }
-            closeItemActionPane()
-            screenHistory.openMoment(frame)
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
             controlRunningApplication(application, action: action.kind)
@@ -7029,9 +6884,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     errorMessage = "Could not read \(item.title)."
                     requestInputFocus()
                 }
-            case .item(let item) where item.kind == .screenHistory:
-                Task { @MainActor in _ = await copyLauncherItem(item) }
-                closeItemActionPane()
             case .item(let item) where item.kind == .snippet:
                 // Copy expands the snippet's placeholders too: what lands on
                 // the clipboard is what a paste would have typed.
@@ -7079,11 +6931,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             saveClipboardEntry(item, asLink: true)
         case .revealInFinder:
             guard case .item(let item) = result else { return true }
-            if item.kind == .screenHistory, let frame = screenHistory.frame(for: item) {
-                closeItemActionPane()
-                screenHistory.revealMoment(frame)
-                return true
-            }
             guard item.kind == .screenshot else { return true }
             closeItemActionPane()
             input = ""
@@ -7676,8 +7523,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return colorItems.contains { $0.itemID == configuration.itemID }
         case .emoji:
             return emojiItems.contains { $0.itemID == configuration.itemID }
-        case .screenHistory:
-            return screenHistory.items.contains { $0.itemID == configuration.itemID }
         case .answer:
             return false
         case .askAI, .snippet, .quickLink, .command, .folder:
@@ -10493,10 +10338,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             activeItemActionForm = nil
             deleteArmedItemID = nil
             actionQuery = ""
-            screenHistory.resetForLayers()
         }
         if scope.contains(.mode) {
-            screenHistory.resetForMode()
             catalogIdleResetTask?.cancel()
             isQuickAIPresented = false
             isRecentChatsPresented = false
@@ -11406,4 +11249,4 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 }
 
-extension QuickViewModel: ScreenHistoryHost {}
+

@@ -23,7 +23,6 @@ struct StatusMenuTests {
             StatusMenu.State(
                 settings: settings,
                 isCaffeinating: isCaffeinating,
-                screenHistory: ScreenHistoryStatusPresentation.make(status: nil),
                 version: "1.5.0"
             ),
             target: nil,
@@ -76,7 +75,6 @@ struct StatusMenuTests {
                 settings: QuickSettings(),
                 isCaffeinating: false,
                 hasCaffeinateSession: true,
-                screenHistory: ScreenHistoryStatusPresentation.make(status: nil),
                 version: "1.5.0"
             ),
             target: nil,
@@ -97,11 +95,18 @@ struct StatusMenuTests {
         #expect(commands[1] == .openAIChat)
     }
 
-    @Test func aStoppedScreenHistoryControlIsDisabled() throws {
+    /// Screen History was retired (memory-screenctx is the one collector),
+    /// so the menu has no capture row or control left.
+    @Test func theMenuHasNoScreenHistoryRows() {
         let menu = menu()
         #expect(!menu.autoenablesItems)
-        let stop = try #require(menu.items.first { $0.tag == StatusMenu.Command.stopScreenHistory.rawValue })
-        #expect(!stop.isEnabled)
+        #expect(!menu.items.contains { $0.title.contains("Screen History") })
+        let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
+        #expect(titles == [
+            "Open Quick Launch", "AI Chat", "Settings…", "Caffeinate",
+            "Show Welcome Again", "Quick Launch v1.5.0", "View Quick Launch on GitHub",
+            "Quit Quick Launch",
+        ])
     }
 
     // MARK: - Keep on Top

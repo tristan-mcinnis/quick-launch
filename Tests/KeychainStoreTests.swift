@@ -90,60 +90,6 @@ struct KeychainStoreTests {
         #expect(result == .failure(KeychainError(status: errSecAuthFailed)))
     }
 
-    @Test func coastIntegrityKeyIsCreatedOnceAndReused() throws {
-        let keychain = InMemoryKeychainStore()
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quick-launch-coast-key-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let fallback = folder.appendingPathComponent("integrity.key")
-
-        let first = try ScreenHistoryCoastFreezeReceiptService.loadOrCreateIntegrityKeyForTesting(
-            receiptDirectoryURL: folder, fallbackFileURL: fallback, keychain: keychain
-        )
-        let second = try ScreenHistoryCoastFreezeReceiptService.loadOrCreateIntegrityKeyForTesting(
-            receiptDirectoryURL: folder, fallbackFileURL: fallback, keychain: keychain
-        )
-        #expect(first == second)
-        let items = keychain.storedItems[ScreenHistoryCoastFreezeReceiptService.integrityKeyServiceForTesting]
-        #expect(items?.count == 1)
-        #expect(items?.values.first?.data.count == 32)
-        #expect(items?.values.first?.options.accessible == kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
-        #expect(!FileManager.default.fileExists(atPath: fallback.path))
-    }
-
-    @Test func coastIntegrityKeyFallsBackToOwnerOnlyFileWhenKeychainIsLocked() throws {
-        let keychain = InMemoryKeychainStore()
-        keychain.failureStatus = errSecInteractionNotAllowed
-        // The fallback refuses any symlinked path component, so use a
-        // real /private/tmp folder (mkdtemp makes it owner-only).
-        var template = Array("/private/tmp/quick-launch-keychain-tests.XXXXXX".utf8CString)
-        try #require(mkdtemp(&template) != nil)
-        let folder = URL(fileURLWithPath: String(cString: template), isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let fallback = folder.appendingPathComponent("integrity.key")
-
-        let key = try ScreenHistoryCoastFreezeReceiptService.loadOrCreateIntegrityKeyForTesting(
-            receiptDirectoryURL: folder, fallbackFileURL: fallback, keychain: keychain
-        )
-        #expect(FileManager.default.fileExists(atPath: fallback.path))
-        let again = try ScreenHistoryCoastFreezeReceiptService.loadOrCreateIntegrityKeyForTesting(
-            receiptDirectoryURL: folder, fallbackFileURL: fallback, keychain: keychain
-        )
-        #expect(key == again)
-        #expect(keychain.storedItems.isEmpty)
-    }
-
-    @Test func coastIntegrityKeyReportsOtherKeychainFailures() {
-        let keychain = InMemoryKeychainStore()
-        keychain.failureStatus = errSecInternalError
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("x-\(UUID().uuidString)")
-        #expect(throws: ScreenHistoryCoastFreezeReceiptError.self) {
-            try ScreenHistoryCoastFreezeReceiptService.loadOrCreateIntegrityKeyForTesting(
-                receiptDirectoryURL: folder, fallbackFileURL: folder.appendingPathComponent("k"), keychain: keychain
-            )
-        }
-    }
-
     @Test func featureKeysRoundTripWithoutDisturbingProviderKeys() throws {
         let keychain = InMemoryKeychainStore()
         let provider = UUID()

@@ -152,14 +152,6 @@ struct PanelSizingTests {
         #expect(estimate <= fitting + 16, "a tall estimate leaves dead space")
     }
 
-    @Test func screenHistorySaveHasAProductionVisibilityBudget() {
-        #expect(ItemActionForm.screenHistorySave.minimumWindowHeight! >= 620)
-        #expect(ItemActionForm.screenHistorySave.minimumWindowHeight! > PanelSizing.windowHeight(
-            base: PanelSizing.inputHeight,
-            paneHeight: PanelSizing.itemActionPaneHeight(rows: 2)
-        ))
-    }
-
     /// The ⌘K pane beside a detail pane sits inside that column, with the
     /// same margin each side. It used to float at a fixed 520, which cut
     /// across the preview text behind it.

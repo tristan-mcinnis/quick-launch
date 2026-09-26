@@ -97,7 +97,7 @@ struct FoldersAndCommandsTests {
         #expect(ids.contains("ocr.area"))
         #expect(ids.contains("paste.plain"))
         #expect(ids.contains("clipboard.cleanLink"))
-        #expect(!ids.contains("screenHistory.toggleCapture"), "capture control stays hidden until it can run safely")
+        #expect(!ids.contains { $0.hasPrefix("screenHistory.") }, "Screen History was retired; no capture control")
         #expect(ids.contains { $0.hasPrefix("settingspane.") })
         #expect(Set(ids).count == ids.count, "command ids stay unique")
         vm.input = "dark mode"

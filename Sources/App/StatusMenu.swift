@@ -5,7 +5,7 @@ import AppKit
 /// always shows the hotkey the user set, the moment they change it.
 ///
 /// Order: the two windows first (Quick Launch, then AI Chat), then Settings
-/// and Caffeinate; Screen History and Welcome; the version and GitHub; Quit.
+/// and Caffeinate; Welcome; the version and GitHub; Quit.
 /// Every item carries a `Command` as its tag and sends one action, so the
 /// menu can be built and read in a test without the app.
 @MainActor
@@ -15,7 +15,6 @@ enum StatusMenu {
         case openAIChat
         case openSettings
         case toggleCaffeinate
-        case stopScreenHistory
         case showWelcome
         case openWebsite
         case quit
@@ -32,29 +31,26 @@ enum StatusMenu {
         /// the assertion. Defaults to `isCaffeinating` for a caller that has no
         /// paused state to report.
         var hasCaffeinateSession: Bool
-        var screenHistory: ScreenHistoryStatusPresentation
         var version: String
 
         init(
             settings: QuickSettings,
             isCaffeinating: Bool,
             hasCaffeinateSession: Bool? = nil,
-            screenHistory: ScreenHistoryStatusPresentation,
             version: String
         ) {
             hotkeyKeyCode = settings.hotkeyKeyCode
             hotkeyModifiers = settings.hotkeyModifiers
             self.isCaffeinating = isCaffeinating
             self.hasCaffeinateSession = hasCaffeinateSession ?? isCaffeinating
-            self.screenHistory = screenHistory
             self.version = version
         }
     }
 
     static func make(_ state: State, target: AnyObject?, action: Selector?) -> NSMenu {
         let menu = NSMenu()
-        // Each item's `isEnabled` is the truth: a disabled Stop Screen
-        // History stays disabled.
+        // Each item's `isEnabled` is the truth: the version line stays
+        // disabled.
         menu.autoenablesItems = false
         @discardableResult
         func add(_ title: String, _ command: Command?, key: String = "") -> NSMenuItem {
@@ -81,9 +77,6 @@ enum StatusMenu {
         caffeinate.state = state.hasCaffeinateSession ? .on : .off
 
         menu.addItem(.separator())
-        add(state.screenHistory.statusTitle, nil)
-        add(state.screenHistory.controlTitle, .stopScreenHistory)
-            .isEnabled = state.screenHistory.controlIsEnabled
         add("Show Welcome Again", .showWelcome)
 
         menu.addItem(.separator())

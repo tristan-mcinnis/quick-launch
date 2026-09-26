@@ -8,8 +8,9 @@ import Foundation
 /// reference (`SettingsView.SettingsTab`) still compiles.
 enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     // Appended, never inserted: the ⌘-number of a tab is its position, so
-    // adding a pane at the end keeps ⌘1…⌘7 on the tabs they always opened.
-    case general, items, models, clipboard, screenHistory, prompts, about, keyboard
+    // adding a pane at the end keeps ⌘1…⌘6 on the tabs they always opened.
+    // (Screen History, once ⌘5, was retired on 2026-09-26.)
+    case general, items, models, clipboard, prompts, about, keyboard
 
     var id: String { rawValue }
 
@@ -20,7 +21,6 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .items: "Items"
         case .models: "Models"
         case .clipboard: "Clipboard & Capture"
-        case .screenHistory: "Screen History"
         case .prompts: "AI Commands"
         case .about: "About"
         }
@@ -33,7 +33,6 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .items: "square.grid.2x2"
         case .models: "cpu"
         case .clipboard: "clipboard"
-        case .screenHistory: "clock.arrow.circlepath"
         case .prompts: "text.quote"
         case .about: "info.circle"
         }
@@ -47,7 +46,6 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .items: "Aliases and hotkeys for apps, folders, and commands."
         case .models: "Providers, models, and the quick-action instruction."
         case .clipboard: "Clipboard history, colors, emoji, and Quicklinks."
-        case .screenHistory: "Sources, capture, retention, and exclusions."
         case .prompts: "Saved AI commands, their aliases, and hotkeys."
         case .about: "Version, updates, and source."
         }
@@ -59,7 +57,6 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .general, .items, .clipboard, .prompts: "Applies immediately"
         case .keyboard: "Rebinds apply immediately"
         case .models: "Model changes apply immediately"
-        case .screenHistory: "Capture stays locked in this build"
         case .about: "Version and updates"
         }
     }
@@ -270,23 +267,6 @@ enum SettingsDestinationIndex {
         group("clipboard.catalog", .clipboard, "clipboard.catalog", "Snippets & Quicklinks",
               "Private local items owned by Quick Launch",
               ["snippets", "quicklinks", "quick links", "catalog", "local", "files"]),
-
-        // Screen History
-        group("screenHistory.sources", .screenHistory, "screenHistory.sources", "Sources",
-              "Search existing Coast history and communication sources",
-              ["screen history", "sources", "coast", "messages", "wechat", "slack", "outlook"]),
-        group("screenHistory.capture", .screenHistory, "screenHistory.capture", "Capture",
-              "Start or stop ambient capture; it stays locked until the review passes",
-              ["capture", "screen history", "recording", "start", "stop", "ambient"]),
-        group("screenHistory.retention", .screenHistory, "screenHistory.retention", "Retention",
-              "How long moments are kept and the storage cap",
-              ["retention", "days", "storage", "cap", "history"]),
-        group("screenHistory.exclusions", .screenHistory, "screenHistory.excludedApplications", "Excluded applications",
-              "Apps never captured or searched",
-              ["exclude", "excluded", "applications", "apps", "privacy", "never capture"]),
-        group("screenHistory.excludedWebsites", .screenHistory, "screenHistory.excludedWebsites", "Excluded websites",
-              "Domains never captured or searched",
-              ["exclude", "excluded", "websites", "domains", "privacy", "never capture"]),
 
         // AI Commands
         group("prompts.commands", .prompts, "prompts.commands", "AI Commands",

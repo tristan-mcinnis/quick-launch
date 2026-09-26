@@ -22,8 +22,8 @@ struct AppPathsTests {
         #expect(AppPaths.file("translation-history.json").path
             == FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Quick Launch/translation-history.json").path)
-        #expect(AppPaths.directory("Screen History Soak").path == base.appendingPathComponent("Screen History Soak").path)
-        #expect(AppPaths.directory("Screen History Soak").hasDirectoryPath)
+        #expect(AppPaths.directory("ClipboardBlobs").path == base.appendingPathComponent("ClipboardBlobs").path)
+        #expect(AppPaths.directory("ClipboardBlobs").hasDirectoryPath)
         #expect(!AppPaths.file("launcher-usage.json").hasDirectoryPath)
     }
 
@@ -34,8 +34,5 @@ struct AppPathsTests {
         #expect(ScreenshotTextIndex.defaultStoreURL().path == base + "/screenshot-text-index.json")
         #expect(TranslationHistoryStore.defaultURL().path == base + "/translation-history.json")
         #expect(QuickHistoryStore.defaultFileURL().path == base + "/chat-history.json")
-        #expect(SQLiteScreenHistoryStore.defaultDatabaseURL().path == base + "/screen-history.sqlite3")
-        #expect(SQLiteScreenHistoryStore.defaultMediaDirectoryURL().path == base + "/Screen History Frames")
-        #expect(ScreenHistoryCoastFreezeReceiptService.defaultReceiptDirectoryURLForTesting.path == base + "/Screen History Coast Freeze")
     }
 }

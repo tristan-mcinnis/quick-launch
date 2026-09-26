@@ -334,22 +334,6 @@ Changes, Project History, and Across Projects.
   freshness and source paths, refuse future evidence, and ask for project scope
   when a name is ambiguous.
 
-## Screen History
-
-A local, search-only catalog over an owned SQLite FTS store and a separate
-existing database, with time, app, and site filters, stable source-labelled
-rows, image and OCR previews, surrounding timelines, and no AI or remote
-fallback.
-
-- Every row is labelled by source. It never falls back to a model, web search,
-  Vault Search, or telemetry.
-- This beta hard-locks owned capture. Capture is off by default, switched on in
-  its own Settings tab, stored only on this Mac, and stays locked until its
-  privacy review and soak test pass. Browser capture is not available.
-- It is Quick Launch's own collector. It is not the `screenctx` timeline
-  (`screenctx timeline` and `screenctx search`) that Memory.app switches on
-  and off.
-
 ## Learning and the interaction journal
 
 The app keeps a bounded local review log of launcher and AI outcomes: choices,
@@ -406,7 +390,6 @@ failures or cancellations, successful command actions, and hotkey runs.
 | AI Chat | Open the chat window | The AI Chat command, `Command+J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Vault Search | Show a cited result | Enter the catalog, choose a mode, type the project and question |
-| Screen History | Open the surrounding local timeline | Enter the catalog, type a memory, add filters |
 | Colors | Paste the picked colour into the previous app | Run Pick Color from Screen, or open the catalog |
 | Emoji | Paste the symbol | Open the catalog and type a name |
 | Screenshots | Attach or act on a capture | Open the catalog and type a name |
@@ -503,8 +486,9 @@ interpolated into a shell command.
 
 Finder file actions, autonomous file changes, voice input, and a larger chat
 workspace are deferred. Explicit clipboard image attachments are supported.
-Quick Launch does not watch the screen on its own: the only continuous capture
-is the opt-in owned Screen History capture described above.
+Quick Launch does not watch the screen on its own and keeps no screen
+history. The House's one screen-history collector is `screenctx`
+(memory-screenctx); Memory.app switches it on and off.
 
 ## Removed
 
@@ -514,3 +498,12 @@ is the opt-in owned Screen History capture described above.
   to this project, so the helper, its dependency, the managed provider, and the
   MCP tab are gone. Settings saved by earlier builds load unchanged. The
   OpenAI-compatible client remains the inference path.
+- **Screen History (2026-09-26).** Quick Launch's own collector, its search
+  catalog over the owned store and the closed Coast database, its Settings
+  tab, the Save to Vault form, the import review and the menu-bar capture
+  status are gone. Capture was never switched on, the owned store held no
+  moments, and the Coast database is no longer on this Mac. `screenctx`
+  (memory-screenctx) is the one screen-history collector. Settings saved by
+  earlier builds load unchanged; their Screen History keys are dropped on the
+  next save. The old files in Application Support are left in place and are
+  no longer read.

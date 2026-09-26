@@ -24,7 +24,7 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   dates, a typed address) sit above everything.
 - **Catalog.** A named list of items of one kind: Snippets, Quick Links,
   Clipboard History, Emoji & Symbols, Screenshots, Folders, Caffeinate,
-  Chats, Vault Search, Screen History, Colors, Commands (windows, screenshots, toggles, System Settings
+  Chats, Vault Search, Colors, Commands (windows, screenshots, toggles, System Settings
   panes, clipboard and screen helpers). Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
@@ -112,8 +112,8 @@ The same key means the same thing on every layer.
 | `↑ ↓` | Move the highlight |
 
 The launcher list never uses `⌘1…9` to jump to rows. A number key is a row
-action where a catalog needs one (a colour's other notations are `⌘1…⌘4`,
-Screen History's import review is `⌘1` and `⌘2`), switches Settings tabs (`⌘1…⌘8`),
+action where a catalog needs one (a colour's other notations are `⌘1…⌘4`),
+switches Settings tabs (`⌘1…⌘7`),
 or, in AI Chat only, opens a chat from the list. The answer keys live in one table, `ResultAction.defaultShortcut`
 (`Sources/Models/ItemAction.swift`); the AI Chat window's own keys in
 `AIChatWindowModel`, the Translator's in `TranslatorKey`.
@@ -126,7 +126,7 @@ command palette (`⌘K`), and every Quick AI and AI Chat action (`⌘N`, `⌘P`,
 `⌘J`, `⌥⌘K`, `⌥⌘T`, `⇧⌘M`, `⌘F`, `⌃⌘S`, and the answer keys, including Replace
 Selection on `⌥⌘V`: it was `⇧⌘V` until that turned out to be Clipboard
 History's global hotkey, which wins the key system-wide). Settings › Keyboard
-Shortcuts (the last tab, `⌘8`) records one, `QuickSettings.shortcutOverrides`
+Shortcuts (the last tab, `⌘7`) records one, `QuickSettings.shortcutOverrides`
 stores it, and `QuickSettings.shortcuts` is the resolved table the router, the
 footer hints, the key-cap badges, the tooltips, the `⌘K` rows, the launcher's
 chat-row actions, and the AI Chat menu all read: the built-in key stops
@@ -167,7 +167,7 @@ return.
   with section headers (Frequently Used, All). Arrows move the highlight;
   the same actions apply.
 - **Detail pane.** Catalogs of things worth previewing (Screenshots,
-  Clipboard History, Screen History) show the list on the left and a preview plus an
+  Clipboard History, Snippets, Quick Links, Colors) show the list on the left and a preview plus an
   Information block on the right; the panel widens to fit.
 - **Answer.** Model answers live on the Quick AI surface: the thread
   scrolls, follows the newest text only while you are at the bottom, and
@@ -185,7 +185,7 @@ return.
   chat to the AI Chat window, one conversation window with the same thread
   and composer, a multi-line composer, find (`⌘F`), and a chat list hidden
   until `⌃⌘S` (Pin, Rename, and Delete on its rows).
-- **Settings.** A sidebar of eight tabs (`⌘1…⌘8`), no system tab view.
+- **Settings.** A sidebar of seven tabs (`⌘1…⌘7`), no system tab view.
   Typing in the sidebar searches one index of every setting
   (`SettingsDestinationIndex`), and the launcher row for a group opens Settings
   on it. The Items tab is one searchable table of every configurable item with
@@ -225,7 +225,7 @@ one toggle, one Forget button.
   later questions, as long as the session holds it; after a relaunch a file is
   read again, or a link fetched again, only when the user chooses Re-attach.
   Attached images stay in memory for the session and are never written.
-- Screen History frames and OCR remain in owner-only local stores. The search-only beta hard-locks capture. The latent capture path requires FileVault and visible consent after each launch, and all browsers are refused before pixels are read. The editable application and domain exclusions govern capture, search, and migration. A result proves only that something was visible at that time. It never reports current project truth.
+- Quick Launch keeps no background screen history; its Screen History collector was retired on 2026-09-26. `screenctx` (memory-screenctx) is the House's one screen-history collector.
 - The screenshot text index is on-device OCR (Vision), one local JSON file,
   switchable off in Settings › General.
 - Snippet and clipboard values never reach logs or diagnostics.

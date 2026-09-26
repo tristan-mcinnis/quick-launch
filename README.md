@@ -50,7 +50,11 @@ and actions can be added, instead of waiting on someone else's roadmap.
   `⌘-` More and Less, `⌘Z` Undo, `⌘D` Discuss in a new chat; `⌘N` adds a
   task. Activity, Artifacts and Charter are `⌥⌘3` to `⌥⌘5`. Its notifications come from Quick Launch. Type `cos` in the
   launcher to open it. This pinned conversation is the only Chief of Staff
-  face: the old ChiefOfStaff.app is retired and not installed.
+  face: the old ChiefOfStaff.app is retired and its code removed.
+- AI Chat is the House's general chat. RTI keeps its own chats because they
+  are grounded in a meeting or a recording session; anything not about a
+  meeting belongs here.
+- Capture to Memory (`⌥⌘M`) sends an answer to `recall capture`.
 
 **Capture and screen**
 
@@ -65,9 +69,12 @@ and actions can be added, instead of waiting on someone else's roadmap.
 - A Translator window for selected or typed text.
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions and Agent Watch.
-- Emoji and symbols, and local Screen History search. Screen History is Quick
-  Launch's own collector: opt-in, off by default and locked. It is not the
-  `screenctx` timeline that Memory.app switches on and off.
+- Emoji and symbols.
+- Quick Launch keeps no screen history of its own. The one screen-history
+  collector in the House is `screenctx` (memory-screenctx): Memory.app
+  switches it on and off, and `screenctx timeline` and `screenctx search`
+  read it. Quick Launch's own Screen History collector was retired on
+  2026-09-26.
 
 **Models and providers**
 

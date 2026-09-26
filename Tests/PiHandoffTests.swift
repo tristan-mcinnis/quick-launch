@@ -591,7 +591,7 @@ struct PiHandoffTests {
         ]
         let kinds: [LauncherItemKind] = [
             .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
-            .conversation, .askAI, .folder, .answer, .screenHistory, .color,
+            .conversation, .askAI, .folder, .answer, .color,
         ]
         var results: [LauncherSearchResult] = kinds.map { kind in
             .item(LauncherCatalogItem(

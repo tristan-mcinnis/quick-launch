@@ -352,12 +352,15 @@ struct InteractionJournalTests {
             "folder:downloads", "snippet:9F3A1C", "quickLink:1b2c3d",
             "clipboard:9f3a1c2b", "emoji:emoji-1f600", "screenshot:file-9f3a1c",
             "conversation:11111111-1111-1111-1111-111111111111", "answer:answer",
-            "askAI:ask", "screenHistory:app:com.apple.Safari", "color:ff8800ff",
+            "askAI:ask", "color:ff8800ff",
             "action:translate",
         ]
         for identifier in realIdentifiers {
             #expect(store.sanitizedItemID(identifier) == identifier, "\(identifier) should survive")
         }
+        // Screen History rows were retired; an id left from them is no longer
+        // a known identity, so it is digested like any other free text.
+        #expect(store.sanitizedItemID("screenHistory:app:com.apple.Safari")?.hasPrefix("redacted:v2:") == true)
         // The typed-URL row is the one real shape that is always re-keyed: the
         // launcher's own identity for it is a keyless FNV-1a content hash, and
         // the journal does not inherit that non-cryptographic property.

@@ -634,11 +634,12 @@ struct ShortcutRegistryTests {
 
     // MARK: - The pane
 
-    /// The new pane is last, so `⌘1`…`⌘7` still open the tabs they always did.
+    /// The new pane is last, so the tabs before it keep their numbers.
+    /// Screen History (once `⌘5`) was retired, so Prompts is `⌘5` now.
     @Test func theKeyboardPaneIsLastSoTheOldTabNumbersHold() {
         #expect(SettingsPane.allCases.last == .keyboard)
         #expect(SettingsPane.allCases.dropLast() == [
-            .general, .items, .models, .clipboard, .screenHistory, .prompts, .about,
+            .general, .items, .models, .clipboard, .prompts, .about,
         ])
         let destination = SettingsDestinationIndex.destination(id: "pane.keyboard")
         #expect(destination?.pane == .keyboard)

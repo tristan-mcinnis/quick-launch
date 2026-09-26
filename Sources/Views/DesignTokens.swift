@@ -8,8 +8,7 @@ import SwiftUI
 /// names the launcher's semantic roles. Nothing here retypes a value.
 ///
 /// Type is the house scale at its fixed point sizes: 16 input, 14 prose,
-/// 13 label, 12 meta, 11 caption, 10.5 section, 10 micro. Views that carry
-/// their own accessibility scale use the `scaled*` helpers.
+/// 13 label, 12 meta, 11 caption, 10.5 section, 10 micro.
 enum AQDesign {
     enum ColorToken {
         /// Focus rings and links only. Never a fill, never chrome.
@@ -137,17 +136,6 @@ enum AQDesign {
             let target = House.TypeToken.Size.body * House.TypeToken.LineHeight.body
             return max(0, target - native)
         }()
-
-        /// Body text that follows the Screen History detail pane's own
-        /// accessibility scale rather than Dynamic Type.
-        static func scaledBody(_ scale: CGFloat, weight: Font.Weight = .regular) -> Font {
-            Font.system(size: House.TypeToken.Size.bodySmall * scale, weight: weight)
-        }
-
-        /// Hint text under the same manual scale as `scaledBody`.
-        static func scaledHint(_ scale: CGFloat, weight: Font.Weight = .regular) -> Font {
-            Font.system(size: House.TypeToken.Size.caption * scale, weight: weight)
-        }
     }
 
     enum Space {

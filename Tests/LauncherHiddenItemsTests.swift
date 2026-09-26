@@ -184,7 +184,6 @@ struct LauncherHiddenItemsTests {
         #expect(!typedLink.canBeHidden)
         #expect(!LauncherCatalogItem(kind: .answer, itemID: "answer", title: "2", detail: "1+1", value: "2").canBeHidden)
         #expect(!LauncherCatalogItem(kind: .askAI, itemID: "askAI", title: "Ask AI", detail: "", value: "").canBeHidden)
-        #expect(!LauncherCatalogItem(kind: .screenHistory, itemID: "m", title: "Moment", detail: "", value: "").canBeHidden)
     }
 
     @Test func hideFromQuickLaunchRemovesTheRowAndKeepsAliasHotkeyAndSource() async {

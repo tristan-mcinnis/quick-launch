@@ -173,11 +173,6 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case hideFromLauncher
     case relaunch
     case copyCleanLink
-    case showTimeline
-    case openMoment
-    case saveToVault
-    case acceptScreenHistoryReview
-    case flagScreenHistoryReview
     /// `⌘J` on a chat row: that chat moves to the AI Chat window.
     case openInAIChat
 }
@@ -405,17 +400,6 @@ enum ItemActionCatalog {
                 ItemAction(kind: .secondary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
             ]
-        case .screenHistory:
-            var actions = [
-                ItemAction(kind: .openMoment, title: "Open moment", systemImage: "clock", shortcut: .returnKey),
-                ItemAction(kind: .showTimeline, title: "Show timeline", systemImage: "clock.arrow.circlepath", shortcut: .command("y")),
-                ItemAction(kind: .secondary, title: "Copy text", systemImage: "doc.on.doc", shortcut: .commandReturn),
-            ]
-            if item.keywords.contains("has-local-file") {
-                actions.append(ItemAction(kind: .revealInFinder, title: "Show in Finder", systemImage: "folder", shortcut: .commandShift("r")))
-            }
-            actions.append(ItemAction(kind: .saveToVault, title: "Save to Vault", systemImage: "tray.and.arrow.down", shortcut: nil))
-            return actions
         case .askAI:
             return [
                 ItemAction(kind: .primary, title: "Ask AI", systemImage: "sparkles", shortcut: .returnKey),
@@ -466,25 +450,12 @@ enum ItemActionForm: Equatable, Sendable {
     case edit
     case alias
     case hotkey
-    case screenHistorySave
-
-    /// Window height the whole overlay must reach while this form is open,
-    /// or nil when the form fits inside the default pane budget.
-    var minimumWindowHeight: CGFloat? {
-        switch self {
-        case .edit, .alias, .hotkey: nil
-        case .screenHistorySave: ScreenHistorySaveLayout.minimumWindowHeight
-        }
-    }
 
     /// ⌘K pane showing this form instead of the list: header 44 + divider + body.
     var minimumPaneHeight: CGFloat {
         switch self {
         case .edit: 44 + 1 + 240
         case .alias, .hotkey: 44 + 1 + 130
-        case .screenHistorySave:
-            ScreenHistorySaveLayout.minimumWindowHeight
-                - PanelSizing.inputHeight - PanelSizing.paneBottomMargin
         }
     }
 }

@@ -143,19 +143,6 @@ struct QuickSettings: Codable, Sendable {
     /// Read text inside screenshots with on-device OCR for search.
     var screenshotTextSearch: Bool = true
 
-    // Screen History. Search and capture are separate permissions.
-    var searchLegacyCoastHistory: Bool = true
-    var screenHistoryCaptureEnabled: Bool = false
-    /// Set only by the explicit Start Capture control after the toggle is on.
-    var screenHistoryCaptureConfirmed: Bool = false
-    /// Explicit acknowledgement that FileVault and owner-only permissions do
-    /// not protect plaintext OCR from another process running as this user.
-    var screenHistorySameUserAccessRiskAccepted: Bool = false
-    var screenHistoryRetentionDays: Int = 30
-    var screenHistoryStorageCapGB: Int = 20
-    var screenHistoryExcludedBundleIDs: [String] = ScreenHistoryCaptureConfiguration.safeDefaultExcludedBundleIdentifiers.sorted()
-    var screenHistoryExcludedDomains: [String] = ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted()
-
     // Updates
     var checkForUpdatesOnLaunch: Bool = false
 
@@ -313,10 +300,13 @@ struct QuickSettings: Codable, Sendable {
         launchAtLoginPromptShown = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginPromptShown) ?? false
         savedPromptPrefix = try c.decodeIfPresent(String.self, forKey: .savedPromptPrefix) ?? "/"
         savedPrompts = try c.decodeIfPresent([SavedPrompt].self, forKey: .savedPrompts) ?? SavedPrompt.defaults
+        // Lossy: a record whose kind was retired (Screen History rows) is
+        // dropped, instead of failing the whole blob and resetting every
+        // setting to its default.
         launcherItemConfigurations = try c.decodeIfPresent(
-            [LauncherItemConfiguration].self,
+            LossyDecodableArray<LauncherItemConfiguration>.self,
             forKey: .launcherItemConfigurations
-        ) ?? (Self.defaultWindowConfigurations + Self.defaultFolderConfigurations)
+        )?.elements ?? (Self.defaultWindowConfigurations + Self.defaultFolderConfigurations)
         launcherLearningEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .launcherLearningEnabled
@@ -355,23 +345,6 @@ struct QuickSettings: Codable, Sendable {
         lastTranslationSource = try c.decodeIfPresent(String.self, forKey: .lastTranslationSource)
             ?? (lastTranslationTarget == "en" ? "zh-Hans" : "en")
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
-        searchLegacyCoastHistory = try c.decodeIfPresent(Bool.self, forKey: .searchLegacyCoastHistory) ?? true
-        screenHistoryCaptureEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenHistoryCaptureEnabled) ?? false
-        screenHistoryCaptureConfirmed = try c.decodeIfPresent(Bool.self, forKey: .screenHistoryCaptureConfirmed) ?? false
-        screenHistorySameUserAccessRiskAccepted = try c.decodeIfPresent(
-            Bool.self,
-            forKey: .screenHistorySameUserAccessRiskAccepted
-        ) ?? false
-        screenHistoryRetentionDays = max(1, try c.decodeIfPresent(Int.self, forKey: .screenHistoryRetentionDays) ?? 30)
-        screenHistoryStorageCapGB = max(1, try c.decodeIfPresent(Int.self, forKey: .screenHistoryStorageCapGB) ?? 20)
-        screenHistoryExcludedBundleIDs = try c.decodeIfPresent(
-            [String].self,
-            forKey: .screenHistoryExcludedBundleIDs
-        ) ?? ScreenHistoryCaptureConfiguration.safeDefaultExcludedBundleIdentifiers.sorted()
-        screenHistoryExcludedDomains = try c.decodeIfPresent(
-            [String].self,
-            forKey: .screenHistoryExcludedDomains
-        ) ?? ScreenHistoryCaptureConfiguration.safeDefaultExcludedDomains.sorted()
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .clipboardHistoryEnabled
@@ -699,61 +672,6 @@ struct QuickSettings: Codable, Sendable {
 }
 
 extension QuickSettings {
-    func screenHistoryIncludes(
-        bundleIdentifiers: [String] = [],
-        domains: [String] = []
-    ) -> Bool {
-        let excludedBundles = Set(screenHistoryExcludedBundleIDs.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
-        ))
-        let excludedDomains = Set(screenHistoryExcludedDomains.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedDomain
-        ))
-        return bundleIdentifiers.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
-        ).allSatisfy { !excludedBundles.contains($0) }
-            && domains.compactMap(
-                ScreenHistoryCaptureConfiguration.normalizedDomain
-            ).allSatisfy { !excludedDomains.contains($0) }
-    }
-
-    mutating func setScreenHistoryIncluded(
-        _ included: Bool,
-        bundleIdentifiers: [String] = [],
-        domains: [String] = []
-    ) {
-        let bundles = Set(bundleIdentifiers.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
-        ))
-        let normalizedDomains = Set(domains.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedDomain
-        ))
-        var excludedBundles = Set(screenHistoryExcludedBundleIDs.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedBundleIdentifier
-        ))
-        var excludedDomains = Set(screenHistoryExcludedDomains.compactMap(
-            ScreenHistoryCaptureConfiguration.normalizedDomain
-        ))
-        if included {
-            excludedBundles.subtract(bundles)
-            excludedDomains.subtract(normalizedDomains)
-        } else {
-            excludedBundles.formUnion(bundles)
-            excludedDomains.formUnion(normalizedDomains)
-        }
-        screenHistoryExcludedBundleIDs = excludedBundles.sorted()
-        screenHistoryExcludedDomains = excludedDomains.sorted()
-    }
-
-    /// Applies the same editable exclusions to legacy migration that capture
-    /// and search use. Hard defaults are added again by the policy itself.
-    var screenHistoryMigrationPolicy: ScreenHistoryMigrationPolicy {
-        ScreenHistoryMigrationPolicy(
-            excludedBundleIdentifiers: Set(screenHistoryExcludedBundleIDs),
-            excludedDomains: Set(screenHistoryExcludedDomains)
-        )
-    }
-
     /// `dl` opens Downloads and `dk` the Desktop, from the first run.
     static let defaultFolderConfigurations: [LauncherItemConfiguration] = [
         LauncherItemConfiguration(kind: .folder, itemID: "downloads", alias: "dl"),

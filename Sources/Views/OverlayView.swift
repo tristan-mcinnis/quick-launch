@@ -55,9 +55,6 @@ struct OverlayView: View {
         .onChange(of: viewModel.launcherSelectionAnnouncementRevision) { _, _ in
             announceLauncherSelection(viewModel.launcherSelectionAnnouncement)
         }
-        .onChange(of: viewModel.screenHistory.announcementRevision) { _, _ in
-            announceScreenHistoryResult(viewModel.screenHistory.resultAnnouncement)
-        }
         .onChange(of: viewModel.errorMessage) { _, error in
             guard let error, !error.isEmpty else { return }
             postAccessibilityAnnouncement("Error. \(error)", priority: .high)
@@ -124,7 +121,6 @@ struct OverlayView: View {
                         viewModel.resetApplicationSelection()
                         viewModel.noteInteraction()
                         viewModel.rootInputDidChange(newValue)
-                        viewModel.screenHistory.inputDidChange()
                         // Typing `@` opens the same Add Context menu the
                         // control left of the field does.
                         viewModel.addContextTriggerDidChange(newValue)
@@ -233,8 +229,6 @@ struct OverlayView: View {
                 }
             }
 
-            screenHistoryStatusSurface
-
             // Saved-prompt autocomplete
             if !viewModel.isApplicationActionPanePresented,
                !viewModel.isCatalogActionPanePresented,
@@ -336,9 +330,7 @@ struct OverlayView: View {
         // surface's proposal and the palette sits at its bottom edge, not
         // over the header.
         .frame(
-            maxHeight: viewModel.activeItemActionForm?.minimumWindowHeight
-                .map { $0 - PanelSizing.inputHeight - PanelSizing.paneBottomMargin }
-                ?? PanelSizing.actionPaletteMaxHeight,
+            maxHeight: PanelSizing.actionPaletteMaxHeight,
             alignment: viewModel.isQuickAIPresented ? .bottom : .top
         )
         // Below the input row and, when present, the attachment strip:
@@ -353,28 +345,6 @@ struct OverlayView: View {
         )
         .padding(.bottom, viewModel.isQuickAIPresented ? quickAIComposerHeight : 0)
         .padding(.trailing, House.Spacing.sm)
-    }
-
-    @ViewBuilder
-    private var screenHistoryStatusSurface: some View {
-        if viewModel.catalogScope == .screenHistory,
-           !viewModel.isItemActionPanePresented,
-           viewModel.launcherMatches.isEmpty {
-            HouseDivider()
-            ScreenHistoryEmptyState(viewModel: viewModel)
-        }
-        if viewModel.catalogScope == .screenHistory,
-           !viewModel.screenHistory.resultAnnouncement.isEmpty {
-            Text(viewModel.screenHistory.resultAnnouncement)
-                .frame(width: 1, height: 1)
-                .opacity(0.001)
-                .accessibilityLabel(viewModel.screenHistory.resultAnnouncement)
-        }
-    }
-
-    private func announceScreenHistoryResult(_ announcement: String) {
-        guard viewModel.catalogScope == .screenHistory, !announcement.isEmpty else { return }
-        postAccessibilityAnnouncement(announcement, priority: .medium)
     }
 
     private func announceLauncherSelection(_ announcement: String) {
@@ -419,7 +389,7 @@ struct OverlayView: View {
                     total: viewModel.launcherMatches.count
                 )
                 .padding(.horizontal, 10)
-                .modifier(ScreenHistoryRowFrame(result: result))
+                .frame(minHeight: AQDesign.rowHeight, maxHeight: AQDesign.rowHeight)
             }
         }
         .padding(.horizontal, 10)
@@ -569,9 +539,7 @@ struct LauncherResultRow: View {
     var body: some View {
         HStack(spacing: AQDesign.Space.row) {
             icon
-            if let screenHistoryRow {
-                screenHistoryRow
-            } else if let chatSnippet {
+            if let chatSnippet {
                 ChatSnippetRowText(title: title, detail: detail, snippet: chatSnippet)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: AQDesign.Space.standard) {
@@ -602,7 +570,7 @@ struct LauncherResultRow: View {
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
             } else if let statusLight {
                 StatusLightLabel(light: statusLight)
-            } else if screenHistoryRow == nil, chatSnippet == nil {
+            } else if chatSnippet == nil {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -668,7 +636,7 @@ struct LauncherResultRow: View {
     private var detail: String {
         switch result {
         case .application: "Application"
-        case .catalog(let scope, let count): scope == .screenHistory ? "Search local screen activity" : "\(count) items"
+        case .catalog(_, let count): "\(count) items"
         case .item(let item): item.detail
         }
     }
@@ -700,25 +668,13 @@ struct LauncherResultRow: View {
             case .askAI: "AI Command"
             case .folder: "Folder"
             case .answer: "Answer"
-            case .screenHistory: "Screen History"
             case .color: "Color"
             case .command: "Command"
             }
         }
     }
 
-    private var screenHistoryRow: ScreenHistoryResultRow? {
-        ScreenHistoryResultRow(
-            result: result,
-            isSelected: isSelected,
-            position: position,
-            total: total,
-            primaryAction: action
-        )
-    }
-
     private var accessibilityValue: String {
-        if let screenHistoryRow { return screenHistoryRow.accessibilityValue }
         var parts: [String] = []
         if isSelected { parts.append("Selected") }
         if let position, let total { parts.append("\(position) of \(total)") }
@@ -772,7 +728,6 @@ private struct ItemActionPane: View {
         .onAppear {
             syncEditor()
             focusSearch()
-            announceSelectedAction()
         }
         .onChange(of: viewModel.activeItemActionForm) { _, form in
             syncEditor()
@@ -780,7 +735,6 @@ private struct ItemActionPane: View {
         }
         .onChange(of: viewModel.actionQuery) { _, _ in
             selectedIndex = 0
-            announceSelectedAction()
         }
     }
 
@@ -857,7 +811,6 @@ private struct ItemActionPane: View {
         case .askAI: return item.detail
         case .folder: return item.detail
         case .answer: return item.detail
-        case .screenHistory: return item.detail
         case .color: return item.detail
         case .application: return "Application"
         }
@@ -868,7 +821,6 @@ private struct ItemActionPane: View {
         case .edit: isCreatingItem ? "New" : "Edit"
         case .alias: "Alias"
         case .hotkey: "Hotkey"
-        case .screenHistorySave: "Save to Vault"
         case nil: ""
         }
     }
@@ -885,11 +837,7 @@ private struct ItemActionPane: View {
             emptyText: "No matching actions",
             scrollsToSelection: true,
             accessibilityValue: { index, isSelected in
-                ScreenHistoryAccessibilityPresentation.actionValue(
-                    isSelected: isSelected,
-                    position: index + 1,
-                    total: actions.count
-                )
+                "\(isSelected ? "Selected, " : "")\(index + 1) of \(actions.count)"
             },
             onActivate: { action in
                 Task { await viewModel.perform(action, on: result) }
@@ -1030,8 +978,6 @@ private struct ItemActionPane: View {
                         .keyboardShortcut(.return, modifiers: [.command])
                 }
             }
-        case .screenHistorySave:
-            ScreenHistorySaveForm(viewModel: viewModel, result: result, formFocused: $formFocused)
         }
     }
 
@@ -1093,16 +1039,6 @@ private struct ItemActionPane: View {
     private func move(_ delta: Int) {
         guard !actions.isEmpty else { return }
         selectedIndex = ListSelection.wrappedIndex(selectedIndex, by: delta, count: actions.count)
-        announceSelectedAction()
-    }
-
-    private func announceSelectedAction() {
-        guard actions.indices.contains(selectedIndex) else { return }
-        viewModel.screenHistory.announceActionSelection(
-            actions[selectedIndex],
-            position: selectedIndex + 1,
-            total: actions.count
-        )
     }
 
     private func runSelected() {
@@ -1472,10 +1408,7 @@ private struct LauncherFooter: View {
                 }
             }
         }
-        .modifier(ScreenHistoryFooterFrame(
-            isActive: viewModel.catalogScope == .screenHistory,
-            defaultMinHeight: AQDesign.footerHeight
-        ))
+        .frame(minHeight: AQDesign.footerHeight)
         .accessibilityElement(children: .combine)
     }
 }

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — 2026-09-26 (House sweep, second pass)
+
+- **Screen History is retired.** Quick Launch's own collector, its search
+  catalog (owned store and the closed Coast database), the Screen History
+  Settings tab, Save to Vault, the import review, the maintenance command and
+  the menu-bar capture status are removed. `screenctx` (memory-screenctx) is
+  the House's one screen-history collector. Capture was never on, the owned
+  store was empty and the Coast database is gone from this Mac. Settings keep
+  loading: a saved launcher item of the retired kind is dropped on its own
+  instead of resetting every setting. Settings tabs after Clipboard move up
+  one (`⌘5` AI Commands, `⌘6` About, `⌘7` Keyboard Shortcuts). The old files
+  in Application Support are left in place and no longer read.
+- **Capture to Memory calls `recall capture`.** `remember` stays a hidden
+  alias in recall, so nothing breaks.
+- **A cancelled web search stops.** The Automatic chain no longer tries every
+  later backend after an Escape.
+- **A cancelled command ends at once.** Cancelling a `cos`, `recall` or other
+  command call no longer waits for a background job that still holds its
+  output, and a call cancelled before it starts runs nothing.
+
 ## Unreleased — 2026-09-24 (Chief of Staff memory design)
 
 - **Learnings are rows.** The Charter view lists them from `cos learnings`
