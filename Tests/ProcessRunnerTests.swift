@@ -127,6 +127,37 @@ struct ProcessRunnerTests {
         }
     }
 
+    /// A script that backgrounds a job and exits hands the job its stdout.
+    /// The timeout must still end the call, not wait until the job finally
+    /// closes the pipe (five minutes here; it used to hang that long).
+    @Test(.timeLimit(.minutes(1)))
+    func timeoutIsNotHeldOpenByAGrandchildOnThePipe() async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ql-runner-\(UUID().uuidString).pid")
+        let script = try Self.writeScript("""
+        #!/bin/sh
+        sleep 300 &
+        echo $! > '\(pidFile.path)'
+        exit 0
+        """)
+        defer {
+            if let text = try? String(contentsOf: pidFile, encoding: .utf8),
+               let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+            try? FileManager.default.removeItem(at: pidFile)
+            try? FileManager.default.removeItem(at: script)
+        }
+
+        await #expect(throws: ProcessRunnerError.timedOut(executable: "sh", seconds: 0.5)) {
+            try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [script.path],
+                timeout: 0.5
+            )
+        }
+    }
+
     @Test func streamYieldsStdoutAndFinishes() async throws {
         let script = try Self.writeScript("""
         #!/bin/sh

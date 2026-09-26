@@ -74,20 +74,31 @@ enum ProcessRunner {
                 let group = DispatchGroup()
                 let collector = OutputCollector()
                 let timedOut = TimeoutFlag()
+                let finish = ResumeOnce(continuation)
+                let timeoutError = timeout.map {
+                    ProcessRunnerError.timedOut(executable: executable.lastPathComponent, seconds: $0)
+                }
 
                 // Termination must be wired before run() so a process that
-                // exits instantly is never missed.
+                // exits instantly is never missed. Once the timeout has
+                // fired, the child's exit ends the wait: a grandchild that
+                // inherited stdout or stderr (a script that backgrounds a
+                // job) can hold the pipes open long after, and waiting for
+                // their end would let the call outlive its timeout.
                 group.enter()
-                box.process.terminationHandler = { _ in group.leave() }
+                box.process.terminationHandler = { _ in
+                    if timedOut.fired, let timeoutError { finish(.failure(timeoutError)) }
+                    group.leave()
+                }
 
                 do {
                     try box.process.run()
                 } catch {
                     box.process.terminationHandler = nil
-                    continuation.resume(throwing: ProcessRunnerError.launchFailed(
+                    finish(.failure(ProcessRunnerError.launchFailed(
                         executable: executable.lastPathComponent,
                         reason: error.localizedDescription
-                    ))
+                    )))
                     return
                 }
 
@@ -115,7 +126,17 @@ enum ProcessRunner {
                 if let timeout {
                     let item = DispatchWorkItem {
                         timedOut.fired = true
-                        if box.process.isRunning { box.process.terminate() }
+                        guard box.process.isRunning else {
+                            // Already exited; only an inherited pipe is left.
+                            if let timeoutError { finish(.failure(timeoutError)) }
+                            return
+                        }
+                        box.process.terminate()
+                        // A child that ignores SIGTERM is killed.
+                        let pid = box.process.processIdentifier
+                        queue.asyncAfter(deadline: .now() + killGrace) {
+                            if box.process.isRunning { kill(pid, SIGKILL) }
+                        }
                     }
                     timer = item
                     queue.asyncAfter(deadline: .now() + timeout, execute: item)
@@ -123,18 +144,15 @@ enum ProcessRunner {
 
                 group.notify(queue: queue) {
                     timer?.cancel()
-                    if timedOut.fired, let timeout {
-                        continuation.resume(throwing: ProcessRunnerError.timedOut(
-                            executable: executable.lastPathComponent,
-                            seconds: timeout
-                        ))
+                    if timedOut.fired, let timeoutError {
+                        finish(.failure(timeoutError))
                         return
                     }
-                    continuation.resume(returning: ProcessResult(
+                    finish(.success(ProcessResult(
                         stdout: collector.stdout,
                         stderr: collector.stderr,
                         status: box.process.terminationStatus
-                    ))
+                    )))
                 }
             }
         } onCancel: {
@@ -278,8 +296,35 @@ enum ProcessRunner {
         var stderr = Data()
     }
 
+    /// Seconds between SIGTERM and SIGKILL for a child that outlives its
+    /// timeout.
+    static let killGrace: TimeInterval = 2
+
+    /// Set by the timer, read by the termination handler and the join, on
+    /// different queues.
     private final class TimeoutFlag: @unchecked Sendable {
-        var fired = false
+        private let lock = NSLock()
+        private var value = false
+        var fired: Bool {
+            get { lock.withLock { value } }
+            set { lock.withLock { value = newValue } }
+        }
+    }
+
+    /// The continuation, resumed by whichever path ends the call first; the
+    /// later ones are no-ops.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<ProcessResult, Error>?
+        init(_ continuation: CheckedContinuation<ProcessResult, Error>) { self.continuation = continuation }
+
+        func callAsFunction(_ result: Result<ProcessResult, Error>) {
+            let taken = lock.withLock { () -> CheckedContinuation<ProcessResult, Error>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            taken?.resume(with: result)
+        }
     }
 }
 
