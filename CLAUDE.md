@@ -48,6 +48,10 @@ credential type without echoing the value, then rotate the credential.
 
 AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi.
 
+AI Chat is the House's general chat. RTI keeps its own standalone chats
+because they are grounded in a meeting or a recording session (decided
+2026-09-26); a chat that is not about a meeting belongs here.
+
 **Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
 organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
 acts only by calling the `cos` CLI (`tell`, `do`, `edit`, `no`, `later`, `reopen`,
