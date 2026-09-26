@@ -390,7 +390,7 @@ struct ChatToolsViewModelTests {
 
         #expect(vm.resultActions.contains(.captureToMemory))
         await vm.performResultAction(.captureToMemory)
-        #expect(await memory.remembered == ["Ship on Friday."])
+        #expect(await memory.captured == ["Ship on Friday."])
         #expect(vm.composerConfirmation == "Captured")
         let answer = try #require(vm.conversationMessages.last)
         #expect(answer.tools == [ChatToolRecord(kind: .capture, summary: "Captured to memory")])
@@ -400,7 +400,7 @@ struct ChatToolsViewModelTests {
 
         // A second capture sends again but keeps one line.
         await vm.performResultAction(.captureToMemory)
-        #expect(await memory.remembered.count == 2)
+        #expect(await memory.captured.count == 2)
         #expect(vm.conversationMessages.last?.tools.count == 1)
     }
 
@@ -408,7 +408,7 @@ struct ChatToolsViewModelTests {
         let mock = MockQuickService()
         let vm = make(service: mock)
         let memory = FakeMemory()
-        await memory.setRememberError(RecallError.timedOut)
+        await memory.setCaptureError(RecallError.timedOut)
         vm.memoryCapture = memory
         await ask(vm, mock, "plan", deltas: [StreamDelta(text: "Ship on Friday.", finishReason: "stop")])
         await vm.performResultAction(.captureToMemory)

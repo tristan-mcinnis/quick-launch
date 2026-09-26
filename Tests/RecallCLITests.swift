@@ -141,20 +141,20 @@ struct RecallCLITests {
         #expect(result.reason == "no read interface (taskTreeCLI disabled)")
     }
 
-    @Test func rememberSendsTheTextAsOneArgument() async throws {
+    @Test func captureSendsTheTextAsOneArgumentUnderTheCaptureVerb() async throws {
         let runner = FakeRunner(.success(Self.output("● Captured")))
-        try await Self.cli(runner).remember("Ship on Friday.\nThen Monday.")
+        try await Self.cli(runner).capture("Ship on Friday.\nThen Monday.")
         #expect(await runner.calls == [.init(
             executable: Self.recallURL,
-            arguments: ["remember", "Ship on Friday.\nThen Monday."],
+            arguments: ["capture", "Ship on Friday.\nThen Monday."],
             timeout: 10
         )])
     }
 
     @Test func aRefusedCaptureSaysWhy() async throws {
-        let runner = FakeRunner(.success(Self.output("● usage: recall remember <text>", status: 2)))
-        await #expect(throws: RecallError.failed("● usage: recall remember <text>")) {
-            try await Self.cli(runner).remember("x")
+        let runner = FakeRunner(.success(Self.output("● usage: recall capture <text>", status: 2)))
+        await #expect(throws: RecallError.failed("● usage: recall capture <text>")) {
+            try await Self.cli(runner).capture("x")
         }
     }
 

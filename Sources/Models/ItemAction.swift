@@ -525,7 +525,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case deleteChat
     /// `⌘O`: open the answer's source, or pick one when there are several.
     case openSource
-    /// `⌥⌘M`: send the answer to `recall remember`. User-triggered only.
+    /// `⌥⌘M`: send the answer to `recall capture`. User-triggered only.
     case captureToMemory
     /// `⌥⌘K`: the chat's tools, toggled in the palette.
     case tools

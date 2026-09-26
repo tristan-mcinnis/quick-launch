@@ -155,7 +155,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .tools: "The chat's tools, toggled in the palette"
         case .copyChat: "The whole chat as a labelled transcript"
         case .continueInPi: "The thread to a new pi session in tmux, opened in Ghostty"
-        case .captureToMemory: "Send the answer to recall remember"
+        case .captureToMemory: "Send the answer to recall capture"
         case .openSource: "The answer's source, or a picker when there are several"
         case .chatList: "The pinned and recent chats beside the thread, AI Chat only"
         case .findInChat: "Search the messages of this chat, AI Chat only"

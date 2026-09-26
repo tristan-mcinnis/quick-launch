@@ -85,11 +85,11 @@ struct AssistantRenderProofTests {
         for (appearance, preference, suffix) in Self.appearances {
             let vm = Self.makeViewModel(preference, service: MockQuickService())
             let command = SavedPrompt(
-                name: "Remember",
-                alias: "remember",
+                name: "Capture",
+                alias: "capture",
                 prompt: "",
                 commandExecutable: "recall",
-                commandArguments: ["remember", "{input}"]
+                commandArguments: ["capture", "{input}"]
             )
             vm.settings.savedPrompts.append(command)
             let grammar = try #require(vm.settings.savedPrompts.first { $0.alias == "grammar" })

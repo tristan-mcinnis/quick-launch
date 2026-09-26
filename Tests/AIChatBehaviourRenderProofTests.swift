@@ -107,5 +107,5 @@ struct AIChatBehaviourRenderProofTests {
 
 /// Capture to Memory that goes nowhere, so the palette offers it.
 private struct RenderProofMemory: MemoryCapturing {
-    func remember(_ text: String) async throws {}
+    func capture(_ text: String) async throws {}
 }

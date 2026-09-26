@@ -751,7 +751,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var vaultSearchService: (any VaultSearchServicing)?
     /// Memory and task reads through `recall`. Nil in tests that do not fake it.
     var memoryService: (any MemoryRecalling)?
-    /// Capture to Memory (`recall remember`), a user action only.
+    /// Capture to Memory (`recall capture`), a user action only.
     var memoryCapture: (any MemoryCapturing)?
     /// `read_skill`, over the canonical skills folder.
     var skillLibrary: SkillLibrary?

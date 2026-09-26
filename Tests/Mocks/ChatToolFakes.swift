@@ -7,10 +7,10 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
     var searchResult: Result<MemorySearchResult, Error>
     var todayResult: Result<MemoryToday, Error>
     var openTasksResult: Result<RecalledTaskList, Error>
-    var rememberError: Error?
+    var captureError: Error?
     var delay: Duration = .zero
     private(set) var queries: [String] = []
-    private(set) var remembered: [String] = []
+    private(set) var captured: [String] = []
 
     init(
         hits: [MemorySearchResult.Hit] = [],
@@ -36,7 +36,7 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
     func setSearchResult(_ result: Result<MemorySearchResult, Error>) { searchResult = result }
     func setTodayResult(_ result: Result<MemoryToday, Error>) { todayResult = result }
     func setOpenTasksResult(_ result: Result<RecalledTaskList, Error>) { openTasksResult = result }
-    func setRememberError(_ error: Error?) { rememberError = error }
+    func setCaptureError(_ error: Error?) { captureError = error }
     func setDelay(_ value: Duration) { delay = value }
 
     func search(_ query: String) async throws -> MemorySearchResult {
@@ -55,9 +55,9 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
         return try openTasksResult.get()
     }
 
-    func remember(_ text: String) async throws {
-        if let rememberError { throw rememberError }
-        remembered.append(text)
+    func capture(_ text: String) async throws {
+        if let captureError { throw captureError }
+        captured.append(text)
     }
 
     static func hit(_ path: String, line: String = "a matching line", day: String = "2026-09-10", number: Int = 3) -> MemorySearchResult.Hit {

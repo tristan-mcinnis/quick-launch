@@ -66,7 +66,7 @@ private func memoryManifest(statusPath: String) -> String {
       "endpoint": "/usr/local/bin/recall",
       "status": "\(statusPath)",
       "commands": [
-        {"id": "remember", "title": "Capture a Thought", "verb": "remember", "needs": "text",
+        {"id": "capture", "title": "Capture a Thought", "verb": "capture", "needs": "text",
          "unavailableWhen": "collecting"},
         {"id": "today", "title": "Today", "verb": "today"}
       ]
@@ -83,7 +83,7 @@ private let plainMemoryManifest = """
   "transport": "exec",
   "endpoint": "/usr/local/bin/recall",
   "commands": [
-    {"id": "remember", "title": "Capture a Thought", "verb": "remember", "needs": "text"}
+    {"id": "capture", "title": "Capture a Thought", "verb": "capture", "needs": "text"}
   ]
 }
 """
@@ -594,7 +594,7 @@ struct HouseCommandDispatcherTests {
         let record = await launched.last
         #expect(record?.url.path == "/usr/local/bin/recall")
         #expect(
-            record?.arguments == ["remember", "buy milk; rm -rf /"],
+            record?.arguments == ["capture", "buy milk; rm -rf /"],
             "user text is one argument, never shell syntax"
         )
     }
@@ -1050,7 +1050,7 @@ struct HouseCommandLauncherTests {
         await vm.waitForHouseCommandRefreshForTesting()
 
         #expect(await dispatcher.recordedRuns() == [
-            FakeDispatcher.Run(app: "memory", verb: "remember", argument: "the roof needs fixing")
+            FakeDispatcher.Run(app: "memory", verb: "capture", argument: "the roof needs fixing")
         ])
         #expect(vm.inputMode == nil)
     }

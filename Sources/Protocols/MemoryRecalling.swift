@@ -14,7 +14,7 @@ protocol MemoryRecalling: Sendable {
 
 /// Capture to Memory: the user's own ⌘K action, never a model tool.
 protocol MemoryCapturing: Sendable {
-    func remember(_ text: String) async throws
+    func capture(_ text: String) async throws
 }
 
 /// Opens a local file in its default app (a source under an answer).

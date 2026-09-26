@@ -246,7 +246,7 @@ extension QuickViewModel {
 
     // MARK: - Capture to Memory
 
-    /// Sends the answer on screen to `recall remember`. Only ever run by the
+    /// Sends the answer on screen to `recall capture`. Only ever run by the
     /// user from `⌘K` or `⌥⌘M`; the model has no way to call it. A thread
     /// answer gets a checkmark line under it that stays with the chat.
     func captureAnswerToMemory() async {
@@ -256,13 +256,13 @@ extension QuickViewModel {
         await captureToMemory(output, answerID: answerID)
     }
 
-    /// Sends `content` to `recall remember`. An answer of the thread
+    /// Sends `content` to `recall capture`. An answer of the thread
     /// (`answerID`) gets the checkmark line; a question does not.
     func captureToMemory(_ content: String, answerID: UUID?) async {
         let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let memoryCapture else { return }
         do {
-            try await memoryCapture.remember(text)
+            try await memoryCapture.capture(text)
         } catch {
             errorMessage = "Capture to Memory failed: \(error.localizedDescription)"
             requestInputFocus()

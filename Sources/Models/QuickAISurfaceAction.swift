@@ -28,7 +28,7 @@ enum QuickAISurfaceAction: String, CaseIterable, Identifiable, Sendable {
     case stopKeepingOnTop
     /// Copy any question or answer of the chat: a list in the palette.
     case copyMessage
-    /// Send any question or answer of the chat to `recall remember`.
+    /// Send any question or answer of the chat to `recall capture`.
     case captureMessage
 
     var id: String { rawValue }

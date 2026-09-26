@@ -168,7 +168,7 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 - `Command+K` › **Tools** (`Option+Command+K`) turns each tool on or off per
   chat. New chats start on the defaults in **Settings › General › Chat**.
 - **Capture to Memory** (`Option+Command+M`) sends the answer on screen to
-  `recall remember`. It is the one write, and only you can run it.
+  `recall capture`. It is the one write, and only you can run it.
 - Long chats are held to a budget from the model's context window: older tool
   results go first, then old turns, never the first or current question.
 

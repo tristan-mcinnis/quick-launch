@@ -580,7 +580,7 @@ struct AIChatBehaviourTests {
         rig.chat.performQuickAISurfaceAction(.captureMessage)
         #expect(rig.chat.actionPaletteSubmenu == .messages(.capture))
         await rig.chat.performMessageAction(.capture, on: older)
-        #expect(await memory.remembered == ["First answer."])
+        #expect(await memory.captured == ["First answer."])
         let stored = try #require(rig.chat.conversationMessages.first { $0.id == older.id })
         #expect(stored.tools.contains { $0.kind == .capture }, "the older answer gets the line")
         let newest = try #require(rig.chat.conversationMessages.last)

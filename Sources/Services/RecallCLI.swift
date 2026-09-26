@@ -146,7 +146,7 @@ enum RecallError: LocalizedError, Equatable {
 actor RecallCLI: MemoryRecalling, MemoryCapturing {
     /// Searches and `today` run in about 0.3 s on the live store.
     static let readTimeout: TimeInterval = 5
-    /// `remember` hands off to the memory repo's Python capture CLI, which
+    /// `capture` hands off to the memory repo's Python capture CLI, which
     /// starts slower than a scan.
     static let captureTimeout: TimeInterval = 10
 
@@ -166,7 +166,8 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
     static func searchArguments(_ query: String) -> [String] { ["search", query, "--json"] }
     static let todayArguments = ["today", "--json"]
     static let tasksArguments = ["tasks", "--json"]
-    static func rememberArguments(_ text: String) -> [String] { ["remember", text] }
+    /// `capture` is recall's capture verb; `remember` is its hidden alias.
+    static func captureArguments(_ text: String) -> [String] { ["capture", text] }
 
     func search(_ query: String) async throws -> MemorySearchResult {
         let result = try await invoke(Self.searchArguments(query), timeout: Self.readTimeout)
@@ -183,8 +184,8 @@ actor RecallCLI: MemoryRecalling, MemoryCapturing {
         return try Self.parseTasks(result)
     }
 
-    func remember(_ text: String) async throws {
-        let result = try await invoke(Self.rememberArguments(text), timeout: Self.captureTimeout)
+    func capture(_ text: String) async throws {
+        let result = try await invoke(Self.captureArguments(text), timeout: Self.captureTimeout)
         guard result.status == 0 else {
             throw RecallError.failed(
                 result.trimmedStderr
