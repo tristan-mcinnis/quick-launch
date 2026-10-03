@@ -133,6 +133,6 @@ I did not run the app. All findings come from reading the code, the render proof
 - With Keep on Top, the chat window floats over the new Ghostty window.
 - Fix: show "Stop the answer first", or stop it and hand off. Lower Keep on Top for the hand-off.
 
-Relevant files (under `/Users/user/Documents/code/house/quick-launch/Sources/`): `App/AIChatWindowController.swift`, `App/AIChatMenu.swift`, `App/AppDelegate.swift`, `ViewModels/AIChatWindowModel.swift`, `ViewModels/QuickViewModel.swift`, `ViewModels/QuickViewModel+AIChat.swift`, `ViewModels/QuickViewModel+ChatTools.swift`, `Views/AIChatWindowView.swift`, `Views/QuickAIComposer.swift`, `Views/QuickAIThread.swift`.
+Relevant files (under `./Sources/`): `App/AIChatWindowController.swift`, `App/AIChatMenu.swift`, `App/AppDelegate.swift`, `ViewModels/AIChatWindowModel.swift`, `ViewModels/QuickViewModel.swift`, `ViewModels/QuickViewModel+AIChat.swift`, `ViewModels/QuickViewModel+ChatTools.swift`, `Views/AIChatWindowView.swift`, `Views/QuickAIComposer.swift`, `Views/QuickAIThread.swift`.
 
 Executed but unverified.

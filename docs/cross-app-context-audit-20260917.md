@@ -27,7 +27,7 @@ The Quick Launch intervals are proxies for its request phase, not instrumented e
 Local receipt locations:
 
 - `~/Library/Application Support/Quick Launch/chat-history.json`: Quick AI chat `97845F09-763E-4CAE-916C-6A74016E614E`; AI Chat `21A48EE5-3AEA-4DEC-BC8F-44E647D2144A`.
-- `~/vault/kb/databases/projects/personal/rti/turns/2026-09-17.jsonl`: turn `2026-09-17T03:07:52Z`.
+- `<vault>/kb/databases/projects/personal/rti/turns/2026-09-17.jsonl`: turn `2026-09-17T03:07:52Z`.
 - Screenshots: `Screenshot 2026-09-17 at 11.07.39.png` (Quick AI), `11.07.55.png` (RTI), `11.08.17.png` (AI Chat).
 
 The screenshot alone made Ghostty look like a possible invented detail. The saved input explicitly says `Context from Ghostty`; that claim is grounded in app metadata. Different screen descriptions cannot establish hallucination without the original captured pixels.
@@ -157,8 +157,8 @@ Sources: `Sources/Services/QuickHistoryStore.swift`; `Sources/Models/QuickConver
 
 Standalone and meeting assistant turns append to:
 
-- `~/vault/kb/databases/projects/personal/rti/turns/YYYY-MM-DD.jsonl`
-- `~/vault/kb/databases/projects/personal/rti/chats/YYYY-MM-DD.md`
+- `<vault>/kb/databases/projects/personal/rti/turns/YYYY-MM-DD.jsonl`
+- `<vault>/kb/databases/projects/personal/rti/chats/YYYY-MM-DD.md`
 
 The JSONL has timestamp, action, mode, provider, model, Smart flag, session flag, transcript/screen-use flags, user input, transcript context, output, latency and sources. It has better per-turn model/timing evidence than Quick Launch, but no stable conversation ID, full prompt, screenshot payload, complete tool arguments/results or retrieval-adapter field. The readable daily file is a log, not equivalent to Quick Launch's resumable named chats.
 
@@ -177,14 +177,14 @@ Partly. Retrieval-augmented generation means retrieving outside evidence and sup
 There are different retrieval paths today:
 
 1. **Quick Launch memory:** local `recall search`, deterministic keyword/line matching over memory Markdown. It ranks lexical matches, then file modification time. Old session transcripts can win; their modification date is not necessarily the date of the event being discussed. This explains why the eight source dates should not be read as eight recent decisions.
-2. **Quick Launch vault:** SSH to `vault-vps`, then `.claude/tools/state/vault-search.py`, with current/reconcile/history/portfolio modes and an eight-second request deadline. The inspected local copy of this backend states it uses materialized project state and the document index, without an LLM, embeddings or reranker. The deployed remote copy was not compared. The sample call failed; its specific cause is unknown.
-3. **RTI vault:** code attempts a hybrid Neon CLI and otherwise uses local keyword search. The configured resolver points to `~/vault/code/hermes/src/cli.ts`, which is absent on this Mac. It therefore cannot enter that semantic path in the audited install. A successor exists at `~/vault/code/vault-search/src/cli.ts`; its contract appears compatible but was not executed or adopted by this audit.
+2. **Quick Launch vault:** SSH to the House server, then `.claude/tools/state/vault-search.py`, with current/reconcile/history/portfolio modes and an eight-second request deadline. The inspected local copy of this backend states it uses materialized project state and the document index, without an LLM, embeddings or reranker. The deployed remote copy was not compared. The sample call failed; its specific cause is unknown.
+3. **RTI vault:** code attempts a hybrid Neon CLI and otherwise uses local keyword search. The configured resolver points to `<vault>/code/hermes/src/cli.ts`, which is absent on this Mac. It therefore cannot enter that semantic path in the audited install. A successor exists at `<vault>/code/vault-search/src/cli.ts`; its contract appears compatible but was not executed or adopted by this audit.
 
 RTI's fallback returns short lexical excerpts from vault Markdown. Files over 256 KB and several raw-data directories are excluded. It is useful retrieval, but it does not have the recall of a working semantic index. Some in-session tracing identifies the adapter; the durable turn log does not.
 
 Missing across the apps: one retrieval contract, explicit source authority/freshness, reliable health reporting, attachment chunk retrieval, consistent citation precision, and tests that distinguish “no evidence” from “retrieval unavailable.” Adding another vector database would not resolve the unnecessary searches in this screen example.
 
-Sources: `../memory-recall/Sources/RecallCore/MemorySearch.swift:71–155`; `Sources/Services/RecallCLI.swift`; `Sources/Services/VaultSearchService.swift:66–141`; `~/vault/.claude/tools/state/vault-search.py`; `../rti/RTI/Sources/LLM/VaultSearchCLI.swift:20–44,107–111`; `VaultRetrieval.swift:78–131`; `VaultSearch.swift:29–40,184–207,267–296`.
+Sources: `../memory-recall/Sources/RecallCore/MemorySearch.swift:71–155`; `Sources/Services/RecallCLI.swift`; `Sources/Services/VaultSearchService.swift:66–141`; `<vault>/.claude/tools/state/vault-search.py`; `../rti/RTI/Sources/LLM/VaultSearchCLI.swift:20–44,107–111`; `VaultRetrieval.swift:78–131`; `VaultSearch.swift:29–40,184–207,267–296`.
 
 ## Recommended harmonization
 

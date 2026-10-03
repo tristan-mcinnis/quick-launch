@@ -132,9 +132,9 @@ automations, no file changes; those belong to pi."
 
 > Shipped in v1.5.0. What landed differs from the plan below in three places.
 > Citations needed no remote change: `vault-search.py` already returns
-> `source_path` (vault-relative, or under `/home/ubuntu/vault-private/`), a
+> `source_path` (vault-relative, or under `<server vault>/`), a
 > title, and dates on each `evidence` or `results` row, so the app reads them
-> from the JSON it already gets and maps them onto `~/vault/`. The context
+> from the JSON it already gets and maps them onto `<vault>/`. The context
 > budget cuts rather than summarises: the results of the answer's older tool
 > rounds, then oldest turns, then the newest round's results, never the first
 > or the current question, with a line saying what was left
@@ -149,9 +149,9 @@ timeout, and a line in the thread ("Searched memory: 4 hits").
 
 | Tool | Backed by | Latency | Writes? | Default |
 |---|---|---|---|---|
-| `recall_memory(query)` | `recall search --json` over `~/memory` | about 0.3 s, local | no | on |
+| `recall_memory(query)` | `recall search --json` over the memory notes | about 0.3 s, local | no | on |
 | `recall_today()` | `recall today --json` | fast, local | no | on |
-| `search_vault(query, mode)` | the existing SSH lane (`vault-search.py` on vault-vps, four modes, JSON) | 1 to 9 s | no | on; one try, 8 s, then "timed out" to the model; no retry |
+| `search_vault(query, mode)` | the existing SSH lane (`vault-search.py` on the House server, four modes, JSON) | 1 to 9 s | no | on; one try, 8 s, then "timed out" to the model; no retry |
 | `read_skill(name)` | `~/.claude/skills/<name>/SKILL.md`, name checked against the real folder list | instant | no | on |
 | `capture_thought` | **not a model tool.** `memory-capture.py` accepts only your own words. Instead: a ⌘K action "Capture to memory" on any message, through `recall remember` | | you trigger it | |
 | `run_skill` | **not built.** The write skills (email, Slack, calendar, Float) have policy gates a model tool would skip | | | |
@@ -162,7 +162,7 @@ Also in Phase C:
   vault plus a skill fit in one answer.
 - Citations need a data change first. The vault lane returns rendered text
   with VPS paths today. It must return hits (path, title, date) and map
-  `/home/ubuntu/vault-private/` to `~/vault/`, so a source opens on the Mac.
+  `<server vault>/` to `<vault>/`, so a source opens on the Mac.
   This is the Onyx idea worth keeping: retrieve, answer, cite, click through.
   The index itself is the vault's existing Neon/pgvector; the app indexes
   nothing.
@@ -237,7 +237,7 @@ installed, and you said no fork.
 
 ## 8. What stays out
 
-Dictation (local-dictation owns it). A second memory (`~/memory` is the
+Dictation (local-dictation owns it). A second memory (the memory notes are the
 memory). Projects and working folders (pi). Automations (the vault loops).
 Image generation (the nanobanana skill). MCP servers (pi). Edit-and-rerun,
 branch chat, and Recently Deleted: not now; revisit after B2 is in use.
@@ -264,7 +264,7 @@ second window is still wanted once Quick AI can resize.
 - `docs/quick-ai-raycast-surface-20260911.md`, `docs/quick-ai-parity-20260911.md`.
 - pi 0.85.1 docs: `session-format.md`, `rpc.md`, `usage.md` under the npm
   package; `~/.pi/agent/{AGENTS.md,settings.json,models.json}`.
-- `~/memory/CLAUDE.md`, `memory-capture.py --help`, `recall --help`;
+- `<memory>/CLAUDE.md`, `memory-capture.py --help`, `recall --help`;
   `VaultSearchService.swift`.
 - DeepSeek API `/models` and a vision call, 2026-09-11.
 - PI-Desktop v0.14.6 source; Onyx README.

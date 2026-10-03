@@ -2,7 +2,7 @@
 
 Read-only audit, 2026-09-11, of what in the rest of Quick Launch became inconsistent, duplicated, stale, or missing after the Quick AI and AI Chat rebuild. Nothing here is fixed yet unless a later commit says so.
 
-The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in the chat lists, the ⋯ menu and the privacy text in the docs. I checked everything by reading the code and the PNGs in `/tmp/quick-launch-render-proof/`. I did not run the app. The working tree is dirty: an uncommitted `AIChatMenu.swift` and a header chip labelled "Open in Chat" are in progress. I audited HEAD and mark the in-progress parts. All paths are under `/Users/user/Documents/code/house/quick-launch/`.
+The rest of Quick Launch has 22 problems caused by the rebuild. The worst are in the chat lists, the ⋯ menu and the privacy text in the docs. I checked everything by reading the code and the PNGs in `/tmp/quick-launch-render-proof/`. I did not run the app. The working tree is dirty: an uncommitted `AIChatMenu.swift` and a header chip labelled "Open in Chat" are in progress. I audited HEAD and mark the in-progress parts. All paths are under `./`.
 
 ## Ranked findings (most visible first)
 

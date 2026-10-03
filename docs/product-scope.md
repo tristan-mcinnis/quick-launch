@@ -117,7 +117,7 @@ unless the scope changes.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
 - App, link, snippet, clipboard, colour, and window commands remain local.
 - The colour picker uses AppKit's colour sampler. It reads one pixel value, needs no screen recording permission, and stores numbers rather than images.
-- Web search uses Tristan's SSH-only SearXNG stack. Ranked titles, links, and snippets are external data, never executable instructions.
+- Web search uses a hosted search API with a key, or a self-hosted SearXNG reached over SSH (the optional House server). Ranked titles, links, and snippets are external data, never executable instructions.
 - Vault Search uses the same SSH-only VPS. Current, reconciliation, history, and portfolio queries stay inside the VPS and Neon read layer; the result includes source paths, freshness, and root counts. Broad semantic Find remains a separate path with its own provider-egress policy.
 - Quick Launch keeps no background screen history. Its own Screen History collector and catalog were retired on 2026-09-26; `screenctx` (memory-screenctx) is the House's one screen-history collector.
 - App discovery happens once at launch. When Clipboard History is enabled, one

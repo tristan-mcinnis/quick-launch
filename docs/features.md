@@ -150,7 +150,7 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 
 | Tool | Reads |
 |---|---|
-| `recall_memory(query)` | notes under `~/memory` |
+| `recall_memory(query)` | the memory notes `recall` searches |
 | `recall_captures_today()` | today's captures |
 | `recall_tasks_today()` | due-today, overdue, and in-progress tasks |
 | `recall_open_tasks()` | the complete open backlog |
