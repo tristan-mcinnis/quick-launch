@@ -1,21 +1,15 @@
-### Download
+### First open (macOS will warn you)
 
-Get the latest `.dmg` from the [Releases page](https://github.com/tristan-mcinnis/__REPO__/releases/latest). It is for Apple Silicon Macs.
+@APP_NAME@ is not notarized. It is a free project, and it has no paid Apple Developer ID. So macOS blocks the first open. Only open it if you downloaded it from the Releases page of this repository.
 
-1. Open the `.dmg` and drag __APPNAME__ to Applications.
-2. Open __APPNAME__ once. macOS will block it. This is expected.
-3. Go to System Settings > Privacy & Security, scroll down, and click Open Anyway.
+1. Open the DMG and drag @APP_NAME@ to Applications.
+2. Open @APP_NAME@ once. macOS says it cannot verify the app. Click Done.
+3. Open System Settings, then Privacy & Security. Scroll down and click Open Anyway next to @APP_NAME@. Confirm.
 
-Or do it in Terminal:
+If you prefer Terminal, run this once, then open the app:
 
-```sh
-xattr -dr com.apple.quarantine "/Applications/__APPNAME__.app"
+```bash
+xattr -dr com.apple.quarantine "/Applications/@APP_NAME@.app"
 ```
 
-__APPNAME__ is not notarized. It is a free project, and I do not pay for an Apple Developer ID, so macOS blocks the first open. Each release is signed ad hoc. Because of that, macOS may ask again for permissions such as Accessibility or Microphone after an update.
-
-Check the download against `SHA256SUMS` on the release page:
-
-```sh
-shasum -a 256 -c SHA256SUMS
-```
+Each release is signed ad hoc. So macOS may ask again for permissions such as Accessibility or Microphone after an update. Grant them again when asked.

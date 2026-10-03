@@ -110,21 +110,21 @@ Get the latest `QuickLaunch-<version>-macos-arm64.dmg` from
 Open it and drag Quick Launch to Applications. It needs macOS 26 on Apple
 Silicon. Each release lists a SHA256 you can check with `shasum -a 256 -c SHA256SUMS`.
 
-#### First open
+#### First open (macOS will warn you)
 
-The app is not notarized. It is a free project and has no paid Apple Developer ID, so macOS blocks the first open. This is expected. To open it:
+Quick Launch is not notarized. It is a free project, and it has no paid Apple Developer ID. So macOS blocks the first open. Only open it if you downloaded it from the Releases page of this repository.
 
-1. Drag the app to Applications.
-2. Open it once. macOS says it cannot verify the app. Click Done.
-3. Open System Settings > Privacy & Security. Scroll down and click Open Anyway. Confirm.
+1. Open the DMG and drag Quick Launch to Applications.
+2. Open Quick Launch once. macOS says it cannot verify the app. Click Done.
+3. Open System Settings, then Privacy & Security. Scroll down and click Open Anyway next to Quick Launch. Confirm.
 
-Or, in Terminal:
+If you prefer Terminal, run this once, then open the app:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Quick Launch.app"
 ```
 
-Each release is signed ad hoc. After an update, macOS may ask again for permissions such as Accessibility or Microphone.
+Each release is signed ad hoc. So macOS may ask again for permissions such as Accessibility or Microphone after an update. Grant them again when asked.
 
 ### Build from source
 
