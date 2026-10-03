@@ -1,4 +1,4 @@
-.PHONY: build build-app test install clean run check-clean
+.PHONY: build build-app test scrub install clean run check-clean
 
 # Stable code signature: Keychain items only survive rebuilds when every
 # build carries the same verifiable identity. Ad-hoc ("-") signatures change
@@ -10,8 +10,14 @@ export SIGN_IDENTITY
 build:
 	swift build -c release
 
-test:
+# The full gate: the publish scrub, the app suite, and the shared chat core.
+test: scrub
 	swift test
+	swift test --package-path Packages/HouseChatCore
+
+# No personal paths, private hosts, keys or client names in tracked files.
+scrub:
+	sh scripts/scrub.sh
 
 build-app:
 	./scripts/build-app.sh

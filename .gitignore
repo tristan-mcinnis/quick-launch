@@ -26,3 +26,6 @@ credentials/
 snippets/
 private-snippets/
 local-data/
+
+# Private scrub tokens (client names), never committed
+.scrub-private

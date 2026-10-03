@@ -41,6 +41,7 @@ fi
 # ── Tests ───────────────────────────────────────────────────────────────────
 print ""
 print "==> Running tests..."
+sh "$ROOT_DIR/scripts/scrub.sh"
 swift test --package-path "$ROOT_DIR"
 
 # ── Build + Sign + Notarise ─────────────────────────────────────────────────
