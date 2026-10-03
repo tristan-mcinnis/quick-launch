@@ -28,6 +28,8 @@
     <false/>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Quick Launch asks System Events and Finder to run the system commands you choose, such as Empty Trash or toggling Dark Mode.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Tristan McInnis. MIT License.</string>
 </dict>
