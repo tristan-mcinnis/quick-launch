@@ -130,7 +130,7 @@ macOS asks for these the first time a feature needs them:
 | Accessibility | Reading and replacing selected text, Type to Click, window management. |
 | Screen Recording | Screenshots, text from screen, and screen-aware commands. |
 | Automation (System Events, Finder) | System toggles such as Dark Mode, Lock Screen, Empty Trash, and Eject. |
-| Notifications | Chief of Staff notices, when that integration is present. |
+| Notifications | Answer notices from AI Chat, and Chief of Staff notices when that integration is present. |
 
 ## Usage
 
