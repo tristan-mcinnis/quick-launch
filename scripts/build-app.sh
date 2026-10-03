@@ -22,8 +22,27 @@ codesign_path() {
     fi
 }
 
+# Nested code is signed first, deepest path first, so every outer bundle seals
+# an already-signed inner one. The outer app is never signed with --deep, which
+# would give nested code the app's identity and entitlements. Quick Launch
+# ships one executable today, so this finds nothing; it keeps a future helper,
+# framework or XPC service from shipping unsigned.
+sign_nested_code() {
+    local nested
+    nested=("${(@f)$(find "$APP_BUNDLE/Contents" \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' -o -name '*.dylib' \) -print 2>/dev/null \
+        | awk '{ print gsub("/", "/") "\t" $0 }' | sort -rn | cut -f2-)}")
+    local item
+    for item in "${nested[@]}"; do
+        [[ -n "$item" ]] || continue
+        print "==> Signing nested code: ${item#$APP_BUNDLE/}"
+        codesign_path "$item"
+    done
+}
+
 sign_bundle() {
     xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
+    sign_nested_code
 
     if [[ -n "$ENTITLEMENTS" && -f "$ENTITLEMENTS" ]]; then
         codesign_path "$APP_BUNDLE" \

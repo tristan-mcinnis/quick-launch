@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-10-03 (free DMG release)
+
+- **`make dmg` packages a free download.** It builds with ad hoc signing, wraps the app and an Applications link in `QuickLaunch-<version>-macos-arm64.dmg`, and writes `SHA256SUMS`, `RELEASE_NOTES.md` and the draft-release command. `scripts/verify-dmg.sh` mounts the image read-only and checks the layout, the strict signature, the architecture, the version and the bundled notices without launching the app. No Developer ID is needed. The notarized `release.sh` path is unchanged.
+- **Nested code is signed first.** `build-app.sh` signs any nested framework, helper or XPC service deepest first, before the app. Today there is none.
+- The README Install section starts with Download and explains the first open of an app that is not notarized.
+
 ## Unreleased — 2026-09-26 (House sweep, second pass)
 
 - **Screen History is retired.** Quick Launch's own collector, its search

@@ -149,6 +149,11 @@ History.
 - Run `SIGN_IDENTITY=- ./scripts/build-app.sh` to verify local packaging.
 - The built app is `build/Quick Launch.app`.
 - `make install` installs `/Applications/Quick Launch.app`.
+- `make dmg` is the free release path: ad hoc signed `QuickLaunch-<version>-macos-arm64.dmg`,
+  `SHA256SUMS`, release notes and the draft-release command in `dist/release`
+  (`scripts/make-dmg.sh`, checked by `scripts/verify-dmg.sh`). Tristan has no
+  Developer ID, so this is the documented default; `scripts/release.sh` is the
+  notarized path and needs one. Never run `gh release create` without his go.
 - Keep UI labels, bundle metadata, scripts, release artifacts, documentation,
   tests, and website metadata consistent when changing product identity.
 - Do not remove or overwrite unrelated user changes in a dirty worktree.

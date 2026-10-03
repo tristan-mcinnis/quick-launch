@@ -103,7 +103,30 @@ on them.
 
 ## Install
 
-There is no signed download yet. Build and install from source:
+### Download
+
+Get the latest `QuickLaunch-<version>-macos-arm64.dmg` from
+[GitHub Releases](https://github.com/tristan-mcinnis/quick-launch/releases/latest).
+Open it and drag Quick Launch to Applications. It needs macOS 26 on Apple
+Silicon. Each release lists a SHA256 you can check with `shasum -a 256 -c SHA256SUMS`.
+
+#### First open
+
+The app is not notarized. It is a free project and has no paid Apple Developer ID, so macOS blocks the first open. This is expected. To open it:
+
+1. Drag the app to Applications.
+2. Open it once. macOS says it cannot verify the app. Click Done.
+3. Open System Settings > Privacy & Security. Scroll down and click Open Anyway. Confirm.
+
+Or, in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Quick Launch.app"
+```
+
+Each release is signed ad hoc. After an update, macOS may ask again for permissions such as Accessibility or Microphone.
+
+### Build from source
 
 ```bash
 git clone https://github.com/tristan-mcinnis/quick-launch.git
@@ -120,6 +143,16 @@ macOS asks again for Accessibility and the Keychain asks again for saved keys.
 
 The install target refuses a dirty working tree, so the installed app always
 traces to a commit. Override with `QL_ALLOW_DIRTY=1`.
+
+### Package a release
+
+`make dmg` builds the app with ad hoc signing and writes
+`QuickLaunch-<version>-macos-arm64.dmg`, `SHA256SUMS`, `RELEASE_NOTES.md` and
+the draft-release command to `dist/release` (set `RELEASE_OUT` to move it).
+It checks the image without launching the app. It needs no Developer ID and
+publishes nothing; the printed `gh release create ... --draft` command is the
+only step left, and you run it yourself. The notarized path
+(`scripts/release.sh`) stays available for a Developer ID holder.
 
 ### Permissions
 
@@ -174,6 +207,7 @@ The details are in [docs/features.md](docs/features.md#privacy-boundary).
 make test                              # scrub gate, app tests, HouseChatCore tests
 swift build -c release                 # release build
 SIGN_IDENTITY=- ./scripts/build-app.sh # package build/Quick Launch.app
+make dmg                               # ad hoc DMG + SHA256SUMS + release notes
 ```
 
 - `make test` runs `scripts/scrub.sh` (no personal paths or keys in tracked

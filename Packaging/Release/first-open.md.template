@@ -1,0 +1,21 @@
+### Download
+
+Get the latest `.dmg` from the [Releases page](https://github.com/tristan-mcinnis/__REPO__/releases/latest). It is for Apple Silicon Macs.
+
+1. Open the `.dmg` and drag __APPNAME__ to Applications.
+2. Open __APPNAME__ once. macOS will block it. This is expected.
+3. Go to System Settings > Privacy & Security, scroll down, and click Open Anyway.
+
+Or do it in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/__APPNAME__.app"
+```
+
+__APPNAME__ is not notarized. It is a free project, and I do not pay for an Apple Developer ID, so macOS blocks the first open. Each release is signed ad hoc. Because of that, macOS may ask again for permissions such as Accessibility or Microphone after an update.
+
+Check the download against `SHA256SUMS` on the release page:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+```

@@ -1,0 +1,7 @@
+- AI Chat is a full conversation window over the same providers and tools as Quick AI, with saved chats, attachments and slash commands.
+- Quick AI opens as one fixed surface from root search with Tab, and answers can be pasted or copied in one key.
+- The `/` palette, Settings search, and a Keyboard Shortcuts tab that lists and remaps every in-app key.
+- Optional Chief of Staff face: a pinned conversation that talks to the `cos` command line tool when it is installed.
+- Web search backends: Automatic, Google, Bing, Bocha and Exa.
+- Clipboard History, screenshots, Type to Click, window layouts, Caffeinate and local math, all with no telemetry.
+- Screen History is retired. Quick Launch no longer records the screen in the background.

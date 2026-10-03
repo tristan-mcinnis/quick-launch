@@ -1,4 +1,4 @@
-.PHONY: build build-app test scrub install clean run check-clean
+.PHONY: build build-app dmg test scrub install clean run check-clean
 
 # Stable code signature: Keychain items only survive rebuilds when every
 # build carries the same verifiable identity. Ad-hoc ("-") signatures change
@@ -21,6 +21,12 @@ scrub:
 
 build-app:
 	./scripts/build-app.sh
+
+# The free GitHub release download: an ad hoc signed DMG, SHA256SUMS, release
+# notes and the draft-release command, in dist/release (or $(RELEASE_OUT)).
+# It needs no Developer ID and publishes nothing. See scripts/make-dmg.sh.
+dmg:
+	./scripts/make-dmg.sh
 
 # `make install` installs what build-app.sh compiled from the WORKING TREE,
 # not from HEAD, so installing a dirty checkout produces a binary that traces

@@ -1,0 +1,39 @@
+# @APP_NAME@ @VERSION@
+
+@APP_NAME@ is a free, open-source (MIT) macOS launcher and instant AI action overlay. It is keyboard-first, fast, and sends no telemetry.
+
+## What is new
+
+@HIGHLIGHTS@
+
+The full history is in [CHANGELOG.md](https://github.com/@REPO@/blob/main/CHANGELOG.md).
+
+## Requirements
+
+- macOS 26 or later.
+- Apple Silicon (arm64). There is no Intel build.
+- At least one AI provider for the chat features: a local OpenAI-compatible server, a hosted API key, or a CLI subscription. The launcher, math, and system tools need none.
+
+## Install
+
+Download `@DMG_NAME@`, open it, and drag @APP_NAME@ to Applications.
+
+@FIRST_OPEN@
+
+## Check the download
+
+SHA256 of `@DMG_NAME@`:
+
+```
+@SHA256@
+```
+
+To check it, run this in the folder with the download:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
+
+## Build from source
+
+See the README: https://github.com/@REPO@#build-from-source
