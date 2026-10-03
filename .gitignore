@@ -29,3 +29,6 @@ local-data/
 
 # Private scrub tokens (client names), never committed
 .scrub-private
+
+# Python bytecode from the scripts tests
+__pycache__/
