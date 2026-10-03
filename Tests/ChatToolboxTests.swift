@@ -71,7 +71,7 @@ struct ChatToolboxTests {
         #expect(vault.contains("only when the user asks about their own projects, clients, decisions, or files"))
         #expect(vault.contains("slow"))
         let skill = try #require(Self.description("read_skill", in: definitions))
-        #expect(skill.contains("when the user names a skill or asks how Tristan does something"))
+        #expect(skill.contains("when the user names a skill or asks how they do something"))
 
         // The vault's modes are VaultSearchMode's, and the skill names are the folder listing.
         let vaultFunction = definitions.compactMap { $0["function"] as? [String: Any] }
@@ -113,7 +113,7 @@ struct ChatToolboxTests {
         let outcome = try #require(await toolbox.run("recall_memory", arguments: #"{"query":"zzq"}"#))
         #expect(outcome.record.summary == "Searched memory: no hits")
         #expect(outcome.record.sources.isEmpty)
-        #expect(outcome.content.contains("No lines in Tristan's memory match"))
+        #expect(outcome.content.contains("No lines in the user's memory match"))
     }
 
     @Test func memorySearchTimeoutAnswersTheModel() async throws {
@@ -331,7 +331,7 @@ struct ChatToolboxTests {
         let outcome = try #require(await toolbox.run("read_skill", arguments: #"{"name":"costing"}"#))
         #expect(outcome.record.kind == .skill)
         #expect(outcome.record.summary == "Read skill: costing")
-        #expect(outcome.content.contains("How Tristan does costing."))
+        #expect(outcome.content.contains("How Sam does costing."))
         #expect(outcome.content.contains("you cannot run its commands"))
     }
 

@@ -5,7 +5,7 @@ import Foundation
 /// Continue in pi and the Memory tool find them (`ExecutableResolver`:
 /// `~/.local/bin`, `/opt/homebrew/bin`, and the other usual folders, then
 /// `PATH`); Ghostty by the bundle identifier the hand-off opens; the vault
-/// lane by `ssh -G vault-vps`, which prints what ssh would use from the
+/// lane by `ssh -G <House server host>`, which prints what ssh would use from the
 /// config and never connects.
 ///
 /// An actor: it owns the one child process, and every lookup runs on its
@@ -28,7 +28,7 @@ actor ChatBackendProbe: ChatBackendProbing {
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
         },
         run: @escaping ProcessRunning = ProcessRunner.live,
-        vaultHost: String = SSHVaultSearchService.defaultHost
+        vaultHost: String = HouseServer.host
     ) {
         self.resolve = resolve
         self.applicationURL = applicationURL
@@ -43,7 +43,8 @@ actor ChatBackendProbe: ChatBackendProbing {
             piFound: resolve("pi") != nil,
             ghosttyFound: applicationURL(PiHandoffService.ghosttyBundleIdentifier) != nil,
             recallFound: resolve("recall") != nil,
-            vaultHostConfigured: vaultHostConfigured
+            vaultHostConfigured: vaultHostConfigured,
+            vaultHost: vaultHost
         )
     }
 

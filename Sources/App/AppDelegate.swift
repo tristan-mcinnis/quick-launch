@@ -239,7 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     )
     private let vaultSearchService = SSHVaultSearchService()
-    /// `recall` over `~/memory`: the model's memory tools and Capture to Memory.
+    /// The launch probe's answer: which optional tool backends this Mac has.
+    private var chatBackends: ChatBackendStatus?
+    /// The `recall` CLI over the memory notes: the model's memory tools and Capture to Memory.
     private let recall = RecallCLI()
     private let pageReader = WebPageReader()
     private let windowManager = WindowManager()
@@ -309,6 +311,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Settings › General › Chat asks it whether tmux, pi, Ghostty,
         // recall, and the vault host are there.
         vm.chatBackendProbe = ChatBackendProbe()
+        // The optional House tools (recall, the House server) leave the
+        // chat on a Mac that does not have them.
+        Task { @MainActor [weak self] in
+            let status = await ChatBackendProbe().probe()
+            guard let self else { return }
+            self.chatBackends = status
+            self.viewModel?.dropMissingChatBackends(status)
+            self.aiChatController?.model.chat.dropMissingChatBackends(status)
+        }
         // ⌘J in Quick AI and the "AI Chat" command open the chat window.
         vm.aiChatOpener = { [weak self] handoff in
             guard let self else { return }
@@ -1660,6 +1671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         chat.piHandoff = PiHandoffService()
         chat.chiefOfStaff = chiefOfStaff
         chat.chiefOfStaffOpener = launcher.chiefOfStaffOpener
+        if let chatBackends { chat.dropMissingChatBackends(chatBackends) }
         let controller = AIChatWindowController(model: AIChatWindowModel(chat: chat), app: self)
         // The chat window lays itself out. Weak, because the controller owns
         // the window and the view model must never own the controller.

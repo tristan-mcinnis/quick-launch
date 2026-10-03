@@ -190,9 +190,9 @@ extension ChatToolKind {
     /// What the tool reads, for the `⌘K` › Tools rows.
     var detail: String {
         switch self {
-        case .memory: "Search notes and today's captures in ~/memory"
+        case .memory: "Search notes and today's captures with recall"
         case .tasks: "Read due, overdue, in-progress, and open tasks"
-        case .vault: "Search project state on vault-vps"
+        case .vault: "Search project state on the House server"
         case .skills: "Read a skill from ~/.claude/skills"
         case .web: "Search the web with SearXNG"
         }

@@ -178,7 +178,8 @@ struct ChatSettingsTests {
                 await log.add(executable, arguments)
                 guard let sshConfig else { throw ProcessRunnerError.timedOut(executable: "ssh", seconds: 3) }
                 return ProcessResult(stdout: Data(sshConfig.utf8), stderr: Data(), status: 0)
-            }
+            },
+            vaultHost: "example-host"
         )
     }
 
@@ -191,25 +192,26 @@ struct ChatSettingsTests {
             log: log
         ).probe()
         #expect(status == ChatBackendStatus(
-            tmuxFound: true, piFound: true, ghosttyFound: true, recallFound: true, vaultHostConfigured: true
+            tmuxFound: true, piFound: true, ghosttyFound: true, recallFound: true, vaultHostConfigured: true,
+            vaultHost: "example-host"
         ))
         #expect(status.piLevel == .ready)
         #expect(status.piLine == "tmux, pi and Ghostty found.")
         #expect(status.toolsLevel == .ready)
-        #expect(status.toolsLine == "recall found. vault-vps is in your SSH config.")
+        #expect(status.toolsLine == "recall found. example-host is in your SSH config.")
         // `ssh -G` reads the config and never connects; argv, no shell.
         let calls = await log.calls
         #expect(calls.count == 1)
         #expect(calls.first?.0 == SSHRunner.executable)
-        #expect(calls.first?.1 == ["-G", "vault-vps"])
+        #expect(calls.first?.1 == ["-G", "example-host"])
     }
 
     @Test func missingProgramsAreNamed() async {
-        let status = await probe(found: ["tmux"], ghostty: false, sshConfig: "hostname vault-vps\n").probe()
+        let status = await probe(found: ["tmux"], ghostty: false, sshConfig: "hostname example-host\n").probe()
         #expect(status.piLevel == .missing)
         #expect(status.piLine == "pi and Ghostty not found. Continue in pi needs tmux and pi.")
         #expect(status.toolsLevel == .missing)
-        #expect(status.toolsLine == "recall not found, so Memory cannot run. vault-vps is not in your SSH config.")
+        #expect(status.toolsLine == "recall not found, so Memory cannot run. example-host is not in your SSH config.")
     }
 
     @Test func onlyGhosttyMissingIsPartlyReady() async {
@@ -221,11 +223,11 @@ struct ChatSettingsTests {
     }
 
     @Test func aHostWithAHostNameOfItsOwnIsConfigured() {
-        #expect(ChatBackendProbe.isConfigured(sshConfig: "user ubuntu\nhostname 10.0.0.2", host: "vault-vps"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname vault-vps\nport 22", host: "vault-vps"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname VAULT-VPS", host: "vault-vps"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "", host: "vault-vps"))
-        #expect(ChatBackendProbe.sshConfigArguments(host: "vault-vps") == ["-G", "vault-vps"])
+        #expect(ChatBackendProbe.isConfigured(sshConfig: "user ubuntu\nhostname 10.0.0.2", host: "example-host"))
+        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname example-host\nport 22", host: "example-host"))
+        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname EXAMPLE-HOST", host: "example-host"))
+        #expect(!ChatBackendProbe.isConfigured(sshConfig: "", host: "example-host"))
+        #expect(ChatBackendProbe.sshConfigArguments(host: "example-host") == ["-G", "example-host"])
     }
 
     actor FixedProbe: ChatBackendProbing {
@@ -248,6 +250,25 @@ struct ChatSettingsTests {
         await vm.refreshChatBackendStatus()
         #expect(vm.chatBackendStatus == status)
         #expect(await fixed.count == 1)
+    }
+
+    @Test func aMacWithoutTheHouseBackendsIsNotOfferedTheirTools() {
+        func status(recall: Bool, vault: Bool) -> ChatBackendStatus {
+            ChatBackendStatus(
+                tmuxFound: false, piFound: false, ghosttyFound: false,
+                recallFound: recall, vaultHostConfigured: vault
+            )
+        }
+        let vm = make()
+        vm.memoryService = FakeMemory()
+        vm.vaultSearchService = FakeVault(outcome: .failure(VaultSearchError.empty))
+        vm.dropMissingChatBackends(status(recall: true, vault: true))
+        #expect(vm.isChatToolAvailable(.memory) && vm.isChatToolAvailable(.vault), "both found: both stay")
+
+        vm.dropMissingChatBackends(status(recall: false, vault: false))
+        #expect(!vm.isChatToolAvailable(.memory))
+        #expect(!vm.isChatToolAvailable(.tasks))
+        #expect(!vm.isChatToolAvailable(.vault))
     }
 
     // MARK: - History limit

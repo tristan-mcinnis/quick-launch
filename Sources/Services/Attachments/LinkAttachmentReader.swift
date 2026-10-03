@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 /// - 15 s in all (10 s a request); the body is read as a stream and stops
 ///   at 5 MB whatever the server claims.
 /// - A page with under 200 characters of text gets the one retry through
-///   the trafilatura reader on vault-vps, as `WebPageReader` does, inside
+///   the trafilatura reader on the House server, as `WebPageReader` does, inside
 ///   the same 15 s.
 /// - The reference keeps the final URL after redirects, and the title.
 ///
@@ -38,7 +38,7 @@ actor LinkAttachmentReader {
         totalTimeout: Duration = AttachmentLimits.linkTotalTimeout,
         requestTimeout: Duration = AttachmentLimits.linkRequestTimeout,
         bodyLimit: Int = AttachmentLimits.linkBodyBytes,
-        remoteRead: RemoteReader? = LinkAttachmentReader.vpsReader(host: "vault-vps")
+        remoteRead: RemoteReader? = LinkAttachmentReader.vpsReader(host: HouseServer.host)
     ) {
         // A copy, so the caller's configuration is never changed.
         let configuration = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
@@ -61,7 +61,7 @@ actor LinkAttachmentReader {
     /// Runs one remote command on a host: `SSHRunner.run` in the app.
     typealias SSHRunning = @Sendable (_ host: String, _ remoteCommand: [String], _ timeout: TimeInterval) async throws -> ProcessResult
 
-    /// The trafilatura reader on vault-vps over SSH: `WebPageReader`'s
+    /// The trafilatura reader on the House server over SSH: `WebPageReader`'s
     /// remote command, direct argv, no local shell.
     static func vpsReader(
         host: String,

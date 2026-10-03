@@ -105,7 +105,7 @@ enum TemporarySkills {
         for name in names {
             let folder = root.appending(path: name, directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try "# \(name)\nHow Tristan does \(name).".write(
+            try "# \(name)\nHow Sam does \(name).".write(
                 to: folder.appending(path: "SKILL.md"),
                 atomically: true,
                 encoding: .utf8

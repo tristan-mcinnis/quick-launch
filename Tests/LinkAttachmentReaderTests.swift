@@ -256,17 +256,17 @@ struct LinkAttachmentReaderTests {
     func vpsCommand() async throws {
         let calls = Mutex<[(String, [String])]>([])
         let page = url("/it's")
-        let reader = LinkAttachmentReader.vpsReader(host: "vault-vps") { host, command, timeout in
+        let reader = LinkAttachmentReader.vpsReader(host: "example-host") { host, command, timeout in
             calls.withLock { $0.append((host, command)) }
             #expect(timeout == 15)
             return ProcessResult(stdout: Data("remote text".utf8), stderr: Data(), status: 0)
         }
         #expect(try await reader(page) == "remote text")
         let call = try #require(calls.withLock { $0.first })
-        #expect(call.0 == "vault-vps")
+        #expect(call.0 == "example-host")
         #expect(call.1 == WebPageReader.remoteCommand(for: page))
 
-        let failing = LinkAttachmentReader.vpsReader(host: "vault-vps") { _, _, _ in
+        let failing = LinkAttachmentReader.vpsReader(host: "example-host") { _, _, _ in
             ProcessResult(stdout: Data(), stderr: Data("no route".utf8), status: 255)
         }
         await #expect(throws: AttachmentFailure.unreachable) { try await failing(page) }

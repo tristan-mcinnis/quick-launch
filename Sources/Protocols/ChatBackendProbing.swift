@@ -2,14 +2,16 @@ import Foundation
 
 /// What Settings › General › Chat says about the programs the chat features
 /// lean on: Continue in pi (tmux, pi, Ghostty) and the tool backends (the
-/// `recall` CLI for Memory, the vault-vps SSH host for Vault).
+/// `recall` CLI for Memory, the House server's SSH host for Vault).
 struct ChatBackendStatus: Sendable, Equatable {
     var tmuxFound: Bool
     var piFound: Bool
     var ghosttyFound: Bool
     var recallFound: Bool
-    /// vault-vps has an entry of its own in the SSH config.
+    /// The House server has an entry of its own in the SSH config.
     var vaultHostConfigured: Bool
+    /// The SSH alias the vault lane uses (`HouseServer.host`).
+    var vaultHost: String = HouseServer.defaultHost
 
     /// Everything found, some of it, or none of what the feature needs.
     enum Level: Sendable, Equatable {
@@ -48,8 +50,8 @@ struct ChatBackendStatus: Sendable, Equatable {
     var toolsLine: String {
         let memory = recallFound ? "recall found." : "recall not found, so Memory cannot run."
         let vault = vaultHostConfigured
-            ? "vault-vps is in your SSH config."
-            : "vault-vps is not in your SSH config."
+            ? "\(vaultHost) is in your SSH config."
+            : "\(vaultHost) is not in your SSH config."
         return "\(memory) \(vault)"
     }
 

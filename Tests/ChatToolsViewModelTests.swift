@@ -319,7 +319,8 @@ struct ChatToolsViewModelTests {
         let vm = make()
         let opener = FakeFileOpener()
         vm.fileOpener = opener
-        // The default roots are ~/memory and ~/vault; a temp file is outside.
+        // The default roots are the memory and vault folders in the home
+        // folder; a temp file is outside.
         await vm.openSource(ChatSource(title: "dec-01.md", path: note.path))
         #expect(vm.errorMessage == "dec-01.md is not a file on this Mac.")
         vm.sourceRoots = [folder]

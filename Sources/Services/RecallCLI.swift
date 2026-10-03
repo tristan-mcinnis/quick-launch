@@ -140,7 +140,7 @@ enum RecallError: LocalizedError, Equatable {
     }
 }
 
-/// The `recall` CLI over `~/memory`. Every call is a direct argv launch
+/// The `recall` CLI over the memory notes. Every call is a direct argv launch
 /// through `ProcessRunner` with a timeout; the query or the captured text is
 /// always one argument, never shell syntax.
 actor RecallCLI: MemoryRecalling, MemoryCapturing {

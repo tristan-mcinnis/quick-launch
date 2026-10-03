@@ -32,7 +32,7 @@ actor SearXNGSearchService: WebSearchServicing {
     private let transport: @Sendable (URL) async throws -> Data
 
     init(
-        host: String = "vault-vps",
+        host: String = HouseServer.host,
         requestTimeout: Duration = .seconds(8),
         transport: (@Sendable (URL) async throws -> Data)? = nil
     ) {
@@ -125,7 +125,7 @@ actor SearXNGSearchService: WebSearchServicing {
         return components?.url
     }
 
-    /// The single remote command string ssh runs on vault-vps. Pure; tests
+    /// The single remote command string ssh runs on the House server. Pure; tests
     /// pin the quoting.
     nonisolated static func remoteCommand(for url: URL) -> [String] {
         ["curl -s --max-time 6 '\(url.absoluteString.replacingOccurrences(of: "'", with: "%27"))'"]

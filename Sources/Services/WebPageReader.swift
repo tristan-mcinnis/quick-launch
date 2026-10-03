@@ -27,7 +27,7 @@ enum PageReadError: LocalizedError {
 }
 
 /// Reads web pages over a direct URLSession fetch, falling back to the
-/// trafilatura reader on vault-vps (same path as the ``webread`` CLI) when
+/// trafilatura reader on the House server (same path as the ``webread`` CLI) when
 /// the direct fetch fails or yields almost nothing.
 actor WebPageReader: WebPageReading {
     /// Upper bound on injected page text so one long page cannot flood the
@@ -38,7 +38,7 @@ actor WebPageReader: WebPageReading {
     private let vpsHost: String?
     private let requestTimeout: Duration
 
-    init(vpsHost: String? = "vault-vps", requestTimeout: Duration = .seconds(15)) {
+    init(vpsHost: String? = HouseServer.host, requestTimeout: Duration = .seconds(15)) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
         configuration.httpAdditionalHeaders = [
@@ -151,7 +151,7 @@ actor WebPageReader: WebPageReading {
 
     // MARK: - VPS fallback
 
-    /// The single remote command string ssh runs on vault-vps. Pure; tests
+    /// The single remote command string ssh runs on the House server. Pure; tests
     /// pin the quoting.
     nonisolated static func remoteCommand(for url: URL) -> [String] {
         let escaped = url.absoluteString
@@ -159,7 +159,7 @@ actor WebPageReader: WebPageReading {
         return ["~/search-tools/venv/bin/python ~/search-tools/read_page.py '\(escaped)'"]
     }
 
-    /// Runs the trafilatura reader on vault-vps over SSH. Mirrors the
+    /// Runs the trafilatura reader on the House server over SSH. Mirrors the
     /// transport of `SearXNGSearchService`: direct process execution, no
     /// local shell interpolation.
     private func readViaVPS(_ url: URL) async throws -> String {

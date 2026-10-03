@@ -1,6 +1,6 @@
 import Foundation
 
-/// Read access to `~/memory` and the canonical task backends for the model's
+/// Read access to the `recall` memory notes and the canonical task backends for the model's
 /// memory and task tools. The app implements it with the `recall` CLI; tests
 /// pass a fake.
 protocol MemoryRecalling: Sendable {

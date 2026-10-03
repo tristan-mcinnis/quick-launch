@@ -6,7 +6,7 @@ enum WebSearchBackend: String, Sendable {
     /// Bocha for a Chinese query when its key is stored, then Tavily, the
     /// self-hosted SearXNG, and Brave.
     case chain
-    /// The self-hosted SearXNG on vault-vps, restricted to one engine or
+    /// The self-hosted SearXNG on the House server, restricted to one engine or
     /// category.
     case searxng
     /// The Tavily search API, called directly with a Keychain key.

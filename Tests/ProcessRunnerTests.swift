@@ -263,10 +263,10 @@ struct ProcessRunnerTests {
 
         // WebPageReader / SearXNG shape: single remote command string.
         #expect(
-            SSHRunner.arguments(host: "vault-vps", remoteCommand: ["curl -s 'http://x'"]) == [
+            SSHRunner.arguments(host: "example-host", remoteCommand: ["curl -s 'http://x'"]) == [
                 "-o", "BatchMode=yes",
                 "-o", "ConnectTimeout=5",
-                "vault-vps",
+                "example-host",
                 "curl -s 'http://x'",
             ]
         )
@@ -274,11 +274,11 @@ struct ProcessRunnerTests {
         // VaultSearch shape: -T, then separate argv elements.
         #expect(
             SSHRunner.arguments(
-                host: "vault-vps",
+                host: "example-host",
                 remoteCommand: ["python3", "/remote/vault-search.py", "current", "--stdin", "--limit", "10", "--json"],
                 disablePTY: true
             ) == [
-                "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "vault-vps",
+                "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "example-host",
                 "python3", "/remote/vault-search.py", "current",
                 "--stdin", "--limit", "10", "--json",
             ]

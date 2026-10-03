@@ -118,7 +118,7 @@ struct VaultSearchServiceTests {
     }
 
     @Test func theLastTracebackLineIsTheDiagnostic() {
-        // The live failure on vault-vps: the script raises before it can
+        // The live failure on the House server: the script raises before it can
         // answer. The exception line, not the stack above it, is useful.
         let stderr = """
         Traceback (most recent call last):

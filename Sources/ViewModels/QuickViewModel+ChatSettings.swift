@@ -12,6 +12,16 @@ extension QuickViewModel {
         chatBackendStatus = status
     }
 
+    /// Drops the tool backends this Mac does not have, so a model is never
+    /// offered a tool that can only fail: Memory and Tasks need the `recall`
+    /// CLI, Vault needs the House server in the SSH config. The app calls it
+    /// once at launch with the probe's answer; a backend installed later is
+    /// picked up on the next launch.
+    func dropMissingChatBackends(_ status: ChatBackendStatus) {
+        if !status.recallFound { memoryService = nil }
+        if !status.vaultHostConfigured { vaultSearchService = nil }
+    }
+
     /// The limits the History card's picker offers: the standard ones, plus
     /// a stored value that is not one of them, so the menu can show it.
     var historyLimitChoices: [Int] {

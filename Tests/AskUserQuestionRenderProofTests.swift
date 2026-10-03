@@ -24,7 +24,7 @@ struct AskUserQuestionRenderProofTests {
             question: "Which folder should the new project live in?",
             options: [
                 AskUserQuestionOption(label: "~/Documents/code", detail: "Matches your existing projects"),
-                AskUserQuestionOption(label: "~/vault", detail: "For a vault-backed project"),
+                AskUserQuestionOption(label: "~/Projects", detail: "For a folder-backed project"),
                 AskUserQuestionOption(label: "Somewhere else…"),
             ]
         )
@@ -54,12 +54,12 @@ struct AskUserQuestionRenderProofTests {
         let vm = QuickViewModel(settings: settings)
         vm.currentConversation = QuickConversation(providerID: UUID(), model: "dark-proof")
         vm.lastQuestion = "Set up a new project folder for me"
-        vm.output = "Created the project folder at ~/vault."
+        vm.output = "Created the project folder at ~/Projects."
         vm.currentConversation?.messages = [
             QuickMessage(role: .user, content: "Set up a new project folder for me"),
             QuickMessage(role: .assistant, content: "Which folder?", askUserQuestion: Self.answered()),
-            QuickMessage(role: .user, content: "~/vault"),
-            QuickMessage(role: .assistant, content: "Created the project folder at ~/vault."),
+            QuickMessage(role: .user, content: "~/Projects"),
+            QuickMessage(role: .assistant, content: "Created the project folder at ~/Projects."),
         ]
         let image = try Self.render(viewModel: vm, appearance: .darkAqua)
         try Self.save(image, name: "ask-user-question-record-dark.png")
@@ -70,7 +70,7 @@ struct AskUserQuestionRenderProofTests {
             question: "Which folder should the new project live in?",
             options: [
                 AskUserQuestionOption(label: "~/Documents/code", detail: "Matches your existing projects"),
-                AskUserQuestionOption(label: "~/vault", detail: "For a vault-backed project"),
+                AskUserQuestionOption(label: "~/Projects", detail: "For a folder-backed project"),
                 AskUserQuestionOption(label: "Somewhere else…"),
             ]
         )

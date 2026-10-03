@@ -49,7 +49,7 @@ struct ChatSettingsView: View {
                 }
                 SettingsRow(
                     title: "Tool backends",
-                    detail: viewModel.chatBackendStatus?.toolsLine ?? "Looking for recall and vault-vps."
+                    detail: viewModel.chatBackendStatus?.toolsLine ?? "Looking for recall and the House server."
                 ) {
                     statusWord(viewModel.chatBackendStatus?.toolsLevel)
                 }

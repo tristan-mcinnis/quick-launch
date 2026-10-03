@@ -67,8 +67,8 @@ struct RecallCLITests {
     }
 
     @Test func aMissingStoreIsAnError() async throws {
-        let runner = FakeRunner(.success(Self.output(#"{"error":"no memory repo at ~/memory","schema_version":1}"#, status: 1)))
-        await #expect(throws: RecallError.failed("no memory repo at ~/memory")) {
+        let runner = FakeRunner(.success(Self.output(#"{"error":"no memory repo at ~/notes","schema_version":1}"#, status: 1)))
+        await #expect(throws: RecallError.failed("no memory repo at ~/notes")) {
             _ = try await Self.cli(runner).search("x")
         }
     }

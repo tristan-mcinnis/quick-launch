@@ -3676,7 +3676,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // A submitted Vault Search is an act, not an abandoned search.
         noteActedQuery(question)
         guard let vaultSearchService else {
-            errorMessage = "Vault Search is unavailable. Check the VPS connection and try again."
+            errorMessage = "Vault Search is unavailable. It needs the optional House server in your SSH config."
             requestInputFocus()
             return
         }

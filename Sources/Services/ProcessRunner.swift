@@ -401,7 +401,7 @@ enum ProcessRunner {
     }
 }
 
-/// Builds the `ssh` argv Quick Launch uses to reach vault-vps. One place
+/// Builds the `ssh` argv Quick Launch uses to reach the House server. One place
 /// for the batch-mode options so every remote lane behaves the same.
 enum SSHRunner {
     static let executable = URL(fileURLWithPath: "/usr/bin/ssh")
