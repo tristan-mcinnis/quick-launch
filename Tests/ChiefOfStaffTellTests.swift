@@ -51,13 +51,13 @@ struct ChiefOfStaffTellContractTests {
     }
 
     @Test func attachedFilesAndLinksGoInAsAttachedLines() {
-        let file = ChatAttachmentRef(kind: .pdf, name: "costing.pdf", path: "/Users/user/Downloads/costing.pdf")
+        let file = ChatAttachmentRef(kind: .pdf, name: "costing.pdf", path: "/Users/test/Downloads/costing.pdf")
         let link = ChatAttachmentRef(kind: .link, name: "Brief", url: URL(string: "https://example.com/brief"))
         let picture = ChatAttachmentRef(kind: .image, name: "Screenshot", path: "/tmp/shot.png")
         #expect(CosTellReply.message("  Charlie approved the costing.  ", attachments: [file, link, picture]) == """
         Charlie approved the costing.
 
-        Attached: /Users/user/Downloads/costing.pdf
+        Attached: /Users/test/Downloads/costing.pdf
         Attached: https://example.com/brief
         """)
         #expect(CosTellReply.message("Close it.", attachments: []) == "Close it.")

@@ -74,7 +74,7 @@ struct ChatToolsRenderProofTests {
         let memory = FakeMemory()
         vm.memoryCapture = memory
         vm.openQuickAI()
-        vm.input = "which deck did we pick for acme tennis"
+        vm.input = "which deck did we pick for acme launch"
         await vm.submit()
         await vm.captureAnswerToMemory()
         return vm
@@ -101,7 +101,7 @@ struct ChatToolsRenderProofTests {
             vm.currentConversation = QuickConversation(
                 providerID: InferenceProvider.deepSeekID,
                 model: InferenceProvider.deepSeekDefaultModel,
-                messages: [QuickMessage(role: .user, content: "what is on my plate for acme tennis this week")]
+                messages: [QuickMessage(role: .user, content: "what is on my plate for acme launch this week")]
             )
             vm.isStreaming = true
             vm.noteLiveToolRecord(ChatToolRecord(kind: .today, summary: "Read today: 2 captures, 31 open tasks"))

@@ -232,7 +232,7 @@ final class TypeToClickTests: XCTestCase {
     }
 
     func testAccessibilityFramesMapOntoCurrentStackedMixedScaleDisplayLayout() {
-        // Tristan's ultrawide is above the built-in primary display. AppKit's
+        // An ultrawide display sits above the built-in primary display. AppKit's
         // screen origin is (-932, 982), while AX reports its menu bar at a
         // negative global y. Scale does not enter this point-space transform.
         XCTAssertEqual(

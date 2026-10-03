@@ -43,7 +43,7 @@ struct VaultSearchServiceTests {
         let scope = Data("""
         {"ok":true,"needs_scope":true,"candidates":[
           {"slug":"acme-launch","title":"Acme Launch","phase":"reporting","status":"active"},
-          {"slug":"acme-retail-csr","title":"Acme Running CSR","phase":"proposal-sent","status":"active"}
+          {"slug":"acme-retail-csr","title":"Acme Retail CSR","phase":"proposal-sent","status":"active"}
         ]}
         """.utf8)
         let future = Data("""
@@ -218,7 +218,7 @@ struct VaultSearchServiceTests {
     @Test func aNestedCanonicalProjectIdIsPassedThroughNotFlattened() {
         // `state.projects.slug` is the project directory path relative to
         // `kb/databases/projects/` (`project-projector.py`: "slug = the project
-        // dir path … e.g. acme-af1" or "personal/china-book"), so the resolver
+        // dir path … e.g. acme-site" or "personal/china-book"), so the resolver
         // returns nested ids for 29 of that table's 40 rows. The adapter sends
         // the canonical id verbatim: the flat basename is not the same id —
         // today `history --project stack` matches by the over-broad

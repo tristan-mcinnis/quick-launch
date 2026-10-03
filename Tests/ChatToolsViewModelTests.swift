@@ -133,7 +133,7 @@ struct ChatToolsViewModelTests {
         // Shorter than the answer, longer than the first tool line.
         vm.webAnswerTimeout = .milliseconds(300)
         vm.openQuickAI()
-        vm.input = "search web acme tennis status"
+        vm.input = "search web acme launch status"
         await vm.submit()
 
         #expect(vm.output == "Answer after tools.", "the model was working, not silent")

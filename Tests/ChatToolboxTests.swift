@@ -256,11 +256,11 @@ struct ChatToolboxTests {
         let toolbox = ChatToolbox(enabled: [.vault], vault: vault)
         let outcome = try #require(await toolbox.run(
             "search_vault",
-            arguments: #"{"query":"acme tennis status","mode":"history"}"#
+            arguments: #"{"query":"acme launch status","mode":"history"}"#
         ))
         let calls = await vault.calls
         #expect(calls.map(\.mode) == [.history])
-        #expect(calls.map(\.query) == ["acme tennis status"])
+        #expect(calls.map(\.query) == ["acme launch status"])
         #expect(outcome.record.summary == "Searched vault · history: 6 results")
         #expect(outcome.record.sources.map(\.title) == ["Acme Launch status"])
         #expect(outcome.content.contains("<vault_results>"))

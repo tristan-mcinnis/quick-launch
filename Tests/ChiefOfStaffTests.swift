@@ -228,14 +228,14 @@ struct ChiefOfStaffThreadTests {
 @Suite("Chief of Staff reading")
 struct ChiefOfStaffReadingTests {
     @Test func headlinesFallBackToTheFirstSentenceCutAtASemicolon() {
-        #expect(Proposal.firstSentence(of: "Charlie approved the mini group; Dana started.\nMore.") == "Charlie approved the mini group")
+        #expect(Proposal.firstSentence(of: "Charlie approved the mini group; Robin started.\nMore.") == "Charlie approved the mini group")
         #expect(Proposal.firstSentence(of: "The readout moved. Log it.") == "The readout moved.")
         #expect(Proposal.firstSentence(of: "One line") == "One line")
         #expect(Proposal.firstSentence(of: "\n\n") == nil)
         #expect(Proposal(id: "x", message: "A; b").headline == "A")
         #expect(Proposal(id: "x", message: "m", headline: "Given").headline == "Given")
-        let long = "Charlie approved the mini group with 5 IC recruits on 2026-09-23; Dana started the same day"
-        #expect(Proposal(id: "x", message: "m", headline: long).headline == "Charlie approved the mini group with 5 IC recruits on 2026-09-23")
+        let long = "Charlie approved the mini group with 5 new recruits on 2026-09-23; Robin started the same day"
+        #expect(Proposal(id: "x", message: "m", headline: long).headline == "Charlie approved the mini group with 5 new recruits on 2026-09-23")
         #expect(Proposal(id: "x", message: "m", headline: "Short; fine").headline == "Short; fine")
     }
 
@@ -1682,7 +1682,7 @@ struct ChiefOfStaffMemoryModelTests {
         model.submitAddRule()
         await model.perform(.charterLine(text: "Warmer with clients", section: "voice"))
         #expect(await runner.writes.last == .charterLine(text: "Warmer with clients", section: "voice"))
-        #expect(ChiefOfStaffModel.senderName("Charlie <w@example.com>") == "Charlie")
+        #expect(ChiefOfStaffModel.senderName("Charlie <c@example.com>") == "Charlie")
         #expect(ChiefOfStaffModel.senderName("Alex") == "Alex")
     }
 

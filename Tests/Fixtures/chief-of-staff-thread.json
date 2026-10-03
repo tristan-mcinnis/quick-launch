@@ -354,17 +354,17 @@
      "created": "2026-09-22T10:00:00.000Z",
      "due": null,
      "event_kind": "email",
-     "headline": "Sam owes the interview count",
+     "headline": "Morgan owes the interview count",
      "id": "33cc44dd",
      "importance": "client",
      "kind": "proposal",
-     "message": "Sam said he will confirm how many interviews he attends.",
+     "message": "Morgan said he will confirm how many interviews he attends.",
      "paths": [
       "kb/databases/emails/2026/09/a.md"
      ],
      "project": "sample-project",
      "reason": "",
-     "sender": "Sam",
+     "sender": "Morgan",
      "status": "pending",
      "tier": "waiting",
      "title": "Interview count",
@@ -376,7 +376,7 @@
    "id": "9279b0e9-fd2d-4fb8-8b76-1c632e923e10",
    "role": "assistant",
    "sessionLinks": [],
-   "text": "Sam said he will confirm how many interviews he attends.",
+   "text": "Morgan said he will confirm how many interviews he attends.",
    "toolRounds": []
   },
   {
@@ -526,7 +526,7 @@
      "created": "2026-09-23T07:45:00.000Z",
      "due": null,
      "event_kind": "morning",
-     "headline": "Two meetings, one thing due, Sam owes you the interview count",
+     "headline": "Two meetings, one thing due, Morgan owes you the interview count",
      "id": "mo123456",
      "importance": "system",
      "kind": "proposal",
