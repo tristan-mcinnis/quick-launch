@@ -74,6 +74,9 @@ python3 "$ROOT_DIR/scripts/chat-core-provenance.py" --plist "$APP_BUNDLE/Content
 
 [[ -f "$ICON_SOURCE" ]] && cp "$ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]] && cp "$ROOT_DIR/PrivacyInfo.xcprivacy" "$APP_BUNDLE/Contents/Resources/"
+# The licence and the credits for every bundled dependency travel with the app.
+cp "$ROOT_DIR/LICENSE" "$APP_BUNDLE/Contents/Resources/LICENSE"
+cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_BUNDLE/Contents/Resources/THIRD_PARTY_NOTICES.md"
 
 print "==> Signing bundle (${SIGN_IDENTITY})"
 sign_bundle
