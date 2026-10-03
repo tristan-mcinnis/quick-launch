@@ -1,7 +1,7 @@
 # Quick Launch — Feature Reference
 
-Quick Launch is a private, keyboard-first macOS launcher and instant AI
-overlay. This document is the detailed reference for current behavior; the
+Quick Launch is a free, open-source, keyboard-first macOS launcher and
+instant AI overlay. This document is the detailed reference for current behavior; the
 [README](../README.md) is the short version.
 
 Scope boundary: Quick Launch is not an autonomous desktop agent. AI Chat is one
@@ -327,7 +327,7 @@ Windows**.
 
 ## Vault Search
 
-A catalog backed by the private VPS and a read layer: Current Project, Reconcile
+An optional catalog backed by your own House server (an SSH host) and a read layer: Current Project, Reconcile
 Changes, Project History, and Across Projects.
 
 - Structured modes make one read-only call with no model-provider egress, show

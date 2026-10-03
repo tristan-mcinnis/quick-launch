@@ -4,8 +4,8 @@ Canonical file. `AGENTS.md` is a symlink to this file so every runtime reads one
 
 ## Product
 
-Quick Launch is a private, personal macOS launcher and instant AI action
-overlay. Keep it small, keyboard-first, fast, and focused on immediate actions.
+Quick Launch is a free, open-source (MIT) macOS launcher and instant AI
+action overlay. Keep it small, keyboard-first, fast, and focused on immediate actions.
 It is not a general chat workspace or an autonomous desktop agent.
 
 The product name is always **Quick Launch** in user-facing copy. Technical
@@ -23,7 +23,7 @@ changelog. The OpenAI-compatible client is `OpenAICompatibleService`.
 
 ## Repository
 
-- `origin`: private repository `tristan-mcinnis/quick-launch`
+- `origin`: `tristan-mcinnis/quick-launch`
 - `upstream`: original `Arthur-Ficial/apfel-quick` project, retained for
   attribution and upstream comparison only
 - When Tristan explicitly says **push to main** for this project, commit the
@@ -32,8 +32,7 @@ changelog. The OpenAI-compatible client is `OpenAICompatibleService`.
 
 ## Private Data and Secrets
 
-This is a private repository, but treat Git history as durable and potentially
-exposed. Never commit API keys, tokens, passwords, private keys, personal
+Treat Git history as durable and public. Never commit API keys, tokens, passwords, private keys, personal
 snippet exports, `.env` files, credentials, or local launcher data.
 
 Provider API keys belong in macOS Keychain through `APIKeyStore`. Personal
@@ -165,7 +164,11 @@ singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 
 ## Verification
 
-Run `swift test` after source changes. For packaging or identity changes, also
+Run `make test` after source changes: the publish scrub
+(`scripts/scrub.sh`; client names live in the untracked `.scrub-private`),
+`swift test`, and the HouseChatCore suite. The vault, memory and House server
+names may appear only in `Sources/Services/HouseServer.swift` and
+`docs/personal-setup.md`; Tristan's own wiring is described there. For packaging or identity changes, also
 run `SIGN_IDENTITY=- ./scripts/build-app.sh` and verify the resulting
 `build/Quick Launch.app` metadata.
 

@@ -1,21 +1,26 @@
-# Quick Launch
+<p align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="Quick Launch icon">
+</p>
 
-**A keyboard-first macOS launcher and instant AI overlay.**
+<h1 align="center">Quick Launch</h1>
 
-![Platform: macOS 26+](https://img.shields.io/badge/platform-macOS%2026%2B-black)
-![Swift 6.2](https://img.shields.io/badge/swift-6.2-orange)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+<p align="center"><strong>A keyboard-first Mac launcher with an instant AI overlay.</strong></p>
 
-Press `Option+Space`, or a hotkey you choose, and one search field opens over
-whatever you are doing: launch an app, run a command, rearrange a window,
-translate a selection, or ask an AI. `Tab` turns the panel into a chat, and
-`Command+J` moves that chat into a full window. It lives in the menu bar, stays
-fast and keyboard-first, and runs local actions without a model.
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%2026%2B%20%C2%B7%20Apple%20Silicon-1f2937">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-3b5bdb">
+  <img alt="Free and open source" src="https://img.shields.io/badge/free-and%20open%20source-3b5bdb">
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-locally-1f2937">
+</p>
 
-Almost everything is yours to change: the global hotkey, the in-app keys,
-per-item aliases and hotkeys, the catalogs, and the model providers. Quick
-Launch exists so the launcher's inner workings stay open to you and new rows
-and actions can be added, instead of waiting on someone else's roadmap.
+Press `Option+Space` and one search field opens over whatever you are doing.
+Launch an app, run a command, move a window, translate a selection, or ask an
+AI. `Tab` turns the panel into a chat, and `Command+J` moves that chat into a
+full window. It is for people who live on the keyboard and want a launcher
+whose inner workings they can read and change.
+
+> **Free and open source.** Quick Launch is free to use, change and share under the MIT License.
+> No account, no subscription, no telemetry. Nothing leaves your Mac unless you send it to an AI or web-search provider you chose; with a local model, nothing leaves at all.
 
 ## Features
 
@@ -24,169 +29,209 @@ and actions can be added, instead of waiting on someone else's roadmap.
 - One ranked search across apps, folders, commands, snippets, quick links,
   saved actions, and the Ask AI row.
 - Fuzzy matching, per-item aliases, optional per-item global hotkeys, and
-  learned ranking with decay.
+  learned ranking that fades over 14 days.
 - Nested catalogs, keyboard-only navigation, and footers that show the keys
   that work right now.
 
 **Instant answers, no model**
 
-- Math, unit conversions, dates, and city times are computed on this Mac.
-- Answers appear as you type; `Return` copies, `Command+Return` pastes.
+- Math, unit conversions, dates, and city times are computed on your Mac.
+- Answers appear as you type. `Return` copies, `Command+Return` pastes.
 
 **Quick AI and AI Chat**
 
-- `Tab` turns the launcher into a chat; follow-ups stay in the thread and
-  streamed answers can be stopped, retried, or regenerated.
-- `Command+J` moves the chat into a complete, resizable window that shares one
-  store of settings and history with the panel.
-- Saved actions and assistants add custom instructions, tools, and context
-  skills, with fuzzy slash aliases and hotkeys.
-- Read-only tools cover local notes and tasks, project evidence, skills, and
-  web search. Each tool switches on or off per chat.
-- The Chief of Staff (`cos`) has a pinned conversation at the top of the AI
-  Chat list: health in its status line, then DECIDE, TODAY, WAITING ON
-  OTHERS, PROJECTS, LATER and FYI above the chat, or a Board (`⌥⌘2`). On a
-  card, `⌘↩` Do it, `⌘E` Edit, `⌘L` Later, `⌘⌫` No, `⌘R` Bring back, `⌘=`
-  `⌘-` More and Less, `⌘Z` Undo, `⌘D` Discuss in a new chat; `⌘N` adds a
-  task. Activity, Artifacts and Charter are `⌥⌘3` to `⌥⌘5`. Its notifications come from Quick Launch. Type `cos` in the
-  launcher to open it. This pinned conversation is the only Chief of Staff
-  face: the old ChiefOfStaff.app is retired.
-- AI Chat is the House's general chat. RTI keeps its own chats because they
-  are grounded in a meeting or a recording session; anything not about a
-  meeting belongs here.
-- Capture to Memory (`⌥⌘M`) sends an answer to `recall capture`.
+- `Tab` turns the launcher into a chat. Follow-ups stay in the thread, and a
+  streamed answer can be stopped, retried, or regenerated.
+- `Command+J` moves the chat into a resizable window that shares one store of
+  settings and history with the panel.
+- Saved actions and assistants add custom instructions, tools, and context,
+  with fuzzy slash aliases (`/grammar`, `/tldr`, `/search`) and hotkeys.
+- Read-only tools: web search, plus skills, memory, tasks, and a project vault
+  when those optional integrations are present. Each tool turns on or off per
+  chat.
+- Attachments: files, images, links, screenshots, and the current selection.
 
 **Capture and screen**
 
-- Screenshot attachments, a Screenshots catalog with on-device OCR, and Screen
-  Awareness commands for the focused window, a screen area, or selected text.
+- Screenshot attachments, a Screenshots catalog with on-device OCR, and
+  commands for the focused window, a screen area, or selected text.
 - Text from screen, a colour picker, and a bounded local Clipboard History.
-- Type to Click labels every clickable control in the frontmost app so you can
+- Type to Click labels every clickable control in the frontmost app, so you can
   click one by typing its name.
 
 **Text and system tools**
 
 - A Translator window for selected or typed text.
 - Window management across halves, thirds, fourths, and displays.
-- Caffeinate with timed sessions and Agent Watch.
-- Emoji and symbols.
-- Quick Launch keeps no screen history of its own. The one screen-history
-  collector in the House is `screenctx` (memory-screenctx): Memory.app
-  switches it on and off, and `screenctx timeline` and `screenctx search`
-  read it. Quick Launch's own Screen History collector was retired on
-  2026-09-26.
+- Caffeinate with timed sessions, and Agent Watch to keep the Mac awake while
+  a coding agent works.
+- Emoji and symbols, and system toggles such as Dark Mode and Empty Trash.
 
 **Models and providers**
 
-- Swappable local and hosted OpenAI-compatible providers, CLI subscription
-  providers, and a provider that uses the installed pi configuration.
-- Enable or disable individual models; API keys live in the macOS Keychain.
+- Swappable providers: local OpenAI-compatible servers (LM Studio,
+  [Local Models](https://github.com/tristan-mcinnis/local-models), and others),
+  hosted OpenAI-compatible APIs, and CLI subscription providers.
+- Turn single models on or off. API keys live in the macOS Keychain.
 
-**Privacy**
+The full behaviour reference is [docs/features.md](docs/features.md).
 
-- No analytics and no telemetry. Provider keys, chat history, and source blobs
-  stay on this Mac and are owner-only.
-- One bounded, content-free local review log can be inspected, exported, and
-  cleared, or turned off entirely.
+### Optional integrations
 
-The full behavior reference is in [docs/features.md](docs/features.md).
+These features appear only when their backing tool is on your Mac. Without
+it, the feature hides itself or reports what is missing. Nothing else depends
+on them.
+
+| Integration | What it needs | Without it |
+|---|---|---|
+| Skills tool | Skill folders with a `SKILL.md` in `~/.claude/skills` | The tool is not offered. |
+| Memory and Tasks tools, Capture to Memory | A `recall` CLI on `PATH` | The tools are not offered; Capture says recall is not installed. |
+| Vault tool and Vault Search, SearXNG web search, page-reader fallback | An SSH host alias for your own server in `~/.ssh/config` (the "House server"; set its name with `defaults write com.tristanmcinnis.quick-launch HouseServerHost <alias>`) | The Vault tool is not offered, Vault Search says it is unavailable, Automatic web search uses the next backend, and pages are read directly. |
+| Chief of Staff pinned chat | A `cos` CLI at `~/.local/bin/cos` (or `COS_BIN`) | The pinned chat does not appear. |
+| Read aloud | [Local TTS](https://github.com/tristan-mcinnis/local-tts) running on `127.0.0.1:8081` | Says Local TTS is not running. |
+| Continue in pi | `tmux` and `pi` on `PATH` | Settings shows what is missing. |
+
+**Settings › General › Chat** shows which of these it found.
 
 ## Requirements
 
-- macOS 26 or later
-- Apple Silicon
-- Xcode command-line tools for source builds
-- At least one inference provider: a local OpenAI-compatible server, a hosted
-  API, or a CLI subscription, configured in **Settings › Models**
+- macOS 26 or later on Apple Silicon.
+- Xcode 26 or its command-line tools (Swift 6.2) to build from source.
+- At least one AI provider for the chat features: a local OpenAI-compatible
+  server, a hosted API key, or a CLI subscription. The launcher, math, and
+  system tools need none.
 
-## Build and install
+## Install
+
+There is no signed download yet. Build and install from source:
 
 ```bash
 git clone https://github.com/tristan-mcinnis/quick-launch.git
 cd quick-launch
-swift test
+make test
 make install
 ```
 
-`make install` builds, signs, and copies the menu-bar app to
-`/Applications/Quick Launch.app`. Run `make run` to open the installed app.
-The install target refuses to build from a dirty working tree, so the installed
-binary always traces to a commit; override deliberately with
-`QL_ALLOW_DIRTY=1`.
+`make install` builds the app, signs it, and copies it to
+`/Applications/Quick Launch.app`. `make run` opens it. It signs with your
+Apple Development or Developer ID certificate when you have one, and ad hoc
+when you do not. An ad hoc build gets a new signature on every rebuild, so
+macOS asks again for Accessibility and the Keychain asks again for saved keys.
 
-Local builds use the stable designated requirement
-`com.tristanmcinnis.quick-launch`, so macOS Accessibility approval survives code
-changes. The generated `build` directory is excluded from Spotlight so it does
-not appear as a second installation.
+The install target refuses a dirty working tree, so the installed app always
+traces to a commit. Override with `QL_ALLOW_DIRTY=1`.
 
-## Use
+### Permissions
+
+macOS asks for these the first time a feature needs them:
+
+| Permission | Used for |
+|---|---|
+| Accessibility | Reading and replacing selected text, Type to Click, window management. |
+| Screen Recording | Screenshots, text from screen, and screen-aware commands. |
+| Automation (System Events, Finder) | System toggles such as Dark Mode, Lock Screen, Empty Trash, and Eject. |
+| Notifications | Chief of Staff notices, when that integration is present. |
+
+## Usage
 
 1. Press `Option+Space`.
-2. Type an app name or a configured alias. Arrow keys and `Return` open the
-   highlighted row.
+2. Type an app name or an alias. Arrow keys and `Return` open the highlighted
+   row.
 3. Type a question, or a saved alias such as `/grammar`, `/tldr`, or
    `/search`.
 4. Press `Tab` to ask Quick AI and keep the chat. Press `Escape` to stop a
    stream and keep the answer that arrived.
-5. Type a follow-up in the composer. `Return` while an answer streams queues it
-   until the answer ends.
+5. Type a follow-up. `Return` while an answer streams queues it until the
+   answer ends.
 
-`Command+Shift+V` opens Clipboard History directly. `Command+K` lists the
-actions for the highlighted row. Escape steps back one layer at a time and
-closes the launcher at root search. Open it again within the **Keep my place**
-interval and it is where you left off.
+`Command+Shift+V` opens Clipboard History. `Command+K` lists the actions for
+the highlighted row. Escape steps back one layer at a time and closes the
+launcher at root search. Open it again within the **Keep my place** interval
+and it is where you left off.
 
-## Documentation
-
-- [docs/features.md](docs/features.md) — the full feature reference
-- [docs/product-scope.md](docs/product-scope.md) — the product scope and
-  interaction contract
-- [CHANGELOG.md](CHANGELOG.md) — release history
-- [docs/](docs/) — design notes, audits, and plans
+Pick providers and models in **Settings › Models**. The global hotkey, in-app
+keys, aliases, catalogs, and providers are all yours to change.
 
 ## Privacy
 
-Quick Launch keeps no analytics and sends nothing about your use anywhere. API
-keys are stored in the macOS Keychain. Chat history, attachments, clipboard
-history, snippets, and picks are local, owner-only, and bounded, and can be
-cleared. A question sent to a cloud provider contains the question, the
-permitted conversation context, the app's instruction, and any permitted tool
-results; source-only questions do not silently widen. See
-[docs/features.md](docs/features.md#privacy-boundary) for the details.
+- **Read:** the text you type, the selection when you run an action on it, the
+  screen only when you run a screen command, and the clipboard for Clipboard
+  History.
+- **Sent:** a question to a cloud provider carries the question, the allowed
+  conversation context, the app's instruction, any attachments you added, and
+  any permitted tool results. A web search sends the query to the backend you
+  chose. A local provider keeps everything on your Mac.
+- **Stored:** API keys in the macOS Keychain. Chat history, attachments,
+  clipboard history, snippets, and launcher picks stay in owner-only files in
+  Application Support, bounded, and clearable. No analytics. One local,
+  content-free review log can be inspected, exported, cleared, or turned off.
 
-## Development
+The details are in [docs/features.md](docs/features.md#privacy-boundary).
 
-- Build and test from the repository root: `swift test`.
-- Package a local build: `SIGN_IDENTITY=- ./scripts/build-app.sh`. The result is
-  `build/Quick Launch.app`.
-- Verify the packaged bundle's metadata after identity or packaging changes.
-- The native rail focus proof takes the keyboard and runs separately:
+## Build from source
+
+```bash
+make test                              # scrub gate, app tests, HouseChatCore tests
+swift build -c release                 # release build
+SIGN_IDENTITY=- ./scripts/build-app.sh # package build/Quick Launch.app
+```
+
+- `make test` runs `scripts/scrub.sh` (no personal paths or keys in tracked
+  files), `swift test`, and `swift test --package-path Packages/HouseChatCore`.
+- The native rail focus proof takes the keyboard and runs on its own:
   `QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --skip-build --filter PaletteRailFocusProofTests`.
+- Speed budgets run only on a quiet machine:
+  `QUICK_LAUNCH_PERF=1 swift test --filter LauncherPerformanceBudgetTests`.
+- `Packages/HouseChatCore` is the shared chat core (schema, archives,
+  retrieval policy, slash commands). Quick Launch builds it from this repo.
+- The only network fetch during a build is swift-markdown and swift-cmark
+  from GitHub.
 
-The house Swift rule is `../design-system/SWIFT.md`. This repository is its
-reference implementation, with a floor of macOS 26, swift-tools 6.2, and Swift
-Testing.
+[CHANGELOG.md](CHANGELOG.md) has the release history, and [docs/](docs/)
+holds design notes, audits, and plans.
 
-## Acknowledgements
+## Part of House
+
+Quick Launch is one of a small family of free, local-first Mac tools that share one design system.
+
+| App | What it does |
+|---|---|
+| **[Quick Launch](https://github.com/tristan-mcinnis/quick-launch)** | Keyboard-first launcher and instant AI overlay. |
+| [Local Dictation](https://github.com/tristan-mcinnis/local-dictation) | Hold a key, talk, and on-device text lands at your cursor. |
+| [Local TTS](https://github.com/tristan-mcinnis/local-tts) | Fast on-device voice cloning and text-to-speech. |
+| [Local Models](https://github.com/tristan-mcinnis/local-models) | One local daemon that serves a fleet of small models to every app. |
+| [Usage](https://github.com/tristan-mcinnis/usage-menubar) | One menu-bar gauge for every AI subscription and API key. |
+
+## Credits
 
 Quick Launch began as a fork of
-[apfel-quick](https://github.com/Arthur-Ficial/apfel-quick) by Arthur Ficial.
+**[apfel-quick](https://github.com/Arthur-Ficial/apfel-quick) by Arthur Ficial**.
+His project gave Quick Launch its start: the menu-bar app, the hotkey
+overlay, local math, the streaming client, the test suite, and the release
+tooling and landing page. His copyright stays in
+[LICENSE](LICENSE). Thank you, Arthur.
 
-The interface and behavior draw on earlier tools:
+It is built on Apple's
+[swift-markdown](https://github.com/apple/swift-markdown) (Apache-2.0) and
+[swift-cmark](https://github.com/swiftlang/swift-cmark), the cmark-gfm parser
+by John MacFarlane, GitHub and others (BSD-2-Clause). Emoji names come from
+the Unicode Character Database.
 
-- [Raycast](https://www.raycast.com/) — the launcher surface, the Quick AI
+The interface draws on earlier tools. No code from them is included.
+
+- [Raycast](https://www.raycast.com/): the launcher surface, the Quick AI
   panel, the row action list, the footer hints, and the window-management set.
-- [Shortcat](https://shortcat.app/) and [Homerow](https://homerow.app/) — the
-  Type to Click approach of labelling and clicking controls through
-  Accessibility.
-- [Vimium](https://vimium.github.io/) — the equal-length, non-prefix hint style.
-- [Tuna](https://tunaformac.com/) — the predecessor this app replaces. Its
-  translator behavior is mirrored, and its snippets and quick links are
+- [Shortcat](https://shortcat.app/) and [Homerow](https://homerow.app/): Type
+  to Click, labelling and clicking controls through Accessibility.
+- [Vimium](https://vimium.github.io/): the equal-length, non-prefix hint style.
+- [Tuna](https://tunaformac.com/): the predecessor this app replaces. Its
+  translator behaviour is mirrored, and its snippets and quick links are
   imported once.
 
-It depends on Apple's [swift-markdown](https://github.com/apple/swift-markdown)
-and [swift-cmark](https://github.com/swiftlang/swift-cmark), both Apache-2.0.
+Full licence texts are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
+which also ships inside the app.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Arthur Ficial and
+Copyright (c) 2026 Tristan McInnis.
