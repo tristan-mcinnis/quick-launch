@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="quick-launch"
+APP_DISPLAY_NAME="Quick Launch"
 VERSION="$(tr -d '\n' < "$ROOT_DIR/.version")"
 TAG="v${VERSION}"
 ARCH="$(uname -m)"
@@ -52,7 +53,7 @@ SIGN_IDENTITY="$SIGN_IDENTITY" KEYCHAIN_PROFILE="$KEYCHAIN_PROFILE" ENTITLEMENTS
 APP_ZIP="$DIST_DIR/${APP_NAME}-${TAG}-macos-${ARCH}.zip"
 VERIFY_DIR="$(mktemp -d)"
 ditto -x -k "$APP_ZIP" "$VERIFY_DIR"
-if ! xcrun stapler validate "$VERIFY_DIR/${APP_NAME}.app" >/dev/null 2>&1; then
+if ! xcrun stapler validate "$VERIFY_DIR/${APP_DISPLAY_NAME}.app" >/dev/null 2>&1; then
     print "ERROR: Notarisation ticket missing from app bundle. Aborting." >&2
     rm -rf "$VERIFY_DIR"
     exit 1
@@ -127,41 +128,6 @@ print "==> Deploying website to Cloudflare Pages..."
 source ~/.env 2>/dev/null || true
 npx wrangler pages deploy "$ROOT_DIR/site" --project-name quick-launch
 
-# ── Ensure custom domain is wired up (idempotent) ───────────────────────────
-print ""
-print "==> Ensuring quick-launch.pages.dev is configured..."
-EXISTING_DOMAINS="$(curl -s \
-    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/quick-launch/domains" \
-    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-    | python3 -c "import json,sys; [print(d['name']) for d in json.load(sys.stdin).get('result',[])]" 2>/dev/null)"
-
-if ! echo "$EXISTING_DOMAINS" | grep -q "quick-launch.pages.dev"; then
-    print "    Adding custom domain to Cloudflare Pages..."
-    curl -s -X POST \
-        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/quick-launch/domains" \
-        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{"name":"quick-launch.pages.dev"}' > /dev/null
-else
-    print "    Custom domain already registered."
-fi
-
-EXISTING_DNS="$(curl -s \
-    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?name=quick-launch.pages.dev" \
-    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-    | python3 -c "import json,sys; r=json.load(sys.stdin).get('result',[]); print(r[0]['type'] if r else '')" 2>/dev/null)"
-
-if [[ -z "$EXISTING_DNS" ]]; then
-    print "    Creating CNAME quick-launch.pages.dev → quick-launch.pages.dev..."
-    curl -s -X POST \
-        "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records" \
-        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{"type":"CNAME","name":"quick-launch","content":"quick-launch.pages.dev","ttl":1,"proxied":true}' > /dev/null
-else
-    print "    DNS CNAME already exists."
-fi
-
 # ── Post-deploy tests ───────────────────────────────────────────────────────
 print ""
 print "==> Running post-deploy tests..."
@@ -198,7 +164,7 @@ if curl -fsSL -o "$DOWNLOADED_ZIP" \
     # 3. Extract and validate app bundle from downloaded ZIP
     EXTRACT_DIR="$(mktemp -d)"
     ditto -x -k "$DOWNLOADED_ZIP" "$EXTRACT_DIR"
-    EXTRACTED_APP="$EXTRACT_DIR/${APP_NAME}.app"
+    EXTRACTED_APP="$EXTRACT_DIR/${APP_DISPLAY_NAME}.app"
 
     # Version in plist
     PLIST_VERSION="$(defaults read "$EXTRACTED_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)"
@@ -225,14 +191,10 @@ else
 fi
 rm -rf "$DOWNLOAD_DIR"
 
-# 4. Landing page is live on both Pages URL and custom domain
+# 4. Landing page is live on the Pages URL
 SITE_STATUS="$(curl -so /dev/null -w "%{http_code}" https://quick-launch.pages.dev)"
 [[ "$SITE_STATUS" == "200" ]] \
     && pass "Pages URL (quick-launch.pages.dev) HTTP $SITE_STATUS" || fail "Pages URL HTTP $SITE_STATUS"
-
-CUSTOM_STATUS="$(curl -so /dev/null -w "%{http_code}" https://quick-launch.pages.dev)"
-[[ "$CUSTOM_STATUS" == "200" ]] \
-    && pass "Custom domain (quick-launch.pages.dev) HTTP $CUSTOM_STATUS" || fail "Custom domain HTTP $CUSTOM_STATUS (DNS or Pages custom domain not configured)"
 
 # 5. GitHub API returns this tag (download button will show correct version)
 API_TAG="$(curl -s https://api.github.com/repos/tristan-mcinnis/quick-launch/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)"
