@@ -34,9 +34,10 @@ struct HouseCommandRow: Sendable, Equatable, Identifiable {
 /// launcher the rows it may show.
 ///
 /// An actor, because it owns file reads, sockets, HTTP, and child processes.
-/// Nothing here ever throws to its caller: a missing folder, a dead socket,
-/// an app that is not installed, and a timeout all come back as "that row is
-/// not on offer", never as an error the launcher has to handle.
+/// Nothing here ever throws to its caller: a missing folder, a missing or
+/// refused socket, and an app that is not installed all come back as "that
+/// row is not on offer". A timeout or an unreadable status reply is no
+/// status, and leaves the app's rows on offer.
 actor HouseCommandCatalog {
     /// A status read is worth doing again after this long. Short enough that
     /// a row cannot lie for long, long enough that opening the launcher

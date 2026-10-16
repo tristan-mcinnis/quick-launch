@@ -32,7 +32,7 @@ private struct FixtureFolder: ~Copyable {
         try? FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: file.path)
     }
 
-    var directory: HouseCommandDirectory { HouseCommandDirectory(root: url) }
+    var directory: HouseCommandDirectory { HouseCommandDirectory(root: url, socketExists: { _ in true }) }
 
     deinit { try? FileManager.default.removeItem(at: url) }
 }
@@ -343,6 +343,21 @@ struct HouseCommandDirectoryTests {
 
         let manifests = folder.directory.manifests()
         #expect(manifests.map(\.app) == ["memory", "rti"], "sorted by file name, bad files skipped")
+    }
+
+    @Test func aSocketManifestWithNoStatusVerbAndNoSocketOnDiskIsHidden() throws {
+        let folder = FixtureFolder()
+        let socketPath = folder.url.appendingPathComponent("plain.sock").path
+        let manifest = """
+        {"schema": 1, "app": "plain", "transport": "socket", "endpoint": "\(socketPath)",
+         "commands": [{"id": "go", "title": "Go", "verb": "go"}]}
+        """
+        folder.write("plain.json", manifest)
+        let real = HouseCommandDirectory(root: folder.url)
+        #expect(real.manifests().isEmpty, "no status verb and no socket file: nothing to offer")
+
+        FileManager.default.createFile(atPath: socketPath, contents: nil)
+        #expect(real.manifests().map(\.app) == ["plain"], "the socket path exists, so the manifest is read")
     }
 
     @Test func aMissingFolderIsSimplyNoCommands() {
