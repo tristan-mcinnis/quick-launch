@@ -794,6 +794,26 @@ struct HouseCommandCatalogTests {
         #expect(await catalog.refresh().isEmpty)
     }
 
+    @Test func aDeadSocketHidesEveryRowEvenOnesNothingGatesOn() async {
+        let folder = FixtureFolder()
+        folder.write("rti.json", rtiManifest.replacingOccurrences(
+            of: "\"commands\": [",
+            with: "\"commands\": [{\"id\": \"sessions.open\", \"title\": \"Open Sessions\", \"verb\": \"sessions\"},"
+        ))
+        let live = HouseCommandCatalog(
+            directory: folder.directory,
+            dispatcher: FakeDispatcher(statuses: ["rti": status(["recording": false])])
+        )
+        #expect(await live.refresh().map(\.command.title) == ["Open Sessions", "Start Recording"])
+
+        let dead = HouseCommandCatalog(
+            directory: folder.directory,
+            dispatcher: FakeDispatcher(statusFailures: ["rti"])
+        )
+        #expect(await dead.refresh().isEmpty, "a left-behind manifest must not offer an ungated command")
+        #expect(await dead.rows().isEmpty)
+    }
+
     @Test func anAppWithNoStatusIsNeverProbedAndStillOffersItsCommands() async {
         let folder = FixtureFolder()
         folder.write("memory.json", plainMemoryManifest)

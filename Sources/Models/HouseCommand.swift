@@ -169,6 +169,13 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
         status != nil && commands.contains { $0.unavailableWhen != nil }
     }
 
+    /// True when a dead listener must hide every row this app publishes. A
+    /// socket app that declares a status verb has to answer it: the file a
+    /// crash or a quit leaves behind names a socket nobody listens on.
+    var isLivenessChecked: Bool {
+        transport == .socket && status != nil
+    }
+
     /// The endpoint as a file URL, for the socket and exec transports.
     var endpointURL: URL { URL(fileURLWithPath: endpoint) }
 

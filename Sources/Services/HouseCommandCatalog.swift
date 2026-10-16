@@ -66,7 +66,7 @@ actor HouseCommandCatalog {
     /// the sum of them.
     func refresh() async -> [HouseCommandRow] {
         manifests = directory.manifests()
-        let needing = manifests.filter(\.needsStatus)
+        let needing = manifests.filter { $0.needsStatus || $0.isLivenessChecked }
         await withTaskGroup(of: (String, HouseCommandStatus?).self) { group in
             for manifest in needing where !isFresh(manifest.app) {
                 group.addTask { [dispatcher] in
@@ -84,9 +84,14 @@ actor HouseCommandCatalog {
     }
 
     /// The rows worth showing, as the last refresh left them, with no I/O of
-    /// any kind. `unavailableWhen` decides what is drawn and nothing else.
+    /// any kind. `unavailableWhen` decides what is drawn, except that a socket
+    /// app whose status did not answer is gone, so none of its rows are drawn.
     func rows() -> [HouseCommandRow] {
-        allRows().filter { $0.command.isAvailable(given: statuses[$0.manifest.app]?.status) }
+        allRows().filter { row in
+            let status = statuses[row.manifest.app]?.status
+            if row.manifest.isLivenessChecked && status == nil { return false }
+            return row.command.isAvailable(given: status)
+        }
     }
 
     /// Every command every manifest publishes, shown or not. A row hidden by
