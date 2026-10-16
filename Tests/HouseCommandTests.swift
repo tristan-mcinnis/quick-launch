@@ -345,7 +345,7 @@ struct HouseCommandDirectoryTests {
         #expect(manifests.map(\.app) == ["memory", "rti"], "sorted by file name, bad files skipped")
     }
 
-    @Test func aSocketManifestWithNoStatusVerbAndNoSocketOnDiskIsHidden() throws {
+    @Test func aSocketManifestWithNoSocketOnDiskIsMarkedMissingButStillRead() throws {
         let folder = FixtureFolder()
         let socketPath = folder.url.appendingPathComponent("plain.sock").path
         let manifest = """
@@ -354,10 +354,11 @@ struct HouseCommandDirectoryTests {
         """
         folder.write("plain.json", manifest)
         let real = HouseCommandDirectory(root: folder.url)
-        #expect(real.manifests().isEmpty, "no status verb and no socket file: nothing to offer")
+        let read = try #require(real.manifests().first)
+        #expect(real.isSocketMissing(read), "no socket file: the app is not listed")
 
         FileManager.default.createFile(atPath: socketPath, contents: nil)
-        #expect(real.manifests().map(\.app) == ["plain"], "the socket path exists, so the manifest is read")
+        #expect(!real.isSocketMissing(read), "the socket path exists")
     }
 
     @Test func aMissingFolderIsSimplyNoCommands() {
@@ -738,6 +739,37 @@ struct HouseCommandDispatcherTests {
         }
     }
 
+    @Test func aWriteToAClosedPeerIsNotATimeout() async throws {
+        let path = "/tmp/ql-\(UUID().uuidString.prefix(8)).sock"
+        defer { unlink(path) }
+        let listener = UnixSocketLineClient.makeSocket()
+        try #require(listener >= 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            raw.copyBytes(from: Array(path.utf8))
+        }
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        try #require(bound == 0)
+        try #require(listen(listener, 1) == 0)
+        let acceptor = Thread {
+            let peer = accept(listener, nil, nil)
+            if peer >= 0 { close(peer) }
+        }
+        acceptor.start()
+        defer { close(listener) }
+
+        let huge = String(repeating: "x", count: 16 * 1024 * 1024)
+        await #expect(throws: UnixSocketLineClient.Failure.sendFailed) {
+            try await UnixSocketLineClient.send(huge, to: URL(fileURLWithPath: path), timeout: 5)
+        }
+    }
+
     @Test func theSocketDescriptorIsNotInheritedByChildren() {
         let descriptor = UnixSocketLineClient.makeSocket()
         #expect(descriptor >= 0)
@@ -803,6 +835,23 @@ struct HouseCommandCatalogTests {
         #expect(await dispatcher.recordedRuns() == [
             FakeDispatcher.Run(app: "rti", verb: "stop", argument: nil)
         ])
+    }
+
+    @Test func aMissingSocketIsHiddenFromTheListYetFoundByIdAndFailsAsUnreachable() async throws {
+        let folder = FixtureFolder()
+        folder.write("rti.json", rtiManifest)
+        let directory = HouseCommandDirectory(root: folder.url, socketExists: { _ in false })
+        let dispatcher = HouseCommandDispatcher(
+            sendLine: { _, _, _ in throw UnixSocketLineClient.Failure.cannotConnect }
+        )
+        let catalog = HouseCommandCatalog(directory: directory, dispatcher: dispatcher)
+
+        #expect(await catalog.refresh().isEmpty, "no socket file: nothing is listed")
+        #expect(await catalog.rows().isEmpty)
+        let row = try #require(await catalog.row(forValue: "house.rti.record.start"))
+        await #expect(throws: HouseCommandError.unreachable(app: "RTI")) {
+            try await catalog.run(row, argument: nil)
+        }
     }
 
     @Test func aDeadAppOffersNothingAndNeverThrows() async {

@@ -10,9 +10,10 @@ import Foundation
 /// not know all mean the same thing: that app offers nothing. Nothing here
 /// throws, so a bad manifest can never block the launcher.
 ///
-/// A socket manifest whose socket file does not exist is dropped too, with
-/// or without a status verb: the file a crash or a quit leaves behind names
-/// nothing. This is one file check, never a connection.
+/// A socket manifest whose socket file does not exist is still read, so its
+/// commands stay reachable by id, but `isSocketMissing` marks it so the
+/// launcher does not list its rows. This is one file check, never a
+/// connection.
 struct HouseCommandDirectory: Sendable {
     let root: URL
     private let socketExists: @Sendable (String) -> Bool
@@ -34,6 +35,13 @@ struct HouseCommandDirectory: Sendable {
             .appendingPathComponent("commands", isDirectory: true)
     }
 
+    /// True for a socket manifest whose socket file does not exist, with or
+    /// without a status verb: the file a crash or a quit leaves behind names
+    /// nothing.
+    func isSocketMissing(_ manifest: HouseCommandManifest) -> Bool {
+        manifest.transport == .socket && !socketExists(manifest.endpoint)
+    }
+
     /// Every readable manifest, sorted by app id so the launcher rows keep a
     /// stable order between reads. Files that are not `.json` are ignored,
     /// as is anything the parser refuses.
@@ -47,7 +55,6 @@ struct HouseCommandDirectory: Sendable {
             guard let data = try? Data(contentsOf: root.appendingPathComponent(name)),
                   let manifest = HouseCommandManifest.parse(data)
             else { continue }
-            if manifest.transport == .socket, !socketExists(manifest.endpoint) { continue }
             // Two files claiming the same app id: the first by file name
             // wins, so the list cannot carry one app twice.
             guard !manifests.contains(where: { $0.app == manifest.app }) else { continue }

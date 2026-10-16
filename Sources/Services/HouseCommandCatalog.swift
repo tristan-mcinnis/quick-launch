@@ -49,6 +49,7 @@ actor HouseCommandCatalog {
     private let now: @Sendable () -> Date
 
     private var manifests: [HouseCommandManifest] = []
+    private var missingSocketApps: Set<String> = []
     private var statuses: [String: (status: HouseCommandStatus?, unreachable: Bool, readAt: Date)] = [:]
 
     init(
@@ -67,7 +68,10 @@ actor HouseCommandCatalog {
     /// the sum of them.
     func refresh() async -> [HouseCommandRow] {
         manifests = directory.manifests()
-        let needing = manifests.filter { $0.needsStatus || $0.isLivenessChecked }
+        missingSocketApps = Set(manifests.filter { directory.isSocketMissing($0) }.map(\.app))
+        let needing = manifests.filter {
+            !missingSocketApps.contains($0.app) && ($0.needsStatus || $0.isLivenessChecked)
+        }
         await withTaskGroup(of: (String, HouseCommandStatus?, Bool).self) { group in
             for manifest in needing where !isFresh(manifest.app) {
                 group.addTask { [dispatcher] in
@@ -96,6 +100,7 @@ actor HouseCommandCatalog {
     func rows() -> [HouseCommandRow] {
         allRows().filter { row in
             let known = statuses[row.manifest.app]
+            if missingSocketApps.contains(row.manifest.app) { return false }
             if row.manifest.isLivenessChecked && known?.unreachable == true { return false }
             return row.command.isAvailable(given: known?.status)
         }

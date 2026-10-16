@@ -29,6 +29,10 @@ enum UnixSocketLineClient {
         case timedOut
         /// The peer closed without sending a line.
         case noReply
+        /// The request could not be written: the peer is gone (EPIPE,
+        /// ECONNRESET) or the write failed for another reason that is not
+        /// the send timeout.
+        case sendFailed
     }
 
     /// The real client, as a value, so a service that talks to a socket
@@ -65,6 +69,10 @@ enum UnixSocketLineClient {
             close(descriptor)
             return -1
         }
+        // A write to a closed peer must fail with EPIPE, not raise SIGPIPE
+        // and end the launcher.
+        var on: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         return descriptor
     }
 
@@ -111,7 +119,10 @@ enum UnixSocketLineClient {
                 guard let base = raw.baseAddress else { return -1 }
                 return Darwin.send(descriptor, base.advanced(by: written), request.count - written, 0)
             }
-            guard sent > 0 else { throw Failure.timedOut }
+            guard sent > 0 else {
+                let timedOut = sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)
+                throw timedOut ? Failure.timedOut : Failure.sendFailed
+            }
             written += sent
         }
 
