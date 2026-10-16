@@ -48,7 +48,7 @@ actor HouseCommandCatalog {
     private let now: @Sendable () -> Date
 
     private var manifests: [HouseCommandManifest] = []
-    private var statuses: [String: (status: HouseCommandStatus?, readAt: Date)] = [:]
+    private var statuses: [String: (status: HouseCommandStatus?, unreachable: Bool, readAt: Date)] = [:]
 
     init(
         directory: HouseCommandDirectory = HouseCommandDirectory(),
@@ -67,17 +67,22 @@ actor HouseCommandCatalog {
     func refresh() async -> [HouseCommandRow] {
         manifests = directory.manifests()
         let needing = manifests.filter { $0.needsStatus || $0.isLivenessChecked }
-        await withTaskGroup(of: (String, HouseCommandStatus?).self) { group in
+        await withTaskGroup(of: (String, HouseCommandStatus?, Bool).self) { group in
             for manifest in needing where !isFresh(manifest.app) {
                 group.addTask { [dispatcher] in
-                    // A dead socket, a missing app, or a timeout is not an
-                    // error here: it is simply no status.
-                    let status = try? await dispatcher.status(for: manifest)
-                    return (manifest.app, status)
+                    // A timeout or an unreadable reply is no status, nothing
+                    // more. Only a socket nobody answers on is a dead app.
+                    do {
+                        return (manifest.app, try await dispatcher.status(for: manifest), false)
+                    } catch HouseCommandError.unreachable {
+                        return (manifest.app, nil, true)
+                    } catch {
+                        return (manifest.app, nil, false)
+                    }
                 }
             }
-            for await (app, status) in group {
-                statuses[app] = (status, now())
+            for await (app, status, unreachable) in group {
+                statuses[app] = (status, unreachable, now())
             }
         }
         return rows()
@@ -85,12 +90,13 @@ actor HouseCommandCatalog {
 
     /// The rows worth showing, as the last refresh left them, with no I/O of
     /// any kind. `unavailableWhen` decides what is drawn, except that a socket
-    /// app whose status did not answer is gone, so none of its rows are drawn.
+    /// app whose socket is missing or refuses connection is gone, so none of
+    /// its rows are drawn. A slow or unreadable status does not hide a row.
     func rows() -> [HouseCommandRow] {
         allRows().filter { row in
-            let status = statuses[row.manifest.app]?.status
-            if row.manifest.isLivenessChecked && status == nil { return false }
-            return row.command.isAvailable(given: status)
+            let known = statuses[row.manifest.app]
+            if row.manifest.isLivenessChecked && known?.unreachable == true { return false }
+            return row.command.isAvailable(given: known?.status)
         }
     }
 
@@ -152,7 +158,7 @@ actor HouseCommandCatalog {
             statuses[app] = nil
             let status = try? await dispatcher.status(for: row.manifest)
             if let status, !status.busy {
-                statuses[app] = (status, now())
+                statuses[app] = (status, false, now())
                 return status
             }
             if Task.isCancelled { return nil }

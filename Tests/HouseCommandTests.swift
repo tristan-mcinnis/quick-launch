@@ -120,6 +120,7 @@ private actor FakeDispatcher: HouseCommandDispatching {
 
     private var statuses: [String: HouseCommandStatus?]
     private var statusFailures: Set<String>
+    private var statusTimeouts: Set<String>
     private(set) var runs: [Run] = []
     private(set) var statusReads: [String] = []
     private(set) var choiceFetches: [String] = []
@@ -133,6 +134,7 @@ private actor FakeDispatcher: HouseCommandDispatching {
     init(
         statuses: [String: HouseCommandStatus?] = [:],
         statusFailures: Set<String> = [],
+        statusTimeouts: Set<String> = [],
         failure: HouseCommandError? = nil,
         outcome: HouseCommandOutcome = .completed("ok"),
         choices: [HouseCommandChoice] = [],
@@ -141,6 +143,7 @@ private actor FakeDispatcher: HouseCommandDispatching {
     ) {
         self.statuses = statuses
         self.statusFailures = statusFailures
+        self.statusTimeouts = statusTimeouts
         self.failure = failure
         self.outcome = outcome
         self.choices = choices
@@ -162,6 +165,9 @@ private actor FakeDispatcher: HouseCommandDispatching {
         statusReads.append(manifest.app)
         if statusFailures.contains(manifest.app) {
             throw HouseCommandError.unreachable(app: manifest.name)
+        }
+        if statusTimeouts.contains(manifest.app) {
+            throw HouseCommandError.timedOut(app: manifest.name)
         }
         // The last scripted status sticks, so a test asserts on the state
         // the app settles in rather than on how many times it was read.
@@ -812,6 +818,19 @@ struct HouseCommandCatalogTests {
         )
         #expect(await dead.refresh().isEmpty, "a left-behind manifest must not offer an ungated command")
         #expect(await dead.rows().isEmpty)
+    }
+
+    @Test func aSlowStatusKeepsALiveAppsRows() async {
+        let folder = FixtureFolder()
+        folder.write("rti.json", rtiManifest.replacingOccurrences(
+            of: "\"commands\": [",
+            with: "\"commands\": [{\"id\": \"sessions.open\", \"title\": \"Open Sessions\", \"verb\": \"sessions\"},"
+        ))
+        let busy = HouseCommandCatalog(
+            directory: folder.directory,
+            dispatcher: FakeDispatcher(statusTimeouts: ["rti"])
+        )
+        #expect(await busy.refresh().map(\.command.title).contains("Open Sessions"))
     }
 
     @Test func anAppWithNoStatusIsNeverProbedAndStillOffersItsCommands() async {
