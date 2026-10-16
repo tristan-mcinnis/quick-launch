@@ -31,6 +31,9 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var isPinned: Bool = false
     /// Screenshots only: when the file was captured, for date filters.
     var capturedAt: Date?
+    /// Screenshots only: whether the file is an image or a video, so actions
+    /// and previews never take an image path for a video.
+    var screenshotMediaKind: ScreenshotMediaKind? = nil
     /// A live on/off/paused state the row shows as a coloured light with a
     /// word, in place of its type label. Caffeinate uses it.
     var statusLight: LauncherStatusLight?
@@ -38,6 +41,12 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     /// and restore the original representation. Nil for plain-text entries
     /// and for every non-clipboard kind.
     var clipboardPayload: ClipboardPayload? = nil
+    /// Clipboard entries: the app observed in front when the copy was seen,
+    /// or nil when it could not be resolved. Never a claim about the true
+    /// originating process.
+    var clipboardSource: ClipboardSourceInfo? = nil
+    /// Clipboard entries: bounded source tags for search and filtering.
+    var clipboardTags: [String] = []
     /// Chats found by a search in their text: the line that shows where
     /// (`ChatSearch`). The row draws it under the title, with the count and
     /// time on the trailing edge. Nil for a title hit and every other kind.
@@ -101,6 +110,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "clipboard.cleanLink": "link.badge.plus",
         "screenshot.latest": "photo.badge.plus",
         "screenshot.pasteLatest": "photo.on.rectangle",
+        "screenshot.save": "square.and.arrow.down",
         "screenshot.window": "macwindow.on.rectangle",
         "screenshot.display": "rectangle.dashed.badge.record",
         "awareness.area": "rectangle.dashed",

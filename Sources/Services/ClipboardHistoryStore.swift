@@ -22,6 +22,14 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         /// those legacy entries are plain text (`payload == nil`). Only light
         /// metadata is stored here; the heavy bytes live in a blob file.
         var payload: StoredPayloadMeta?
+        /// The app observed in front when the copy was seen. Optional so
+        /// files written before source attribution still decode.
+        var source: ClipboardSourceInfo? = nil
+        /// Bounded source tags for search and filtering.
+        var tags: [String]? = nil
+        /// A user-given name, kept across relaunches. Optional so older files
+        /// decode; nil falls back to the content-derived title.
+        var customTitle: String? = nil
     }
 
     private(set) var entries: [LauncherCatalogItem] = [] {
@@ -39,8 +47,15 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     private let file: JSONFileStore<[StoredEntry]>
     private let blobs: ClipboardBlobStore
     let maximumTotalPayloadBytes: Int
+    /// The live capture policy, kept in step with Settings by the owner.
+    private(set) var policy: ClipboardCapturePolicy = .default
+    /// Resolves the app in front when a copy is observed; injected so tests
+    /// never read the real window server and a better seam can replace it.
+    @ObservationIgnored private let sourceResolver: any ClipboardSourceResolving
+    /// Now, injected so retention can be tested without waiting.
+    @ObservationIgnored private let now: () -> Date
     /// Apple Vision recognition over a copied image; injectable for tests.
-    private let ocr: @Sendable (Data) async -> String
+    private let ocr: @Sendable (Data, ClipboardOCRMode) async -> String
     /// In-flight OCR keyed by entry id, so tests can await it and stale results
     /// can be ignored after delete/clear.
     @ObservationIgnored private var ocrTasks: [String: Task<Void, Never>] = [:]
@@ -56,13 +71,17 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         fileURL: URL? = nil,
         blobDirectory: URL? = nil,
         maximumTotalPayloadBytes: Int = ClipboardHistoryStore.defaultMaximumTotalPayloadBytes,
-        ocr: (@Sendable (Data) async -> String)? = nil
+        sourceResolver: (any ClipboardSourceResolving)? = nil,
+        now: @escaping () -> Date = Date.init,
+        ocr: (@Sendable (Data, ClipboardOCRMode) async -> String)? = nil
     ) {
         let url = fileURL ?? Self.defaultFileURL()
         self.fileURL = url
         self.file = JSONFileStore(fileURL: url)
         self.maximumTotalPayloadBytes = maximumTotalPayloadBytes
-        self.ocr = ocr ?? { await ScreenshotTextIndex.recognizeText(in: $0) }
+        self.sourceResolver = sourceResolver ?? SystemClipboardSourceResolver()
+        self.now = now
+        self.ocr = ocr ?? { data, mode in await ScreenshotTextIndex.recognizeText(in: data, mode: mode) }
         self.blobs = ClipboardBlobStore(
             directory: blobDirectory ?? url.deletingLastPathComponent().appendingPathComponent("ClipboardBlobs", isDirectory: true)
         )
@@ -106,6 +125,14 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
 
         let id = StableIdentifier.make(payload)
         let existing = storedEntries.first { $0.id == id }
+        // Attribute the copy to the app in front now, or keep the earlier
+        // attribution when no frontmost app can be resolved. A copy from an
+        // excluded app is never recorded. The pasteboard's own privacy markers
+        // are honoured separately (see `capture`) and are never bypassed here.
+        let observedSource = sourceResolver.currentClipboardSource()
+        let source = observedSource ?? existing?.source
+        guard !policy.excludes(source) else { return false }
+        let tags: [String] = policy.sourceTagsEnabled ? [source?.tag].compactMap { $0 } : []
         let blobKey = payload.blobKey ?? (payload.isPlainTextOnly ? nil : payload.items.flatMap { StableIdentifier.make($0) })
         let byteSize = payload.estimatedByteSize
         let meta = StoredPayloadMeta(
@@ -136,7 +163,19 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
 
         let wasPinned = existing?.pinned ?? false
         storedEntries.removeAll { $0.id == id }
-        storedEntries.insert(StoredEntry(id: id, value: text, capturedAt: Date(), pinned: wasPinned, payload: meta), at: 0)
+        storedEntries.insert(
+            StoredEntry(
+                id: id,
+                value: text,
+                capturedAt: now(),
+                pinned: wasPinned,
+                payload: meta,
+                source: source,
+                tags: tags,
+                customTitle: existing?.customTitle
+            ),
+            at: 0
+        )
         prune(limit: limit)
         // Write the blob only if the entry survived pruning (incremental: the
         // blob store skips a key that already exists).
@@ -147,7 +186,7 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         save()
         // Recognize text from a copied image once, off the main thread. Never
         // touches the payload or the restored image; only fills search keywords.
-        if meta.ocrText == nil, let imageData = payload.imageData {
+        if policy.ocrEnabled, meta.ocrText == nil, let imageData = payload.imageData {
             scheduleOCR(id: id, imageData: imageData)
         }
         return true
@@ -180,11 +219,15 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     /// never push the budget negative and silently evict a newer pin.
     private func prune(limit: Int) {
         let cap = max(1, min(limit, 200))
+        let cutoff = policy.retention.cutoff(from: now())
         var kept: [StoredEntry] = []
         var unpinned = 0
         for entry in storedEntries {
             if entry.pinned == true {
                 kept.append(entry)
+            } else if let cutoff, entry.capturedAt < cutoff {
+                // Expired unpinned content: dropped. A pin is never expired.
+                continue
             } else if unpinned < cap {
                 kept.append(entry)
                 unpinned += 1
@@ -218,6 +261,34 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         save()
     }
 
+    /// Applies a new capture policy (source exclusions, retention, OCR) and
+    /// re-applies retention immediately. Never touches content that is kept.
+    func setPolicy(_ policy: ClipboardCapturePolicy) {
+        guard policy != self.policy else { return }
+        self.policy = policy
+        expireUnpinned()
+        rebuildPublicEntries()
+        save()
+    }
+
+    /// Gives an entry a user name. An empty name clears it so the row falls
+    /// back to its content-derived title. Returns false when the entry is gone.
+    @discardableResult
+    func rename(_ item: LauncherCatalogItem, to title: String) -> Bool {
+        guard let index = storedEntries.firstIndex(where: { $0.id == item.itemID }) else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        storedEntries[index].customTitle = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        rebuildPublicEntries()
+        save()
+        return true
+    }
+
+    /// The stored entries narrowed by a filter, for the catalog list.
+    func entries(matching filter: ClipboardCatalogFilter) -> [LauncherCatalogItem] {
+        guard filter.isActive else { return entries }
+        return entries.filter(filter.matches)
+    }
+
     func clear() {
         storedEntries.removeAll()
         entries.removeAll()
@@ -238,8 +309,9 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
     private func scheduleOCR(id: String, imageData: Data) {
         guard ocrTasks[id] == nil else { return }
         let ocr = self.ocr
+        let mode = policy.ocrMode
         let task = Task { @MainActor [weak self] in
-            let text = await Task.detached(priority: .utility) { await ocr(imageData) }.value
+            let text = await Task.detached(priority: .utility) { await ocr(imageData, mode) }.value
             guard let self else { return }
             self.applyOCR(text, to: id)
             self.ocrTasks[id] = nil
@@ -307,6 +379,11 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType"),
     ]
 
+    /// The Universal Clipboard marker. Unlike the ignored types above it is
+    /// not a privacy promise: it only says the copy arrived from another
+    /// device. Continuity is off by default and turned on by the user.
+    nonisolated private static let remotePasteboardType = NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")
+
     private func capturePasteboard(limit: Int) {
         capture(from: NSPasteboard.general, limit: limit)
     }
@@ -321,6 +398,14 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
             return
         }
         if pasteboard.types?.contains(where: Self.ignoredPasteboardTypes.contains) == true {
+            pendingReadCount = 0
+            return
+        }
+        // Universal Clipboard continuity is off unless the user opts in. The
+        // concealed/transient/auto-generated markers above are always
+        // honoured, whatever this policy says.
+        if !policy.captureRemote,
+           pasteboard.types?.contains(Self.remotePasteboardType) == true {
             pendingReadCount = 0
             return
         }
@@ -356,10 +441,10 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
                 blobKey: meta?.blobKey,
                 firstType: meta?.firstType
             )
-            let baseTitle = Self.truncate(Self.title(for: kind, text: text, payload: payload))
+            let baseTitle = Self.truncate(entry.customTitle ?? Self.title(for: kind, text: text, payload: payload))
             let stamp = entry.capturedAt.formatted(date: .abbreviated, time: .shortened)
             let kindLabel = Self.kindLabel(kind)
-            let detail = [kindLabel, entry.pinned == true ? "Pinned" : nil, stamp]
+            let detail = [kindLabel, entry.pinned == true ? "Pinned" : nil, entry.source?.name, stamp]
                 .compactMap { $0 }
                 .joined(separator: " · ")
             return LauncherCatalogItem(
@@ -368,9 +453,11 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
                 title: baseTitle,
                 detail: detail,
                 value: text,
-                keywords: Self.keywords(for: kind, text: text, payload: payload, pinned: entry.pinned == true, ocrText: meta?.ocrText ?? ""),
+                keywords: Self.keywords(for: kind, text: text, payload: payload, pinned: entry.pinned == true, ocrText: meta?.ocrText ?? "", source: entry.source, tags: entry.tags ?? []),
                 isPinned: entry.pinned == true,
-                clipboardPayload: payload
+                clipboardPayload: payload,
+                clipboardSource: entry.source,
+                clipboardTags: entry.tags ?? []
             )
         }
     }
@@ -402,13 +489,17 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
         }
     }
 
-    private static func keywords(for kind: ClipboardPayloadKind, text: String, payload: ClipboardPayload?, pinned: Bool, ocrText: String) -> String {
+    private static func keywords(for kind: ClipboardPayloadKind, text: String, payload: ClipboardPayload?, pinned: Bool, ocrText: String, source: ClipboardSourceInfo?, tags: [String]) -> String {
         var words: [String] = []
         if pinned { words.append("pinned") }
+        if let sourceName = source?.name, !sourceName.isEmpty { words.append(sourceName) }
+        words.append(contentsOf: tags)
         switch kind {
         case .text:
-            let word = pinned ? "pinned" : ""
-            return ocrText.isEmpty ? word : (word + " " + ocrText)
+            // The text itself is the row's value; keywords add the pin, the
+            // source app, its tag, and any recognized OCR text.
+            if !ocrText.isEmpty { words.append(ocrText) }
+            return words.joined(separator: " ")
         case .image:
             words.append("image")
             words.append("picture")
@@ -449,7 +540,16 @@ final class ClipboardHistoryStore: ClipboardHistoryServicing {
             }
         }
         storedEntries = decoded
+        // Retention is opt-in; when set, expire unpinned entries on load.
+        expireUnpinned()
         rebuildPublicEntries()
+    }
+
+    /// Drops unpinned entries older than the retention window. Pins are
+    /// always kept. A no-op while the retention is `forever` (the default).
+    private func expireUnpinned() {
+        guard let cutoff = policy.retention.cutoff(from: now()) else { return }
+        storedEntries.removeAll { $0.pinned != true && $0.capturedAt < cutoff }
     }
 
     /// Persists the metadata JSON strictly AFTER the queued blob writes on the

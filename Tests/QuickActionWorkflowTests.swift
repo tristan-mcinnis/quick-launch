@@ -1030,6 +1030,23 @@ struct QuickActionWorkflowTests {
         #expect(!vm.isTransformChooserPresented)
     }
 
+    @Test func translateFromTheSourceMenuUsesTheChosenClipboardText() async throws {
+        let selection = FakeSelectedTextService(text: "old launch selection")
+        let vm = QuickViewModel(selectedTextService: selection, attachmentExtractor: FakeAttachmentExtractor())
+        let recorder = RecordingOverlayPresenter()
+        vm.overlayPresenter = recorder
+        vm.rememberSelectionTarget(target)
+        vm.captureLaunchSelection()
+        vm.attachmentTray.add(.clipboard("chosen clipboard source", appName: nil))
+        await vm.attachmentTray.waitUntilRead()
+        let option = try #require(vm.chipTransformOptions.first { option in
+            if case .translator = option.kind { return true }
+            return false
+        })
+        await vm.runChipTransform(option)
+        #expect(recorder.handedOffSelection == "chosen clipboard source")
+    }
+
     @Test func translatorHandoffSurvivesLaunchStateClear() {
         let selection = FakeSelectedTextService(text: "launch snapshot")
         let vm = QuickViewModel(selectedTextService: selection)

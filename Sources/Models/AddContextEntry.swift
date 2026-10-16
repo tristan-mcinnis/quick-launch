@@ -70,6 +70,10 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
     case file
     /// A one-line field in the same pane for a web link.
     case link
+    /// A submenu over the app's own Clipboard History catalog. Reuses the
+    /// existing store (already filtered for concealed and transient copies);
+    /// nothing here captures or reads the pasteboard itself.
+    case clipboardHistory
     /// The files selected in the Finder window behind the overlay.
     case finderSelection
 
@@ -87,7 +91,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
     /// drops the two that need an app behind it while it knows none). Files
     /// and links come first; Finder Selection appears when Finder is behind.
     static func menu(captures: [AddContextEntry], finderIsBehind: Bool) -> [AddContextRow] {
-        var rows: [AddContextRow] = [.file, .link]
+        var rows: [AddContextRow] = [.file, .link, .clipboardHistory]
         if captures.contains(.selectedText) { rows.append(.capture(.selectedText)) }
         rows += captures.filter { $0 != .selectedText }.map(AddContextRow.capture)
         if finderIsBehind { rows.append(.finderSelection) }
@@ -104,6 +108,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         case .capture(let entry): entry.id
         case .file: "file"
         case .link: "link"
+        case .clipboardHistory: "clipboardHistory"
         case .finderSelection: "finderSelection"
         }
     }
@@ -113,6 +118,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         case .capture(let entry): entry.title
         case .file: "Files…"
         case .link: "Link…"
+        case .clipboardHistory: "Clipboard History"
         case .finderSelection: "Finder Selection"
         }
     }
@@ -122,6 +128,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         case .capture(let entry): entry.detail
         case .file: "PDF, Word, PowerPoint, Excel, text, or an image"
         case .link: "A web page, read once"
+        case .clipboardHistory: "Text, images, or files you copied"
         case .finderSelection: "The files selected in Finder"
         }
     }
@@ -131,6 +138,7 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         case .capture(let entry): entry.systemImage
         case .file: "doc.badge.plus"
         case .link: "link"
+        case .clipboardHistory: "doc.on.clipboard"
         case .finderSelection: "folder"
         }
     }
@@ -140,4 +148,8 @@ enum AddContextRow: Hashable, Identifiable, Sendable {
         if case .capture(let entry) = self { return entry }
         return nil
     }
+
+    /// True for the row that opens the Clipboard History submenu rather than
+    /// attaching anything itself.
+    var opensClipboardHistory: Bool { self == .clipboardHistory }
 }

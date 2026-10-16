@@ -175,6 +175,25 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case copyCleanLink
     /// `⌘J` on a chat row: that chat moves to the AI Chat window.
     case openInAIChat
+    /// Clipboard entries and saved screenshots: read the text inside an image
+    /// with on-device Vision and copy it.
+    case copyTextFromImage
+    /// Clipboard entries and saved screenshots: read the first machine-readable
+    /// code (QR and other barcode symbologies) and copy its string.
+    case copyQRCode
+    /// A clipboard text entry: paste only its plain-text representation.
+    case pasteAsPlainText
+    /// A clipboard entry: attach it to the question draft, never sending it.
+    case attachToQuestion
+    /// A clipboard entry: give it a user name.
+    case renameEntry
+    /// A clipboard entry with a file or link: open it.
+    case openEntry
+    /// A clipboard entry: write its supported payload to a file the user picks.
+    case saveAsFile
+    /// A saved screenshot: open a copy in Preview to annotate (or the system's
+    /// annotate-image host). Never overwrites the original in place.
+    case annotateInPreview
 }
 
 /// One row in the ⌘K pane. The same table drives direct shortcuts from the
@@ -263,8 +282,19 @@ enum ItemActionCatalog {
                 ),
                 ItemAction(kind: .secondary, title: isImage ? "Copy Image" : "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Copy & Paste", systemImage: "doc.on.clipboard", shortcut: .commandShiftReturn),
-                pinAction(for: item),
+                ItemAction(kind: .attachToQuestion, title: "Attach to Question", systemImage: "photo.badge.plus", shortcut: nil),
             ]
+            if !(item.clipboardPayload?.fileURLs.isEmpty ?? true) || looksLikeURL(item.value) {
+                actions.append(ItemAction(kind: .openEntry, title: "Open", systemImage: "arrow.up.forward.app", shortcut: nil))
+            }
+            actions.append(pinAction(for: item))
+            if isImage {
+                actions.append(ItemAction(kind: .copyTextFromImage, title: "Copy Text from Image", systemImage: "text.viewfinder", shortcut: nil))
+                actions.append(ItemAction(kind: .copyQRCode, title: "Copy Text from QR Code", systemImage: "qrcode.viewfinder", shortcut: nil))
+            }
+            if !isImage, !item.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                actions.append(ItemAction(kind: .pasteAsPlainText, title: "Paste as Plain Text", systemImage: "text.alignleft", shortcut: nil))
+            }
             if isText {
                 actions.append(ItemAction(kind: .saveAsSnippet, title: "Save as Snippet", systemImage: "text.badge.plus", shortcut: .commandShift("n")))
                 if looksLikeURL(item.value) {
@@ -274,13 +304,30 @@ enum ItemActionCatalog {
                     }
                 }
             }
+            actions.append(ItemAction(kind: .saveAsFile, title: "Save as File…", systemImage: "square.and.arrow.down", shortcut: nil))
+            actions.append(ItemAction(kind: .renameEntry, title: "Rename…", systemImage: "pencil", shortcut: nil))
             actions.append(ItemAction(kind: .delete, title: "Delete Entry", systemImage: "trash", shortcut: .control("x"), isDestructive: true))
             return actions
         case .screenshot:
+            // A video cannot be pasted or attached as an image. Offer only the
+            // file actions that work, rather than a button that would fail.
+            if item.screenshotMediaKind == .video {
+                return [
+                    ItemAction(kind: .primary, title: "Open", systemImage: "play.rectangle", shortcut: .returnKey),
+                    ItemAction(kind: .secondary, title: "Reveal in Finder", systemImage: "folder", shortcut: .commandReturn),
+                    ItemAction(kind: .quickLook, title: "Quick Look", systemImage: "eye", shortcut: .command("y")),
+                    pinAction(for: item),
+                    ItemAction(kind: .copyPath, title: "Copy File Path", systemImage: "doc.on.clipboard", shortcut: .commandShift("c")),
+                    ItemAction(kind: .delete, title: "Move to Trash", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
+                ]
+            }
             return [
                 ItemAction(kind: .primary, title: pasteTarget.map { "Paste Image to \($0)" } ?? "Paste Image", systemImage: "arrow.turn.down.right", shortcut: .returnKey),
                 ItemAction(kind: .secondary, title: "Copy Image", systemImage: "doc.on.doc", shortcut: .commandReturn),
                 ItemAction(kind: .copyAndPaste, title: "Attach to Question", systemImage: "photo.badge.plus", shortcut: .commandShiftReturn),
+                ItemAction(kind: .copyTextFromImage, title: "Copy Text from Image", systemImage: "text.viewfinder", shortcut: nil),
+                ItemAction(kind: .copyQRCode, title: "Copy Text from QR Code", systemImage: "qrcode.viewfinder", shortcut: nil),
+                ItemAction(kind: .annotateInPreview, title: "Annotate in Preview", systemImage: "pencil.tip.crop.circle", shortcut: nil),
                 ItemAction(kind: .quickLook, title: "Quick Look", systemImage: "eye", shortcut: .command("y")),
                 pinAction(for: item),
                 ItemAction(kind: .revealInFinder, title: "Reveal in Finder", systemImage: "folder", shortcut: .commandShift("r")),
@@ -467,6 +514,11 @@ enum ItemActionForm: Equatable, Sendable {
 enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     case replaceSelection
     case pasteBack
+    /// `⌃⌘V`: publish the answer's plain, HTML and RTF representations and
+    /// paste them with ⌘V, so headings, emphasis, lists, links and code reach
+    /// the app behind intact. Distinct from Paste into Previous App, which is
+    /// the plain text-only path.
+    case pasteFormatted
     case copy
     /// `⌥⌘C`: the whole chat as a labelled transcript ("You:" and the model).
     case copyChat
@@ -507,6 +559,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .replaceSelection: "Replace Selection"
         case .pasteBack: "Paste into Previous App"
+        case .pasteFormatted: "Paste Formatted Response"
         case .copy: "Copy Answer"
         case .copyChat: "Copy Chat"
         case .continueInPi: "Continue in pi"
@@ -535,6 +588,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .replaceSelection: "text.cursor"
         case .pasteBack: "arrow.turn.down.right"
+        case .pasteFormatted: "doc.richtext"
         case .copy: "doc.on.doc"
         case .copyChat: "text.bubble"
         case .continueInPi: "terminal"
@@ -576,6 +630,11 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         // whenever the launcher is open; the global default is unchanged.
         case .replaceSelection: .commandOption("v")
         case .pasteBack: .commandReturn
+        // `⌃⌘V`: the formatted sibling of Paste into Previous App. Free
+        // against every other default in an overlapping scope, the fixed
+        // keys, and the shipped global hotkeys; `⌥⌘V` is Replace Selection
+        // and `⇧⌘V` is the Clipboard History global hotkey.
+        case .pasteFormatted: .controlCommand("v")
         case .copy: .commandShift("c")
         case .copyChat: .commandOption("c")
         // P for pi. Checked free against every key table (see
@@ -612,7 +671,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     /// own: what the action works on. The answer on screen, or the chat.
     var paletteGroup: String {
         switch self {
-        case .replaceSelection, .pasteBack, .copy, .readAloud, .saveSnippet, .searchWeb,
+        case .replaceSelection, .pasteBack, .pasteFormatted, .copy, .readAloud, .saveSnippet, .searchWeb,
              .regenerate, .regenerateWithModel, .openSource, .captureToMemory:
             "Answer"
         case .copyChat, .continueInPi, .continueInAIChat, .changeModel, .changeAssistant,

@@ -189,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var translatorModel: TranslatorModel?
     private var typeToClickHotKey: GlobalHotKey?
     private var typeToClickController: TypeToClickController?
+    /// The optional direct Quick AI hotkey (off by default).
+    private var quickAIHotKey: GlobalHotKey?
     private var actionHotKeys: [UUID: GlobalHotKey] = [:]
     private var launcherItemHotKeys: [String: GlobalHotKey] = [:]
     private var mouseMonitor: Any?
@@ -345,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         clipboardHistoryHotKey?.invalidate()
         translatorHotKey?.invalidate()
         typeToClickHotKey?.invalidate()
+        quickAIHotKey?.invalidate()
         clipboardHistory.stopMonitoring()
         doubleTapMonitor.stop()
         actionHotKeys.values.forEach { $0.invalidate() }
@@ -500,7 +503,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         registerTranslatorHotkey()
         registerTypeToClickHotkey()
+        registerQuickAIHotkey()
 
+        NotificationCenter.default.addObserver(
+            forName: .quickAIHotkeyChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.registerQuickAIHotkey() }
+        }
         NotificationCenter.default.addObserver(
             forName: .screenAwarenessSettingsChanged,
             object: nil,
@@ -852,6 +863,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func configureClipboardHistory() {
         guard let vm = viewModel else { return }
+        // Capture policy first, so a capture that lands while the hotkey is
+        // being re-registered already honours the source exclusions and OCR
+        // setting.
+        clipboardHistory.setPolicy(vm.settings.clipboardCapturePolicy)
         clipboardHistoryHotKey?.invalidate()
         clipboardHistoryHotKey = nil
         if vm.settings.clipboardHistoryEnabled {
@@ -925,6 +940,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.typeToClickHotkeyRegistrationError = typeToClickHotKey == nil
             ? "That shortcut is already used by macOS or another app."
             : nil
+    }
+
+    /// The optional direct Quick AI hotkey. Off by default; when enabled it
+    /// opens the Quick AI composer on the app and selection behind, without
+    /// sending. Re-read every settings change, and never leaves a stale
+    /// registration behind: the old hotkey is invalidated first.
+    private func registerQuickAIHotkey() {
+        quickAIHotKey?.invalidate()
+        quickAIHotKey = nil
+        guard let vm = viewModel else { return }
+        switch QuickAIHotkeyRegistration.decide(settings: vm.settings) {
+        case .disabled:
+            vm.quickAIHotkeyRegistrationError = nil
+        case .refused(let message):
+            vm.quickAIHotkeyRegistrationError = message
+        case .register(let hotkey):
+            let flags = NSEvent.ModifierFlags(rawValue: hotkey.modifiers)
+            quickAIHotKey = GlobalHotKey(
+                keyCode: UInt32(hotkey.keyCode),
+                modifiers: GlobalHotKey.carbonModifiers(from: flags)
+            ) { [weak self] in
+                self?.showQuickAI()
+            }
+            vm.quickAIHotkeyRegistrationError = quickAIHotKey == nil
+                ? "That shortcut is already used by macOS or another app."
+                : nil
+        }
+    }
+
+    /// The direct Quick AI hotkey: capture the app and selection behind the
+    /// overlay before it takes focus, then open the Quick AI composer on the
+    /// retained draft. Nothing is submitted.
+    func showQuickAI() {
+        guard let vm = viewModel else { return }
+        vm.presentQuickAIComposerForHotkey()
+        showOverlay(captureSelectionTarget: false)
     }
 
     /// The Translator window: opened from ⇧⌘T or the Translate item. Arrives

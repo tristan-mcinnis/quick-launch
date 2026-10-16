@@ -229,13 +229,16 @@ struct QuickAISettingsTests {
         settings.autoCopy = false
         settings.quickAIPrimaryAction = .pasteToActiveApp
         let mock = MockQuickService()
-        let vm = make(settings: settings, service: mock)
+        let pasteboard = FakePasteboard()
+        let vm = make(settings: settings, service: mock, pasteboard: pasteboard)
         await ask(vm, mock, "hello", reply: "Bonjour")
 
         vm.input = ""
         await vm.submitResolvingFuzzyAlias()
 
-        #expect(vm.errorMessage == "Open Quick Launch from the app where you want to paste.")
+        #expect(vm.errorMessage == "Open Quick Launch from the app where you want to paste. The result was copied instead.")
+        #expect(pasteboard.string == "Bonjour", "with no target the answer is copied, not dropped")
+        #expect(pasteboard.transientWriteCount == 1)
         #expect(vm.output == "Bonjour", "the answer stays on screen")
     }
 

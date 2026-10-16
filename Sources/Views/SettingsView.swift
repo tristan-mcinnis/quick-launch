@@ -552,6 +552,30 @@ private struct GeneralTab: View {
                 CardNote { CardText(error, tone: AQDesign.ColorToken.danger) }
             }
 
+            SettingsRow(title: "Quick AI") {
+                ActionHotkeyRecorderView(
+                    hotkey: viewModel.settingsBinding(
+                        get: { $0.quickAIHotkeyEnabled ? $0.quickAIHotkey : nil },
+                        set: { settings, value in
+                            if let value {
+                                settings.quickAIHotkey = value
+                                settings.quickAIHotkeyEnabled = true
+                            } else {
+                                settings.quickAIHotkeyEnabled = false
+                            }
+                        },
+                        onSet: { NotificationCenter.default.post(name: .quickAIHotkeyChanged, object: nil) }
+                    ),
+                    label: "Quick AI",
+                    showsLabel: false,
+                    changeNotification: .quickAIHotkeyChanged
+                )
+            }
+            if let error = viewModel.settings.quickAIHotkeyConflict()
+                ?? viewModel.quickAIHotkeyRegistrationError {
+                CardNote { CardText(error, tone: AQDesign.ColorToken.danger) }
+            }
+
             SettingsRow(title: "Open Translator") {
                 ActionHotkeyRecorderView(
                     hotkey: viewModel.settingsBinding(

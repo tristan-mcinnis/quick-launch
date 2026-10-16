@@ -63,6 +63,13 @@ protocol ClipboardHistoryServicing: AnyObject {
     /// from the blob (in-memory cache first, disk off-main on a miss). Used by
     /// previews and restore.
     func payload(for item: LauncherCatalogItem) async -> ClipboardPayload?
+    /// Gives an entry a user name; an empty name clears it. Returns false when
+    /// the entry is gone.
+    func rename(_ item: LauncherCatalogItem, to title: String) -> Bool
+    /// Applies the capture policy (source exclusions, retention, OCR).
+    func setPolicy(_ policy: ClipboardCapturePolicy)
+    /// The entries narrowed by a catalog filter.
+    func entries(matching filter: ClipboardCatalogFilter) -> [LauncherCatalogItem]
 }
 
 extension ClipboardHistoryServicing {
@@ -78,4 +85,7 @@ extension ClipboardHistoryServicing {
     }
     func togglePin(_ item: LauncherCatalogItem) {}
     func payload(for item: LauncherCatalogItem) async -> ClipboardPayload? { nil }
+    func rename(_ item: LauncherCatalogItem, to title: String) -> Bool { false }
+    func setPolicy(_ policy: ClipboardCapturePolicy) {}
+    func entries(matching filter: ClipboardCatalogFilter) -> [LauncherCatalogItem] { entries }
 }

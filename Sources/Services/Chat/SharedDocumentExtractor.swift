@@ -30,15 +30,17 @@ struct SharedDocumentExtractor: AttachmentExtracting {
             } catch let error as DocumentExtractionError {
                 throw AttachmentReadFailure(error.message)
             }
-        case .link, .image, .selection:
+        case .link, .image, .selection, .clipboard:
             var content = try await app.content(for: source)
             // The archive keeps the bytes as read; a link already carries its
-            // raw body from the app reader, a selection and an in-memory
-            // picture get theirs here so the archive never re-reads a path.
+            // raw body from the app reader, a selection, a clipboard item, and
+            // an in-memory picture get theirs here so the archive never
+            // re-reads a path.
             if content.originalBytes == nil {
                 switch source {
                 case .image(let image, _, _): content.originalBytes = image.data
                 case .selection(let text, _): content.originalBytes = Data(text.utf8)
+                case .clipboard(let text, _): content.originalBytes = Data(text.utf8)
                 default: break
                 }
             }

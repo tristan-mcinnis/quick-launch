@@ -12,6 +12,81 @@ private enum DetailMetrics {
     static let textMaxHeight = House.Control.row * 3
 }
 
+/// Saved screenshots as a grid. Arrow keys move the highlight through the
+/// same index the list uses, and Return runs the focused item's primary
+/// action, so a grid cell is the same row identity as a list row. A video
+/// shows a play glyph; it is never previewed as an image.
+struct ScreenshotGridView: View {
+    @Bindable var viewModel: QuickViewModel
+
+    var body: some View {
+        let items = viewModel.launcherMatches
+        let columns = viewModel.gridColumnCount
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: AQDesign.Space.compact),
+                count: max(1, columns)
+            ),
+            spacing: AQDesign.Space.compact
+        ) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, result in
+                if case .item(let item) = result {
+                    Button {
+                        viewModel.applicationSelectionIndex = index
+                        Task { await viewModel.performLauncherResult(result) }
+                    } label: {
+                        ScreenshotGridCell(
+                            item: item,
+                            isSelected: index == viewModel.applicationSelectionIndex
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(item.title)
+                    .accessibilityLabel(item.title)
+                }
+            }
+        }
+        .padding(.horizontal, AQDesign.Space.standard)
+        .padding(.vertical, AQDesign.Space.compact)
+    }
+}
+
+private struct ScreenshotGridCell: View {
+    let item: LauncherCatalogItem
+    let isSelected: Bool
+    private static let cellHeight = House.Control.row * 2
+
+    var body: some View {
+        ZStack {
+            if item.screenshotMediaKind == .video {
+                Image(systemName: "play.rectangle")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            } else if let image = ScreenshotThumbnailCache.thumbnail(forPath: item.value) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else {
+                Image(systemName: "photo")
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.cellHeight)
+        .background(AQDesign.ColorToken.tileFill)
+        .clipShape(RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AQDesign.cardCornerRadius, style: .continuous)
+                .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
+        )
+        .overlay(RowHighlight(isSelected: isSelected, radius: AQDesign.cardCornerRadius))
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
 /// Emoji & Symbols as a grid: Frequently Used first, then everything that
 /// matches. Arrow keys move the highlight; Return pastes, ⌘↩ copies.
 struct EmojiGridView: View {
@@ -75,6 +150,37 @@ struct EmojiGridView: View {
     }
 }
 
+/// The compact type/pinned filter over the clipboard catalog.
+private enum ClipboardFilterSegment: String, CaseIterable, Identifiable {
+    case all, text, images, files, pinned
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .text: "Text"
+        case .images: "Images"
+        case .files: "Files"
+        case .pinned: "Pinned"
+        }
+    }
+
+    var filter: ClipboardCatalogFilter {
+        switch self {
+        case .all: ClipboardCatalogFilter()
+        case .text: ClipboardCatalogFilter(kinds: [.text, .richText])
+        case .images: ClipboardCatalogFilter(kinds: [.image])
+        case .files: ClipboardCatalogFilter(kinds: [.fileURL, .data])
+        case .pinned: ClipboardCatalogFilter(pinnedOnly: true)
+        }
+    }
+
+    static func segment(for filter: ClipboardCatalogFilter) -> ClipboardFilterSegment {
+        allCases.first { $0.filter == filter } ?? .all
+    }
+}
+
 /// Raycast-style detail beside a list: a preview and an Information block,
 /// each a raised card on the panel ground.
 struct CatalogDetailPane: View {
@@ -88,6 +194,12 @@ struct CatalogDetailPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: House.Spacing.sm) {
+            if item.kind == .clipboard {
+                VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                    clipboardFilterBar
+                    clipboardFilterHint
+                }
+            }
             preview
             informationGroup
             if let text = longText {
@@ -112,6 +224,30 @@ struct CatalogDetailPane: View {
                 }
             }
         }
+    }
+
+    /// The always-visible cheat sheet (or the active filter) under the
+    /// clipboard filter bar, so the query grammar is discoverable.
+    private var clipboardFilterHint: some View {
+        Text(viewModel.clipboardFilterHint ?? QuickViewModel.clipboardFilterHintText)
+            .font(AQDesign.TypeToken.metadata)
+            .foregroundStyle(AQDesign.ColorToken.textTertiary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The type/pinned filter over the clipboard catalog. Shown only while a
+    /// clipboard entry is under the cursor; selection is keyboard-driven like
+    /// every other house control.
+    private var clipboardFilterBar: some View {
+        InkSegmentedControl(
+            selection: Binding(
+                get: { ClipboardFilterSegment.segment(for: viewModel.clipboardCatalogFilter) },
+                set: { viewModel.setClipboardCatalogFilter($0.filter) }
+            ),
+            options: ClipboardFilterSegment.allCases.map { InkSegment(value: $0, title: $0.title) }
+        )
     }
 
     // MARK: - Groups
@@ -168,7 +304,9 @@ struct CatalogDetailPane: View {
     @ViewBuilder private var preview: some View {
         switch item.kind {
         case .screenshot:
-            if let image = ScreenshotThumbnailCache.thumbnail(forPath: item.value) {
+            if item.screenshotMediaKind == .video {
+                placeholderCard(symbol: "play.rectangle", text: "Video · Quick Look to play")
+            } else if let image = ScreenshotThumbnailCache.thumbnail(forPath: item.value) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -335,7 +473,7 @@ struct CatalogDetailPane: View {
                 }
                 list.append(("Copied", item.detail.replacingOccurrences(of: "Pinned · ", with: "")))
                 if item.isPinned { list.append(("Pinned", "Yes")) }
-                return list
+                return list + Self.clipboardSourceRows(for: item)
             }
             if let payload = item.clipboardPayload, payload.kind == .fileURL {
                 var list: [(String, String)] = [("Type", "File")]
@@ -350,7 +488,7 @@ struct CatalogDetailPane: View {
                 }
                 list.append(("Copied", item.detail.replacingOccurrences(of: "Pinned · ", with: "")))
                 if item.isPinned { list.append(("Pinned", "Yes")) }
-                return list
+                return list + Self.clipboardSourceRows(for: item)
             }
             let words = item.value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
             var list: [(String, String)] = [
@@ -360,7 +498,7 @@ struct CatalogDetailPane: View {
             ]
             if item.isPinned { list.append(("Pinned", "Yes")) }
             if ItemActionCatalog.looksLikeURL(item.value) { list.append(("Type", "Link")) }
-            return list
+            return list + Self.clipboardSourceRows(for: item)
         case .snippet:
             let words = item.value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
             let lines = item.value.split(separator: "\n", omittingEmptySubsequences: false).count
@@ -406,11 +544,20 @@ struct CatalogDetailPane: View {
     }
 
     private var longText: String? {
-        guard item.kind == .screenshot else { return nil }
+        guard item.kind == .screenshot, item.screenshotMediaKind != .video else { return nil }
         if let text = viewModel.screenshotText(for: item) {
             return text.isEmpty ? "No text found" : text
         }
         return viewModel.screenshotIndexProgress.isRunning ? "Reading text…" : "Not read yet"
+    }
+
+    /// The source app and tags, when a clipboard entry has them. Shared by
+    /// every clipboard sub-list so the three shapes show the same metadata.
+    private static func clipboardSourceRows(for item: LauncherCatalogItem) -> [(String, String)] {
+        var rows: [(String, String)] = []
+        if let source = item.clipboardSource { rows.append(("Source app", source.name)) }
+        if !item.clipboardTags.isEmpty { rows.append(("Tags", item.clipboardTags.joined(separator: ", "))) }
+        return rows
     }
 
 }

@@ -217,7 +217,7 @@ final class AttachmentTray {
             if Self.isFolder(url) { return AttachmentReadFailure.folder.line }
         case .link(let url):
             guard Self.isWebURL(url) else { return Self.notWebLinkNotice }
-        case .image, .selection:
+        case .image, .selection, .clipboard:
             break
         }
         if let identity = source.identity,
@@ -613,6 +613,10 @@ final class AttachmentTray {
         case .link:
             beginLinkEntry(clipboard: clipboard)
             return true
+        case .clipboardHistory:
+            // The submenu is the view model's: only it holds the clipboard
+            // catalog. The view model runs this row itself.
+            return false
         case .finderSelection:
             onReadFinderSelection?()
             return true

@@ -174,7 +174,7 @@ struct LongComposerTests {
                 let full = fullWindow ? AIChatWindowModel(chat: vm, defaults: defaults) : nil
                 vm.openAddContextMenu()
                 vm.attachmentTray.finderIsBehind = true
-                #expect(vm.addContextRows.count == 7)
+                #expect(vm.addContextRows.count == 8)
                 let width = fullWindow ? House.Layout.chatMinWidth : PanelSizing.panelWidth
                 let height = fullWindow ? House.Layout.chatMinHeight : PanelSizing.quickAIHeight
                 let header = fullWindow ? AIChatWindowView.titleBarHeight : QuickAIView.headerHeight

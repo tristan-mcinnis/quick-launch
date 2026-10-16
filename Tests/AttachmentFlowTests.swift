@@ -248,7 +248,7 @@ struct AttachmentFlowTests {
         #expect(rig.vm.addContextRows.last == .finderSelection)
         #expect(rig.vm.attachmentTray.finderIsBehind)
         #expect(rig.vm.addContextRows.map(\.title) == [
-            "Files…", "Link…", "Selected Text", "Focused Window", "Selected Area", "Entire Screen", "Finder Selection",
+            "Files…", "Link…", "Clipboard History", "Selected Text", "Focused Window", "Selected Area", "Entire Screen", "Finder Selection",
         ])
 
         rig.vm.addContextIndex = rig.vm.addContextRows.count - 1
@@ -264,7 +264,7 @@ struct AttachmentFlowTests {
         let chat = QuickViewModel(store: launcher.vm.store, service: launcher.service)
         let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: "AttachmentFlowTests.\(UUID())")!)
         withExtendedLifetime(window) {
-            #expect(chat.addContextRows == [.file, .link, .capture(.selectedArea), .capture(.entireScreen)])
+            #expect(chat.addContextRows == [.file, .link, .clipboardHistory, .capture(.selectedArea), .capture(.entireScreen)])
             #expect(AddContextPane.rows(captures: chat.addContextOptions, tray: chat.attachmentTray) == chat.addContextRows)
         }
     }

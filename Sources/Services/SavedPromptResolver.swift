@@ -85,15 +85,64 @@ enum SavedPromptResolver {
         return match
     }
 
-    static func prompt(for action: SavedPrompt, source: String) -> String {
-        if action.prompt.contains("{selection}") {
-            return action.prompt.replacingOccurrences(of: "{selection}", with: source)
+    /// The `{argument}` slots a saved prompt asks the user to fill, in the
+    /// order the template first names them. Empty for an ordinary prompt.
+    static func argumentSlots(in prompt: String) -> [SnippetArgument] {
+        SnippetPlaceholders.arguments(in: prompt)
+    }
+
+    /// True when the template reads the clipboard through an explicit
+    /// `{clipboard}` placeholder (any case, modifiers allowed). Nothing reads
+    /// the pasteboard on a saved prompt's behalf unless this says so.
+    static func readsClipboard(_ prompt: String) -> Bool {
+        SnippetPlaceholders.usesClipboard(prompt)
+    }
+
+    /// The full expansion of one saved action over `source`.
+    ///
+    /// Legacy behaviour is preserved exactly: `{selection}` is replaced
+    /// inline, and a template with no `{selection}` gets the source appended
+    /// after a blank line (an assistant may leave its prompt empty, so the
+    /// source stands alone). On top of that, the shared placeholder grammar
+    /// fills `{argument …}` from `arguments` (positional, matching
+    /// `argumentSlots(in:)`), `{clipboard}` from `clipboard`, and
+    /// `{date}`/`{time}`. `clipboard` is nil unless the caller chose to read
+    /// it, so a template that never asks for it never sees it.
+    static func prompt(
+        for action: SavedPrompt,
+        source: String,
+        arguments: [String] = [],
+        clipboard: String? = nil
+    ) -> String {
+        let template = action.prompt
+        let usesSelection = template.contains("{selection}")
+        // Expand the TEMPLATE first. The engine does not know `{selection}`,
+        // so it stays literal; a sentinel replaces it so that a `{clipboard}`
+        // or `{argument}` value the user supplies cannot later be mistaken
+        // for the template's own selection slot.
+        let sentinel = "\u{0}selection\u{0}"
+        var prepared = usesSelection
+            ? template.replacingOccurrences(of: "{selection}", with: sentinel)
+            : template
+        // `containsPlaceholders` is false for `{selection}` alone (the engine
+        // does not know that name), so an ordinary prompt is left untouched.
+        if SnippetPlaceholders.containsPlaceholders(prepared) {
+            prepared = SnippetPlaceholders.expand(
+                prepared,
+                clipboard: clipboard,
+                arguments: arguments
+            ).text
         }
-        guard !source.isEmpty else { return action.prompt }
+        // The SOURCE is literal data now: braces inside it are never executed
+        // as template syntax (a selection that reads `{date}` stays `{date}`).
+        if usesSelection {
+            return prepared.replacingOccurrences(of: sentinel, with: source)
+        }
+        guard !source.isEmpty else { return prepared }
         // An assistant may leave its transform prompt empty: the text alone
         // is the question, with no blank lines in front of it.
-        guard !action.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return source }
-        return "\(action.prompt)\n\n\(source)"
+        guard !template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return source }
+        return "\(prepared)\n\n\(source)"
     }
 
     /// Return saved prompts whose aliases or names fuzzy-match the fragment

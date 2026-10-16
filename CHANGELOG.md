@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.6.0 — 2026-10-15
+
+- **Clipboard History is an Add Context source.** `⇧⌘A` (or `@`) now lists
+  Clipboard History beside Files… and Link…. Text attaches as a labelled,
+  Clipboard source; images and copied files attach as typed chips. Attaching
+  never sends and never touches the draft, and only what the clipboard
+  catalog already kept can be chosen (concealed and transient copies stay
+  dropped, and nothing new is captured).
+- **Saved transforms take named arguments.** A prompt may ask
+  `{argument name="audience" default="Editorial" options="Editorial,Casual"}`
+  and `{clipboard}`. A slot with options opens the keyboard-first Transform
+  chooser once per slot; a required text slot asks for a value before sending,
+  and a slot with a default fills silently. `{selection}`
+  and the appended-source behaviour are unchanged, and the clipboard is read
+  only when the prompt explicitly asks for it, on the user's action.
+- **Review Changes.** A saved action can be set to Review before replacing.
+  The original and the proposal are shown together with Copy, Cancel and
+  Accept, and Accept writes back through the same fail-closed live-selection
+  check as Replace Selection. The target is bound to the actual source before
+  the request starts; an attached source or changed selection copies instead.
+  Closing the panel, cancelling, or starting a new chat drops pending reviews
+  and argument forms.
+- **Text-only transforms.** A plain saved action can be marked text only: it
+  offers the model no tools and skips web search and page reading. Assistant
+  and ordinary-prompt behaviour is unchanged. Source text remains literal,
+  even when it contains placeholder-shaped braces.
+- **Formatted response paste.** Paste Formatted Response (`⌃⌘V`) preserves
+  supported text formatting without carrying the app's dark/light ink. Plain
+  text remains the default and fallback; delivery writes transient markers.
+- **Direct Quick AI hotkey.** An optional global shortcut opens the composer
+  with pre-focus context and never submits automatically. It is off by default
+  and reports conflicts before registration.
+- **Clipboard controls.** Added observed-app metadata and exclusions, source
+  tags and filters, optional age retention, OCR settings, QR/text extraction,
+  plain-text paste, rename, Open, Save as File, and typed Attach to Question.
+  Existing pins, payload budgets and privacy markers remain enforced.
+- **Screenshot browser.** Added multiple folders, list/grid layout, image/video
+  browsing, OCR modes, explicit capture saving and a Preview annotation-copy
+  action. Videos use Open/Reveal rather than image delivery. File operations
+  avoid unavailable cloud placeholders; annotation copies leave originals alone.
+
 ## Unreleased — 2026-10-03 (free DMG release)
 
 - **`make dmg` packages a free download.** It builds with ad hoc signing, wraps the app and an Applications link in `QuickLaunch-<version>-macos-arm64.dmg`, and writes `SHA256SUMS`, `RELEASE_NOTES.md` and the draft-release command. `scripts/verify-dmg.sh` mounts the image read-only and checks the layout, the strict signature, the architecture, the version and the bundled notices without launching the app. No Developer ID is needed. The notarized `release.sh` path is unchanged.

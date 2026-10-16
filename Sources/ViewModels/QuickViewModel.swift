@@ -307,6 +307,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var clipboardHistoryHotkeyRegistrationError: String?
     var translatorHotkeyRegistrationError: String?
     var typeToClickHotkeyRegistrationError: String?
+    var quickAIHotkeyRegistrationError: String?
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
     /// The one ⌘K layer that can sit above the launcher. Exclusive by
     /// construction: a palette and a pane can never both be open.
@@ -343,6 +344,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false
+    /// True briefly after a capture is saved to the Screenshots folder, so the
+    /// launcher can confirm the save the way a copy is confirmed.
+    var justSaved: Bool = false
     /// What the Quick AI composer confirms for a moment after Copy Answer
     /// or Copy Chat ("Copied"), drawn with a checkmark in place of the
     /// primary action. Nil the rest of the time.
@@ -447,6 +451,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     enum InputMode: Equatable, Sendable {
         case caffeinateUntil
         case renameChat(UUID)
+        /// A clipboard entry is asking for a new name; `itemID` identifies it.
+        case renameClipboard(String)
         case vaultSearch(VaultSearchMode)
         /// A snippet is asking for one `{argument}`; `pendingSnippetInsertion`
         /// holds which, and what to do once every slot is answered.
@@ -873,6 +879,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored var webAnswerTimeout: Duration = .seconds(15)
     @ObservationIgnored var catalogIdleResetDelay: Duration = .seconds(15)
     @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
+    @ObservationIgnored private var justSavedTask: Task<Void, Never>?
     /// A source being opened from the thread or the palette; a second click
     /// replaces it.
     @ObservationIgnored var sourceOpenTask: Task<Void, Never>?
@@ -932,7 +939,17 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored private(set) var replaceableSelectionContext: SelectedTextContext?
     /// Text an action dispatch (picker/hotkey) resolved explicitly, so a
     /// multi-line selection is never whitespace-collapsed by alias context.
-    @ObservationIgnored private var pendingActionSource: String?
+    @ObservationIgnored var pendingActionSource: String?
+    /// The label of the source in `pendingActionSource` ("Clipboard", or an
+    /// app name), consumed once for the review card's attribution.
+    @ObservationIgnored var pendingActionSourceLabel: String?
+    /// The text of a source the user chose explicitly (a clipboard item),
+    /// which a transform must act on ahead of the auto-captured launch
+    /// snapshot. Cleared with the launch scope it belongs to.
+    @ObservationIgnored var explicitTransformSource: String?
+    /// The label of `explicitTransformSource`, so the review card says
+    /// "Clipboard" rather than borrowing the live selection's app name.
+    @ObservationIgnored var explicitTransformSourceLabel: String?
     /// True after the user removes a launch selection: suppresses the
     /// automatic re-capture of `{selection}` for a saved action until a fresh
     /// launch or an explicit attachment, so a dismissed chip is not silently
@@ -1212,6 +1229,26 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var quickLinks: [LauncherCatalogItem] { pinnedFirst(launcherCatalog?.quickLinks ?? []) }
     var clipboardEntries: [LauncherCatalogItem] { clipboardHistory?.entries ?? [] }
 
+    /// The active filter over the clipboard catalog. Empty means every entry.
+    /// Set through `setClipboardCatalogFilter(_:)` so ranking and selection
+    /// follow every change.
+    var clipboardCatalogFilter = ClipboardCatalogFilter()
+
+    /// The clipboard entries after the active filter, for the list and count.
+    var filteredClipboardEntries: [LauncherCatalogItem] {
+        guard clipboardCatalogFilter.isActive else { return clipboardEntries }
+        return clipboardHistory?.entries(matching: clipboardCatalogFilter)
+            ?? clipboardEntries.filter(clipboardCatalogFilter.matches)
+    }
+
+    /// Applies a clipboard catalog filter and refreshes the list.
+    func setClipboardCatalogFilter(_ filter: ClipboardCatalogFilter) {
+        guard filter != clipboardCatalogFilter else { return }
+        clipboardCatalogFilter = filter
+        applicationSelectionIndex = 0
+        invalidateLauncherRanking()
+    }
+
     /// The full clipboard payload for an item, with its raw items loaded from
     /// the blob (in-memory cache first, disk off-main on a miss). Used by
     /// previews and restore; returns nil when the entry is gone.
@@ -1439,6 +1476,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 detail: "Paste the newest screenshot into the app behind Quick Launch",
                 value: "screenshot.pasteLatest",
                 keywords: "image paste"
+            ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: "screenshot.save",
+                title: "Save Capture to Screenshots",
+                detail: "Save the capture waiting to attach as a new PNG in your screenshots folder",
+                value: "screenshot.save",
+                keywords: "save screenshot capture png file export attachments library"
             ),
         ]
         let caffeine = caffeinateStatusRow
@@ -1766,7 +1811,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         switch catalogScope {
         case .snippets: return snippets
         case .quickLinks: return quickLinks
-        case .clipboard: return clipboardEntries
+        case .clipboard: return filteredClipboardEntries
         case .emoji: return emojiItems
         case .screenshots: return screenshotItems
         case .caffeinate: return caffeinateItems
@@ -1842,7 +1887,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
 
     var screenAwarenessActions: [ItemAction] {
-        Self.screenAwarenessCommandValues.compactMap { value in
+        var actions = Self.screenAwarenessCommandValues.compactMap { value -> ItemAction? in
             guard let command = systemCommands.first(where: { $0.value == value }) else { return nil }
             return ItemAction(
                 kind: .runCommand,
@@ -1852,6 +1897,19 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 commandValue: value
             )
         }
+        // Save is offered only when a capture is actually waiting, so the row
+        // is a readiness check, not a button that always fails.
+        if pendingImage != nil,
+           let save = systemCommands.first(where: { $0.value == "screenshot.save" }) {
+            actions.append(ItemAction(
+                kind: .runCommand,
+                title: save.title,
+                systemImage: "square.and.arrow.down",
+                shortcut: nil,
+                commandValue: "screenshot.save"
+            ))
+        }
+        return actions
     }
 
     /// Marks the items the user pinned and floats them to the top, keeping
@@ -1879,10 +1937,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored private var emojiTonedItems: (tone: Int, items: [LauncherCatalogItem])?
 
     func reloadScreenshotFiles() {
-        screenshotFiles = ScreenshotLibrary.items(in: screenshotsFolder)
+        screenshotFiles = ScreenshotLibrary.items(
+            inFolders: screenshotFolders,
+            includeAllMedia: settings.screenshotIncludeAllMedia
+        )
         lastScreenshotScanAt = Date()
         if settings.screenshotTextSearch {
-            screenshotTextIndex.refresh(for: screenshotFiles)
+            screenshotTextIndex.refresh(for: screenshotFiles, mode: settings.screenshotOCRMode)
         }
         invalidateLauncherRanking()
     }
@@ -1894,10 +1955,27 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The emoji grid shows more: 9 columns by 7 rows.
     static let maxGridCells = 63
     static let gridColumns = 9
-    /// Emoji & Symbols is a grid, everything else a list. The grid stays put
-    /// while the ⌘K pane floats over it; swapping layouts under a popover
-    /// made the whole window shift.
-    var isGridCatalog: Bool { catalogScope == .emoji }
+    /// The saved-media grid's cell cap, matching the emoji grid.
+    static let screenshotGridCells = 63
+    /// Emoji & Symbols is a grid. The screenshots browser is a grid when the
+    /// user chose one. The grid stays put while the ⌘K pane floats over it;
+    /// swapping layouts under a popover made the whole window shift.
+    var isGridCatalog: Bool {
+        catalogScope == .emoji || (catalogScope == .screenshots && settings.screenshotUseGrid)
+    }
+
+    /// The live column count: the emoji grid is fixed at nine, the screenshot
+    /// grid follows the user's setting (2...6).
+    var gridColumnCount: Int {
+        catalogScope == .screenshots ? max(2, min(6, settings.screenshotColumns)) : Self.gridColumns
+    }
+
+    /// The row cap for the current scope. A screenshot grid lists more cells
+    /// than the list's rows so the grid is worth using.
+    private var effectiveRowLimit: Int {
+        if catalogScope == .screenshots, settings.screenshotUseGrid { return Self.screenshotGridCells }
+        return Self.maxRows(for: catalogScope)
+    }
 
     /// Catalogs that show the detail pane beside their list. Snippets and
     /// Quicklinks join the preview-worthy set so a row's stored value is
@@ -1951,6 +2029,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // on it is measured.
         if isQuickAIPresented { return quickAISize.height }
         let showsChooser = isTransformChooserPresented || isCaptureChooserPresented
+            || isTransformReviewPresented || isTransformArgumentFieldPresented
         let base = PanelSizing.panelHeight(
             errorMessage: errorMessage,
             // The Transform chooser replaces the launcher list while open, so
@@ -1961,7 +2040,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             showsFooter: showsLauncherFooter,
             launcherRowCount: showsChooser ? 0 : launcherMatches.count,
             gridRows: isGridCatalog
-                ? Int((Double(launcherMatches.count) / Double(Self.gridColumns)).rounded(.up))
+                ? Int((Double(launcherMatches.count) / Double(gridColumnCount)).rounded(.up))
                     + max(0, gridSections.count - 1)
                 : 0,
             gridSections: isGridCatalog ? gridSections.count : 0,
@@ -1989,7 +2068,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             )
         }
         if launchSelection != nil { total += PanelSizing.selectionChipHeight }
-        if isTransformChooserPresented { total += PanelSizing.chooserBlockHeight(rows: chipTransformOptions.count) }
+        if isTransformChooserPresented { total += PanelSizing.chooserBlockHeight(rows: transformChooserOptions.count) }
+        if isTransformReviewPresented { total += PanelSizing.transformReviewBlockHeight }
+        if isTransformArgumentFieldPresented { total += PanelSizing.searchableChooserBlockHeight(rows: 0) }
         if isCaptureChooserPresented {
             total += PanelSizing.searchableChooserBlockHeight(rows: captureChooserOptions.count)
         }
@@ -2061,7 +2142,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Section headers over `launcherMatches` in the emoji grid.
     var gridSections: [GridSection] {
-        guard isGridCatalog else { return [] }
+        guard isGridCatalog, catalogScope == .emoji else { return [] }
         let count = launcherMatches.count
         guard count > 0 else { return [] }
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2100,7 +2181,38 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // and pins all see the same visible set.
         let items = visibleLauncherItems(catalogItems)
         let scope = catalogScope?.rawValue ?? LauncherUsageStore.rootScope
-        let rows = Self.maxRows(for: catalogScope)
+        let rows = effectiveRowLimit
+        // Clipboard grammar (`source:`/`tag:`/`kind:`/`pin:`) narrows the list
+        // and is stripped from the free-text needle, so the visible hint and
+        // the results agree. The segmented control's filter still applies
+        // underneath through `catalogItems`.
+        if catalogScope == .clipboard, !query.isEmpty {
+            let parsed = ClipboardFilterQuery.parse(query)
+            var filter = clipboardCatalogFilter
+            if let source = parsed.source { filter.sourceName = source }
+            if let tag = parsed.tag { filter.tag = tag }
+            if !parsed.kinds.isEmpty { filter.kinds = parsed.kinds }
+            if parsed.pinnedOnly { filter.pinnedOnly = true }
+            let narrowed = items.filter(filter.matches)
+            guard !parsed.needle.isEmpty else { return Array(narrowed.prefix(rows)) }
+            let foldedNeedle = FuzzyMatcher.fold(parsed.needle)
+            return Array(narrowed.compactMap { item -> (LauncherCatalogItem, Int)? in
+                guard let score = matchScore(
+                    foldedQuery: foldedNeedle,
+                    title: item.title,
+                    alias: launcherItemAlias(for: item),
+                    keywords: item.keywords
+                ) else { return nil }
+                return (item, score)
+            }
+            .sorted { lhs, rhs in
+                lhs.1 == rhs.1
+                    ? lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+                    : lhs.1 > rhs.1
+            }
+            .prefix(rows)
+            .map(\.0))
+        }
         guard !query.isEmpty else {
             // Time-ordered catalogs stay chronological: the clipboard store
             // and the screenshots list already put pins first, and learned
@@ -2443,6 +2555,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         switch inputMode {
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
+        case .renameClipboard: return "Rename Entry"
         case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
         case .snippetArgument:
             return pendingSnippetInsertion.map { "Snippet · \($0.item.title)" } ?? "Snippet"
@@ -2500,7 +2613,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     FooterHint(label: "Caffeinate", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
-            case .renameChat:
+            case .renameChat, .renameClipboard:
                 return [
                     FooterHint(label: "Save", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
@@ -2854,6 +2967,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         switch inputMode {
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
+        case .renameClipboard: return "New name for this entry…"
         case .vaultSearch(let mode): return mode.placeholder
         case .houseCommandArgument:
             guard let row = pendingHouseCommandText else { return "Value…" }
@@ -3220,8 +3334,21 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         // A chooser floats above Recent Chats (`topLayer`), so it takes
         // Return first, in the same order Escape closes them.
+        if isTransformArgumentFieldPresented {
+            // Return in the argument field takes the typed value; empty is
+            // refused rather than substituted.
+            await submitTransformArgument()
+            return
+        }
+        if isTransformReviewVisible {
+            // Return on the review card accepts it, through the same
+            // fail-closed write-back as Replace Selection.
+            _ = await acceptTransformReview()
+            return
+        }
         if isTransformChooserPresented {
-            // Return runs the focused transform in the keyboard-first chooser.
+            // Return runs the focused transform in the keyboard-first chooser,
+            // or picks the highlighted argument option while one is filling.
             await runTransformChooserSelection()
             return
         }
@@ -3317,7 +3444,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// ↑↓ move a whole grid row in Emoji & Symbols, one item elsewhere.
     func moveSelectionVertically(_ direction: Int) {
-        moveApplicationSelection(isGridCatalog ? direction * Self.gridColumns : direction)
+        moveApplicationSelection(isGridCatalog ? direction * gridColumnCount : direction)
     }
 
     func moveApplicationSelection(_ delta: Int) {
@@ -3448,6 +3575,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     // MARK: - Input modes
 
     func enterInputMode(_ mode: InputMode) {
+        clearTransformFlowState()
         // A mode owns the root input row, so the Quick AI surface steps
         // aside; the thread is kept behind it.
         isQuickAIPresented = false
@@ -3465,6 +3593,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         applicationSelectionIndex = 0
         if case .renameChat(let id) = mode {
             input = history.first { $0.id == id }?.title ?? ""
+        }
+        if case .renameClipboard(let itemID) = mode {
+            input = clipboardEntries.first { $0.itemID == itemID }?.title ?? ""
         }
         requestInputFocus()
         noteInteraction()
@@ -3501,6 +3632,19 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         requestInputFocus()
     }
 
+    /// The optional direct Quick AI hotkey: remember and capture the app and
+    /// selection behind the overlay before it takes focus, then open the Quick
+    /// AI composer on the retained draft. It never submits: the composer
+    /// opens ready for the question, and the new-chat/retained-draft policy
+    /// still governs what a later Return does.
+    func presentQuickAIComposerForHotkey() {
+        if let selectedTextService, let target = selectedTextService.currentExternalTarget() {
+            rememberSelectionTarget(target)
+            captureLaunchSelection()
+        }
+        openQuickAI()
+    }
+
     /// Escape, the back chevron, or an empty Backspace on the surface: back
     /// to root search. The thread stays; `⌘N` is what starts a new one.
     func closeQuickAI() {
@@ -3519,6 +3663,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         isTransformChooserPresented = false
         isActionPalettePresented = false
         actionQuery = ""
+        clearTransformFlowState()
         isQuickAIPresented = false
         errorMessage = nil
         applicationSelectionIndex = 0
@@ -3647,6 +3792,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .renameChat(let id):
             renameConversation(id: id, title: input)
             if !leaveInputMode() { enterCatalog(.chats) }
+        case .renameClipboard(let itemID):
+            if let item = clipboardEntries.first(where: { $0.itemID == itemID }) {
+                _ = clipboardHistory?.rename(item, to: input)
+            }
+            if !leaveInputMode() { enterCatalog(.clipboard) }
         case .caffeinateUntil:
             let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
             do {
@@ -3811,7 +3961,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         switch scope {
         case .snippets: return visible(snippets)
         case .quickLinks: return visible(quickLinks)
-        case .clipboard: return visible(clipboardEntries)
+        case .clipboard: return visible(filteredClipboardEntries)
         case .emoji: return visible(emojiItems)
         case .colors: return visible(colorItems)
         case .screenshots: return visible(screenshotItems)
@@ -3983,6 +4133,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .clipboard, .emoji, .color:
             _ = await pasteLauncherItem(item)
         case .screenshot:
+            if item.screenshotMediaKind == .video {
+                // A video is not an image: open it in its player instead of
+                // trying to paste it as a picture.
+                workspace.open(URL(fileURLWithPath: item.value))
+                learn(.item(item))
+                overlayPresenter.dismissOverlay()
+                return
+            }
             if await pasteImageFile(URL(fileURLWithPath: item.value)) {
                 learn(.item(item))
                 overlayPresenter.dismissOverlay()
@@ -4062,6 +4220,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
             if item.value == "screenshot.pasteLatest" {
                 await pasteLatestScreenshot()
+                return
+            }
+            if item.value == "screenshot.save" {
+                if await savePendingImageToScreenshots() != nil {
+                    markJustSaved()
+                }
+                requestInputFocus()
                 return
             }
             performSystemCommand(item)
@@ -4346,7 +4511,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if hasAnswer {
             actions.append(contentsOf: [.readAloud, .saveSnippet])
             if memoryCapture != nil { actions.append(.captureToMemory) }
-            actions.append(.searchWeb)
+            actions.append(contentsOf: [.searchWeb, .pasteFormatted])
         }
         actions.append(contentsOf: [.regenerate, .regenerateWithModel, .changeModel])
         if !assistants.isEmpty { actions.append(.changeAssistant) }
@@ -4365,7 +4530,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Answer actions the AI Chat window leaves out.
     static let launcherOnlyResultActions: Set<ResultAction> = [
-        .replaceSelection, .pasteBack, .recentChats, .continueInAIChat,
+        .replaceSelection, .pasteBack, .pasteFormatted, .recentChats, .continueInAIChat,
     ]
 
     /// `⌘J` hands the chat to the AI Chat window: on the Quick AI surface,
@@ -4395,6 +4560,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             replaceableSelectionContext.map { "Replace in \($0.target.applicationName)" }
         case .pasteBack:
             selectionTarget.map { "Paste into \($0.applicationName)" }
+        case .pasteFormatted:
+            selectionTarget.map { "Formatted, into \($0.applicationName)" }
+                ?? "Keep headings, lists and links"
         case .changeModel:
             "Using \(activeModelDisplay)"
         case .changeAssistant:
@@ -4442,6 +4610,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             _ = await replaceOutputInCapturedSelection()
         case .pasteBack:
             _ = await pasteOutputToPreviousApp()
+        case .pasteFormatted:
+            _ = await pasteFormattedOutputToPreviousApp()
         case .copy:
             // The surface stays open; the composer shows the checkmark.
             isActionPalettePresented = false
@@ -4669,6 +4839,17 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         didSet { if addContextQuery != oldValue { addContextIndex = 0 } }
     }
 
+    /// True while the Clipboard History submenu is open inside Add Context.
+    /// Its rows come from the existing clipboard catalog (already filtered
+    /// for concealed and transient copies); nothing here captures.
+    var isClipboardHistoryOpen = false
+    var clipboardHistoryIndex = 0
+    /// The submenu's own search, typed in its own field, like Add Context's.
+    /// It narrows the catalog rows and never touches the draft.
+    var clipboardHistoryQuery = "" {
+        didSet { if clipboardHistoryQuery != oldValue { clipboardHistoryIndex = 0 } }
+    }
+
     /// The four capture paths, in the order the menu lists them. The AI
     /// Chat window has no app behind it: Focused Window and Selected Text
     /// read the app that was in front before the window became key, and
@@ -4681,6 +4862,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func openAddContextMenu() {
         guard !isStreaming else { return }
         isAddContextMenuPresented = true
+        isClipboardHistoryOpen = false
+        clipboardHistoryQuery = ""
+        clipboardHistoryIndex = 0
         addContextQuery = ""
         addContextIndex = 0
         attachmentTray.cancelLinkEntry()
@@ -4705,6 +4889,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func closeAddContextMenu() {
         guard isAddContextMenuPresented else { return }
         isAddContextMenuPresented = false
+        isClipboardHistoryOpen = false
+        clipboardHistoryQuery = ""
         attachmentTray.cancelLinkEntry()
         requestInputFocus()
     }
@@ -4722,6 +4908,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Return in the open Add Context menu: the highlighted row, or, in the
     /// Link field, the link.
     func runAddContextSelection() async {
+        if isClipboardHistoryOpen {
+            await runClipboardHistorySelection()
+            return
+        }
         if attachmentTray.isEnteringLink {
             submitAttachmentLink()
             return
@@ -5005,6 +5195,20 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             if oldValue != screenshotsFolder { lastScreenshotScanAt = nil }
         }
     }
+    /// Every directory root the browser scans: the system screenshot folder
+    /// first, then the user's extra folders. Only these roots are scanned,
+    /// never home, and never recursively. Duplicates are dropped.
+    var screenshotFolders: [URL] {
+        var roots = [screenshotsFolder]
+        for path in settings.screenshotFolders {
+            let expanded = (path as NSString).expandingTildeInPath
+            guard !expanded.isEmpty,
+                  !roots.contains(where: { $0.path == expanded })
+            else { continue }
+            roots.append(URL(fileURLWithPath: expanded, isDirectory: true))
+        }
+        return roots
+    }
     /// When `screenshotFiles` was read from disk; nil until the first scan.
     @ObservationIgnored private(set) var lastScreenshotScanAt: Date?
     @ObservationIgnored private var screenshotScanTask: Task<Void, Never>?
@@ -5017,13 +5221,28 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func refreshScreenshotFilesInBackground() {
         guard screenshotScanTask == nil else { return }
         let folder = screenshotsFolder
+        let folders = screenshotFolders
+        let includeAllMedia = settings.screenshotIncludeAllMedia
         let requestedAt = Date()
         screenshotScanTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let items = ScreenshotLibrary.items(in: folder, now: requestedAt)
+            let items = ScreenshotLibrary.items(
+                inFolders: folders,
+                includeAllMedia: includeAllMedia,
+                now: requestedAt
+            )
             await MainActor.run { [weak self] in
                 self?.applyScreenshotScan(items, from: folder, requestedAt: requestedAt)
             }
         }
+    }
+
+    /// Re-runs screenshot OCR after the recognition mode changes, so the
+    /// Text recognition control takes effect instead of leaving the first
+    /// pass's text cached. The running pass is cancelled first so its stale
+    /// results cannot overwrite the new mode's.
+    func reindexScreenshotText(mode: ClipboardOCRMode) {
+        screenshotTextIndex.cancel()
+        screenshotTextIndex.refresh(for: screenshotFiles, mode: mode)
     }
 
     /// Warms the list when the cached scan is older than the freshness window.
@@ -5060,7 +5279,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         screenshotFiles = items
         lastScreenshotScanAt = Date()
         if settings.screenshotTextSearch {
-            screenshotTextIndex.refresh(for: items)
+            screenshotTextIndex.refresh(for: items, mode: settings.screenshotOCRMode)
         }
         invalidateLauncherRanking()
         if let browsedItemID {
@@ -5928,6 +6147,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// attachment.
     func clearLaunchSelection() {
         launchSelection = nil
+        explicitTransformSource = nil
+        explicitTransformSourceLabel = nil
         selectedTextContext = nil
         selectionRecaptureSuppressed = true
     }
@@ -5937,7 +6158,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// selection or chip cannot survive into a later request or a reopen.
     func clearLaunchScopedState() {
         launchSelection = nil
+        explicitTransformSource = nil
+        explicitTransformSourceLabel = nil
         pendingActionSource = nil
+        pendingActionSourceLabel = nil
         selectedTextContext = nil
         selectionRecaptureSuppressed = true
     }
@@ -5967,6 +6191,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         enum Kind: Equatable, Sendable {
             case saved(UUID)
             case translator
+            /// One option of the `{argument}` slot the Transform chooser is
+            /// currently filling. The index is into that slot's options.
+            case argument(Int)
         }
         let kind: Kind
         let title: String
@@ -5976,6 +6203,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             switch kind {
             case .saved(let id): "saved:\(id.uuidString)"
             case .translator: "translator"
+            case .argument(let index): "argument:\(index)"
             }
         }
     }
@@ -5994,7 +6222,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// (so the user's edited name, prompt, and hotkey are honored). Absent
     /// aliases are dropped, so a defunct action simply doesn't appear.
     var chipTransformOptions: [ChipTransformOption] {
-        guard launchSelection != nil else { return [] }
+        guard selectionTransformSource != nil else { return [] }
         return Self.chipTransformOrder.compactMap { entry in
             if entry.value == "translate" {
                 return ChipTransformOption(
@@ -6024,6 +6252,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .saved(let id):
             guard let action = settings.savedPrompts.first(where: { $0.id == id }) else { return }
             await performTransform(action: action)
+        case .argument(let index):
+            await chooseTransformArgument(index: index)
         }
     }
 
@@ -6032,7 +6262,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the text the user selected. This is the keyboard-first path for the
     /// Transform chooser and the chip menu.
     func performTransform(action: SavedPrompt) async {
-        let snapshot = launchSelection?.text
+        let label = selectionTransformSourceLabel
+        let snapshot = selectionTransformSource
             ?? captureSelectedText(promptForPermission: true)?.text
         guard let snapshot,
               !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -6047,11 +6278,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // keeps what arrived, as Stop does, so the transform never runs a
         // second model request beside it.
         if isStreaming { cancel() }
-        pendingActionSource = snapshot
         isActionPalettePresented = false
         actionQuery = ""
-        input = settings.savedPromptPrefix + action.alias
-        await submit()
+        // A prompt with `{argument …}` slots that offer `options` waits for
+        // the chooser; one without collects its defaults and runs at once.
+        await beginTransformArguments(action: action, source: snapshot, sourceLabel: label)
     }
 
     // MARK: - Transform chooser (keyboard-first)
@@ -6070,6 +6301,68 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
     var transformChooserIndex = 0
 
+    /// A saved transform waiting on its `{argument …}` slots. `values` is
+    /// positional, matching `slots`; a slot with `options` is offered as a
+    /// chooser through the existing Transform chooser pane, and a slot with
+    /// only a `default` is filled silently. Nil when nothing is waiting.
+    struct PendingTransformArguments: Equatable, Sendable {
+        let actionID: UUID
+        let alias: String
+        let source: String
+        /// The source's label ("Clipboard", or an app name), carried to the
+        /// review card so an attached source is never attributed to the live
+        /// selection.
+        let sourceLabel: String?
+        let slots: [SnippetArgument]
+        var values: [String]
+        /// The slot the option chooser is on, or nil.
+        var choosing: Int?
+        /// The required free-text slot the composer is filling, or nil. A
+        /// `{argument …}` with no `default` and no `options` must be typed:
+        /// it is never substituted with an empty string.
+        var filling: Int?
+
+        var currentSlot: SnippetArgument? {
+            guard let choosing, slots.indices.contains(choosing) else { return nil }
+            return slots[choosing]
+        }
+
+        var fillingSlot: SnippetArgument? {
+            guard let filling, slots.indices.contains(filling) else { return nil }
+            return slots[filling]
+        }
+    }
+
+    var pendingTransformArguments: PendingTransformArguments?
+
+    /// The typed text for the required `{argument}` slot the Transform
+    /// argument field is asking for. Its own field, so the composer draft is
+    /// never touched by an argument.
+    var transformArgumentInput = ""
+
+    /// The original text and the proposed result of a `.reviewChanges`
+    /// transform, shown before anything is written back.
+    ///
+    /// `target` is the captured live-selection context the transform actually
+    /// ran on, frozen here and set only when the transformed source was that
+    /// exact selection. It is nil for a clipboard or otherwise attached
+    /// source, so Accept copies the result instead of writing it into an
+    /// unrelated app. Accept then runs the same fail-closed live-selection
+    /// check as Replace Selection against this frozen target.
+    struct PendingTransformReview {
+        let original: String
+        let proposed: String
+        let sourceApp: String?
+        let target: SelectedTextContext?
+    }
+
+    var pendingTransformReview: PendingTransformReview?
+
+    /// The `{argument}` values collected for the transform about to be
+    /// submitted, read once by `prepareRequest` and then cleared. Nil means
+    /// the resolved prompt has no argument slots.
+    @ObservationIgnored var pendingActionArguments: [String]?
+
     func openTransformChooser() {
         // A transform is its own model request; it waits for the answer on
         // screen to end, as Add Context does.
@@ -6086,6 +6379,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 
     func closeTransformChooser() {
+        // Closing while filling an argument must drop the abandoned run, or a
+        // later Return on a reopened chooser could send it.
+        if pendingTransformArguments != nil {
+            cancelTransformArguments()
+            return
+        }
         isTransformChooserPresented = false
         requestInputFocus()
     }
@@ -6095,14 +6394,19 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 
     func moveTransformChooserSelection(_ delta: Int) {
-        let count = chipTransformOptions.count
+        let count = transformChooserOptions.count
         guard count > 0 else { return }
         transformChooserIndex = (transformChooserIndex + delta + count) % count
     }
 
     func runTransformChooserSelection() async {
-        let options = chipTransformOptions
+        let options = transformChooserOptions
         guard options.indices.contains(transformChooserIndex) else { return }
+        // Filling an argument: the highlighted option is the value.
+        if pendingTransformArguments != nil {
+            await chooseTransformArgument(index: transformChooserIndex)
+            return
+        }
         isTransformChooserPresented = false
         await runChipTransform(options[transformChooserIndex])
     }
@@ -6117,7 +6421,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // (and with it `launchSelection`). The presenter passes it to the
         // Translator so "Use selected text" can import it even after focus
         // moves on.
-        let retained = launchSelection?.text
+        let retained = selectionTransformSource
         overlayPresenter.openTranslator(retainedSelection: retained)
     }
 
@@ -6411,6 +6715,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case itemActionPane
         case actionPalette
         case transformChooser
+        /// A `.reviewChanges` transform's original/proposed card.
+        case transformReview
+        /// A required `{argument}` free-text slot the Transform field is
+        /// asking for (its own field; the composer draft is untouched).
+        case transformArgumentField
         case modelChooser
         case assistantChooser
         case captureChooser
@@ -6438,6 +6747,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return activeItemActionForm != nil ? .itemActionForm : .itemActionPane
         }
         if isActionPalettePresented { return .actionPalette }
+        if isTransformReviewVisible { return .transformReview }
+        if isTransformArgumentFieldPresented { return .transformArgumentField }
         if isTransformChooserPresented { return .transformChooser }
         if isModelChooserPresented { return .modelChooser }
         if isAssistantChooserPresented { return .assistantChooser }
@@ -6474,6 +6785,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
         case .transformChooser:
             closeTransformChooser()
+        case .transformReview:
+            cancelTransformReview()
+        case .transformArgumentField:
+            cancelTransformArguments()
         case .modelChooser:
             closeModelChooser()
         case .assistantChooser:
@@ -6481,9 +6796,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .captureChooser:
             closeCaptureChooser()
         case .addContextMenu:
-            // The Link field goes back to the rows first.
+            // The Link field and the Clipboard History submenu each go back
+            // to the Add Context rows first.
             if attachmentTray.cancelLinkEntry() {
                 requestInputFocus()
+            } else if isClipboardHistoryOpen {
+                closeClipboardHistory()
             } else {
                 closeAddContextMenu()
             }
@@ -6826,6 +7144,37 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             else { return }
             closeItemActionPane()
             await performLauncherItem(command)
+        case .copyTextFromImage:
+            guard case .item(let item) = result else { return }
+            closeItemActionPane()
+            _ = await copyTextFromImage(item)
+        case .copyQRCode:
+            guard case .item(let item) = result else { return }
+            closeItemActionPane()
+            _ = await copyQRCode(from: item)
+        case .pasteAsPlainText:
+            guard case .item(let item) = result, item.kind == .clipboard else { return }
+            closeItemActionPane()
+            _ = await pasteClipboardEntryAsPlainText(item)
+        case .attachToQuestion:
+            guard case .item(let item) = result, item.kind == .clipboard else { return }
+            closeItemActionPane()
+            _ = await attachClipboardEntryToQuestion(item)
+        case .annotateInPreview:
+            guard case .item(let item) = result, item.kind == .screenshot else { return }
+            closeItemActionPane()
+            await annotateInPreview(item)
+        case .renameEntry:
+            guard case .item(let item) = result, item.kind == .clipboard else { return }
+            enterInputMode(.renameClipboard(item.itemID))
+        case .openEntry:
+            guard case .item(let item) = result, item.kind == .clipboard else { return }
+            closeItemActionPane()
+            _ = openClipboardEntry(item)
+        case .saveAsFile:
+            guard case .item(let item) = result, item.kind == .clipboard else { return }
+            closeItemActionPane()
+            _ = await saveClipboardEntryAsFile(item)
         default:
             break
         }
@@ -6837,7 +7186,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     private func performSynchronously(_ action: ItemAction, on result: LauncherSearchResult) -> Bool {
         if action.kind != .delete { deleteArmedItemID = nil }
         switch action.kind {
-        case .primary, .copyAndPaste, .runCommand:
+        case .primary, .copyAndPaste, .runCommand,
+             .copyTextFromImage, .copyQRCode, .pasteAsPlainText,
+             .attachToQuestion, .annotateInPreview, .renameEntry,
+             .openEntry, .saveAsFile:
             return false
         case .quit, .forceQuit, .hide, .relaunch:
             guard case .application(let application) = result else { return true }
@@ -6875,7 +7227,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 closeItemActionPane()
                 Task { _ = await pasteLauncherItem(item) }
             case .item(let item) where item.kind == .screenshot:
-                if pasteboard.writeImageFile(at: URL(fileURLWithPath: item.value)) {
+                if item.screenshotMediaKind == .video {
+                    // A video has no image representation to paste: reveal it.
+                    closeItemActionPane()
+                    input = ""
+                    overlayPresenter.dismissOverlay()
+                    workspace.revealInFileViewer([URL(fileURLWithPath: item.value)])
+                } else if pasteboard.writeImageFile(at: URL(fileURLWithPath: item.value)) {
                     markJustCopied()
                     closeItemActionPane()
                     input = ""
@@ -7780,7 +8138,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// row, or its hotkey runs its prompt on that text instead of picking
     /// the assistant.
     var hasSelectedActionSource: Bool {
-        [pendingActionSource, pendingContext?.selectedText, launchSelection?.text].contains { text in
+        [pendingActionSource, selectionTransformSource].contains { text in
             text.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
         }
     }
@@ -7826,13 +8184,29 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if !action.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return action.context
         }
+        if let attached = attachmentTray.readyContents.last(where: { $0.isTransformTextSource })?.text,
+           !attached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return attached
+        }
         if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // Consume the snapshot: a command or model action that used it
-            // must not re-send it to a later request.
-            launchSelection = nil
+            // Resolution is pure: cancelling a required input must not
+            // consume the source. Only preparation consumes the snapshot.
             return launchText
         }
         return action.context
+    }
+
+    /// The captured live selection a saved action may write back to: only
+    /// when its text is exactly the text the action actually ran on.
+    ///
+    /// A typed alias context (`/alias B` with the launch selection A still
+    /// captured), a clipboard source, or any other attached text yields nil,
+    /// so the result copies instead of overwriting an unrelated app. This is
+    /// the one binding a review, an auto `.replaceSelection`, or an offered
+    /// Replace Selection action uses.
+    func boundActionTarget(forSource source: String) -> SelectedTextContext? {
+        guard let context = selectedTextContext, context.text == source else { return nil }
+        return context
     }
 
     /// One Return, prepared for a provider: the prompt the model receives
@@ -7861,6 +8235,15 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         var inlineAttachmentIDs: Set<UUID> = []
         let action: SavedPromptResolver.Resolution?
         let actionDefinition: SavedPrompt?
+        /// The text a saved action ran on, kept for a `.reviewChanges`
+        /// result card that offers it back beside the proposed text.
+        var actionSource: String = ""
+        /// The label of that source ("Clipboard", an app name), so a review
+        /// card never attributes an attached source to the live selection.
+        var actionSourceApp: String?
+        /// The matching live source target frozen before any external work.
+        /// Clipboard and unrelated typed sources deliberately have no target.
+        var actionTarget: SelectedTextContext?
         var effectivePrompt: String
         var usedWebSearch = false
         var webSearchFallback: String?
@@ -8012,7 +8395,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             content: request.effectivePrompt,
             attachments: request.attachmentRefs.isEmpty ? nil : request.attachmentRefs
         ))
-        let tools = Array(chatTools)
+        let tools = Array(request.contextEvaluation?.gatedTools ?? chatTools)
         do {
             _ = try await chatArchive.submit(TurnSubmission(
                 conversation: provisional,
@@ -8102,10 +8485,22 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             ? (reaskedAttachments ?? []).map { AttachmentContent(ref: $0) }
             : pendingAttachmentContents()
         let trayItemIDs = reasksTurn ? [] : attachmentTray.items.filter { $0.content != nil }.map(\.id)
+        // Resolve the saved-prompt alias first: a plain transform marked
+        // text-only offers the model no tools. That tool set then feeds the
+        // one context gate, so the receipt and the request agree.
+        let action = SavedPromptResolver.resolveAction(
+            input: submittedInput,
+            prefix: settings.savedPromptPrefix,
+            savedPrompts: settings.savedPrompts
+        )
+        let actionDefinition = action.flatMap { resolution in
+            settings.savedPrompts.first(where: { $0.id == resolution.actionID })
+        }
+        let isTextOnlyAction = actionDefinition?.textOnly == true
         // Resolve the retrieval and tool gate once, before any branch that
         // might send. Both `enrich` and `stream` read this same evaluation.
         let contextEvaluation = ChatContextGate.standard.evaluate(
-            enabledTools: chatTools,
+            enabledTools: isTextOnlyAction ? [] : chatTools,
             hasCurrentSource: !attachments.isEmpty,
             currentSourceCount: attachments.count,
             historyTurnCount: currentConversation?.messages.count ?? 0,
@@ -8114,8 +8509,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             override: contextOverride
         )
         guard !submittedInput.isEmpty || pendingImage != nil || !attachments.isEmpty else { return nil }
-        // A new request supersedes any prior answer's replaceable selection.
+        // A new request supersedes any prior answer's replaceable selection
+        // and any review card left up by an earlier transform.
         replaceableSelectionContext = nil
+        pendingTransformReview = nil
         webSearchNote = nil
         liveToolRecords = []
         threadNotice = nil
@@ -8129,15 +8526,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let submittedImages = attachments.compactMap(\.image)
         let submittedImage = submittedImages.last
         let hasDocuments = attachments.contains { !$0.ref.kind.isImage }
-
-        // Expand saved-prompt aliases before anything else. Non-matches
-        // (including inputs that look like `/foo` but reference an unknown
-        // alias) fall through to the regular path below.
-        let action = SavedPromptResolver.resolveAction(
-            input: submittedInput,
-            prefix: settings.savedPromptPrefix,
-            savedPrompts: settings.savedPrompts
-        )
 
         if reasksTurn {
             // The saved question already contains its original selection
@@ -8180,6 +8568,23 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // built so it never leaks into a later follow-up or a new chat.
         let launchText = launchSelection?.text
 
+        // Every action entry uses this gate, including a typed alias and a
+        // saved-action hotkey. Missing inputs never become an empty request.
+        if let action, let definition = actionDefinition,
+           pendingActionArguments == nil,
+           SavedPromptResolver.argumentSlots(in: definition.prompt).contains(where: {
+               $0.defaultValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+           }) {
+            let source = resolvedActionSource(action: action, launchText: launchText)
+            await beginTransformArguments(
+                action: definition,
+                source: source,
+                sourceLabel: pendingActionSourceLabel
+                    ?? (action.context.isEmpty ? selectionTransformSourceLabel : "Typed text")
+            )
+            return nil
+        }
+
         // Command actions run a local executable directly and never reach a
         // model provider.
         if let action,
@@ -8187,7 +8592,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
            let executable = definition.commandExecutable,
            !executable.isEmpty {
             let source = resolvedActionSource(action: action, launchText: launchText)
+            let sourceLabel = pendingActionSourceLabel
+                ?? (action.context.isEmpty ? selectionTransformSourceLabel : "Typed text")
+            let target = sourceLabel == ClipboardHistoryAttachments.clipboardAppName
+                ? nil : boundActionTarget(forSource: source)
             pendingActionSource = nil
+            pendingActionSourceLabel = nil
+            pendingActionArguments = nil
             // A dispatched command consumed the launch snapshot (whether the
             // source came via pendingActionSource or the launchText branch):
             // clear the chip so it cannot ride a later request.
@@ -8196,6 +8607,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 definition: definition,
                 executable: executable,
                 context: source,
+                sourceTarget: target,
                 submittedInput: submittedInput,
                 takesComposerText: takesComposerText
             )
@@ -8203,10 +8615,31 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
 
         var effectivePrompt: String
+        var actionSourceText = ""
+        var actionSourceLabel: String?
+        var actionTarget: SelectedTextContext?
         if let action,
            let definition = settings.savedPrompts.first(where: { $0.id == action.actionID }) {
-            let source = resolvedActionSource(action: action, launchText: launchText)
+            var source = resolvedActionSource(action: action, launchText: launchText)
+            // Inspect template syntax, never braces occurring in source data.
+            if source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               definition.prompt.contains("{selection}") {
+                guard let selected = captureSelectedText(promptForPermission: true) else {
+                    errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                        ? "Allow Accessibility in System Settings, then select text and try again."
+                        : "This action needs selected text."
+                    requestInputFocus()
+                    return nil
+                }
+                source = selected.text
+            }
+            actionSourceText = source
+            actionSourceLabel = pendingActionSourceLabel
+                ?? (action.context.isEmpty ? selectionTransformSourceLabel : "Typed text")
+            actionTarget = actionSourceLabel == ClipboardHistoryAttachments.clipboardAppName
+                ? nil : boundActionTarget(forSource: source)
             pendingActionSource = nil
+            pendingActionSourceLabel = nil
             // Consume the single-use chip once a saved action uses the
             // selection (perform() may have stashed the snapshot in
             // pendingActionSource, which the resolver returns unchanged).
@@ -8220,24 +8653,33 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 let preamble = submittedContext.promptPreamble(includeSelectedText: false)
                 if !preamble.isEmpty { preambleParts.append(preamble) }
             }
+            // The `{argument}` values collected for this invocation, consumed
+            // once. `{clipboard}` is read only when the template asks for it,
+            // and only now that the user chose the action.
+            let argumentValues = pendingActionArguments
+                ?? SavedPromptResolver.argumentSlots(in: definition.prompt).map(\.defaultValue)
+            pendingActionArguments = nil
+            let clipboardText = SavedPromptResolver.readsClipboard(definition.prompt)
+                ? pasteboard.readString()
+                : nil
             // Keep `{selection}` intact when no source is supplied, so the
-            // branch below can capture it fresh instead of blanking it.
+            // branch below can capture it fresh instead of blanking it; the
+            // shared engine leaves `{selection}` literal while filling
+            // `{argument …}` and `{clipboard}`.
             effectivePrompt = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? definition.prompt
-                : SavedPromptResolver.prompt(for: definition, source: source)
-            if effectivePrompt.contains("{selection}") {
-                guard let selected = captureSelectedText(promptForPermission: true) else {
-                    errorMessage = selectedTextService?.isAccessibilityTrusted == false
-                        ? "Allow Accessibility in System Settings, then select text and try again."
-                        : "This action needs selected text."
-                    requestInputFocus()
-                    return nil
-                }
-                effectivePrompt = effectivePrompt.replacingOccurrences(
-                    of: "{selection}",
-                    with: selected.text
+                ? (SnippetPlaceholders.containsPlaceholders(definition.prompt)
+                    ? SnippetPlaceholders.expand(
+                        definition.prompt,
+                        clipboard: clipboardText,
+                        arguments: argumentValues
+                    ).text
+                    : definition.prompt)
+                : SavedPromptResolver.prompt(
+                    for: definition,
+                    source: source,
+                    arguments: argumentValues,
+                    clipboard: clipboardText
                 )
-            }
             let preamble = preambleParts.joined(separator: "\n\n")
             if !preamble.isEmpty {
                 effectivePrompt = preamble + "\n\n" + effectivePrompt
@@ -8264,10 +8706,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return nil
         }
 
-        let actionDefinition = action.flatMap { resolution in
-            settings.savedPrompts.first(where: { $0.id == resolution.actionID })
-        }
-
         // The launch-scoped background selection rides with exactly one model
         // request; consume it here so it never leaks into a later follow-up
         // or a brand-new conversation. Local answers return above and keep it.
@@ -8282,6 +8720,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             trayItemIDs: trayItemIDs,
             action: action,
             actionDefinition: actionDefinition,
+            actionSource: actionSourceText,
+            actionSourceApp: actionSourceLabel,
+            actionTarget: actionTarget,
             effectivePrompt: effectivePrompt,
             chatShowedAnswer: chatShowsAnswer,
             contextEvaluation: contextEvaluation
@@ -8465,6 +8906,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Returns `false` when the search failed or the ask was stopped and
     /// the request must not reach the model.
     func enrich(_ request: inout PreparedRequest) async -> Bool {
+        // A transform marked text-only never searches or fetches: the model
+        // sees the source and nothing else, exactly as it sees no tools.
+        // Only an explicit per-action choice reaches here; an ordinary prompt
+        // is unchanged.
+        if request.actionDefinition?.textOnly == true { return true }
         if ChatContextGate.allowsWebSearch(request.contextEvaluation),
            let query = webSearchQuery(
             submittedInput: request.submittedInput,
@@ -8839,6 +9285,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             provider: provider,
             model: model,
             toolOverride: request.contextEvaluation?.gatedTools,
+            textOnly: request.actionDefinition?.textOnly == true,
             grounded: request.contextEvaluation?.grounded == true,
             attachmentTrim: composed.trim,
             roundRecorder: roundRecorder
@@ -9093,10 +9540,31 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     detail: output.isEmpty ? "empty-answer" : (action == nil ? "prompt" : "action")
                 )
                 var didAutoWrite = false
-                if action?.outputBehavior == .replaceSelection, !output.isEmpty {
+                if action?.outputBehavior == .reviewChanges, !output.isEmpty {
+                    // Opt-in review: keep the answer on screen and offer the
+                    // original beside it. Nothing replaces the selection
+                    // until Accept, and Accept fails closed to Copy.
+                    //
+                    // Freeze the target now: bind only when the transform
+                    // ran on the captured live selection itself, so a
+                    // clipboard or attached source is never written into the
+                    // app that happened to hold the launch selection.
+                    let boundTarget = request.actionTarget
+                    if !isAIChatWindow { openQuickAI() }
+                    pendingTransformReview = PendingTransformReview(
+                        original: request.actionSource,
+                        proposed: output,
+                        sourceApp: boundTarget?.target.applicationName ?? request.actionSourceApp,
+                        target: boundTarget
+                    )
                     didAutoWrite = true
-                    let context = captureSelectedText(promptForPermission: false)
-                    if let selectedTextService {
+                } else if action?.outputBehavior == .replaceSelection, !output.isEmpty {
+                    didAutoWrite = true
+                    // Bind to the text the action ran on. A typed alias
+                    // context or a clipboard source never overwrites the
+                    // captured launch selection; it copies instead.
+                    let context = request.actionTarget
+                    if let selectedTextService, let context {
                         _ = await writeBackValidated(
                             output: output,
                             in: context,
@@ -9117,7 +9585,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 // inherited by a follow-up or an unrelated ad-hoc answer.
                 if !didAutoWrite,
                    actionDefinition != nil,
-                   let context = selectedTextContext {
+                   let context = request.actionTarget {
                     replaceableSelectionContext = context
                 }
                 // A card the Chief of Staff just made takes the keyboard, so
@@ -9343,6 +9811,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         definition: SavedPrompt,
         executable: String,
         context: String,
+        sourceTarget: SelectedTextContext?,
         submittedInput: String,
         takesComposerText: Bool
     ) async {
@@ -9383,14 +9852,24 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             output = result
             recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
             var didAutoWrite = false
-            if definition.outputBehavior == .replaceSelection,
+            if definition.outputBehavior == .reviewChanges, !output.isEmpty {
+                if !isAIChatWindow { openQuickAI() }
+                pendingTransformReview = PendingTransformReview(
+                    original: context,
+                    proposed: output,
+                    sourceApp: sourceTarget?.target.applicationName,
+                    target: sourceTarget
+                )
+                didAutoWrite = true
+            } else if definition.outputBehavior == .replaceSelection,
                !output.isEmpty {
                 didAutoWrite = true
-                let context = captureSelectedText(promptForPermission: false)
-                if let selectedTextService {
+                // The command ran on `context`; only write back when that text
+                // is the captured live selection, never a typed alias tail.
+                if let selectedTextService, let target = sourceTarget {
                     _ = await writeBackValidated(
                         output: output,
-                        in: context,
+                        in: target,
                         service: selectedTextService
                     )
                 } else {
@@ -9402,7 +9881,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 copyOutput()
                 markJustCopied()
             }
-            if !didAutoWrite, let selectionContext = selectedTextContext {
+            if !didAutoWrite, let selectionContext = sourceTarget {
                 replaceableSelectionContext = selectionContext
             }
             requestInputFocus()
@@ -9741,6 +10220,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         model: String,
         chatTools: Bool = true,
         toolOverride: Set<ChatToolKind>? = nil,
+        /// A `.textOnly` saved action offers the model no tools at all,
+        /// including the clarifying-question tool, which is derived here
+        /// rather than through `toolOverride`.
+        textOnly: Bool = false,
         /// True when this turn carries a source. The tools are offered
         /// either way now; this adds the sentence that keeps the answer on
         /// the attached material (`ChatContextGate.groundingDirective`).
@@ -9753,8 +10236,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
             // A source-grounded request passes the gated set; everything
-            // else uses the chat's own offered set.
-            let tools = toolOverride ?? self.chatTools
+            // else uses the chat's own offered set. A text-only action gets
+            // the empty set no matter what the chat offered.
+            let tools = textOnly ? [] : (toolOverride ?? self.chatTools)
             // The model gets a search_web tool so it can look things up
             // mid-answer, using the same provider as explicit searches.
             var webSearch: (@Sendable (String) async throws -> String)?
@@ -9777,7 +10261,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // The question card is behind the Quick AI setting "Let the model
             // ask clarifying questions"; off, the tool is not offered at all.
             var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
-            if settings.quickAIClarifyingQuestionsEnabled {
+            if settings.quickAIClarifyingQuestionsEnabled, !textOnly {
                 askUserQuestion = { [weak self] question in
                     guard let self else { return nil }
                     return await self.awaitAskQuestionAnswer(question)
@@ -9793,7 +10277,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 ),
                 webSearch: webSearch,
                 askUserQuestion: askUserQuestion,
-                tools: chatTools
+                tools: chatTools && !textOnly
                     ? ChatToolbox(
                         enabled: tools,
                         memory: memoryService,
@@ -10105,7 +10589,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Replace Selection action and a custom `.replaceSelection` saved action's
     /// auto-write, so a stale or unreadable selection is never overwritten.
     /// On any failure it copies the output and reports why, truthfully.
-    private func writeBackValidated(
+    func writeBackValidated(
         output text: String,
         in context: SelectedTextContext?,
         service selectedTextService: any SelectedTextServicing
@@ -10152,12 +10636,64 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func pasteOutputToPreviousApp() async -> Bool {
         guard !output.isEmpty else { return false }
         guard let selectionTarget, let selectedTextService else {
-            errorMessage = "Open Quick Launch from the app where you want to paste."
+            // Nothing to paste into: copy, as every other failure here does,
+            // so the answer is never trapped on screen with no way out.
+            copyOutputAndMark()
+            errorMessage = "Open Quick Launch from the app where you want to paste. The result was copied instead."
             requestInputFocus()
             return false
         }
         guard await selectedTextService.paste(output, to: selectionTarget) else {
             copyOutputAndMark()
+            errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
+            requestInputFocus()
+            return false
+        }
+        overlayPresenter.dismissOverlay()
+        return true
+    }
+
+    /// Paste Formatted Response (`⌃⌘V`): publish the answer's plain, HTML and
+    /// RTF representations on the pasteboard and press ⌘V in the app behind.
+    ///
+    /// The rich path never uses the accessibility insert-at-caret text write,
+    /// which only carries a string and would drop the formatting; the
+    /// pasteboard plus ⌘V is what preserves it. When the answer is plain prose
+    /// with no structure to keep, or a rich representation could not be built,
+    /// it falls back to the ordinary plain paste, so the action never fails
+    /// just because there was nothing rich to carry. Either way the answer is
+    /// on the clipboard first, one manual ⌘V away.
+    @discardableResult
+    func pasteFormattedOutputToPreviousApp() async -> Bool {
+        guard !output.isEmpty else { return false }
+        let representation = FormattedPasteBuilder.representation(fromMarkdown: output)
+        guard let selectionTarget, let selectedTextService else {
+            // Nothing to paste into: publish the rendered text transiently and
+            // say so, rather than dropping the answer.
+            pasteboard.writeTransientString(representation.plainText)
+            markJustCopied()
+            errorMessage = "Open Quick Launch from the app where you want to paste. The result was copied instead."
+            requestInputFocus()
+            return false
+        }
+        guard representation.prefersRichPaste else {
+            // No structure to preserve: the plain path is the honest one.
+            guard await selectedTextService.paste(representation.plainText, to: selectionTarget) else {
+                pasteboard.writeTransientString(representation.plainText)
+                markJustCopied()
+                errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
+                requestInputFocus()
+                return false
+            }
+            overlayPresenter.dismissOverlay()
+            return true
+        }
+        // The rich types are published transiently so a clipboard manager
+        // skips the paste plumbing; ⌘V is the only insertion path here.
+        pasteboard.writeTransientFormatted(representation)
+        guard await selectedTextService.pastePasteboard(to: selectionTarget) else {
+            pasteboard.writeTransientString(representation.plainText)
+            markJustCopied()
             errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
             requestInputFocus()
             return false
@@ -10302,6 +10838,18 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
     }
 
+    /// The save counterpart of `markJustCopied`: a short launcher flash that
+    /// a capture landed in the Screenshots folder.
+    func markJustSaved() {
+        justSavedTask?.cancel()
+        justSaved = true
+        justSavedTask = Task { @MainActor [weak self, timeout = justCopiedTimeout] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.justSaved = false
+        }
+    }
+
     // MARK: - Clear
 
     func clearOutput() {
@@ -10338,6 +10886,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             activeItemActionForm = nil
             deleteArmedItemID = nil
             actionQuery = ""
+            clearTransformFlowState()
         }
         if scope.contains(.mode) {
             catalogIdleResetTask?.cancel()
@@ -10398,6 +10947,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             threadNotice = nil
             clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
+            clearTransformFlowState()
             currentConversation = nil
             reattachStates = [:]
             activeVaultSearchMode = nil

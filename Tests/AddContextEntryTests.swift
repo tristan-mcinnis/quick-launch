@@ -11,15 +11,15 @@ struct AddContextEntryTests {
     @Test func theMenuListsFilesLinksAndSelectedTextBeforeCaptures() {
         let rows = AddContextRow.menu(finderIsBehind: false)
         #expect(rows.map(\.title) == [
-            "Files…", "Link…", "Selected Text", "Focused Window", "Selected Area", "Entire Screen",
+            "Files…", "Link…", "Clipboard History", "Selected Text", "Focused Window", "Selected Area", "Entire Screen",
         ])
-        #expect(rows.prefix(2).allSatisfy { $0.capture == nil })
-        #expect(rows.dropFirst(2).compactMap(\.capture) == [.selectedText, .focusedWindow, .selectedArea, .entireScreen])
+        #expect(rows.prefix(3).allSatisfy { $0.capture == nil })
+        #expect(rows.dropFirst(3).compactMap(\.capture) == [.selectedText, .focusedWindow, .selectedArea, .entireScreen])
     }
 
     @Test func finderSelectionIsListedOnlyBehindFinder() {
         let behindFinder = AddContextRow.menu(finderIsBehind: true)
-        #expect(behindFinder.count == 7)
+        #expect(behindFinder.count == 8)
         #expect(behindFinder.last == .finderSelection)
         #expect(behindFinder.last?.title == "Finder Selection")
 
@@ -31,6 +31,7 @@ struct AddContextEntryTests {
     @Test func theNewRowsCarryTheSpecGlyphs() {
         #expect(AddContextRow.file.systemImage == "doc.badge.plus")
         #expect(AddContextRow.link.systemImage == "link")
+        #expect(AddContextRow.clipboardHistory.systemImage == "doc.on.clipboard")
         #expect(AddContextRow.finderSelection.systemImage == "folder")
         for row in AddContextRow.menu(finderIsBehind: true) {
             #expect(NSImage(systemSymbolName: row.systemImage, accessibilityDescription: nil) != nil)
@@ -46,9 +47,9 @@ struct AddContextEntryTests {
                 == AddContextEntry.allCases.map(AddContextRow.capture)
         )
         let tray = AttachmentTray(extractor: FakeAttachmentExtractor())
-        #expect(AddContextPane.rows(captures: AddContextEntry.allCases, tray: tray).count == 6)
-        tray.finderIsBehind = true
         #expect(AddContextPane.rows(captures: AddContextEntry.allCases, tray: tray).count == 7)
+        tray.finderIsBehind = true
+        #expect(AddContextPane.rows(captures: AddContextEntry.allCases, tray: tray).count == 8)
     }
 
     @Test func theFilePanelOffersTheReadableTypes() {

@@ -30,6 +30,20 @@ final class FakePasteboard: PasteboardWriting {
         transientWriteCount += 1
         isTransient = true
     }
+
+    /// The last formatted representation a transient write published, and how
+    /// many there were: what a formatted-paste test reads back.
+    private(set) var formattedWriteCount = 0
+    private(set) var lastFormattedRepresentation: FormattedPasteRepresentation?
+
+    func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
+        string = representation.plainText
+        writeCount += 1
+        transientWriteCount += 1
+        isTransient = true
+        formattedWriteCount += 1
+        lastFormattedRepresentation = representation
+    }
 }
 
 /// Records every open and reveal; never launches anything.

@@ -59,6 +59,8 @@ extension QuickViewModel {
             // the clipboard. Reading the pasteboard never writes it.
             attachmentTray.beginLinkEntry(clipboard: pasteboard.readString())
             errorMessage = nil
+        case .clipboardHistory:
+            openClipboardHistory()
         case .finderSelection:
             closeAddContextMenu()
             attachFinderSelection()

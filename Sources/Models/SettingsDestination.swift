@@ -250,8 +250,11 @@ enum SettingsDestinationIndex {
 
         // Clipboard & Capture
         group("clipboard.history", .clipboard, "clipboard.history", "Clipboard History",
-              "Keep copied text, its hotkey, and how many items survive",
-              ["clipboard", "history", "copy", "hotkey", "limit", "text"]),
+              "Keep copied text, its hotkey, retention, source exclusions, and OCR",
+              ["clipboard", "history", "copy", "hotkey", "limit", "text", "retention", "expire", "source", "app", "ocr"]),
+        group("clipboard.screenshots", .clipboard, "clipboard.screenshots", "Screenshots",
+              "Saved-capture folders, media types, OCR, and grid layout",
+              ["screenshot", "screenshots", "capture", "folder", "video", "media", "grid", "columns", "ocr"]),
         group("clipboard.colors", .clipboard, "clipboard.colors", "Colors",
               "Color format and picked-color history",
               ["color", "colour", "format", "hex", "rgb", "history", "picker"]),

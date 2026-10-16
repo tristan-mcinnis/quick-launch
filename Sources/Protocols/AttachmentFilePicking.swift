@@ -7,6 +7,14 @@ import UniformTypeIdentifiers
 @MainActor
 protocol AttachmentFilePicking: AnyObject {
     func chooseFiles(allowedExtensions: [String]) async -> [URL]
+    /// A save panel for exporting a clipboard payload to a file the user
+    /// picks. Nil when the user cancels, or when this picker has no save
+    /// path. Default nil so existing fakes still compile.
+    func chooseExportDestination(suggestedName: String, allowedExtensions: [String]) async -> URL?
+}
+
+extension AttachmentFilePicking {
+    func chooseExportDestination(suggestedName: String, allowedExtensions: [String]) async -> URL? { nil }
 }
 
 /// The open panel: several files at once, files only, section 3.3's types.
@@ -31,5 +39,21 @@ final class SystemAttachmentFilePicker: AttachmentFilePicking {
             panel.begin { continuation.resume(returning: $0) }
         }
         return response == .OK ? panel.urls : []
+    }
+
+    func chooseExportDestination(suggestedName: String, allowedExtensions: [String]) async -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.canCreateDirectories = true
+        if !allowedExtensions.isEmpty {
+            panel.allowedContentTypes = allowedExtensions.compactMap { UTType(filenameExtension: $0) }
+        }
+        panel.prompt = "Save"
+        panel.message = "Save this clipboard item as a file."
+        NSApp.activate()
+        let response = await withCheckedContinuation { (continuation: CheckedContinuation<NSApplication.ModalResponse, Never>) in
+            panel.begin { continuation.resume(returning: $0) }
+        }
+        return response == .OK ? panel.url : nil
     }
 }

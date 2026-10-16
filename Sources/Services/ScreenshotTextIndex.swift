@@ -13,6 +13,9 @@ final class ScreenshotTextIndex {
         let text: String
         let modifiedAt: Double
         let byteCount: Int
+        /// The OCR mode this text was recognized with. Older indexes have none
+        /// and are re-read once; a later mode change re-indexes the file.
+        let mode: String?
     }
 
     struct Progress: Equatable, Sendable {
@@ -67,14 +70,14 @@ final class ScreenshotTextIndex {
 
     /// Reads anything new or changed, newest first, and drops entries for
     /// files that are gone. Safe to call on every catalog open.
-    func refresh(for items: [LauncherCatalogItem]) {
+    func refresh(for items: [LauncherCatalogItem], mode: ClipboardOCRMode = .accurate) {
         let known = Set(items.map(\.value))
         if entries.keys.contains(where: { !known.contains($0) }) {
             entries = entries.filter { known.contains($0.key) }
             normalizedCache = normalizedCache.filter { known.contains($0.key) }
             persist()
         }
-        let pending = items.filter { entries[$0.value]?.matches($0) != true }
+        let pending = items.filter { entries[$0.value]?.matches($0, mode: mode) != true }
         guard !pending.isEmpty, indexingTask == nil else { return }
 
         progress = Progress(completed: 0, total: pending.count)
@@ -86,13 +89,14 @@ final class ScreenshotTextIndex {
                 if Task.isCancelled { break }
                 let path = item.value
                 let text = await Task.detached(priority: .utility) {
-                    await Self.recognizeText(atPath: path)
+                    await Self.recognizeText(atPath: path, mode: mode)
                 }.value
                 guard let self else { return }
                 self.entries[path] = Entry(
                     text: text,
                     modifiedAt: item.capturedAt?.timeIntervalSince1970 ?? 0,
-                    byteCount: Self.byteCount(of: path)
+                    byteCount: Self.byteCount(of: path),
+                    mode: mode.rawValue
                 )
                 self.normalizedCache[path] = nil
                 self.progress.completed += 1
@@ -133,21 +137,22 @@ final class ScreenshotTextIndex {
     }
 
     /// Runs off the main actor; only plain text crosses back.
-    nonisolated static func recognizeText(atPath path: String) async -> String {
+    nonisolated static func recognizeText(atPath path: String, mode: ClipboardOCRMode = .accurate) async -> String {
         guard let image = downsampledImage(atPath: path, maximumPixels: maximumPixels) else { return "" }
-        return await recognizeText(in: image)
+        return await recognizeText(in: image, mode: mode)
     }
 
-    /// OCR over in-memory image bytes (a fresh screen-area capture).
-    nonisolated static func recognizeText(in data: Data) async -> String {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return "" }
-        return await recognizeText(in: image)
+    /// OCR over in-memory image bytes (a fresh screen-area capture). Decodes
+    /// through a bounded thumbnail so the full-resolution image is never
+    /// decoded into memory.
+    nonisolated static func recognizeText(in data: Data, mode: ClipboardOCRMode = .accurate) async -> String {
+        guard let image = downsampledImage(in: data, maximumPixels: maximumPixels) else { return "" }
+        return await recognizeText(in: image, mode: mode)
     }
 
-    nonisolated static func recognizeText(in image: CGImage) async -> String {
+    nonisolated static func recognizeText(in image: CGImage, mode: ClipboardOCRMode = .accurate) async -> String {
         var request = RecognizeTextRequest()
-        request.recognitionLevel = .accurate
+        request.recognitionLevel = mode == .fast ? .fast : .accurate
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = true
         request.recognitionLanguages = languages.map { Locale.Language(identifier: $0) }
@@ -160,8 +165,22 @@ final class ScreenshotTextIndex {
     }
 
     nonisolated static func downsampledImage(atPath path: String, maximumPixels: Int) -> CGImage? {
-        let url = URL(fileURLWithPath: path) as CFURL
+        let fileURL = URL(fileURLWithPath: path)
+        guard !ScreenshotLibrary.isUnavailable(fileURL) else { return nil }
+        let url = fileURL as CFURL
         guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        return downsampledImage(from: source, maximumPixels: maximumPixels)
+    }
+
+    /// A bounded decode from in-memory bytes (a copied image, a fresh
+    /// capture), so an oversized or hostile image cannot allocate its full
+    /// pixel buffer just to be read for text or a code.
+    nonisolated static func downsampledImage(in data: Data, maximumPixels: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return downsampledImage(from: source, maximumPixels: maximumPixels)
+    }
+
+    nonisolated private static func downsampledImage(from source: CGImageSource, maximumPixels: Int) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -173,9 +192,18 @@ final class ScreenshotTextIndex {
 
 extension ScreenshotTextIndex.Entry {
     func matches(_ item: LauncherCatalogItem) -> Bool {
+        matches(item, mode: nil)
+    }
+
+    /// Whether the cached text is still valid for the item. When `mode` is
+    /// given, text recognized with a different mode is stale and is re-read:
+    /// the Text recognition control is not a dead setting.
+    func matches(_ item: LauncherCatalogItem, mode: ClipboardOCRMode?) -> Bool {
         guard let capturedAt = item.capturedAt else { return false }
-        return abs(modifiedAt - capturedAt.timeIntervalSince1970) < 1
-            && byteCount == ScreenshotTextIndex.byteCount(of: item.value)
+        guard abs(modifiedAt - capturedAt.timeIntervalSince1970) < 1,
+              byteCount == ScreenshotTextIndex.byteCount(of: item.value) else { return false }
+        guard let mode else { return true }
+        return self.mode == mode.rawValue
     }
 }
 
@@ -202,7 +230,9 @@ enum ScreenshotThumbnailCache {
     }
 
     static func pixelSize(forPath path: String) -> CGSize? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+        let url = URL(fileURLWithPath: path)
+        guard !ScreenshotLibrary.isUnavailable(url),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int

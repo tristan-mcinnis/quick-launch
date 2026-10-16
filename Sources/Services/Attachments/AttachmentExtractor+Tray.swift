@@ -16,6 +16,8 @@ extension AttachmentExtractor: AttachmentExtracting {
                 return Self.imageContent(image, name: name, kind: kind)
             case .selection(let text, let appName):
                 return try Self.selectionContent(text, appName: appName)
+            case .clipboard(let text, let appName):
+                return try Self.clipboardContent(text, appName: appName)
             }
         } catch let failure as AttachmentFailure {
             throw AttachmentReadFailure(failure.chipLine)
@@ -59,6 +61,22 @@ extension AttachmentExtractor: AttachmentExtracting {
             extractorVersion: version
         )
         return AttachmentContent(ref: ref, text: finished.text, kindLabel: "Selected text")
+    }
+
+    /// Text taken from the Clipboard History, as a text attachment. Named
+    /// "Clipboard" so it is never mistaken for live selected text, and read
+    /// through the same NFKC/retention pipeline as a selection.
+    static func clipboardContent(_ text: String, appName: String?) throws -> AttachmentContent {
+        let finished = try DocumentText(text: text).finished()
+        let ref = ChatAttachmentRef(
+            kind: .text,
+            name: appName.map { "Clipboard · \($0)" } ?? "Clipboard",
+            characterCount: finished.characterCount,
+            truncation: finished.truncation,
+            contentHash: sha256(Data(text.utf8)),
+            extractorVersion: version
+        )
+        return AttachmentContent(ref: ref, text: finished.text, kindLabel: "Clipboard")
     }
 }
 

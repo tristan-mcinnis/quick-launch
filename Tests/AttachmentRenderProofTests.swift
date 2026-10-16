@@ -228,14 +228,14 @@ struct AttachmentRenderProofTests {
         }
     }
 
-    @Test func rendersAddContextWithSevenRowsAndTheLinkField() async throws {
+    @Test func rendersAddContextWithAllRowsAndTheLinkField() async throws {
         for (appearance, suffix) in Self.appearances {
             let vm = await Self.quickAI(appearance)
             vm.input = ""
             let tray = AttachmentTray(extractor: FakeAttachmentExtractor())
             tray.finderIsBehind = true
             vm.openAddContextMenu()
-            #expect(AddContextPane.rows(captures: vm.addContextOptions, tray: tray).count == 7)
+            #expect(AddContextPane.rows(captures: vm.addContextOptions, tray: tray).count == 8)
             try Self.save(try Self.renderQuickAI(vm, tray: tray, appearance: appearance),
                           name: "att-add-context-quick-ai-\(suffix).png")
 

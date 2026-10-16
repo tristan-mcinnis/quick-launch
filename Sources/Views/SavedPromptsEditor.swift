@@ -236,6 +236,21 @@ struct SavedPromptsEditor: View {
                 .labelsHidden()
                 .frame(maxWidth: 260)
             }
+            CardNote {
+                CardText(prompt.outputBehavior.detail)
+            }
+
+            if !prompt.isAssistant {
+                SettingsRow(title: "Text only") {
+                    Toggle("Text only", isOn: bindingForTextOnly(prompt.id))
+                        .labelsHidden()
+                        .toggleStyle(InkToggleStyle())
+                        .accessibilityLabel("Text only")
+                }
+                CardNote {
+                    CardText("Text only offers the model no tools and skips web search and page reading. It applies to a plain transform, not an assistant.")
+                }
+            }
 
             SettingsRow(title: "Global hotkey") {
                 ActionHotkeyRecorderView(
@@ -410,6 +425,15 @@ struct SavedPromptsEditor: View {
             },
             set: { newValue in
                 update(id) { $0.outputBehavior = newValue }
+            }
+        )
+    }
+
+    private func bindingForTextOnly(_ id: SavedPrompt.ID) -> Binding<Bool> {
+        Binding(
+            get: { viewModel.settings.savedPrompts.first(where: { $0.id == id })?.textOnly ?? false },
+            set: { newValue in
+                update(id) { $0.textOnly = newValue }
             }
         )
     }

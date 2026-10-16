@@ -15,6 +15,10 @@ enum AttachmentSource: Sendable, Equatable {
     case image(QuickImageAttachment, name: String, kind: ChatAttachmentKind)
     /// Text selected in another app: a "Selection · Safari" chip.
     case selection(String, appName: String?)
+    /// Text taken from the Clipboard History: a "Clipboard · Safari" chip. It
+    /// is deliberately distinct from a selection so it is never read as live
+    /// selected text.
+    case clipboard(String, appName: String?)
 
     /// The kind the chip shows before the source is read. A file guesses
     /// from its extension; the extractor's reference has the last word.
@@ -24,6 +28,7 @@ enum AttachmentSource: Sendable, Equatable {
         case .link: .link
         case .image(_, _, let kind): kind.isImage ? kind : .image
         case .selection: .selection
+        case .clipboard: .text
         }
     }
 
@@ -38,6 +43,8 @@ enum AttachmentSource: Sendable, Equatable {
             name
         case .selection(_, let appName):
             appName.map { "Selection · \($0)" } ?? "Selection"
+        case .clipboard(_, let appName):
+            appName.map { "Clipboard · \($0)" } ?? "Clipboard"
         }
     }
 
@@ -46,7 +53,7 @@ enum AttachmentSource: Sendable, Equatable {
         switch self {
         case .file(let url): "file:" + url.standardizedFileURL.path
         case .link(let url): "link:" + url.absoluteString
-        case .image, .selection: nil
+        case .image, .selection, .clipboard: nil
         }
     }
 }

@@ -270,6 +270,40 @@ struct OverlayRenderProofTests {
         try Self.saveSettings(vm, tab: .items, name: "settings-items-dark.png")
         // Colors, Emoji & Symbols, and Text from Screen live on this tab.
         try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-dark.png")
+        try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-light.png", appearance: .aqua)
+    }
+
+    /// The saved-media browser as a grid, in both appearances: the cells read
+    /// the same item identity the list uses and a video shows a play glyph.
+    @Test func rendersScreenshotGridDarkAndLight() throws {
+        for (appearance, preference, suffix) in [
+            (NSAppearance.Name.darkAqua, AppearancePreference.dark, "dark"),
+            (.aqua, .light, "light"),
+        ] {
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("quick-launch-proof-grid-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: folder) }
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for index in 1...6 {
+                try ScreenAwarenessTests.writeImage(
+                    to: folder.appendingPathComponent(String(format: "Screenshot 2026-08-22 at 09.%02d.12.png", index)),
+                    text: "Grid cell \(index)"
+                )
+            }
+            try Data([0x00, 0x00, 0x00]).write(
+                to: folder.appendingPathComponent("Screenshot 2026-08-22 at 10.00.00.mov")
+            )
+            let vm = Self.makeViewModel(appearance: preference)
+            vm.settings.screenshotTextSearch = false
+            vm.settings.screenshotUseGrid = true
+            vm.settings.screenshotColumns = 3
+            vm.screenshotsFolder = folder
+            vm.enterCatalog(.screenshots)
+            vm.applicationSelectionIndex = 0
+            #expect(vm.isGridCatalog, "the grid proof needs the grid layout")
+            let image = try Self.render(viewModel: vm, appearance: appearance)
+            try Self.save(image, name: "overlay-screenshot-grid-\(suffix).png")
+        }
     }
 
     private static func saveSettings(

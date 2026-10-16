@@ -87,7 +87,7 @@ struct KeyboardShortcutsSettingsView: View {
         SettingsCard("Global Hotkeys") {
             CardNote(isFirst: true) {
                 CardText(
-                    "These work system-wide, in every app, so they live with the rest of the system settings: Quick Launch, Clipboard History, the Translator, and Type to Click are in General. A launcher item's hotkey is in Items; a quick action's is in AI Commands."
+                    "These work system-wide, in every app, so they live with the rest of the system settings: Quick Launch, Quick AI, Clipboard History, the Translator, and Type to Click are in General. A launcher item's hotkey is in Items; a quick action's is in AI Commands."
                 )
             }
             GlobalHotkeyRow(title: "Open Quick Launch", caps: launcherCaps, isFirst: false)
@@ -95,6 +95,9 @@ struct KeyboardShortcutsSettingsView: View {
             GlobalHotkeyRow(title: "Open Translator", caps: viewModel.settings.translatorHotkey.keyCaps)
             if viewModel.settings.typeToClickHotkeyEnabled {
                 GlobalHotkeyRow(title: "Type to Click", caps: viewModel.settings.typeToClickHotkey.keyCaps)
+            }
+            if viewModel.settings.quickAIHotkeyEnabled {
+                GlobalHotkeyRow(title: "Quick AI", caps: viewModel.settings.quickAIHotkey.keyCaps)
             }
             CardNote {
                 CardText(

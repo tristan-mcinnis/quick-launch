@@ -20,8 +20,15 @@ struct SnippetArgument: Equatable, Sendable, Identifiable {
     let index: Int
     /// Text used when the user leaves the slot empty.
     let defaultValue: String
+    /// A fixed set to pick from (`options="Formal,Casual"`), in the order
+    /// written. Empty means a free-text slot. Never more than five, so a
+    /// chooser can list them; a longer list keeps its first five.
+    var options: [String] = []
 
     var id: Int { index }
+
+    /// True when the slot offers a dropdown rather than free text.
+    var offersOptions: Bool { !options.isEmpty }
 }
 
 /// Raycast-style dynamic placeholders inside a snippet's own text, expanded
@@ -35,7 +42,7 @@ struct SnippetArgument: Equatable, Sendable, Identifiable {
 ///     {clipboard}            {clipboard | raw}
 ///     {date}                 {date format="yyyy-MM-dd" offset="+3M -5d"}
 ///     {time}                 {time format="HH:mm" offset="-90m"}
-///     {argument}             {argument name="Client" default="Acme"}
+///     {argument}             {argument name="Client" default="Acme" options="Acme,Globex"}
 ///
 /// A placeholder may carry `key="value"` attributes and any number of
 /// trailing `| modifier` pipes (`uppercase`, `lowercase`, `raw`). A name the
@@ -58,10 +65,32 @@ enum SnippetPlaceholders {
             slots.append(SnippetArgument(
                 name: label.isEmpty ? "Argument \(slots.count + 1)" : label,
                 index: slots.count,
-                defaultValue: placeholder.attributes["default"] ?? ""
+                defaultValue: placeholder.attributes["default"] ?? "",
+                options: parseOptions(placeholder.attributes["options"])
             ))
         }
         return slots
+    }
+
+    /// `options="A,B,C"` becomes `["A", "B", "C"]`: trimmed, non-empty,
+    /// in order, capped at five so a chooser can always draw it.
+    static func parseOptions(_ raw: String?) -> [String] {
+        guard let raw else { return [] }
+        let values: [String] = raw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(values.prefix(5))
+    }
+
+    /// True when the template has a `{clipboard}` placeholder, in any case
+    /// and with any modifiers. It reads nothing itself: the caller decides
+    /// whether to touch a pasteboard at all.
+    static func usesClipboard(_ template: String) -> Bool {
+        tokenize(template).contains { token in
+            if case .placeholder(let placeholder) = token { return placeholder.kind == .clipboard }
+            return false
+        }
     }
 
     /// True when the template holds at least one placeholder the engine

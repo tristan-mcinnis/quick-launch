@@ -27,6 +27,26 @@ final class SystemPasteboard: PasteboardWriting {
         Self.writeTransient(text, to: pasteboard)
     }
 
+    func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
+        var types: [NSPasteboard.PasteboardType] = [.string]
+        if !representation.html.isEmpty { types.append(.html) }
+        if !representation.rtf.isEmpty { types.append(.rtf) }
+        types.append(contentsOf: Self.transientMarkers)
+        pasteboard.clearContents()
+        pasteboard.declareTypes(types, owner: nil)
+        pasteboard.setString(representation.plainText, forType: .string)
+        if !representation.html.isEmpty,
+           let html = representation.html.data(using: .utf8) {
+            pasteboard.setData(html, forType: .html)
+        }
+        if !representation.rtf.isEmpty {
+            pasteboard.setData(representation.rtf, forType: .rtf)
+        }
+        for marker in Self.transientMarkers {
+            pasteboard.setData(Data(), forType: marker)
+        }
+    }
+
     /// The markers clipboard managers honour (nspasteboard.org): transient
     /// means "do not record", auto-generated means "the app wrote this, not
     /// the user". `ClipboardHistoryStore` skips both.
@@ -65,6 +85,14 @@ final class InMemoryPasteboard: PasteboardWriting {
     func writeString(_ text: String) { string = text }
 
     func writeTransientString(_ text: String) { string = text }
+
+    /// The last formatted representation written, for a test to read back.
+    private(set) var lastFormattedRepresentation: FormattedPasteRepresentation?
+
+    func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
+        string = representation.plainText
+        lastFormattedRepresentation = representation
+    }
 }
 
 @MainActor

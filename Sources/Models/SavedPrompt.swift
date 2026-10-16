@@ -4,11 +4,30 @@ import AppKit
 enum ActionOutputBehavior: String, Codable, Sendable, CaseIterable, Hashable {
     case showInOverlay
     case replaceSelection
+    /// Leave the result on screen and offer a review card (original vs
+    /// proposed) whose Accept writes back through the same fail-closed
+    /// live-selection check. Opt-in: nothing is replaced until accepted.
+    case reviewChanges
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: value) ?? .showInOverlay
+    }
 
     var displayName: String {
         switch self {
         case .showInOverlay: "Show in Quick Launch"
         case .replaceSelection: "Replace selected text"
+        case .reviewChanges: "Review before replacing"
+        }
+    }
+
+    /// One line under the picker, so the choice is not a guess.
+    var detail: String {
+        switch self {
+        case .showInOverlay: "Keep the result on screen; copy or paste it yourself"
+        case .replaceSelection: "Write the result over the text it ran on"
+        case .reviewChanges: "Show original and result, then Accept, Copy, or Cancel"
         }
     }
 }
@@ -116,12 +135,19 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
     /// once, through `SkillLibrary`, into its system message. A name the
     /// library does not list is skipped.
     var contextRefs: [String]
+    /// A plain transform's opt-in text-only policy: offer the model no
+    /// tools, and skip the web search and page reading `enrich` would
+    /// otherwise do. Default off, so an ordinary prompt is unchanged and
+    /// the model still judges whether it needs a tool.
+    var textOnly: Bool
 
     /// Tasks is encoded beside the legacy tool set so a rollback build that
     /// predates `ChatToolKind.tasks` can still decode every other setting.
     private enum CodingKeys: String, CodingKey {
         case id, name, alias, prompt, providerID, model, outputBehavior, hotkey
         case commandExecutable, commandArguments, systemPrompt, enabledTools, contextRefs
+        case textOnly
+        case reviewBeforeReplacing
         case tasksEnabled
     }
 
@@ -138,7 +164,8 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         commandArguments: [String]? = nil,
         systemPrompt: String? = nil,
         enabledTools: Set<ChatToolKind>? = nil,
-        contextRefs: [String] = []
+        contextRefs: [String] = [],
+        textOnly: Bool = false
     ) {
         self.id = id
         self.name = name ?? alias.replacingOccurrences(of: "-", with: " ").capitalized
@@ -153,6 +180,7 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.systemPrompt = systemPrompt
         self.enabledTools = enabledTools
         self.contextRefs = contextRefs
+        self.textOnly = textOnly
     }
 
     init(from decoder: Decoder) throws {
@@ -168,6 +196,9 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
             ActionOutputBehavior.self,
             forKey: .outputBehavior
         ) ?? .showInOverlay
+        if try c.decodeIfPresent(Bool.self, forKey: .reviewBeforeReplacing) == true {
+            outputBehavior = .reviewChanges
+        }
         hotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .hotkey)
         commandExecutable = try c.decodeIfPresent(String.self, forKey: .commandExecutable)
         commandArguments = try c.decodeIfPresent([String].self, forKey: .commandArguments)
@@ -177,6 +208,7 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
             enabledTools?.insert(.tasks)
         }
         contextRefs = try c.decodeIfPresent([String].self, forKey: .contextRefs) ?? []
+        textOnly = try c.decodeIfPresent(Bool.self, forKey: .textOnly) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -187,7 +219,12 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         try c.encode(prompt, forKey: .prompt)
         try c.encodeIfPresent(providerID, forKey: .providerID)
         try c.encodeIfPresent(model, forKey: .model)
-        try c.encode(outputBehavior, forKey: .outputBehavior)
+        // Earlier builds understand the existing output enum and ignore the
+        // additional flag, so rolling back cannot reset every saved setting.
+        try c.encode(outputBehavior == .reviewChanges ? .showInOverlay : outputBehavior, forKey: .outputBehavior)
+        if outputBehavior == .reviewChanges {
+            try c.encode(true, forKey: .reviewBeforeReplacing)
+        }
         try c.encodeIfPresent(hotkey, forKey: .hotkey)
         try c.encodeIfPresent(commandExecutable, forKey: .commandExecutable)
         try c.encodeIfPresent(commandArguments, forKey: .commandArguments)
@@ -198,6 +235,7 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
             try c.encode(tasksEnabled, forKey: .tasksEnabled)
         }
         try c.encode(contextRefs, forKey: .contextRefs)
+        try c.encode(textOnly, forKey: .textOnly)
     }
 
     /// True for an assistant: instructions set, and no command to run.

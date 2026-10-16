@@ -147,7 +147,7 @@ struct InputModeTests {
 
         let file = vm.catalogMatches.first!
         #expect(ItemActionCatalog.actions(for: .item(file), pasteTarget: nil).map(\.title)
-            == ["Paste Image", "Copy Image", "Attach to Question", "Quick Look", "Pin to Top", "Reveal in Finder", "Copy File Path", "Move to Trash"])
+            == ["Paste Image", "Copy Image", "Attach to Question", "Copy Text from Image", "Copy Text from QR Code", "Annotate in Preview", "Quick Look", "Pin to Top", "Reveal in Finder", "Copy File Path", "Move to Trash"])
     }
 
     @Test func screenshotSearchForgivesPluralsAndDateWordsAnywhere() throws {

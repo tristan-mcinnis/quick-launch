@@ -19,6 +19,12 @@ protocol PasteboardWriting: AnyObject {
     /// the Clipboard History and other clipboard managers skip. The text is
     /// still one Command-V away.
     func writeTransientString(_ text: String)
+    /// Replaces every item with a formatted answer's plain, HTML and RTF
+    /// representations together, marked transient and auto-generated, so a
+    /// formatted paste keeps its structure in the app behind without the
+    /// Clipboard History recording the paste plumbing. A conformer that does
+    /// not implement it falls back to the plain string.
+    func writeTransientFormatted(_ representation: FormattedPasteRepresentation)
     /// Replaces every item with the image at `url` plus its file URL (pastes
     /// inline in chat apps, as a file in Finder). Returns false when the file
     /// is not a readable image. Only the system pasteboard touches the real
@@ -28,6 +34,12 @@ protocol PasteboardWriting: AnyObject {
 }
 
 extension PasteboardWriting {
+    /// A conformer without a rich path still publishes the plain text, so an
+    /// injected fake or a partial conformer never loses the answer.
+    @MainActor func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
+        writeTransientString(representation.plainText)
+    }
+
     /// A conformer without an image path records nothing and never writes
     /// the real clipboard.
     @MainActor func writeImageFile(at url: URL) -> Bool {

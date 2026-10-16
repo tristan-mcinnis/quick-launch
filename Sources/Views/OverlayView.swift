@@ -136,6 +136,12 @@ struct OverlayView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Stop response")
                     .help("Working… press Escape to stop")
+                } else if viewModel.justSaved {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(AQDesign.TypeToken.input)
+                        .foregroundStyle(AQDesign.ColorToken.success)
+                        .accessibilityLabel("Saved to Screenshots")
+                        .help("Saved to Screenshots")
                 } else if viewModel.justCopied {
                     Image(systemName: "checkmark.circle.fill")
                         .font(AQDesign.TypeToken.input)
@@ -152,9 +158,19 @@ struct OverlayView: View {
             if viewModel.launchSelection != nil {
                 HouseDivider()
                 LaunchSelectionStrip(viewModel: viewModel)
+            }
 
+            // The transform surface follows whatever source is active, not
+            // only the launch-selection strip: an attached or clipboard
+            // selection reaches the same chooser and argument field.
+            if viewModel.hasTransformSource {
                 if viewModel.isTransformChooserPresented {
+                    HouseDivider()
                     TransformChooserPane(viewModel: viewModel)
+                }
+                if viewModel.isTransformArgumentFieldPresented {
+                    HouseDivider()
+                    TransformArgumentPane(viewModel: viewModel)
                 }
             }
 
@@ -180,6 +196,7 @@ struct OverlayView: View {
             }
 
             if !viewModel.isTransformChooserPresented,
+               !viewModel.isTransformArgumentFieldPresented,
                !viewModel.isModelChooserPresented,
                !viewModel.isCaptureChooserPresented,
                !viewModel.isAddContextMenuPresented,
@@ -198,7 +215,11 @@ struct OverlayView: View {
                         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
                         .layoutPriority(1)
                 } else if viewModel.isGridCatalog {
-                    EmojiGridView(viewModel: viewModel)
+                    if viewModel.catalogScope == .screenshots {
+                        ScreenshotGridView(viewModel: viewModel)
+                    } else {
+                        EmojiGridView(viewModel: viewModel)
+                    }
                 } else {
                     HStack(alignment: .top, spacing: 0) {
                         launcherList
@@ -1673,7 +1694,7 @@ struct TransformChooserPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: AQDesign.Space.row) {
-                Text("Transform selected text")
+                Text(viewModel.transformChooserTitle)
                     .font(AQDesign.TypeToken.section)
                     .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 Spacer()
@@ -1685,7 +1706,7 @@ struct TransformChooserPane: View {
             .padding(.top, AQDesign.Space.standard)
 
             SelectableListPane(
-                items: viewModel.chipTransformOptions,
+                items: viewModel.transformChooserOptions,
                 selectedIndex: $viewModel.transformChooserIndex,
                 rowHeight: AQDesign.rowHeight,
                 scrollsToSelection: true,
@@ -1708,7 +1729,7 @@ struct TransformChooserPane: View {
                 .contentShape(Rectangle())
             }
             .modifier(ComposerPaneListHeight(
-                preferredHeight: PanelSizing.actionListHeight(rows: viewModel.chipTransformOptions.count, padded: false)
+                preferredHeight: PanelSizing.actionListHeight(rows: viewModel.transformChooserOptions.count, padded: false)
             ))
             .padding(.horizontal, AQDesign.Space.standard)
             .padding(.bottom, AQDesign.Space.standard)
@@ -1899,7 +1920,9 @@ struct AddContextPane: View {
 
     var body: some View {
         Group {
-            if let tray = activeTray, tray.isEnteringLink {
+            if viewModel.isClipboardHistoryOpen {
+                ClipboardHistoryPane(viewModel: viewModel)
+            } else if let tray = activeTray, tray.isEnteringLink {
                 linkEntry(tray)
             } else {
                 rowList
@@ -1995,6 +2018,10 @@ struct AddContextPane: View {
     }
 
     private func activate(_ row: AddContextRow) {
+        if row.opensClipboardHistory {
+            viewModel.openClipboardHistory()
+            return
+        }
         if let entry = row.capture {
             Task { await viewModel.addContext(entry) }
             return

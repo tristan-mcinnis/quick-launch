@@ -61,6 +61,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
 
     case replaceSelection
     case pasteBack
+    /// `⌃⌘V`: paste the answer with its headings, emphasis, lists, links and
+    /// code kept, through the rich pasteboard representations.
+    case pasteFormatted
     case copyAnswer
     case readAloud
     case saveSnippet
@@ -91,7 +94,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
              .copyChat, .continueInPi, .captureToMemory, .openSource, .chatList,
              .findInChat:
             .chat
-        case .replaceSelection, .pasteBack, .copyAnswer, .readAloud, .saveSnippet,
+        case .replaceSelection, .pasteBack, .pasteFormatted, .copyAnswer, .readAloud, .saveSnippet,
              .searchWeb, .regenerate, .regenerateWithModel, .transformChooser,
              .transcriptCollapse:
             .answer
@@ -124,6 +127,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .findInChat: "Find in Chat"
         case .replaceSelection: "Replace Selection"
         case .pasteBack: "Paste into Previous App"
+        case .pasteFormatted: "Paste Formatted Response"
         case .copyAnswer: "Copy Answer"
         case .readAloud: "Read Aloud"
         case .saveSnippet: "Save Answer as Snippet"
@@ -161,6 +165,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .findInChat: "Search the messages of this chat, AI Chat only"
         case .replaceSelection: "Swap the selected text for the answer"
         case .pasteBack: "Paste the answer into the app behind"
+        case .pasteFormatted: "Paste into the app behind with headings, lists and links kept"
         case .copyAnswer: "Copy the answer to the clipboard"
         case .readAloud: "Speak the answer with the local voice"
         case .saveSnippet: "Keep the answer as a launcher snippet"
@@ -207,6 +212,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         // layer swallows is not a shortcut. The global default is unchanged.
         case .replaceSelection: .commandOption("v")
         case .pasteBack: .commandReturn
+        // `⌃⌘V`, free of the fixed keys, the other answer keys, and the
+        // shipped global hotkeys (`⌥⌘V` is Replace Selection, `⇧⌘V` is the
+        // Clipboard History global).
+        case .pasteFormatted: .controlCommand("v")
         case .copyAnswer: .commandShift("c")
         case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
@@ -244,6 +253,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .openSource: .openSource
         case .replaceSelection: .replaceSelection
         case .pasteBack: .pasteBack
+        case .pasteFormatted: .pasteFormatted
         case .copyAnswer: .copy
         case .readAloud: .readAloud
         case .saveSnippet: .saveSnippet
@@ -260,6 +270,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         switch action {
         case .replaceSelection: .replaceSelection
         case .pasteBack: .pasteBack
+        case .pasteFormatted: .pasteFormatted
         case .copy: .copyAnswer
         case .copyChat: .copyChat
         case .continueInPi: .continueInPi

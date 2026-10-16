@@ -176,6 +176,37 @@ struct QuickSettings: Codable, Sendable {
         keyCode: 9,
         modifiers: 1_048_576 | 131_072
     )
+    /// How long an *unpinned* clipboard entry lives. Opt-in: `forever` by
+    /// default, so an existing history is never silently expired by an update.
+    /// Pinned entries are always kept.
+    var clipboardHistoryRetention: ClipboardRetention = .forever
+    /// Bundle identifiers whose copies are never recorded. Ships empty; the
+    /// concealed/transient markers are honoured whatever this says.
+    var clipboardHistoryDisabledSourceBundleIDs: [String] = []
+    /// Record Universal Clipboard copies that arrive from another device. Off
+    /// by default; never bypasses a privacy marker.
+    var clipboardHistoryCaptureRemote: Bool = false
+    /// Recognize text from a copied image (on-device Vision) for search and
+    /// the copy-text actions.
+    var clipboardHistoryOCR: Bool = true
+    /// Fast or accurate recognition for copied images.
+    var clipboardHistoryOCRMode: ClipboardOCRMode = .accurate
+    /// Attach a source-app tag to each entry for search and filtering.
+    var clipboardHistorySourceTags: Bool = true
+
+    // Screenshots browser
+    /// Extra folders scanned beside the system screenshot folder. Empty means
+    /// only the system folder. Paths are stored as strings (local data).
+    var screenshotFolders: [String] = []
+    /// Include every image and video in the scanned folders, not only files
+    /// whose name looks like a screenshot.
+    var screenshotIncludeAllMedia: Bool = false
+    /// Fast or accurate recognition for saved screenshots.
+    var screenshotOCRMode: ClipboardOCRMode = .accurate
+    /// Grid columns for the screenshots browser.
+    var screenshotColumns: Int = 3
+    /// Show the screenshots browser as a grid instead of a list.
+    var screenshotUseGrid: Bool = false
 
     // Colors picked with the screen eyedropper
     var colorFormat: ColorFormat = .hex
@@ -199,6 +230,14 @@ struct QuickSettings: Codable, Sendable {
     var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
     var typeToClickHotkeyEnabled: Bool = true
     var typeToClickContinuation: TypeToClickContinuation = .continuous
+
+    // The optional direct Quick AI hotkey, off by default: opens the Quick AI
+    // composer on the app and selection behind, without sending anything.
+    // Disabled until the user asks for it, so it never takes a combination
+    // their own setup already uses. `⌥⌘Space` is free against every other
+    // shipped key when they do enable it.
+    var quickAIHotkey: ActionHotkey = ActionHotkey(keyCode: 49, modifiers: 1_048_576 | 524_288)
+    var quickAIHotkeyEnabled: Bool = false
 
     // The user's in-app shortcut overrides, keyed by `ShortcutAction.rawValue`.
     // Empty on a fresh install and on every stored blob from before this
@@ -341,6 +380,11 @@ struct QuickSettings: Codable, Sendable {
         typeToClickContinuation = try c.decodeIfPresent(
             TypeToClickContinuation.self, forKey: .typeToClickContinuation
         ) ?? .continuous
+        quickAIHotkey = try c.decodeIfPresent(ActionHotkey.self, forKey: .quickAIHotkey)
+            ?? ActionHotkey(keyCode: 49, modifiers: 1_048_576 | 524_288)
+        quickAIHotkeyEnabled = try c.decodeIfPresent(
+            Bool.self, forKey: .quickAIHotkeyEnabled
+        ) ?? false
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         lastTranslationSource = try c.decodeIfPresent(String.self, forKey: .lastTranslationSource)
             ?? (lastTranslationTarget == "en" ? "zh-Hans" : "en")
@@ -357,6 +401,50 @@ struct QuickSettings: Codable, Sendable {
             ActionHotkey.self,
             forKey: .clipboardHistoryHotkey
         ) ?? ActionHotkey(keyCode: 9, modifiers: 1_048_576 | 131_072)
+        clipboardHistoryRetention = try c.decodeIfPresent(
+            ClipboardRetention.self,
+            forKey: .clipboardHistoryRetention
+        ) ?? .forever
+        clipboardHistoryDisabledSourceBundleIDs = try c.decodeIfPresent(
+            [String].self,
+            forKey: .clipboardHistoryDisabledSourceBundleIDs
+        ) ?? []
+        clipboardHistoryCaptureRemote = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .clipboardHistoryCaptureRemote
+        ) ?? false
+        clipboardHistoryOCR = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .clipboardHistoryOCR
+        ) ?? true
+        clipboardHistoryOCRMode = try c.decodeIfPresent(
+            ClipboardOCRMode.self,
+            forKey: .clipboardHistoryOCRMode
+        ) ?? .accurate
+        clipboardHistorySourceTags = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .clipboardHistorySourceTags
+        ) ?? true
+        screenshotFolders = try c.decodeIfPresent(
+            [String].self,
+            forKey: .screenshotFolders
+        ) ?? []
+        screenshotIncludeAllMedia = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .screenshotIncludeAllMedia
+        ) ?? false
+        screenshotOCRMode = try c.decodeIfPresent(
+            ClipboardOCRMode.self,
+            forKey: .screenshotOCRMode
+        ) ?? .accurate
+        screenshotColumns = min(max(try c.decodeIfPresent(
+            Int.self,
+            forKey: .screenshotColumns
+        ) ?? 3, 2), 6)
+        screenshotUseGrid = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .screenshotUseGrid
+        ) ?? false
         // An id this build does not know, a value that is not a usable
         // shortcut, or the default it would not have changed is dropped here
         // rather than carried around: the entry falls back to the built-in
@@ -739,6 +827,23 @@ extension QuickSettings {
     /// user has removed every fallback: Return then runs nothing.
     var firstFallbackCommandID: String? { fallbackCommandIDs.first }
 
+    /// The capture policy the Clipboard History store applies, built from the
+    /// flat settings fields so the two can never disagree.
+    var clipboardCapturePolicy: ClipboardCapturePolicy {
+        ClipboardCapturePolicy(
+            disabledSourceBundleIDs: Set(
+                clipboardHistoryDisabledSourceBundleIDs
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            ),
+            retention: clipboardHistoryRetention,
+            ocrEnabled: clipboardHistoryOCR,
+            ocrMode: clipboardHistoryOCRMode,
+            captureRemote: clipboardHistoryCaptureRemote,
+            sourceTagsEnabled: clipboardHistorySourceTags
+        )
+    }
+
     mutating func select(providerID: UUID, model: String? = nil) {
         guard let index = providers.firstIndex(where: { $0.id == providerID }) else { return }
         selectedProviderID = providerID
@@ -888,6 +993,9 @@ extension QuickSettings {
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
         }
+        if quickAIHotkeyEnabled, hotkey == quickAIHotkey.normalized {
+            return "This conflicts with the Quick AI hotkey."
+        }
         if let prompt = savedPrompts.first(where: {
             $0.id != promptID && $0.hotkey?.normalized == hotkey
         }) {
@@ -912,6 +1020,9 @@ extension QuickSettings {
         if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
+        }
+        if quickAIHotkeyEnabled, hotkey == quickAIHotkey.normalized {
+            return "This conflicts with the Quick AI hotkey."
         }
         if let prompt = savedPrompts.first(where: { $0.hotkey?.normalized == hotkey }) {
             return "This conflicts with the \(prompt.name) quick action."
@@ -1018,6 +1129,9 @@ extension QuickSettings {
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
         }
+        if quickAIHotkeyEnabled, hotkey.normalized == quickAIHotkey.normalized {
+            return "This conflicts with the Quick AI hotkey."
+        }
         if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a quick-action hotkey."
         }
@@ -1037,6 +1151,9 @@ extension QuickSettings {
         }
         if hotkey == clipboardHistoryHotkey { return "This conflicts with the Clipboard History hotkey." }
         if hotkey == translatorHotkey { return "This conflicts with the Translator hotkey." }
+        if quickAIHotkeyEnabled, hotkey.normalized == quickAIHotkey.normalized {
+            return "This conflicts with the Quick AI hotkey."
+        }
         if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a quick-action hotkey."
         }
@@ -1059,12 +1176,44 @@ extension QuickSettings {
         if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey {
             return "This conflicts with the Type to Click hotkey."
         }
+        if quickAIHotkeyEnabled, hotkey.normalized == quickAIHotkey.normalized {
+            return "This conflicts with the Quick AI hotkey."
+        }
         if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a quick-action hotkey."
         }
         if launcherItemConfigurations.contains(where: { $0.hotkey?.normalized == hotkey.normalized }) {
             return "This conflicts with a launcher item hotkey."
         }
+        return nil
+    }
+
+    /// The optional direct Quick AI hotkey: off by default, so a disabled one
+    /// never conflicts with anything. Enabled, it checks the in-app table and
+    /// every other global key, and excludes itself.
+    func quickAIHotkeyConflict() -> String? {
+        guard quickAIHotkeyEnabled else { return nil }
+        let hotkey = quickAIHotkey.normalized
+        if let inApp = inAppShortcutConflictMessage(for: hotkey) { return inApp }
+        if hotkey.keyCode == hotkeyKeyCode,
+           hotkey.modifiers == NSEvent.ModifierFlags(rawValue: hotkeyModifiers).overlayRelevant.rawValue {
+            return "This conflicts with the main Quick Launch hotkey."
+        }
+        if hotkey == clipboardHistoryHotkey.normalized {
+            return "This conflicts with the Clipboard History hotkey."
+        }
+        if hotkey == translatorHotkey.normalized {
+            return "This conflicts with the Translator hotkey."
+        }
+        if typeToClickHotkeyEnabled, hotkey == typeToClickHotkey.normalized {
+            return "This conflicts with the Type to Click hotkey."
+        }
+        if savedPrompts.contains(where: { $0.hotkey?.normalized == hotkey }) {
+            return "This conflicts with a quick-action hotkey."
+        }
+        if launcherItemConfigurations.contains(where: {
+            $0.itemID != "type-to-click.mode" && $0.hotkey?.normalized == hotkey
+        }) { return "This conflicts with a launcher item hotkey." }
         return nil
     }
 }

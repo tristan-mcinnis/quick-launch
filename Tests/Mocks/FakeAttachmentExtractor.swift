@@ -26,6 +26,7 @@ actor FakeAttachmentExtractor: AttachmentExtracting {
         case .link(let url): url.absoluteString
         case .image(_, let name, _): name
         case .selection: "selection"
+        case .clipboard: "clipboard"
         }
     }
 
@@ -111,6 +112,16 @@ actor FakeAttachmentExtractor: AttachmentExtracting {
                     characterCount: text.count
                 ),
                 text: text
+            )
+        case .clipboard(let text, let appName):
+            return AttachmentContent(
+                ref: ChatAttachmentRef(
+                    kind: .text,
+                    name: appName.map { "Clipboard · \($0)" } ?? "Clipboard",
+                    characterCount: text.count
+                ),
+                text: text,
+                kindLabel: "Clipboard"
             )
         }
     }

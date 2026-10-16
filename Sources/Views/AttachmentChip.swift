@@ -551,6 +551,10 @@ struct AttachmentStripView: View {
     let onClearAll: () -> Void
     var onRetry: ((String) -> Void)? = nil
     var selectionPreview: QuickViewModel.LaunchSelection? = nil
+    /// The Transform affordance for an attached clipboard or selected-text
+    /// source: the same chooser and argument flow the launch strip opens, so
+    /// source → transform → review is one continuous, visible route.
+    var onTransform: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: House.Spacing.xs) {
@@ -589,6 +593,24 @@ struct AttachmentStripView: View {
                     text: selectionPreview.text,
                     title: "Selected text from \(selectionPreview.appName)"
                 )
+            }
+            if let onTransform {
+                Button(action: onTransform) {
+                    Label("Transform", systemImage: "wand.and.stars")
+                        .font(House.TypeToken.meta)
+                        .foregroundStyle(House.ColorToken.textSecondary)
+                        .padding(.horizontal, House.Spacing.sm)
+                        .frame(height: House.Control.chip)
+                        .background(
+                            RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous)
+                                .fill(House.ColorToken.chipFill)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .accessibilityLabel("Transform attached text")
+                .help("Transform the attached text")
             }
             Button(action: onClearAll) {
                 Image(systemName: "xmark.circle.fill")
@@ -651,7 +673,8 @@ struct ComposerAttachmentStrip: View {
                     onRemove: remove,
                     onClearAll: clearAll,
                     onRetry: retry,
-                    selectionPreview: selectionPreview
+                    selectionPreview: selectionPreview,
+                    onTransform: transformAction
                 )
             }
         }
@@ -671,6 +694,14 @@ struct ComposerAttachmentStrip: View {
     private var routingLine: String? {
         if let line = tray?.routingLine { return line }
         return viewModel.attachmentRoutingLine
+    }
+
+    /// The strip's Transform button, shown only when the source is an
+    /// attached selection rather than the launch snapshot (that one has its
+    /// own strip button, so this would be a duplicate).
+    private var transformAction: (() -> Void)? {
+        guard viewModel.launchSelection == nil, viewModel.hasTransformSource else { return nil }
+        return { viewModel.toggleTransformChooser() }
     }
 
     private func remove(_ id: String) {

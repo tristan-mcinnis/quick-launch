@@ -426,7 +426,7 @@ struct ClipboardImageHistoryTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ql-clip-immediate-\(UUID().uuidString)", isDirectory: true)
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let png = makePNG()
         // Record, then restore immediately — no waitForPendingWrites().
         store.record(imagePayload(png: png), limit: 10)
@@ -442,7 +442,7 @@ struct ClipboardImageHistoryTests {
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
         let budget = 1_000
-        let store = ClipboardHistoryStore(fileURL: url, maximumTotalPayloadBytes: budget, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, maximumTotalPayloadBytes: budget, ocr: { _, _ in "" })
 
         for i in 0..<2 {
             let img = imagePayload(png: Data(repeating: UInt8(i + 1), count: 200))
@@ -469,7 +469,7 @@ struct ClipboardImageHistoryTests {
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
         let budget = 1_000
-        let store = ClipboardHistoryStore(fileURL: url, maximumTotalPayloadBytes: budget, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, maximumTotalPayloadBytes: budget, ocr: { _, _ in "" })
 
         let big = imagePayload(png: Data(repeating: 0x60, count: 600)) // 600 > half of 1000
         #expect(store.record(big, limit: 50))
@@ -499,13 +499,13 @@ struct ClipboardImageHistoryTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ql-clip-reconciling-\(UUID().uuidString)", isDirectory: true)
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let png = makePNG()
         store.record(imagePayload(png: png), limit: 10)
         store.waitForPendingWrites()
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent().appendingPathComponent("ClipboardBlobs", isDirectory: true))
 
-        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let target = makePasteboard()
         target.setString("sentinel", forType: .string)
         guard let entry = reloaded.entries.first, let payload = await reloaded.payload(for: entry) else {
@@ -520,7 +520,7 @@ struct ClipboardImageHistoryTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ql-clip-ordered-\(UUID().uuidString)", isDirectory: true)
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let png = makePNG()
         store.record(imagePayload(png: png), limit: 10)
         store.waitForPendingWrites()
@@ -532,7 +532,7 @@ struct ClipboardImageHistoryTests {
         let blobURL = url.deletingLastPathComponent().appendingPathComponent("ClipboardBlobs").appendingPathComponent(blobKey + ".blob")
         #expect(FileManager.default.fileExists(atPath: blobURL.path), "the blob is written, so metadata never points at a missing blob")
 
-        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         guard let entry = reloaded.entries.first, let payload = await reloaded.payload(for: entry) else {
             Issue.record("reload restores the payload")
             return
@@ -544,7 +544,7 @@ struct ClipboardImageHistoryTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ql-clip-async-\(UUID().uuidString)", isDirectory: true)
         let url = folder.appendingPathComponent("clipboard-history.json")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let store = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let png = makePNG()
         store.record(imagePayload(png: png), limit: 10)
         // No flush: an immediate async load is served by the read-through cache.
@@ -553,7 +553,7 @@ struct ClipboardImageHistoryTests {
 
         store.waitForPendingWrites()
         // A fresh store reads from disk.
-        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _ in "" })
+        let reloaded = ClipboardHistoryStore(fileURL: url, ocr: { _, _ in "" })
         let fromDisk = await reloaded.payload(for: reloaded.entries.first!)
         #expect(fromDisk?.imageData == png, "a reloaded entry loads its blob from disk")
     }

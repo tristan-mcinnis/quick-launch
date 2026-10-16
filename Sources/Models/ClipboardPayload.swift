@@ -161,6 +161,11 @@ struct ClipboardPayload: Sendable, Equatable {
             return nil
         }
 
+        // The privacy markers and the Universal Clipboard metadata marker are
+        // always ignored. The remote marker is not content, even when the user
+        // opted in to recording remote copies: that opt-in is a capture-level
+        // decision (`ClipboardHistoryStore.capture`), not a way to store the
+        // marker itself.
         let ignored = ignoredPasteboardTypes.union(["com.apple.is-remote-clipboard"])
         var rawItems: [[ClipboardRawItem]] = []
         var text: String?

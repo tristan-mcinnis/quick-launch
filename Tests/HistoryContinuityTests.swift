@@ -48,7 +48,7 @@ struct HistoryContinuityTests {
         #expect(store.entries.first?.value == "arrived from another device")
     }
 
-    @Test func remoteClipboardMarkerDoesNotBecomeAHistoryItem() throws {
+    @Test func remoteClipboardIsOptInAndTheMarkerAloneIsNotAPayload() throws {
         let directory = try folder()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = ClipboardHistoryStore(fileURL: directory.appendingPathComponent("clipboard-history.json"))
@@ -60,7 +60,15 @@ struct HistoryContinuityTests {
         #expect(store.entries.isEmpty, "handoff metadata alone is not a copied payload")
         board.setString("remote sentence", forType: .string)
         store.capture(from: board, limit: 10)
-        #expect(store.entries.first?.value == "remote sentence")
+        #expect(store.entries.isEmpty, "a Universal Clipboard copy is not recorded unless the user opts in")
+
+        // With the explicit opt-in the copy is recorded like any other text.
+        store.setPolicy(ClipboardCapturePolicy(captureRemote: true))
+        board.clearContents()
+        board.declareTypes([remote, .string], owner: nil)
+        board.setString("opted-in sentence", forType: .string)
+        store.capture(from: board, limit: 10)
+        #expect(store.entries.first?.value == "opted-in sentence")
         #expect(store.entries.first?.clipboardPayload?.kind == .text)
         #expect(store.entries.first?.clipboardPayload?.blobKey == nil)
     }

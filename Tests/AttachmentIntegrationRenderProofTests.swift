@@ -187,13 +187,13 @@ struct AttachmentIntegrationRenderProofTests {
 
     // MARK: - Add Context with every row
 
-    @Test func rendersAddContextWithAllSevenRows() async throws {
+    @Test func rendersAddContextWithAllRows() async throws {
         for (appearance, suffix) in Self.appearances {
             let vm = Self.viewModel(appearance)
             vm.rememberSelectionTarget(Self.finder)
             vm.openQuickAI()
             vm.openAddContextMenu()
-            #expect(vm.addContextRows.count == 7)
+            #expect(vm.addContextRows.count == 8)
             try Self.save(try Self.renderQuickAI(vm, appearance: appearance), name: "wpd-add-context-quick-ai-\(suffix).png")
 
             let chat = Self.viewModel(appearance)
@@ -201,7 +201,7 @@ struct AttachmentIntegrationRenderProofTests {
             chat.rememberSelectionTarget(Self.finder)
             chat.openQuickAI()
             chat.openAddContextMenu()
-            #expect(chat.addContextRows.count == 7)
+            #expect(chat.addContextRows.count == 8)
             try Self.save(try Self.renderAIChat(window, appearance: appearance), name: "wpd-add-context-ai-chat-\(suffix).png")
         }
     }

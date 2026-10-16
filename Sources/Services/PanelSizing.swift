@@ -128,6 +128,20 @@ enum PanelSizing {
     static func searchableChooserBlockHeight(rows: Int) -> CGFloat {
         chooserBlockHeight(rows: rows) + paneSearchRowHeight
     }
+
+    /// The Review Changes card: header row, two bounded columns with their
+    /// captions, and the footer row of buttons. The card's own view reads
+    /// `reviewColumnHeight`, so the estimate and the drawing cannot drift.
+    static let reviewColumnHeight: CGFloat = 168
+    static var transformReviewBlockHeight: CGFloat {
+        let header = chooserChrome
+        let columnCaption = House.Control.chip
+        let insets = House.Spacing.md * 3
+        let columns = reviewColumnHeight
+        let footer = House.Control.chip
+        let footerInsets = House.Spacing.md * 2
+        return header + columnCaption + insets + columns + footer + footerInsets
+    }
     /// The search row and footer stay pinned while long result sets scroll.
     /// Twelve whole rows plus the section block: the list scrolls rather
     /// than cutting the thirteenth row in half.

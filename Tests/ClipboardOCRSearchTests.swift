@@ -19,7 +19,7 @@ struct ClipboardOCRSearchTests {
 
     private func makeStore(
         in folder: URL,
-        ocr: (@Sendable (Data) async -> String)? = nil
+        ocr: (@Sendable (Data, ClipboardOCRMode) async -> String)? = nil
     ) -> ClipboardHistoryStore {
         ClipboardHistoryStore(
             fileURL: folder.appendingPathComponent("clipboard-history.json"),
@@ -71,7 +71,7 @@ struct ClipboardOCRSearchTests {
     @Test func recognizedTextIsIndexedForClipboardSearch() async {
         let folder = makeFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = makeStore(in: folder, ocr: { _ in "invoice total 42" })
+        let store = makeStore(in: folder, ocr: { _, _ in "invoice total 42" })
         _ = captureImage(store: store)
         await store.waitForOCR()
 
@@ -93,7 +93,7 @@ struct ClipboardOCRSearchTests {
             func increment() { lock.lock(); count += 1; lock.unlock() }
         }
         let counter = Counter()
-        let store = makeStore(in: folder, ocr: { _ in
+        let store = makeStore(in: folder, ocr: { _, _ in
             counter.increment()
             return "recognized-phrase"
         })
@@ -104,7 +104,7 @@ struct ClipboardOCRSearchTests {
         #expect(store.entries.first?.keywords.contains("recognized-phrase") == true)
 
         // Reload: the OCR text is read back from metadata; OCR is NOT re-run.
-        let reloaded = makeStore(in: folder, ocr: { _ in
+        let reloaded = makeStore(in: folder, ocr: { _, _ in
             counter.increment()
             return "different"
         })
@@ -116,7 +116,7 @@ struct ClipboardOCRSearchTests {
     @Test func ocrNeverAltersTheStoredImage() async {
         let folder = makeFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
-        let store = makeStore(in: folder, ocr: { _ in "text extracted" })
+        let store = makeStore(in: folder, ocr: { _, _ in "text extracted" })
         let png = captureImage(store: store)
         await store.waitForOCR()
         store.waitForPendingWrites()
@@ -133,7 +133,7 @@ struct ClipboardOCRSearchTests {
         let folder = makeFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let gate = OCRGate()
-        let store = makeStore(in: folder, ocr: { _ in
+        let store = makeStore(in: folder, ocr: { _, _ in
             await gate.wait()
             return "late result"
         })

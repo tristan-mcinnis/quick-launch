@@ -8,6 +8,10 @@ extension Notification.Name {
     static let screenAwarenessSettingsChanged = Notification.Name("QuickLaunch.screenAwarenessSettingsChanged")
     static let openTranslator = Notification.Name("QuickLaunch.openTranslator")
     static let translatorSettingsChanged = Notification.Name("QuickLaunch.translatorSettingsChanged")
+    /// The optional direct Quick AI hotkey was enabled, disabled, or rebound.
+    /// The global hotkey registry re-registers on this; the in-app shortcuts
+    /// are untouched.
+    static let quickAIHotkeyChanged = Notification.Name("QuickLaunch.quickAIHotkeyChanged")
     static let openTypeToClick = Notification.Name("QuickLaunch.openTypeToClick")
     static let typeToClickSettingsChanged = Notification.Name("QuickLaunch.typeToClickSettingsChanged")
     static let openSettings = Notification.Name("QuickLaunch.openSettings")
