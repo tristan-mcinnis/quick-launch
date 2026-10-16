@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-10-16
+
+- **HouseChatCore is its own repo.** The shared chat core moved out of
+  `Packages/HouseChatCore` to `../house-chat-core`, with its history. Quick
+  Launch and RTI now depend on it by sibling path, so neither needs the
+  other's working tree. `make test` runs its suite from there, and the
+  build provenance stamp lives with it.
+
 ## 1.6.0 — 2026-10-15
 
 - **Clipboard History is an Add Context source.** `⇧⌘A` (or `@`) now lists

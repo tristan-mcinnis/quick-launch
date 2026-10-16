@@ -79,7 +79,7 @@ stays out of every chat list. Quick Launch is the one notification sender and
 touches `app.alive`; `UserNotificationRouter` is the app's one notification
 delegate.
 
-`Packages/HouseChatCore` owns the shared chat policy, archival schema and
+`../house-chat-core` (its own repo, a sibling of this one) owns the shared chat policy, archival schema and
 attachment interfaces consumed by Quick Launch and RTI. Keep it compatible
 with Swift 6.0 and macOS 14. Histories and app defaults remain separate;
 sharing an implementation must not create a global chat or settings owner.

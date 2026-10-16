@@ -7,16 +7,16 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.5.0"),
         // The shared House chat core: schema, archives, retrieval policy,
-        // slash commands. Quick Launch consumes it; RTI consumes it separately.
-        .package(path: "Packages/HouseChatCore"),
+        // slash commands. A sibling repo, consumed by Quick Launch and RTI.
+        .package(path: "../house-chat-core"),
     ],
     targets: [
         .executableTarget(
             name: "QuickLaunch",
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
-                .product(name: "HouseChatCore", package: "HouseChatCore"),
-                .product(name: "HouseChatDocuments", package: "HouseChatCore"),
+                .product(name: "HouseChatCore", package: "house-chat-core"),
+                .product(name: "HouseChatDocuments", package: "house-chat-core"),
             ],
             path: "Sources",
             resources: [
@@ -37,8 +37,8 @@ let package = Package(
             dependencies: [
                 "QuickLaunch",
                 .product(name: "Markdown", package: "swift-markdown"),
-                .product(name: "HouseChatCore", package: "HouseChatCore"),
-                .product(name: "HouseChatDocuments", package: "HouseChatCore"),
+                .product(name: "HouseChatCore", package: "house-chat-core"),
+                .product(name: "HouseChatDocuments", package: "house-chat-core"),
             ],
             path: "Tests",
             resources: [

@@ -13,7 +13,7 @@ build:
 # The full gate: the publish scrub, the app suite, and the shared chat core.
 test: scrub
 	swift test
-	swift test --package-path Packages/HouseChatCore
+	swift test --package-path ../house-chat-core
 
 # No personal paths, private hosts, keys or client names in tracked files.
 scrub:

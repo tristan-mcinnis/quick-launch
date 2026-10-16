@@ -47,10 +47,10 @@ ChiefOfStaff.app is retired.
 
 - AI Chat is the House's general chat. RTI keeps its own chats because they
   are grounded in a meeting or a recording session.
-- RTI builds `Packages/HouseChatCore` from `../../quick-launch` (this repo),
-  so the package keeps its path and public API.
-  `scripts/chat-core-provenance.py` stamps its source fingerprint into both
-  apps' Info.plist.
+- Quick Launch and RTI both build `../house-chat-core`, a sibling repo
+  (extracted from `Packages/HouseChatCore` on 2026-10-16).
+  `house-chat-core/scripts/chat-core-provenance.py` stamps its source
+  fingerprint into both apps' Info.plist.
 - Quick Launch keeps no screen history of its own. The one screen-history
   collector is `screenctx` (memory-screenctx); Memory.app switches it on and
   off. Quick Launch's own collector was retired on 2026-09-26.
