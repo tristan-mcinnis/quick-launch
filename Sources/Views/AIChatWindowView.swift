@@ -16,6 +16,7 @@ import HouseDesign
 struct AIChatWindowView: View {
     @Bindable var model: AIChatWindowModel
     @State private var composerHeight = QuickAIView.composerRowHeight
+    @State private var windowWidth = House.Layout.chatMinWidth
     @State private var conversationHeight = House.Layout.chatMinHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A tray from the environment (render proofs) wins over the chat's own.
@@ -30,18 +31,25 @@ struct AIChatWindowView: View {
     private var chat: QuickViewModel { model.chat }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if model.isRailVisible {
-                AIChatRail(model: model)
-                    .frame(width: House.Layout.chatRail)
-                    .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
-                Rectangle()
-                    .fill(AQDesign.ColorToken.divider)
-                    .frame(width: AQDesign.hairline)
-                    .accessibilityHidden(true)
-            }
+        ZStack(alignment: .leading) {
+            // The slot snaps; only the rail below moves.
             conversation
+                .padding(.leading, ChatRailMotion.slotWidth(railVisible: model.isRailVisible, windowWidth: windowWidth))
+                .transaction(value: model.isRailVisible) { $0.animation = nil }
+            if model.isRailVisible {
+                HStack(spacing: 0) {
+                    AIChatRail(model: model)
+                        .frame(width: House.Layout.chatRail)
+                    Rectangle()
+                        .fill(AQDesign.ColorToken.divider)
+                        .frame(width: AQDesign.hairline)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxHeight: .infinity)
+                .transition(reduceMotion ? .opacity : .move(edge: .leading))
+            }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         // No minimum here: the window keeps its own (`contentMinSize`), and
         // a tiling manager can still make it narrower. A view that insisted
         // on a width would then overflow and clip; the content reflows.
@@ -49,7 +57,7 @@ struct AIChatWindowView: View {
         .background(AQDesign.ColorToken.windowSurface)
         // The header shares the title-bar row with the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
-        .animation(reduceMotion ? nil : .easeOut(duration: AQDesign.Motion.select), value: model.isRailVisible)
+        .animation(ChatRailMotion.animation(opening: model.isRailVisible, reduceMotion: reduceMotion), value: model.isRailVisible)
         .preferredColorScheme(chat.settings.appearance.swiftUIColorScheme)
         .onChange(of: chat.threadError) { _, error in
             guard let error else { return }
