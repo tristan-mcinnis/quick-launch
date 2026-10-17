@@ -11,6 +11,12 @@
 
 ## Unreleased — 2026-10-16
 
+- **House packages are pinned by tag.** `house-chat-core` and the new
+  `design-system` package (`HouseDesign` tokens) are `.package(url:, from:)`
+  dependencies, so a fresh clone builds with no sibling folders. The copied
+  `HouseDesign.swift` is gone. `scripts/stamp-package-pins.py` replaces the
+  source-fingerprint stamp and records the pinned versions in Info.plist.
+
 - **HouseChatCore is its own repo.** The shared chat core moved out of
   `Packages/HouseChatCore` to `../house-chat-core`, with its history. Quick
   Launch and RTI now depend on it by sibling path, so neither needs the

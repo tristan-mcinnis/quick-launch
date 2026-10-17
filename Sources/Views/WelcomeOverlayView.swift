@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// The first-run card: the app mark, one line, the five keys and tools that
 /// make up today's app, and the key that starts the launcher. Monochrome

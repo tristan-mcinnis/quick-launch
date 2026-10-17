@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import HouseDesign
 
 /// A control that shows the current hotkey as key caps and, when clicked,
 /// captures the next key combo as the new one. Inside a `SettingsRow` the

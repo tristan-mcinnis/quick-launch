@@ -17,6 +17,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Search render proof", .serialized)
 @MainActor

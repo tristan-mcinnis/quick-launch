@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// Quick AI, after Raycast's: a `panelWidth` × `quickAIHeight` surface
 /// that replaces the launcher in place. The user can drag the window larger

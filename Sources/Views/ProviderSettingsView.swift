@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Provider configuration stays deliberately compact: choose a source, choose
 /// a model, and edit only the fields that source needs. One card per group.

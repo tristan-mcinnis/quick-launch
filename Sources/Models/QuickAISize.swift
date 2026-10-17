@@ -1,4 +1,5 @@
 import CoreGraphics
+import HouseDesign
 
 /// The Quick AI surface's size. The surface opens at 750 × 475 (the Raycast
 /// size, `House.Layout.panelWidth` × `House.Layout.quickAIHeight`) and the

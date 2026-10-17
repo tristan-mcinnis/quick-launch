@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import HouseDesign
 
 struct OverlayView: View {
     @Bindable var viewModel: QuickViewModel

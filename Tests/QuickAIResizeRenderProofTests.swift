@@ -12,6 +12,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Quick AI resize render proof", .serialized)
 @MainActor

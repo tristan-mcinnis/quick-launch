@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 // This proof takes native keyboard focus. Run alone so other suites' windows
 // cannot steal it: QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --filter PaletteRailFocusProofTests

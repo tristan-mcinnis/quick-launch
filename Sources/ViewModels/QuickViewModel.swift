@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Observation
 import HouseChatCore
+import HouseDesign
 
 /// Does nothing but say so. Used when a presenter was assigned and has since
 /// been released (a short-lived test double): the view model must not fall back

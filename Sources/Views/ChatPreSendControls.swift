@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// What the next Send needs the user to know, drawn between the attachment
 /// strip and the composer field. Both surfaces draw it, because both compose

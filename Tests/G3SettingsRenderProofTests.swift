@@ -8,6 +8,7 @@ import AppKit
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("G3 render proofs", .serialized)
 @MainActor

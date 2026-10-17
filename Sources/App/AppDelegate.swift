@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import SwiftUI
+import HouseDesign
 
 // Borderless panel that can still become key — needed so the TextField
 // receives keyboard input. Without the override, a .borderless style mask

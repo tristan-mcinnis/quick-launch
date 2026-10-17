@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Settings pane for managing saved prompts (aliases) and the command prefix.
 /// The list, the editor for the selected command, and its assistant fields

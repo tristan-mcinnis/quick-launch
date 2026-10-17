@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// The Quick AI thread: user turns as pills on the right, answers as prose
 /// on the left, the tool and status lines, the question card when the model

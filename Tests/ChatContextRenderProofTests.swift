@@ -33,6 +33,7 @@ import HouseChatCore
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Chat context render proof", .serialized)
 @MainActor

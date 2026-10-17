@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// The inline multiple-choice question the model asked mid-answer.
 ///

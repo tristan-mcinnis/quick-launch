@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import HouseDesign
 
 /// Every item that can carry an alias or a global hotkey, in one table you
 /// can read at a glance and edit in place: apps, snippets, quick links,

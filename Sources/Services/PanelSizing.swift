@@ -1,5 +1,6 @@
 import CoreFoundation
 import SwiftUI
+import HouseDesign
 
 /// Pure layout calculation for the Quick Launch overlay panel height.
 /// Extracted from AppDelegate so it can be unit-tested without AppKit

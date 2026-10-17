@@ -10,6 +10,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Code block chrome", .serialized)
 @MainActor

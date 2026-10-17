@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Web search provider", .serialized)
 @MainActor

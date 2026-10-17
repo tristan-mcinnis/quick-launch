@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// Its own window: source text above, translation below, the target language
 /// on the right, the keys in the footer. Same tokens as the launcher, and the

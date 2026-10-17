@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 import UserNotifications
+import HouseDesign
 
 /// The AI Chat window's NSWindow: keys first to the window model, then to
 /// AppKit. Unmodified keys never reach `performKeyEquivalent`, and a text

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// One user turn's text, with the Show more / Collapse control from
 /// `MessageCollapseState`. A short message renders whole and grows no

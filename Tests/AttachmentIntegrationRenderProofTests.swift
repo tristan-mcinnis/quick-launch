@@ -11,6 +11,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Attachment integration render proof", .serialized)
 @MainActor

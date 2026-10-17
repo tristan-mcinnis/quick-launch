@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// The Quick AI composer and what sits on it: an error that belongs to no
 /// turn, the launch selection and attachment strips, and the composer row

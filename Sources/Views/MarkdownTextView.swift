@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import HouseDesign
 
 /// The assistant answer body. The answer is a vertical stack of segments:
 /// markdown runs draw as prose, and each fenced code block draws as its own

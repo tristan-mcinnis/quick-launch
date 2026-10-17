@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// The composer's `/` palette, drawn in the chooser slot above the field.
 ///

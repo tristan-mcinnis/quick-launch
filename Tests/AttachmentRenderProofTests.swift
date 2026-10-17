@@ -10,6 +10,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Attachment render proof", .serialized)
 @MainActor

@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Manage Models: every model the configured providers report, in one
 /// searchable list, with the switch that hides a model from every picker and

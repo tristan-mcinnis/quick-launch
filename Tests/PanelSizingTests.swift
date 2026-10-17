@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("PanelSizing")
 struct PanelSizingTests {

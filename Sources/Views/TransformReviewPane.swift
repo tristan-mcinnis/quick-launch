@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Review Changes: the original text the transform ran on beside the text it
 /// proposed, with Copy, Cancel, and Accept. Shown only for a saved transform

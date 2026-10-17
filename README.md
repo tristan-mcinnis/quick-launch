@@ -210,16 +210,17 @@ make dmg                               # ad hoc DMG + SHA256SUMS + release notes
 ```
 
 - `make test` runs `scripts/scrub.sh` (no personal paths or keys in tracked
-  files), `swift test`, and `swift test --package-path ../house-chat-core`.
+  files) and `swift test`.
 - The native rail focus proof takes the keyboard and runs on its own:
   `QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --skip-build --filter PaletteRailFocusProofTests`.
 - Speed budgets run only on a quiet machine:
   `QUICK_LAUNCH_PERF=1 swift test --filter LauncherPerformanceBudgetTests`.
-- `../house-chat-core` is the shared chat core (schema, archives, retrieval
-  policy, slash commands). It is its own repo, a sibling of this one, so a
-  build needs both folders side by side under `house/`.
-- The only network fetch during a build is swift-markdown and swift-cmark
-  from GitHub.
+- house-chat-core (the shared chat core: schema, archives, retrieval policy,
+  slash commands) and design-system (the `HouseDesign` tokens) are separate
+  repos, pinned in `Package.swift` by GitHub URL and tag, so a fresh clone
+  builds with no sibling folders.
+- The only network fetches during a build are swift-markdown and swift-cmark,
+  house-chat-core and design-system, all from GitHub.
 
 [CHANGELOG.md](CHANGELOG.md) has the release history, and [docs/](docs/)
 holds design notes, audits, and plans.

@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Canonical chat retention is keep-all. Legacy history flags and cache
 /// limits remain decodable for rollback, but are not retention controls.

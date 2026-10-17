@@ -8,6 +8,7 @@ import AppKit
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Assistant render proofs", .serialized)
 @MainActor

@@ -29,10 +29,11 @@ app. The README lists the integrations in general terms.
 
 - AI Chat is the House's general chat. RTI keeps its own chats because they
   are grounded in a meeting or a recording session.
-- Quick Launch and RTI both build `../house-chat-core`, a sibling repo
-  (extracted from `Packages/HouseChatCore` on 2026-10-16).
-  `house-chat-core/scripts/chat-core-provenance.py` stamps its source
-  fingerprint into both apps' Info.plist.
+- Quick Launch and RTI both pin house-chat-core by GitHub URL and tag
+  (extracted from `Packages/HouseChatCore` on 2026-10-16), and take the
+  design tokens from design-system the same way.
+  `scripts/stamp-package-pins.py` stamps the pinned versions and revisions
+  into the app's Info.plist.
 - Quick Launch keeps no screen history of its own. The one screen-history
   collector is `screenctx` (memory-screenctx); Memory.app switches it on and
   off. Quick Launch's own collector was retired on 2026-09-26.

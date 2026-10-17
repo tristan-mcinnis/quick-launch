@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// The Transform chooser, the model chooser, Change Assistant, and Add
 /// Context, floating above the composer. Shared by the Quick AI surface and

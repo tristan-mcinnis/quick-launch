@@ -1,4 +1,5 @@
 import AppKit
+import HouseDesign
 
 /// Accessibility and CoreGraphics measure windows in a top-left global space
 /// anchored on the primary display; AppKit measures them bottom-left. The

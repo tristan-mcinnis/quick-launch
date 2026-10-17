@@ -8,6 +8,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("AI Chat lifecycle render proof", .serialized)
 @MainActor

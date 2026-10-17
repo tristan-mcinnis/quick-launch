@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// Media and text budgets inside the detail pane, written in row units so
 /// nothing here invents a size off the house control scale.

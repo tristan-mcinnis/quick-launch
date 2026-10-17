@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Fallback Commands: the commands unmatched root-search text runs on Return,
 /// in order. The first one runs; the rest are the ranking behind it.

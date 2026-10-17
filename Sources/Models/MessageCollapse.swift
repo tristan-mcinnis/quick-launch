@@ -1,4 +1,5 @@
 import AppKit
+import HouseDesign
 
 /// How long a message has to be before the thread collapses it.
 ///

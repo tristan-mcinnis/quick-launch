@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("AI Chat behaviour render proof", .serialized)
 @MainActor

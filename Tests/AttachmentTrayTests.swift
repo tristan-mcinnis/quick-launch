@@ -4,6 +4,7 @@ import SwiftUI
 import Testing
 import UniformTypeIdentifiers
 @testable import QuickLaunch
+import HouseDesign
 
 /// The attachment tray (spec 3.2, 3.10): chips that read, fail, and ride;
 /// the limits of 10 a message and 6 images; Backspace, Escape, and the

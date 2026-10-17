@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Markdown
+import HouseDesign
 
 /// One slice of an assistant answer: a run of markdown, or a fenced code
 /// block lifted out of the prose stream so it can draw as its own block.

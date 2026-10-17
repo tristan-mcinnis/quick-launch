@@ -1,4 +1,5 @@
 import AppKit
+import HouseDesign
 
 enum TypeToClickBadgePlacement: Equatable {
     case above

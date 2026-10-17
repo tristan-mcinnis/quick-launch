@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// What one fenced code block carries: the language its info string names,
 /// the code the fence wrapped, and what Copy writes.

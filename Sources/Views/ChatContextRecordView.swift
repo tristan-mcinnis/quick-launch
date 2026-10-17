@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import HouseChatCore
 import SwiftUI
+import HouseDesign
 
 /// A read-only projection of one chat's durable archive record, for the
 /// thread to draw: the receipt behind each answer and the material earlier

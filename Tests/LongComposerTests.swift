@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Long composer drafts", .serialized)
 @MainActor

@@ -4,6 +4,7 @@ import Synchronization
 import SwiftUI
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("History continuity", .serialized)
 @MainActor

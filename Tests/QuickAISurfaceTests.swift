@@ -8,6 +8,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 @Suite("Quick AI surface", .serialized)
 @MainActor

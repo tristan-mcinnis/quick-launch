@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// The Clipboard History submenu inside Add Context. Its rows are the app's
 /// own clipboard catalog, so each carries the type and pinned metadata the

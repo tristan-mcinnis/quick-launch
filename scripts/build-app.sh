@@ -86,10 +86,9 @@ fi
 /usr/libexec/PlistBuddy -c "Add :QuickLaunchBuiltFromCommit string ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Set :QuickLaunchBuiltFromCommit ${COMMIT}" "$APP_BUNDLE/Contents/Info.plist" >/dev/null
 
-# RTI consumes this same package. Record the source fingerprint as well as
-# the app commit so either installed app can identify the shared
-# implementation it contains.
-python3 "$ROOT_DIR/../house-chat-core/scripts/chat-core-provenance.py" --plist "$APP_BUNDLE/Contents/Info.plist"
+# Record the pinned house-chat-core and design-system versions, read from the
+# committed Package.resolved, so the installed app names the packages it shipped with.
+python3 "$ROOT_DIR/scripts/stamp-package-pins.py" --resolved "$ROOT_DIR/Package.resolved" --plist "$APP_BUNDLE/Contents/Info.plist"
 
 [[ -f "$ICON_SOURCE" ]] && cp "$ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]] && cp "$ROOT_DIR/PrivacyInfo.xcprivacy" "$APP_BUNDLE/Contents/Resources/"

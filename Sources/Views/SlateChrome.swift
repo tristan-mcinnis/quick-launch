@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 // Shared Slate chrome: the pieces every surface in the app is built from.
 // Nothing here invents a value; every number is a token from `AQDesign`

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// The AI Chat window: one conversation window over the same providers and
 /// tools as Quick AI. Its thread and composer are Quick AI's own views

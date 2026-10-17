@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import HouseDesign
 
 /// Measures the Settings shell and its panes share.
 ///

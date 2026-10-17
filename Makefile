@@ -10,10 +10,9 @@ export SIGN_IDENTITY
 build:
 	swift build -c release
 
-# The full gate: the publish scrub, the app suite, and the shared chat core.
+# The full gate: the publish scrub and the app suite.
 test: scrub
 	swift test
-	swift test --package-path ../house-chat-core
 
 # No personal paths, private hosts, keys or client names in tracked files.
 scrub:

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import QuickLaunch
+import HouseDesign
 
 /// Formatted response paste: the representations the builder produces, what
 /// the sanitizer removes, theme neutrality, the pasteboard write, and where

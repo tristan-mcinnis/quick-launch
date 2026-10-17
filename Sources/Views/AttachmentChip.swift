@@ -3,6 +3,7 @@ import ImageIO
 import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
+import HouseDesign
 
 // Attachment chips (spec section 3.10): one chip view for the composer
 // strip, the question pills in the thread, Quick AI, and AI Chat; the strip

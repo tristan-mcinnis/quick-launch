@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// The chat title over the model line, as the Quick AI header draws it and
 /// the AI Chat window's header reuses it: the title in `subheading`, then

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HouseDesign
 
 /// Clipboard History retention and hotkey, plus where Quick Links open.
 /// One card per group, 40 pt rows, ink toggles.

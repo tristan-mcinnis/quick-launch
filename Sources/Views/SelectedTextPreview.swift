@@ -1,4 +1,5 @@
 import SwiftUI
+import HouseDesign
 
 /// Full, in-memory text behind a selected-text chip. Reading this preview
 /// never fetches a new selection and never submits a question.
