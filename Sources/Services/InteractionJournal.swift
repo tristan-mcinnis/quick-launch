@@ -238,7 +238,7 @@ final class InteractionJournalStore {
     /// by a keyed digest.
     nonisolated static let safeItemIDPrefixes = [
         "application:", "catalog:", "command:", "folder:", "snippet:",
-        "quickLink:", "clipboard:", "screenshot:", "conversation:",
+        "quickLink:", "clipboard:", "emoji:", "screenshot:", "conversation:",
         "answer:", "askAI:", "action:",
     ]
 

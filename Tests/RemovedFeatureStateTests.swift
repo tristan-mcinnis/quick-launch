@@ -26,14 +26,15 @@ struct RemovedFeatureStateTests {
 
         #expect(settings.hotkeyKeyCode == 36, "keys of kept settings still apply")
         #expect(!settings.autoCopy)
+        #expect(settings.emojiSkinTone == 3, "the restored emoji skin tone still applies")
         let ids = settings.launcherItemConfigurations.map(\.id)
         #expect(ids.contains("snippet:sig"), "records of kept kinds survive")
-        #expect(!ids.contains { $0.hasPrefix("emoji:") || $0.hasPrefix("color:") },
-                "records of the removed kinds are dropped")
+        #expect(ids.contains("emoji:emoji-1f600"), "emoji records load again")
+        #expect(!ids.contains { $0.hasPrefix("color:") }, "records of the removed kinds are dropped")
 
         let resaved = try JSONEncoder().encode(settings)
         let object = try #require(JSONSerialization.jsonObject(with: resaved) as? [String: Any])
-        for key in ["hasSeenWelcome", "quickAIClarifyingQuestionsEnabled", "emojiSkinTone", "colorFormat", "colorHistoryLimit"] {
+        for key in ["hasSeenWelcome", "quickAIClarifyingQuestionsEnabled", "colorFormat", "colorHistoryLimit"] {
             #expect(object[key] == nil, "\(key) is not written back")
         }
     }

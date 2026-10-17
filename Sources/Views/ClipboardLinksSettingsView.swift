@@ -16,6 +16,7 @@ struct ClipboardLinksSettingsView: View {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 clipboardCard.settingsAnchor("clipboard.history")
                 screenshotsCard.settingsAnchor("clipboard.screenshots")
+                emojiCard.settingsAnchor("clipboard.emoji")
                 screenTextCard.settingsAnchor("clipboard.screenText")
                 quicklinksCard.settingsAnchor("clipboard.quicklinks")
                 catalogCard.settingsAnchor("clipboard.catalog")
@@ -254,6 +255,24 @@ struct ClipboardLinksSettingsView: View {
         }
     }
 
+    private var emojiCard: some View {
+        SettingsCard("Emoji & Symbols") {
+            SettingsRow(title: "Skin tone", isFirst: true) {
+                Picker("Skin tone", selection: skinToneSelection) {
+                    ForEach(Array(EmojiCatalog.skinToneTitles.enumerated()), id: \.offset) { index, title in
+                        Text("\(EmojiCatalog.applyingSkinTone(index, to: "\u{1F44D}"))  \(title)").tag(index)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 200)
+            }
+
+            CardNote {
+                CardText("Applies to the emoji that accept a tone. Symbols, flags, and objects are unchanged.")
+            }
+        }
+    }
+
     private var screenTextCard: some View {
         SettingsCard("Text from Screen") {
             SettingsRow(title: "Keep line breaks in text read from the screen", isFirst: true) {
@@ -313,6 +332,10 @@ struct ClipboardLinksSettingsView: View {
                 }
             }
         }
+    }
+
+    private var skinToneSelection: Binding<Int> {
+        viewModel.settingsBinding(\.emojiSkinTone) { _ in viewModel.invalidateLauncherRanking() }
     }
 
     private var browserSelection: Binding<String> {

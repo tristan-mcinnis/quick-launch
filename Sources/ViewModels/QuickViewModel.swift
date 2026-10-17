@@ -1233,6 +1233,16 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         await clipboardHistory?.payload(for: item)
     }
 
+    /// The emoji catalog with the chosen skin tone applied, computed once per
+    /// tone. Ids never change, so pins and favourites survive a tone change.
+    var emojiItems: [LauncherCatalogItem] {
+        let tone = settings.emojiSkinTone
+        guard tone > 0 else { return EmojiCatalog.items }
+        if let cached = emojiTonedItems, cached.tone == tone { return cached.items }
+        let toned = EmojiCatalog.items(skinTone: tone)
+        emojiTonedItems = (tone, toned)
+        return toned
+    }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
     var vaultSearchItems: [LauncherCatalogItem] {
@@ -1753,6 +1763,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .snippets: return snippets
         case .quickLinks: return quickLinks
         case .clipboard: return filteredClipboardEntries
+        case .emoji: return emojiItems
         case .screenshots: return screenshotItems
         case .caffeinate: return caffeinateItems
         case .chats: return conversationItems
@@ -1870,6 +1881,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Files are listed when the catalog is entered, so typing never hits the disk.
     private(set) var screenshotFiles: [LauncherCatalogItem] = []
 
+    /// Memoized skin-toned emoji, rebuilt only when the tone changes.
+    @ObservationIgnored private var emojiTonedItems: (tone: Int, items: [LauncherCatalogItem])?
+
     func reloadScreenshotFiles() {
         screenshotFiles = ScreenshotLibrary.items(
             inFolders: screenshotFolders,
@@ -1886,26 +1900,29 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// must fit two learned favourites, Ask AI, and every catalog root, so
     /// this tracks the number of catalogs and the list scrolls past it.
     static let maxLauncherRows = LauncherCatalogScope.allCases.count + 3
-    /// The saved-media grid's cell cap: 9 columns by 7 rows.
+    /// The emoji grid shows more: 9 columns by 7 rows.
+    static let maxGridCells = 63
+    static let gridColumns = 9
+    /// The saved-media grid's cell cap, matching the emoji grid.
     static let screenshotGridCells = 63
-    /// The screenshots browser is a grid when the user chose one. The grid
-    /// stays put while the ⌘K pane floats over it; swapping layouts under a
-    /// popover made the whole window shift.
+    /// Emoji & Symbols is a grid. The screenshots browser is a grid when the
+    /// user chose one. The grid stays put while the ⌘K pane floats over it;
+    /// swapping layouts under a popover made the whole window shift.
     var isGridCatalog: Bool {
-        catalogScope == .screenshots && settings.screenshotUseGrid
+        catalogScope == .emoji || (catalogScope == .screenshots && settings.screenshotUseGrid)
     }
 
-    /// The live column count: the screenshot grid follows the user's setting
-    /// (2...6).
+    /// The live column count: the emoji grid is fixed at nine, the screenshot
+    /// grid follows the user's setting (2...6).
     var gridColumnCount: Int {
-        max(2, min(6, settings.screenshotColumns))
+        catalogScope == .screenshots ? max(2, min(6, settings.screenshotColumns)) : Self.gridColumns
     }
 
     /// The row cap for the current scope. A screenshot grid lists more cells
     /// than the list's rows so the grid is worth using.
     private var effectiveRowLimit: Int {
         if catalogScope == .screenshots, settings.screenshotUseGrid { return Self.screenshotGridCells }
-        return Self.maxLauncherRows
+        return Self.maxRows(for: catalogScope)
     }
 
     /// Catalogs that show the detail pane beside their list. Snippets and
@@ -1972,7 +1989,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             launcherRowCount: showsChooser ? 0 : launcherMatches.count,
             gridRows: isGridCatalog
                 ? Int((Double(launcherMatches.count) / Double(gridColumnCount)).rounded(.up))
+                    + max(0, gridSections.count - 1)
                 : 0,
+            gridSections: isGridCatalog ? gridSections.count : 0,
             showsDetailPane: showsDetailPane
         )
         // The launch-selection chip and an open chooser are inline content
@@ -2064,6 +2083,35 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         updateSettings { $0.quickAISize = .standard }
     }
 
+    struct GridSection: Equatable {
+        let title: String
+        let range: Range<Int>
+    }
+
+    /// Section headers over `launcherMatches` in the emoji grid.
+    var gridSections: [GridSection] {
+        guard isGridCatalog, catalogScope == .emoji else { return [] }
+        let count = launcherMatches.count
+        guard count > 0 else { return [] }
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty, emojiFavouriteCount > 0 {
+            let favourites = min(emojiFavouriteCount, count)
+            var sections = [GridSection(title: "Frequently Used", range: 0..<favourites)]
+            if favourites < count { sections.append(GridSection(title: "All", range: favourites..<count)) }
+            return sections
+        }
+        return [GridSection(title: query.isEmpty ? "All" : "Results", range: 0..<count)]
+    }
+
+    private var emojiFavouriteCount: Int {
+        guard settings.launcherLearningEnabled else { return 0 }
+        return min(18, launcherUsage.topItemIDs(scope: LauncherCatalogScope.emoji.rawValue, limit: 18).count)
+    }
+
+    static func maxRows(for scope: LauncherCatalogScope?) -> Int {
+        scope == .emoji ? maxGridCells : maxLauncherRows
+    }
+
     func screenshotText(for item: LauncherCatalogItem) -> String? {
         screenshotTextIndex.text(for: item)
     }
@@ -2121,7 +2169,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                   settings.launcherLearningEnabled else {
                 return Array(items.prefix(rows))
             }
-            let favourites = launcherUsage.topItemIDs(scope: scope, limit: rows)
+            let favouriteLimit = catalogScope == .emoji ? 18 : rows
+            let favourites = launcherUsage.topItemIDs(scope: scope, limit: favouriteLimit)
             let pinned = items.filter(\.isPinned)
             let ordered = pinned + favourites.compactMap { id in items.first { $0.id == id && !$0.isPinned } }
             let rest = items.filter { item in !ordered.contains { $0.id == item.id } }
@@ -2849,7 +2898,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     var contextualCatalogItem: LauncherCatalogItem? {
         guard var item = resolveContextualCatalogItem() else { return nil }
-        // Some sources (raw screenshot files) carry no pin flag; without the stamp the ⌘K pane kept offering "Pin to
+        // Some sources (raw screenshot files, the emoji catalog) carry no
+        // pin flag; without the stamp the ⌘K pane kept offering "Pin to
         // Top" on an item that was already pinned.
         if !item.isPinned { item.isPinned = isLauncherItemPinned(item) }
         return item
@@ -2860,6 +2910,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // A draft exists nowhere else yet, so it answers for itself.
         if let draftCatalogItem, draftCatalogItem.id == contextualCatalogItemID {
             return draftCatalogItem
+        }
+        if contextualCatalogItemID.hasPrefix("emoji:") {
+            return emojiItems.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("screenshot:") {
             return screenshotFiles.first { $0.id == contextualCatalogItemID }
@@ -3339,7 +3392,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         applicationSelectionIndex = 0
     }
 
-    /// ↑↓ move a whole grid row in the screenshots grid, one item elsewhere.
+    /// ↑↓ move a whole grid row in Emoji & Symbols and the screenshots grid, one item elsewhere.
     func moveSelectionVertically(_ direction: Int) {
         moveApplicationSelection(isGridCatalog ? direction * gridColumnCount : direction)
     }
@@ -3859,6 +3912,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .snippets: return visible(snippets)
         case .quickLinks: return visible(quickLinks)
         case .clipboard: return visible(filteredClipboardEntries)
+        case .emoji: return visible(emojiItems)
         case .screenshots: return visible(screenshotItems)
         case .caffeinate: return visible(caffeinateItems)
         case .chats: return chatCount(excluding: hidden)
@@ -4031,7 +4085,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
         case .snippet:
             await insertSnippet(item, mode: .paste)
-        case .clipboard:
+        case .clipboard, .emoji:
             _ = await pasteLauncherItem(item)
         case .screenshot:
             if item.screenshotMediaKind == .video {
@@ -7138,6 +7192,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             openActionPane(for: result, form: .alias)
         case .setHotkey:
             openActionPane(for: result, form: .hotkey)
+        case .copyUnicode:
+            guard case .item(let item) = result, item.kind == .emoji else { return true }
+            pasteboard.writeString(EmojiCatalog.unicodeNotation(of: item.value))
+            markJustCopied()
+            closeItemActionPane()
         case .copyPath:
             let path: String
             switch result {
@@ -7690,6 +7749,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return clipboardEntries.contains { $0.itemID == configuration.itemID }
         case .screenshot:
             return screenshotFiles.contains { $0.itemID == configuration.itemID }
+        case .emoji:
+            return emojiItems.contains { $0.itemID == configuration.itemID }
         case .answer:
             return false
         case .askAI, .snippet, .quickLink, .command, .folder:

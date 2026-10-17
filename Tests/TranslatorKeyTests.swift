@@ -54,7 +54,7 @@ struct TranslatorKeyTests {
     @Test func commandTIsFreeInEveryOtherKeyTable() {
         let target = TranslatorKey.target.shortcut
         let kinds: [LauncherItemKind] = [
-            .snippet, .quickLink, .clipboard, .command, .screenshot,
+            .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
             .conversation, .askAI, .folder, .answer,
         ]
         var results: [LauncherSearchResult] = kinds.map { kind in

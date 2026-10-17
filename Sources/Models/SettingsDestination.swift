@@ -45,7 +45,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .keyboard: "Rebind the in-app keys; see what stays fixed."
         case .items: "Aliases and hotkeys for apps, folders, and commands."
         case .models: "Providers, models, and the quick-action instruction."
-        case .clipboard: "Clipboard history, screenshots, and Quicklinks."
+        case .clipboard: "Clipboard history, emoji, and Quicklinks."
         case .prompts: "Saved AI commands, their aliases, and hotkeys."
         case .about: "Version, updates, and source."
         }
@@ -255,6 +255,9 @@ enum SettingsDestinationIndex {
         group("clipboard.screenshots", .clipboard, "clipboard.screenshots", "Screenshots",
               "Saved-capture folders, media types, OCR, and grid layout",
               ["screenshot", "screenshots", "capture", "folder", "video", "media", "grid", "columns", "ocr"]),
+        group("clipboard.emoji", .clipboard, "clipboard.emoji", "Emoji & Symbols",
+              "Emoji skin tone for the Emoji catalog",
+              ["emoji", "symbols", "skin tone", "fitzpatrick"]),
         group("clipboard.screenText", .clipboard, "clipboard.screenText", "Text from Screen",
               "On-device OCR behaviour for text copied off the screen",
               ["ocr", "line breaks", "screen text", "text from screen", "vision"]),
