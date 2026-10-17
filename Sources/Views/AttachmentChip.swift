@@ -134,7 +134,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
             self.glyphOverride = nil
         }
         if phase == .ready {
-            detail = ["Ready", detail].filter { !$0.isEmpty }.joined(separator: " · ")
+            // "Ready" is spoken, not drawn: a chip in the strip is ready by default.
             spokenDetail = ["ready to send", spokenDetail ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
         }
     }

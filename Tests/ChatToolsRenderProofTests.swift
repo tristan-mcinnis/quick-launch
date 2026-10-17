@@ -12,6 +12,7 @@
 
 import AppKit
 import Foundation
+import HouseDesign
 import SwiftUI
 import Testing
 @testable import QuickLaunch
@@ -108,6 +109,51 @@ struct ChatToolsRenderProofTests {
             vm.noteLiveToolRecord(ChatToolRecord(kind: .skill, summary: "Read skill: float"))
             vm.streamingStatus = "Searching the vault…"
             try Self.save(try Self.render(vm, appearance: appearance), name: "c-quick-ai-tools-streaming-\(suffix).png")
+        }
+    }
+
+    /// The activity line open, with a failure drawn outside it. Appearance
+    /// only; the folding rules are in `ToolActivitySummaryTests`.
+    @Test func rendersTheActivityLineOpenWithAFailureOutsideIt() throws {
+        for (appearance, suffix) in Self.appearances() {
+            let records = [
+                Self.memoryLine,
+                Self.vaultLine,
+                ChatToolRecord(kind: .skill, summary: "Read skill: float"),
+                ChatToolRecord(kind: .today, summary: "Today's tasks failed", failed: true),
+            ]
+            let summary = ToolActivitySummary.summarize(records.map(\.activityLine))
+            let headline = try #require(summary.headline)
+            let view = VStack(alignment: .leading, spacing: House.Spacing.xs) {
+                ToolActivityGroup(headline: headline, lines: summary.folded, startsExpanded: true) { line in
+                    HStack(spacing: House.Spacing.xs) {
+                        Image(systemName: line.symbol).frame(width: House.Control.keyCap)
+                        Text(line.text)
+                    }
+                    .font(AQDesign.TypeToken.body)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                }
+                ForEach(Array(summary.exposed.enumerated()), id: \.offset) { _, line in
+                    HStack(spacing: House.Spacing.xs) {
+                        Image(systemName: line.symbol).frame(width: House.Control.keyCap)
+                        Text(line.text)
+                    }
+                    .font(AQDesign.TypeToken.body)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                }
+            }
+            .padding(House.Spacing.md)
+            .frame(width: 420, height: 170, alignment: .topLeading)
+            .background(AQDesign.ColorToken.raisedSurface)
+            let host = NSHostingView(rootView: view)
+            host.appearance = NSAppearance(named: appearance)
+            host.frame = NSRect(x: 0, y: 0, width: 420, height: 170)
+            host.layoutSubtreeIfNeeded()
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            let image = NSImage(size: host.bounds.size)
+            image.addRepresentation(rep)
+            try Self.save(image, name: "c-quick-ai-tools-activity-open-\(suffix).png")
         }
     }
 

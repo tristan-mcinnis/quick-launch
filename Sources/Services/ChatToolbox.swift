@@ -283,7 +283,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Memory search failed: \(error.localizedDescription). Answer without it.",
-                record: ChatToolRecord(kind: .memory, summary: "Memory search failed"),
+                record: ChatToolRecord(kind: .memory, summary: "Memory search failed", failed: true),
                 status: .failed
             )
         }
@@ -323,7 +323,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading today's captures failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Today's captures failed"),
+                record: ChatToolRecord(kind: .today, summary: "Today's captures failed", failed: true),
                 status: .failed
             )
         }
@@ -365,7 +365,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading today's tasks failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Today's tasks failed"),
+                record: ChatToolRecord(kind: .today, summary: "Today's tasks failed", failed: true),
                 status: .failed
             )
         }
@@ -409,7 +409,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading open tasks failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Open tasks failed"),
+                record: ChatToolRecord(kind: .today, summary: "Open tasks failed", failed: true),
                 status: .failed
             )
         }
@@ -542,7 +542,7 @@ struct ChatToolbox: Sendable {
         }
         return ChatToolOutcome(
             content: "Vault search could not answer: \(reason). Answer without it and say the vault did not respond.",
-            record: ChatToolRecord(kind: .vault, summary: "\(label): unavailable — \(reason)"),
+            record: ChatToolRecord(kind: .vault, summary: "\(label): unavailable — \(reason)", failed: true),
             status: roundStatus
         )
     }

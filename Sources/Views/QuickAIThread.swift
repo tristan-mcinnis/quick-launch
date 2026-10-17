@@ -431,7 +431,7 @@ struct QuickAIThread: View {
         let above = records.filter(\.drawsAboveAnswer)
         return VStack(alignment: .leading, spacing: House.Spacing.md) {
             if !above.isEmpty {
-                toolLineGroup(above.map { ($0.summary, $0.systemImage) })
+                toolLineGroup(above.map(\.activityLine))
             }
             // Answers never collapse: Raycast folds only what you send.
             answerProse(
@@ -485,8 +485,9 @@ struct QuickAIThread: View {
     /// so nothing moves when the answer lands.
     @ViewBuilder
     private var liveToolLines: some View {
-        let lines = (viewModel.webSearchNote.map { [($0, "globe")] } ?? [])
-            + viewModel.liveToolRecords.map { ($0.summary, $0.systemImage) }
+        let lines = (viewModel.webSearchNote.map {
+            [ToolActivitySummary.Line(text: $0, symbol: "globe", name: "web")]
+        } ?? []) + viewModel.liveToolRecords.map(\.activityLine)
         if !lines.isEmpty {
             toolLineGroup(lines)
                 .id(Self.webSearchNoteID)
@@ -494,9 +495,21 @@ struct QuickAIThread: View {
     }
 
     /// Consecutive tool lines, closer together than the turns around them.
-    private func toolLineGroup(_ lines: [(text: String, symbol: String)]) -> some View {
-        VStack(alignment: .leading, spacing: House.Spacing.xs) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+    /// Two or more that went well fold into one activity line; a failure or
+    /// a pending approval is drawn outside it, never inside.
+    private func toolLineGroup(_ lines: [ToolActivitySummary.Line]) -> some View {
+        let summary = ToolActivitySummary.summarize(lines)
+        return VStack(alignment: .leading, spacing: House.Spacing.xs) {
+            if let headline = summary.headline {
+                ToolActivityGroup(headline: headline, lines: summary.folded) { line in
+                    toolLine(line.text, symbol: line.symbol)
+                }
+            } else {
+                ForEach(Array(summary.folded.enumerated()), id: \.offset) { _, line in
+                    toolLine(line.text, symbol: line.symbol)
+                }
+            }
+            ForEach(Array(summary.exposed.enumerated()), id: \.offset) { _, line in
                 toolLine(line.text, symbol: line.symbol)
             }
         }
@@ -540,7 +553,7 @@ struct QuickAIThread: View {
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let day = source.day {
+            if let day = source.shownDay {
                 Text(day)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -558,12 +571,12 @@ struct QuickAIThread: View {
             }
             .buttonStyle(.plain)
             .help("Open \(path)")
-            .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+            .accessibilityLabel("Source: \(source.title)\(source.shownDay.map { ", \($0)" } ?? "")")
             .accessibilityHint("Opens the file")
         } else {
             label
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+                .accessibilityLabel("Source: \(source.title)\(source.shownDay.map { ", \($0)" } ?? "")")
         }
     }
 
