@@ -749,12 +749,10 @@ struct QuickAIThread: View {
 
     /// A chat with a few turns, opened from elsewhere, is held back until it
     /// has landed; a new chat or its first turns never are.
-    private static let heldMinimumMessages = 3
+    fileprivate static let heldMinimumMessages = 3
 
     private var isHoldingChat: Bool {
-        guard let id = viewModel.currentConversation?.id,
-              viewModel.conversationMessages.count >= Self.heldMinimumMessages else { return false }
-        return id != revealedChatID
+        ThreadReveal.isHolding(current: viewModel.currentConversation?.id, revealed: revealedChatID, messageCount: viewModel.conversationMessages.count)
     }
 
     /// Another chat is on the thread: send the view where that chat was left
@@ -766,7 +764,12 @@ struct QuickAIThread: View {
         knownConversationID = viewModel.currentConversation?.id
         revealTask?.cancel()
         turnGeometry.restoring = nil
-        guard isHoldingChat, let id = knownConversationID else { return }
+        guard isHoldingChat, let id = knownConversationID else {
+            // Not held: this chat is already shown, so its later turns must
+            // not be taken for a chat being opened.
+            revealedChatID = knownConversationID
+            return
+        }
         if !viewModel.isThreadFollowingBottom, let anchor = viewModel.threadAnchors.anchor(for: id) {
             turnGeometry.restoring = anchor
             restoreAnchor()
@@ -932,5 +935,15 @@ struct QuickAIThread: View {
         .frame(minHeight: House.Control.keyCap)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Error: \(message)")
+    }
+}
+
+/// Whether the open chat is held back until it has landed. Only a chat with a
+/// few turns, opened from elsewhere, is held; a chat that was shown while it
+/// was short stays shown as it grows.
+enum ThreadReveal {
+    static func isHolding(current: UUID?, revealed: UUID?, messageCount: Int) -> Bool {
+        guard let current, messageCount >= QuickAIThread.heldMinimumMessages else { return false }
+        return current != revealed
     }
 }

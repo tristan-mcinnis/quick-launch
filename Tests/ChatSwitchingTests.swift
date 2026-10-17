@@ -183,4 +183,49 @@ struct ChatSwitchingTests {
         #expect(vm.isThreadFollowingBottom)
         #expect(vm.threadAnchors.anchor(for: first.id) == nil)
     }
+
+    // MARK: - Hold and reveal
+
+    @Test func onlyAnotherChatWithAFewTurnsIsHeld() {
+        let chat = UUID(), other = UUID()
+        #expect(!ThreadReveal.isHolding(current: nil, revealed: nil, messageCount: 10), "no chat, nothing to hold")
+        #expect(!ThreadReveal.isHolding(current: chat, revealed: nil, messageCount: 2), "a short chat is never held")
+        #expect(ThreadReveal.isHolding(current: chat, revealed: other, messageCount: 3))
+        #expect(!ThreadReveal.isHolding(current: chat, revealed: chat, messageCount: 30), "a shown chat stays shown")
+    }
+
+    @Test func aNewChatIsNotHeldWhenItsSecondQuestionArrives() async throws {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "First answer.", finishReason: "stop")])
+        let vm = QuickViewModel(settings: settings, service: mock, pasteboard: FakePasteboard())
+        vm.openQuickAI()
+        // The thread is mounted before any conversation exists.
+        let host = NSHostingView(rootView: OverlayView(viewModel: vm))
+        host.frame = NSRect(x: 0, y: 0, width: PanelSizing.panelWidth, height: PanelSizing.quickAIHeight)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil }
+        try await Task.sleep(for: .seconds(0.3))
+        #expect(vm.currentConversation == nil)
+
+        vm.input = "first question"
+        await vm.submit()
+        try await Task.sleep(for: .seconds(0.3))
+        let chat = try #require(vm.currentConversation?.id)
+        #expect(vm.conversationMessages.count < 3)
+
+        await mock.setResponses([StreamDelta(text: "Second answer.", finishReason: "stop")])
+        vm.input = "second question"
+        await vm.submit()
+        #expect(vm.conversationMessages.count >= 3)
+        // The view recorded the chat as shown while it was short, so the
+        // growing chat is not held (and not hidden) at three messages.
+        try await Task.sleep(for: .seconds(0.5))
+        #expect(vm.currentConversation?.id == chat)
+        #expect(!ThreadReveal.isHolding(current: chat, revealed: chat, messageCount: vm.conversationMessages.count))
+    }
 }
