@@ -71,6 +71,16 @@ struct StreamRevealTests {
     }
 
     @MainActor
+    @Test func theClockEasesInAfterAnIdlePauseInsteadOfDrawingTheChunkAtOnce() {
+        let clock = RevealClock()
+        let t0 = Date(timeIntervalSinceReferenceDate: 0)
+        _ = clock.visible(total: 50, now: t0)
+        // The timeline paused for a second; a 20 character chunk then lands.
+        let next = clock.visible(total: 70, now: t0.addingTimeInterval(1))
+        #expect(next > 50 && next <= 50 + 4)
+    }
+
+    @MainActor
     @Test func theClockRestartsWhenTheTextShrinksAndWhenReset() {
         let clock = RevealClock()
         let t0 = Date(timeIntervalSinceReferenceDate: 0)

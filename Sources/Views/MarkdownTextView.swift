@@ -172,6 +172,7 @@ private struct StreamingTail: View {
     var body: some View {
         ThinkingIndicator()
             .frame(height: 14, alignment: .leading)
+            .accessibilityHidden(true)
     }
 }
 

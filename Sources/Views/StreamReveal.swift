@@ -11,6 +11,10 @@ enum StreamReveal {
     static let snapThreshold = 4_000
     /// One frame at 60 Hz, the unit the rule is stated in.
     static let frame: TimeInterval = 1.0 / 60.0
+    /// The most frames one tick may count. The timeline pauses once caught
+    /// up, so the first tick after a pause sees the whole idle gap; counting
+    /// it would draw a chunk at once. A slow frame still catches up a little.
+    static let maxFramesPerTick = 2.0
 
     /// The shown count after `frames` frames (60 Hz units, fractional when a
     /// frame ran long) of chasing `total`. Never passes `total`.
@@ -50,7 +54,7 @@ final class RevealClock {
         }
         let elapsed = lastFrame.map { now.timeIntervalSince($0) } ?? StreamReveal.frame
         lastFrame = now
-        current = StreamReveal.advance(shown: current, total: total, frames: elapsed / StreamReveal.frame)
+        current = StreamReveal.advance(shown: current, total: total, frames: min(elapsed / StreamReveal.frame, StreamReveal.maxFramesPerTick))
         shown = current
         return current
     }
