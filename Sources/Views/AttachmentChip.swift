@@ -587,7 +587,8 @@ struct AttachmentStripView: View {
                     .font(House.TypeToken.meta)
                     .foregroundStyle(House.ColorToken.textPrimary)
                     .lineLimit(1)
-                    .fixedSize()
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
             }
             if let selectionPreview {
                 SelectedTextPreviewButton(
