@@ -63,12 +63,6 @@ protocol AIChatWindowPresenting: AnyObject {
         case find
         case rail
         case rename
-        /// A waiting card of the Chief of Staff (↑↓ from the composer).
-        case cards
-        /// A waiting card's Edit fields.
-        case cardEdit
-        /// The Chief of Staff's New task sheet or project picker.
-        case cosForm
         /// A field the window does not route: the `⌘K` palette's search.
         /// Return and ⇧↩ are that field's own.
         case other
@@ -184,7 +178,6 @@ protocol AIChatWindowPresenting: AnyObject {
     /// command, the menu) shows the chat the window holds, or the last one,
     /// or a new one when the Start New Chat interval has passed.
     func open(handoff: AIChatHandoff?) {
-        releaseCards()
         if let handoff {
             closeFind()
             chat.adoptAIChatHandoff(handoff)
@@ -198,368 +191,13 @@ protocol AIChatWindowPresenting: AnyObject {
         chat.requestInputFocus()
     }
 
-    // MARK: - Chief of Staff
-
-    /// The Chief of Staff, when the app has one and its CLI is installed.
-    var chiefOfStaff: ChiefOfStaffModel? {
-        chat.chiefOfStaff.flatMap { $0.isAvailable ? $0 : nil }
-    }
-
-    /// The pinned Chief of Staff conversation is the open chat.
-    var isChiefOfStaffOpen: Bool { chiefOfStaff != nil && chat.isChiefOfStaffChatOpen }
-
-    /// The rail's first row: the pinned conversation, always there, never
-    /// renamed or deleted. It answers a search for its name or `cos`.
-    var chiefOfStaffRailItem: LauncherCatalogItem? {
-        guard let chiefOfStaff else { return nil }
-        let item = LauncherCatalogItem(
-            kind: .conversation,
-            itemID: ChiefOfStaffModel.conversationID.uuidString,
-            title: ChiefOfStaffModel.title,
-            detail: chiefOfStaff.summary,
-            value: "",
-            keywords: "cos",
-            isPinned: true
-        )
-        let query = FuzzyMatcher.fold(railQuery.trimmingCharacters(in: .whitespacesAndNewlines))
-        guard !query.isEmpty else { return item }
-        return FuzzyMatcher.fold("\(item.title) cos").contains(query) ? item : nil
-    }
-
-    static func isChiefOfStaffItem(_ itemID: String?) -> Bool {
-        itemID == ChiefOfStaffModel.conversationID.uuidString
-    }
-
-    /// Opens the pinned conversation: the backing chat, the waiting cards
-    /// above it, and the keyboard in the composer, or on `proposalID`'s card
-    /// when a notification named one.
-    func openChiefOfStaff(proposalID: String? = nil) {
-        guard let chiefOfStaff else { return }
-        wire(chiefOfStaff)
-        closeFind()
-        chat.openChiefOfStaffChat()
-        railIndex = currentRailIndex ?? railIndex
-        railActionsPresented = false
-        deleteArmedChatID = nil
-        if let proposalID {
-            focusCards(proposalID)
-        } else {
-            focusComposer()
-        }
-        window?.showWindow()
-    }
-
-    /// ⌘D: a NEW ordinary chat about a card or a prepared file, titled with
-    /// its headline, the card's text and its source files attached through
-    /// the attachment tray, the draft left for the question. It runs as any
-    /// new chat does: the default provider and tools, no Chief of Staff
-    /// instruction. The pinned thread stays as it is.
-    func discuss(_ discussion: ChiefOfStaffModel.Discussion) {
-        // Continue branch: a card that has one opens it again.
-        if let card = discussion.cardID, let branch = chat.branchConversation(for: card) {
-            openChat(itemID: branch.id.uuidString)
-            return
-        }
-        releaseCards()
-        closeFind()
-        if let chiefOfStaff {
-            wire(chiefOfStaff)
-            chiefOfStaff.send(.loadCharter)
-        }
-        if chat.isStreaming {
-            chat.cancel()
-            chat.persistCurrentConversation()
-        }
-        chat.startNewConversation()
-        if let provider = chat.activeProvider, let model = chat.activeModelID {
-            chat.currentConversation = QuickConversation(
-                providerID: provider.id,
-                model: model,
-                customTitle: discussion.title,
-                cosCard: discussion.cardID
-            )
-        }
-        chat.attachmentTray.add(.selection(discussion.cardText, appName: ChiefOfStaffModel.title))
-        chat.attachmentTray.add(contentsOf: discussion.files.map(AttachmentSource.file))
-        chat.isQuickAIPresented = true
-        railIndex = currentRailIndex ?? railIndex
-        focusComposer()
-    }
-
-    /// The Chief of Staff's ways back into this window: Discuss, the
-    /// keyboard onto a card a reply made, and a Discuss chat's Tell reply.
-    private func wire(_ chiefOfStaff: ChiefOfStaffModel) {
-        chiefOfStaff.onDiscuss = { [weak self] in self?.discuss($0) }
-        chiefOfStaff.onFocusCard = { [weak self] in self?.focusCards($0) }
-        chiefOfStaff.onTold = { [weak self] chat, outcome in self?.chat.chiefOfStaffTold(outcome, inChat: chat) }
-        chiefOfStaff.branchLookup = { [weak self] card in self?.chat.branchConversation(for: card)?.id }
-        chiefOfStaff.onCardDone = { [weak self] card in self?.chat.chiefOfStaffCardDone(card) }
-    }
-
-    /// A Discuss chat is open: its card, while the Chief of Staff is there.
-    var discussedCardID: String? { chiefOfStaff == nil ? nil : chat.discussedCardID }
-
-    /// ⇧⌘W or the button in a branch: it merges back (one line under its
-    /// card in the pinned thread) and the pinned conversation opens, on the
-    /// card while it waits.
-    func closeBranch() {
-        guard let chiefOfStaff, let card = discussedCardID, let branch = chat.currentConversation?.id else { return }
-        wire(chiefOfStaff)
-        if chat.isStreaming {
-            chat.cancel()
-            chat.persistCurrentConversation()
-        }
-        chat.mergeBranch(branch)
-        let waiting = chiefOfStaff.proposal(card)?.isWaiting == true
-        openChiefOfStaff(proposalID: waiting ? card : nil)
-    }
-
-    /// The keyboard onto the waiting cards: `id`'s, or the newest.
-    func focusCards(_ id: String? = nil) {
-        guard let chiefOfStaff, chiefOfStaff.firstFocusable != nil || id != nil else { return }
-        chiefOfStaff.focusCard(id)
-        focus = .cards
-    }
-
-    /// The keyboard leaves the cards; an open Edit closes.
-    private func releaseCards() {
-        chiefOfStaff?.releaseCardFocus()
-    }
-
-    /// The Chief of Staff's keys, while its conversation is open: ↑↓ onto
-    /// and over the cards (←→ between board columns), ⌘↩ Do it, ⌘E Edit,
-    /// ⌘L Later, ⌘⌫ No, ⌘R Bring back, esc back; and anywhere in it ⌥⌘1
-    /// List, ⌥⌘2 Board, ⌘N New task, ⌘I health, ⇧⌘P project, ⇧⌘↩ Do all TODAY,
-    /// ⇧⌘T tasks. True when the key was used; every other chat is untouched.
-    func handleChiefOfStaffKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
-        if !isChiefOfStaffOpen, discussedCardID != nil {
-            return handleDiscussKey(key: key, characters: characters, modifiers: modifiers)
-        }
-        guard isChiefOfStaffOpen, let chiefOfStaff else { return false }
-        if focus == .cosForm {
-            // The sheet's fields type; ⌘↩ adds the task or the rule.
-            guard key?.isReturn == true, modifiers.overlayRelevant == [.command] else { return false }
-            if chiefOfStaff.newTask != nil {
-                chiefOfStaff.submitNewTask()
-                if chiefOfStaff.newTask == nil { returnFromCosForm() }
-                return true
-            }
-            if chiefOfStaff.addRule != nil {
-                chiefOfStaff.submitAddRule()
-                returnFromCosForm()
-                return true
-            }
-            if chiefOfStaff.lessPrompt != nil {
-                chiefOfStaff.submitLess()
-                returnFromCosForm()
-                return true
-            }
-            return false
-        }
-        let place: ChiefOfStaffKeys.Place
-        switch focus {
-        case .cards:
-            if let menu = chiefOfStaff.laterMenu {
-                place = menu.isPicking ? .laterPicking : .laterMenu
-            } else {
-                switch chiefOfStaff.viewMode {
-                case .artifacts: place = .artifact
-                case .charter: place = .rung
-                case .board: place = .card(board: true)
-                case .list, .activity: place = .card(board: false)
-                }
-            }
-        case .cardEdit:
-            place = .editing
-        case .composer:
-            // A chooser, the palette, or the question card over the
-            // composer keeps its own keys.
-            switch chat.topLayer {
-            case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser, .modelChooser,
-                 .assistantChooser, .captureChooser, .addContextMenu, .slashCommandPalette, .recentChats:
-                return false
-            default:
-                if chat.isAskQuestionActive { return false }
-            }
-            place = .composer(draftIsEmpty: chat.input.isEmpty)
-        default:
-            return false
-        }
-        guard let action = ChiefOfStaffKeys.route(
-            key: key,
-            characters: characters,
-            modifiers: modifiers,
-            place: place,
-            hasCards: chiefOfStaff.firstFocusable != nil,
-            hasRungOffer: chiefOfStaff.rungOffer != nil,
-            onConflict: chiefOfStaff.focusedProposal?.conflict != nil
-        ) else { return false }
-        perform(action, on: chiefOfStaff)
-        return true
-    }
-
-    /// A branch's keys (`ChiefOfStaffKeys.routeBranch`).
-    private func handleDiscussKey(key: VirtualKey?, characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
-        guard let chiefOfStaff else { return false }
-        let place: ChiefOfStaffKeys.Place
-        switch focus {
-        case .composer:
-            switch chat.topLayer {
-            case .itemActionForm, .itemActionPane, .actionPalette, .transformChooser, .modelChooser,
-                 .assistantChooser, .captureChooser, .addContextMenu, .slashCommandPalette, .recentChats:
-                return false
-            default:
-                if chat.isAskQuestionActive { return false }
-            }
-            place = .composer(draftIsEmpty: chat.input.isEmpty)
-        case .cards:
-            if let menu = chiefOfStaff.laterMenu {
-                place = menu.isPicking ? .laterPicking : .laterMenu
-            } else {
-                place = .card(board: false)
-            }
-        case .cardEdit:
-            place = .editing
-        default:
-            return false
-        }
-        guard let action = ChiefOfStaffKeys.routeBranch(key: key, characters: characters, modifiers: modifiers, place: place)
-        else { return false }
-        perform(action, on: chiefOfStaff)
-        return true
-    }
-
-    private func perform(_ action: ChiefOfStaffKeys.Action, on chiefOfStaff: ChiefOfStaffModel) {
-        switch action {
-        case .reply(let typed):
-            // In the pinned chat the message is about the card; in a Discuss
-            // chat the chat already is.
-            if isChiefOfStaffOpen { chiefOfStaff.setSubject(chiefOfStaff.focusedCardID) }
-            focusComposer()
-            if let typed { chat.input += typed }
-        case .closeBranch:
-            closeBranch()
-        case .focusCards:
-            focusCards()
-        case .move(let delta):
-            chiefOfStaff.moveCardFocus(delta)
-            if chiefOfStaff.focusedCardID == nil { focusComposer() }
-        case .moveColumn(let delta):
-            chiefOfStaff.moveColumnFocus(delta)
-        case .toComposer:
-            focusComposer()
-        case .doIt:
-            chiefOfStaff.doFocused()
-        case .edit:
-            chiefOfStaff.editFocused()
-            if chiefOfStaff.isEditingFocusedCard { focus = .cardEdit }
-        case .later:
-            chiefOfStaff.openLaterMenu()
-        case .no:
-            chiefOfStaff.noFocused()
-        case .bringBack:
-            chiefOfStaff.bringBackFocused()
-        case .runEdit:
-            chiefOfStaff.doFocused()
-            focus = .cards
-        case .cancelEdit:
-            if let id = chiefOfStaff.focusedCardID { chiefOfStaff.cancelEdit(id) }
-            focus = .cards
-        case .menuMove(let delta):
-            chiefOfStaff.moveLaterMenu(delta)
-        case .menuPick(let choice):
-            chiefOfStaff.chooseLater(choice)
-        case .menuClose:
-            chiefOfStaff.laterMenu = nil
-        case .showView(let view):
-            chiefOfStaff.viewMode = view
-        case .newTask:
-            // "New" in the Charter is a rule; everywhere else, a task.
-            if chiefOfStaff.viewMode == .charter {
-                chiefOfStaff.openAddRule()
-            } else {
-                chiefOfStaff.openNewTask()
-            }
-            focus = .cosForm
-        case .more:
-            chiefOfStaff.moreFocused()
-        case .less:
-            chiefOfStaff.lessFocused()
-            if chiefOfStaff.lessPrompt != nil { focus = .cosForm }
-        case .undo:
-            chiefOfStaff.undoFocused()
-        case .discuss:
-            chiefOfStaff.discussFocused()
-        case .openFile:
-            chiefOfStaff.openFocusedFile()
-        case .removeRung:
-            chiefOfStaff.removeFocusedRung()
-        case .acceptRung:
-            chiefOfStaff.acceptRungOffer()
-        case .forgetConflict(let index):
-            chiefOfStaff.forgetConflict(index)
-        case .activityDay(let delta):
-            if chiefOfStaff.viewMode == .activity { chiefOfStaff.moveActivityDay(delta) }
-        case .toggleHealth:
-            chiefOfStaff.isHealthDetailShown.toggle()
-        case .pickProject:
-            chiefOfStaff.toggleProjectPicker()
-            if chiefOfStaff.projectPicker != nil { focus = .cosForm }
-        case .doAllToday:
-            chiefOfStaff.doAllToday()
-        case .toggleTasks:
-            chiefOfStaff.toggleTasks()
-        }
-    }
-
-    /// The sheet or picker closed: the keyboard goes back to the card it
-    /// came from, else the composer.
-    private func returnFromCosForm() {
-        if chiefOfStaff?.focusedCardID != nil {
-            focus = .cards
-        } else {
-            focusComposer()
-        }
-    }
-
     // MARK: - Rail
 
-    /// The rail's rows: the pinned Chief of Staff first, then pinned chats,
-    /// then recent, narrowed and ranked by the search every chat list
-    /// shares. The view model caches the rows per query, so reading them
-    /// again costs nothing.
+    /// The rail's rows: pinned chats first, then recent, narrowed and ranked
+    /// by the search every chat list shares. The view model caches the rows
+    /// per query, so reading them again costs nothing.
     var railItems: [LauncherCatalogItem] {
-        let chats = chat.chatItems(matching: railQuery)
-        guard let chiefOfStaffRailItem else { return chats }
-        // Unsearched, the Chief of Staff's branches sit under its row,
-        // newest first; a search ranks them with every other chat.
-        let branches = nestedBranchIDs
-        guard !branches.isEmpty else { return [chiefOfStaffRailItem] + chats }
-        let nested = branches.compactMap { id in chats.first { $0.itemID == id } }.map { item in
-            var item = item
-            item.isPinned = true
-            return item
-        }
-        return [chiefOfStaffRailItem] + nested + chats.filter { !branches.contains($0.itemID) }
-    }
-
-    /// The branch rows nested under the Chief of Staff, newest first; none
-    /// while searching or without the Chief of Staff.
-    private var nestedBranchIDs: [String] {
-        guard chiefOfStaff != nil, !isRailSearching else { return [] }
-        return chat.branchConversations.map(\.id.uuidString)
-    }
-
-    /// A rail row is a branch nested under the Chief of Staff.
-    func isNestedBranch(_ item: LauncherCatalogItem) -> Bool {
-        nestedBranchIDs.contains(item.itemID)
-    }
-
-    /// The rows ⌘1 to ⌘9 number: every chat but the Chief of Staff and its
-    /// nested branches.
-    private var numberedRailItems: [LauncherCatalogItem] {
-        let branches = nestedBranchIDs
-        return chat.chatItems(matching: railQuery).filter { !branches.contains($0.itemID) }
+        chat.chatItems(matching: railQuery)
     }
 
     /// While a query is typed the rail is one ranked list under "Results";
@@ -595,7 +233,6 @@ protocol AIChatWindowPresenting: AnyObject {
     /// count and the time today, the day before that. A row found by its
     /// text shows its snippet there instead, and this moves to the tooltip.
     func railDetail(for item: LauncherCatalogItem, now: Date = Date()) -> String {
-        if Self.isChiefOfStaffItem(item.itemID) { return chiefOfStaff?.summary ?? item.detail }
         guard let facts = railFacts[item.itemID] else { return item.detail }
         let count = facts.questions == 1 ? "1 question" : "\(facts.questions) questions"
         let stamp = Calendar.current.isDate(facts.updatedAt, inSameDayAs: now)
@@ -612,15 +249,9 @@ protocol AIChatWindowPresenting: AnyObject {
         item.chatSnippet?.keepingLead(Self.railSnippetLead)
     }
 
-    /// The `⌘` number a row answers to (`⌘1`…`⌘9`), by drawn position
-    /// among the chats: the pinned Chief of Staff row above them takes none,
-    /// so every chat keeps the number it had.
+    /// The `⌘` number a row answers to (`⌘1`…`⌘9`), by drawn position.
     func railNumber(at index: Int) -> Int? {
-        // The Chief of Staff's row and its nested branches lead the rail
-        // unnumbered.
-        let offset = chiefOfStaffRailItem == nil ? 0 : 1 + nestedBranchIDs.count
-        let position = index - offset
-        return position >= 0 && position < Self.jumpRowCount ? position + 1 : nil
+        index >= 0 && index < Self.jumpRowCount ? index + 1 : nil
     }
 
     /// What the rail says when it has no row.
@@ -700,21 +331,10 @@ protocol AIChatWindowPresenting: AnyObject {
     /// Opens a chat from the rail (a click, Return, or `⌘1`…`⌘9`). The rail
     /// stays; the keyboard goes back to the composer.
     func openChat(itemID: String) {
-        if Self.isChiefOfStaffItem(itemID) {
-            openChiefOfStaff()
-            return
-        }
-        releaseCards()
         if chat.isStreaming { chat.cancel() }
         closeFind()
         chat.continueConversation(itemID: itemID)
         chat.isQuickAIPresented = true
-        // A branch reads the charter for its system message and hears back
-        // from the Chief of Staff here.
-        if let chiefOfStaff, discussedCardID != nil {
-            wire(chiefOfStaff)
-            chiefOfStaff.send(.loadCharter)
-        }
         railIndex = railItems.firstIndex { $0.itemID == itemID } ?? railIndex
         railActionsPresented = false
         deleteArmedChatID = nil
@@ -725,7 +345,7 @@ protocol AIChatWindowPresenting: AnyObject {
     /// not the rail is showing.
     @discardableResult
     func jumpToRailRow(_ number: Int) -> Bool {
-        let items = numberedRailItems
+        let items = railItems
         guard number >= 1, number <= Self.jumpRowCount, items.indices.contains(number - 1) else { return false }
         openChat(itemID: items[number - 1].itemID)
         return true
@@ -759,10 +379,9 @@ protocol AIChatWindowPresenting: AnyObject {
         }
     }
 
-    /// The pinned Chief of Staff row has none: it cannot be pinned off,
-    /// renamed, or deleted.
+    /// The actions of the highlighted row; none when no row is highlighted.
     var railActions: [RailAction] {
-        guard let item = highlightedRailItem, !Self.isChiefOfStaffItem(item.itemID) else { return [] }
+        guard highlightedRailItem != nil else { return [] }
         return RailAction.allCases
     }
 
@@ -820,7 +439,7 @@ protocol AIChatWindowPresenting: AnyObject {
     }
 
     func performRailAction(_ action: RailAction) {
-        guard let item = highlightedRailItem, !Self.isChiefOfStaffItem(item.itemID),
+        guard let item = highlightedRailItem,
               let id = UUID(uuidString: item.itemID) else { return }
         switch action {
         case .pin:
@@ -1037,7 +656,6 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Focus
 
     func focusComposer() {
-        releaseCards()
         focus = .composer
         chat.requestInputFocus()
     }
@@ -1045,24 +663,15 @@ protocol AIChatWindowPresenting: AnyObject {
     // MARK: - Window actions (⌘K)
 
     var windowSurfaceActions: [QuickAISurfaceAction] {
-        var actions: [QuickAISurfaceAction] = [
+        [
             isRailVisible ? .hideChatList : .showChatList,
             .findInChat,
             isAlwaysOnTop ? .stopKeepingOnTop : .keepOnTop,
         ]
-        // Added after the window's own rows, so their order never moves.
-        if chiefOfStaff != nil {
-            actions.append(isChiefOfStaffOpen ? .newTask : .chiefOfStaff)
-        }
-        return actions
     }
 
     func performWindowSurfaceAction(_ action: QuickAISurfaceAction) {
         switch action {
-        case .chiefOfStaff: openChiefOfStaff()
-        case .newTask:
-            chiefOfStaff?.openNewTask()
-            focus = .cosForm
         case .showChatList: showRail()
         case .hideChatList: hideRail()
         case .findInChat: openFind()
@@ -1089,31 +698,7 @@ protocol AIChatWindowPresenting: AnyObject {
         default:
             break
         }
-        if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.rungOffer != nil, focus != .cosForm, focus != .cardEdit {
-            // "Always do this?" answered no.
-            chiefOfStaff.dismissRungOffer()
-        } else if focus == .cosForm, let chiefOfStaff {
-            chiefOfStaff.newTask = nil
-            chiefOfStaff.projectPicker = nil
-            chiefOfStaff.laterMenu = nil
-            chiefOfStaff.lessPrompt = nil
-            chiefOfStaff.addRule = nil
-            returnFromCosForm()
-        } else if focus == .cardEdit, let chiefOfStaff, let id = chiefOfStaff.focusedCardID {
-            chiefOfStaff.cancelEdit(id)
-            focus = .cards
-        } else if focus == .cards {
-            focusComposer()
-        } else if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.subjectCardID != nil {
-            // The next message is not about that card after all.
-            chiefOfStaff.setSubject(nil)
-        } else if isChiefOfStaffOpen, let chiefOfStaff, chiefOfStaff.isHealthDetailShown || chiefOfStaff.newTask != nil
-                    || chiefOfStaff.projectPicker != nil || chiefOfStaff.addRule != nil {
-            chiefOfStaff.isHealthDetailShown = false
-            chiefOfStaff.newTask = nil
-            chiefOfStaff.projectPicker = nil
-            chiefOfStaff.addRule = nil
-        } else if renamingChatID != nil {
+        if renamingChatID != nil {
             cancelRename()
         } else if railActionsPresented {
             railActionsPresented = false
@@ -1150,10 +735,7 @@ protocol AIChatWindowPresenting: AnyObject {
         case .rename:
             commitRename()
             return true
-        case .cards:
-            // A bare Return never decides a card: ⌘↩ does.
-            return true
-        case .cardEdit, .cosForm, .other:
+        case .other:
             return false
         }
     }
@@ -1181,9 +763,7 @@ protocol AIChatWindowPresenting: AnyObject {
         case .find:
             findPrevious()
             return .handled
-        case .cards:
-            return .handled
-        case .rail, .rename, .cardEdit, .cosForm, .other:
+        case .rail, .rename, .other:
             return .ignored
         }
     }

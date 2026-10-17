@@ -62,7 +62,7 @@ enum QuickHistoryStore {
     ) -> QuickHistoryLoad {
         let store = store(for: fileURL)
         if let conversations = store.load() {
-            return .loaded(ordered(conversations))
+            return .loaded(ordered(droppingRetired(conversations)))
         }
         guard !store.exists else {
             AppLog.persistence.error(
@@ -73,7 +73,7 @@ enum QuickHistoryStore {
         guard let defaults, let migrated = migrate(from: defaults, into: store) else {
             return .missing
         }
-        return .loaded(ordered(migrated))
+        return .loaded(ordered(droppingRetired(migrated)))
     }
 
     /// Copies the legacy file aside once, before the archive becomes the
@@ -138,6 +138,15 @@ enum QuickHistoryStore {
         var result = conversations.filter { $0.id != conversation.id }
         result.append(conversation)
         return bounded(result, limit: limit)
+    }
+
+    /// The id of the pinned conversation of the retired Chief of Staff. Old
+    /// history may still hold it; it is dropped on load and never listed.
+    static let retiredPinnedChatID = UUID(uuidString: "C0F5C0F5-0000-4000-8000-000000000C05")!
+
+    /// `conversations` without the retired pinned conversation.
+    static func droppingRetired(_ conversations: [QuickConversation]) -> [QuickConversation] {
+        conversations.filter { $0.id != retiredPinnedChatID }
     }
 
     /// Pinned chats first, then newest first.

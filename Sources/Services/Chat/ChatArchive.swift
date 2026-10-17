@@ -44,10 +44,10 @@ actor ChatArchive {
     /// payload; everything else on disk is preserved across a rewrite.
     static let conversationOwnedKeys: Set<String> = [
         "providerID", "model", "customTitle", "titleSource", "isPinned",
-        "enabledTools", "assistantID", "cosCard",
+        "enabledTools", "assistantID",
     ]
     /// The keys the live `QuickMessage` owns on the turn payload.
-    static let turnOwnedKeys: Set<String> = ["askUserQuestion", "toolRecords", "cosTell"]
+    static let turnOwnedKeys: Set<String> = ["askUserQuestion", "toolRecords"]
 
     nonisolated let root: URL
     nonisolated let attachments: AttachmentArchive
@@ -1031,9 +1031,6 @@ actor ChatArchive {
         if let assistantID = conversation.assistantID {
             payload["assistantID"] = .string(assistantID.uuidString)
         }
-        if let cosCard = conversation.cosCard {
-            payload["cosCard"] = .string(cosCard)
-        }
 
         return ConversationRecord(
             id: conversation.id.uuidString,
@@ -1041,25 +1038,10 @@ actor ChatArchive {
             title: conversation.title,
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
-            sessionLinks: sessionLinks(for: conversation),
             turns: conversation.messages.map(turn(for:)),
             appPayload: payload
         )
     }
-
-    /// A Chief of Staff branch links to its parent, the pinned conversation,
-    /// and to the card it is about. Every other chat links to nothing.
-    static func sessionLinks(for conversation: QuickConversation) -> [SessionLink] {
-        guard let card = conversation.cosCard else { return [] }
-        return [
-            SessionLink(kind: branchParentLink, id: ChiefOfStaffModel.conversationID.uuidString, label: ChiefOfStaffModel.title),
-            SessionLink(kind: branchCardLink, id: card),
-        ]
-    }
-
-    /// The `SessionLink` kinds of a branch.
-    static let branchParentLink = "cos-branch-of"
-    static let branchCardLink = "cos-card"
 
     /// One legacy message as a turn, keeping the card and the tool records in
     /// the turn's own namespaced payload.
@@ -1070,9 +1052,6 @@ actor ChatArchive {
         }
         if let tools = message.toolRecords {
             payload["toolRecords"] = jsonValue(tools)
-        }
-        if let told = message.cosTell {
-            payload["cosTell"] = jsonValue(told)
         }
         return TurnRecord(
             id: message.id.uuidString,
@@ -1141,8 +1120,7 @@ actor ChatArchive {
             titleSource: payload?["titleSource"]?.stringValue,
             isPinned: payload?["isPinned"]?.boolValue ?? false,
             enabledTools: enabledTools,
-            assistantID: assistantID,
-            cosCard: payload?["cosCard"]?.stringValue
+            assistantID: assistantID
         )
     }
 
@@ -1157,8 +1135,7 @@ actor ChatArchive {
             content: turn.text,
             askUserQuestion: payload?["askUserQuestion"].flatMap { Self.decodeValue($0, as: AskUserQuestion.self) },
             toolRecords: payload?["toolRecords"].flatMap { Self.decodeValue($0, as: [ChatToolRecord].self) },
-            attachments: turn.attachments.isEmpty ? nil : turn.attachments.map(legacyReference(for:)),
-            cosTell: payload?["cosTell"].flatMap { Self.decodeValue($0, as: CosTold.self) }
+            attachments: turn.attachments.isEmpty ? nil : turn.attachments.map(legacyReference(for:))
         )
     }
 

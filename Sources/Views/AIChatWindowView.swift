@@ -69,54 +69,18 @@ struct AIChatWindowView: View {
             if model.isFindPresented {
                 AIChatFindBar(model: model)
             }
-            if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
-                ChiefOfStaffPanel(
-                    model: chiefOfStaff,
-                    maxHeight: max(House.Control.row * 2, conversationHeight * Self.panelShare),
-                    hasKeyboard: model.focus == .cards || model.focus == .cardEdit
-                ) { place in
-                    switch place {
-                    case .cards: model.noteFocus(.cards, true)
-                    case .editing: model.noteFocus(.cardEdit, true)
-                    case .form: model.noteFocus(.cosForm, true)
-                    }
-                }
-                // The Board and the pages take the room above the composer;
-                // the List leaves the thread under it.
-                .frame(maxHeight: chiefOfStaff.viewMode == .list ? nil : .infinity, alignment: .top)
-                HouseDivider()
-            }
-            if !(model.isChiefOfStaffOpen && model.chiefOfStaff.map { $0.viewMode != .list } == true) {
-                QuickAIThread(
-                    viewModel: chat,
-                    find: model.findHighlights,
-                    onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) },
-                    header: chiefOfStaffHistory,
-                    accessory: toldCard
-                )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // The scroll view would otherwise draw up under the header
-                    // and the transparent title bar.
-                    .clipped()
-                    // A file, link, or picture dropped on the thread attaches to
-                    // the next question, as on the composer.
-                    .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
-            }
-            if model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff {
-                if let subject = chiefOfStaff.subject {
-                    SubjectChip(proposal: subject) { chiefOfStaff.setSubject(nil) }
-                        .padding(.horizontal, House.Spacing.lg)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                ChiefOfStaffKeyStrip(model: chiefOfStaff)
-            } else if let chiefOfStaff = model.chiefOfStaff, let card = model.discussedCardID {
-                BranchStrip(
-                    model: chiefOfStaff,
-                    cardID: card,
-                    isTelling: chat.isTellingChiefOfStaff,
-                    onClose: model.closeBranch
-                )
-            }
+            QuickAIThread(
+                viewModel: chat,
+                find: model.findHighlights,
+                onFindHitOffset: { hit, offset in model.noteFindHitOffset(offset, for: hit) }
+            )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The scroll view would otherwise draw up under the header
+                // and the transparent title bar.
+                .clipped()
+                // A file, link, or picture dropped on the thread attaches to
+                // the next question, as on the composer.
+                .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
             QuickAIComposer(viewModel: chat, multiline: true) { focused in
                 model.noteFocus(.composer, focused)
             }
@@ -127,38 +91,6 @@ struct AIChatWindowView: View {
         .overlay(alignment: .bottomTrailing) { actionPalette }
         .environment(\.composerPaneMaximumHeight,
             max(0, conversationHeight - composerHeight - Self.titleBarHeight - House.Spacing.xs))
-    }
-
-    /// The share of the conversation's height the Chief of Staff's List may
-    /// take before it scrolls, so the thread and the composer always show.
-    static let panelShare: CGFloat = 0.6
-
-    /// The Chief of Staff's decided cards and other surfaces' chat, above
-    /// its chat's own turns. Nil in any other chat.
-    private var chiefOfStaffHistory: AnyView? {
-        guard model.isChiefOfStaffOpen, let chiefOfStaff = model.chiefOfStaff else { return nil }
-        return AnyView(ChiefOfStaffHistory(
-            entries: chiefOfStaff.earlier,
-            problem: chiefOfStaff.problem ?? chiefOfStaff.recordProblem
-        ) { branch in model.openChat(itemID: branch.uuidString) })
-    }
-
-    /// Under a Chief of Staff reply that made a card: that card, with its
-    /// buttons and keys. Nil under every other message.
-    private func toldCard(_ message: QuickMessage) -> AnyView? {
-        guard let card = message.cosTell?.card, let chiefOfStaff = model.chiefOfStaff else { return nil }
-        return AnyView(ToldCard(
-            model: chiefOfStaff,
-            cardID: card,
-            hasKeyboard: model.focus == .cards || model.focus == .cardEdit,
-            takesKeyboard: !model.isChiefOfStaffOpen
-        ) { place in
-            switch place {
-            case .cards: model.noteFocus(.cards, true)
-            case .editing: model.noteFocus(.cardEdit, true)
-            case .form: model.noteFocus(.cosForm, true)
-            }
-        })
     }
 
     // MARK: - Header
@@ -470,8 +402,7 @@ struct AIChatRail: View {
                         isSelected: isSelected,
                         isOpen: isOpen,
                         isPinned: showsPin,
-                        number: showsNumber ? number : nil,
-                        badge: waitingBadge(for: item)
+                        number: showsNumber ? number : nil
                     ) {
                         Text(item.title)
                             .font(AQDesign.TypeToken.label)
@@ -487,10 +418,8 @@ struct AIChatRail: View {
                 .help(snippet == nil ? item.title : "\(item.title), \(detail)")
             }
         }
-        // A branch sits indented under the Chief of Staff's row.
-        .padding(.leading, model.isNestedBranch(item) ? House.Spacing.md : 0)
         .contextMenu {
-            ForEach(AIChatWindowModel.isChiefOfStaffItem(item.itemID) ? [] : AIChatWindowModel.RailAction.allCases) { action in
+            ForEach(AIChatWindowModel.RailAction.allCases) { action in
                 Button(role: action == .delete ? .destructive : nil) {
                     model.performRailAction(action, itemID: item.itemID)
                 } label: {
@@ -505,20 +434,12 @@ struct AIChatRail: View {
         .accessibilityValue(isSelected ? "Selected, \(index + 1) of \(total)" : "\(index + 1) of \(total)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityActions {
-            ForEach(AIChatWindowModel.isChiefOfStaffItem(item.itemID) ? [] : AIChatWindowModel.RailAction.allCases) { action in
+            ForEach(AIChatWindowModel.RailAction.allCases) { action in
                 Button(model.title(of: action, for: item)) {
                     model.performRailAction(action, itemID: item.itemID)
                 }
             }
         }
-    }
-
-    /// The Chief of Staff row's waiting count; nil on every other row and
-    /// when nothing waits.
-    private func waitingBadge(for item: LauncherCatalogItem) -> Int? {
-        guard AIChatWindowModel.isChiefOfStaffItem(item.itemID),
-              let count = model.chiefOfStaff?.waitingCount, count > 0 else { return nil }
-        return count
     }
 
     /// One rail row: the open-chat bar, two lines, and the `⌘` number.
@@ -527,7 +448,6 @@ struct AIChatRail: View {
         isOpen: Bool,
         isPinned: Bool,
         number: Int?,
-        badge: Int? = nil,
         @ViewBuilder lines: () -> Lines
     ) -> some View {
         HStack(spacing: House.Spacing.xs) {
@@ -540,9 +460,6 @@ struct AIChatRail: View {
                     .font(AQDesign.TypeToken.footnote.weight(.semibold))
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .accessibilityHidden(true)
-            }
-            if let badge {
-                WaitingBadge(count: badge)
             }
             if let number {
                 KeyCap(text: "⌘\(number)")
@@ -741,19 +658,3 @@ private struct OpenChatMarker: View {
     }
 }
 
-/// The Chief of Staff row's waiting count in the rail: `meta` digits on a
-/// `chipFill` capsule. Ink, never a colour; the row's detail says it too.
-struct WaitingBadge: View {
-    let count: Int
-
-    var body: some View {
-        Text("\(count)")
-            .font(AQDesign.TypeToken.metadata)
-            .foregroundStyle(AQDesign.ColorToken.textPrimary)
-            .monospacedDigit()
-            .padding(.horizontal, House.Spacing.xs)
-            .frame(minWidth: House.Control.keyCap, minHeight: House.Control.keyCap)
-            .background(Capsule(style: .continuous).fill(AQDesign.ColorToken.chipFill))
-            .accessibilityLabel("\(count) waiting")
-    }
-}

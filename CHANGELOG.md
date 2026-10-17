@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-10-17
+
+- **The Chief of Staff face is retired.** House captures, makes recallable
+  and assists in the moment; synthesis and judging happen downstream. AI Chat
+  loses the pinned conversation, the waiting cards, Discuss branches, the
+  `cos` CLI calls, the notices and every key that only worked there. AI Chat
+  is a plain chat window again. An old pinned conversation in history is
+  dropped on load; its file on disk is left alone.
+
 ## Unreleased — 2026-10-16
 
 - **HouseChatCore is its own repo.** The shared chat core moved out of

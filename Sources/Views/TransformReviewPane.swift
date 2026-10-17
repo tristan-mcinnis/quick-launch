@@ -129,3 +129,31 @@ struct TransformReviewPane: View {
         .padding(.vertical, AQDesign.Space.standard)
     }
 }
+
+/// The review pane's buttons: `Control.chip` high at `Radius.tile`. The
+/// prominent one is an ink fill with inverse ink, never accent; the others
+/// are outlined like key caps.
+struct CardButtonStyle: ButtonStyle {
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: House.Radius.tile, style: .continuous)
+        configuration.label
+            .font(House.TypeToken.label)
+            .foregroundStyle(prominent ? House.ColorToken.textInverse : House.ColorToken.textPrimary)
+            .lineLimit(1)
+            .padding(.horizontal, House.Spacing.sm)
+            .frame(height: House.Control.chip)
+            .background {
+                if prominent {
+                    shape.fill(House.ColorToken.textPrimary)
+                } else {
+                    shape.fill(configuration.isPressed ? House.ColorToken.selectionFill : House.ColorToken.keyCapFill)
+                    shape.strokeBorder(House.ColorToken.keyCapStroke, lineWidth: House.hairline)
+                }
+            }
+            .opacity(configuration.isPressed && prominent ? 0.8 : (isEnabled ? 1 : 0.45))
+            .contentShape(shape)
+    }
+}

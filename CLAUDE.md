@@ -51,33 +51,13 @@ AI Chat is the House's general chat. RTI keeps its own standalone chats
 because they are grounded in a meeting or a recording session (decided
 2026-09-26); a chat that is not about a meeting belongs here.
 
-**Chief of Staff, approved 2026-09-23:** AI Chat is the face of the `cos`
-organ (`../chief-of-staff`). Its pinned conversation reads the `cos` thread and
-acts only by calling the `cos` CLI (`tell`, `do`, `edit`, `no`, `later`, `reopen`,
-`add`, `append`, `more`, `less`, `always`, `never`, `undo`, `rule`, `forget`;
-reads `status`, `projects`, `tasks`, `activity`, `artifacts`, `charter`,
-`rungs`, `learnings`) on
-an action the user takes, per `../chief-of-staff/docs/CONTRACT.md`; Quick
-Launch never writes the thread or the charter, opens a file only on an
-explicit action, and its chat gets no write tools.
-Every message in the pinned conversation goes to `cos tell` (with `--card`
-when it is about a card), never to a model: an answer shows as a reply, a
-proposal as its card under the reply with the keyboard on it. Discuss opens a
-branch: an ordinary chat (`QuickConversation.cosCard`) linked both ways
-(HouseChatCore `sessionLinks` `cos-branch-of` and `cos-card`; `cos append`
-`kind: branch`), seeded with the card, its files, the charter core and the
-project (`ChiefOfStaffPrompt.branchMessage`). Each branch message also goes to
-`cos tell --card <id> --surface branch`; a card it makes joins the branch.
-Close branch (`⇧⌘W`) or a Do it on such a card merges it back as one
-`kind: branch_summary` line under the card. Branches nest under the pinned
-row in the rail, and a card with one offers Continue branch.
-It is additive: Quick AI and every other AI Chat conversation keep their
-provider, tools, keys and palette order, and its keys (`⌥⌘1` to `⌥⌘5`,
-`⌥⌘[` `⌥⌘]`, `⌘N` `⌘I` `⌘Y` `⇧⌘P` `⇧⌘T` `⇧⌘↩`, and the card keys) act only inside it
-(`ChiefOfStaffChatTests` guards this). The backing chat (`ChiefOfStaffModel.conversationID`)
-stays out of every chat list. Quick Launch is the one notification sender and
-touches `app.alive`; `UserNotificationRouter` is the app's one notification
-delegate.
+Retired 2026-10-17: the Chief of Staff face (the pinned conversation, its
+cards, notices and the `cos` CLI calls). House captures, makes recallable and
+assists in the moment; synthesis and judging happen downstream in the vault
+and Pi, so AI Chat is a plain chat window again. Old history may still hold
+the pinned conversation (`QuickHistoryStore.retiredPinnedChatID`); it is
+dropped on load and the file on disk is left alone. `UserNotificationRouter`
+is the app's one notification delegate.
 
 `../house-chat-core` (its own repo, a sibling of this one) owns the shared chat policy, archival schema and
 attachment interfaces consumed by Quick Launch and RTI. Keep it compatible

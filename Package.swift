@@ -40,10 +40,7 @@ let package = Package(
                 .product(name: "HouseChatCore", package: "house-chat-core"),
                 .product(name: "HouseChatDocuments", package: "house-chat-core"),
             ],
-            path: "Tests",
-            resources: [
-                .process("Fixtures")
-            ]
+            path: "Tests"
         ),
     ]
 )

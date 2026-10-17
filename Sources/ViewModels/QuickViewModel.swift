@@ -787,13 +787,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// not here.
     @ObservationIgnored weak var chatWindowHost: (any AIChatWindowHosting)?
     var isAIChatWindow: Bool { chatWindowHost != nil }
-    /// The Chief of Staff (`cos`): its pinned chat's system message, the
-    /// thread its answered turns go to, and the waiting count the launcher
-    /// row shows. The app sets it; nil leaves the Chief of Staff out.
-    @ObservationIgnored weak var chiefOfStaff: ChiefOfStaffModel?
-    /// Opens the AI Chat window on the Chief of Staff's pinned
-    /// conversation, on a card when one is named. The app sets it.
-    @ObservationIgnored var chiefOfStaffOpener: ((_ proposalID: String?) -> Void)?
     /// Set once the AI Chat window has opened. Its first open lands on the
     /// most recent chat; after that it keeps what it holds.
     @ObservationIgnored var hasOpenedAIChatWindow = false
@@ -888,9 +881,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     // MARK: - Private
 
     @ObservationIgnored private var streamTask: Task<Void, Never>?
-    /// Chief of Staff cards a branch made while its answer streamed: they
-    /// join the chat after that answer.
-    @ObservationIgnored var deferredChiefOfStaffReplies: [(chat: UUID, reply: CosTellReply)] = []
     /// Bumped by every model request and by `cancel()` and a thread reset.
     /// A stream task writes state only while its generation is current, so
     /// a stopped stream that ends late (by a `CancellationError`, or by a
@@ -1521,7 +1511,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // "is it on?" in one line. Timers and Agent Watch sit in the catalog.
         commands.append(contentsOf: [translate, typeToClick, caffeine, readAloud])
         if aiChatOpener != nil { commands.append(aiChatCommand) }
-        if let chiefOfStaffCommand { commands.append(chiefOfStaffCommand) }
         if let speechStopRow { commands.append(speechStopRow) }
         commands.append(settings)
         commands.append(contentsOf: utilityCommands)
@@ -1836,9 +1825,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// render that reads the rows again gets the cached rows. Hidden chats
     /// are filtered here, so one hide covers every Quick Launch list.
     func chatItems(matching query: String) -> [LauncherCatalogItem] {
-        // The Chief of Staff's backing chat is reached by its pinned row only.
         visibleLauncherItems(searchedChatItems(matching: query))
-            .filter { $0.itemID != ChiefOfStaffModel.conversationID.uuidString }
     }
 
     /// One chat as a launcher row: its title, question count, and time,
@@ -3096,8 +3083,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The Quick AI header title: the conversation once it has an answer,
     /// "Quick AI" before that.
     var quickAITitle: String {
-        // The pinned Chief of Staff chat is named before its first answer.
-        if isChiefOfStaffChatOpen { return ChiefOfStaffModel.title }
         guard let conversation = currentConversation,
               conversation.messages.contains(where: { $0.role == .assistant })
         else { return "Quick AI" }
@@ -3173,10 +3158,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The answer on screen (or running) came from a command action or a
     /// Vault Search, not from the model: the header names that source.
     var answerSourceTitle: String? {
-        // The pinned chat is answered by `cos tell`, never by a model.
-        if isChiefOfStaffChatOpen, let chiefOfStaff, chiefOfStaff.isAvailable {
-            return "Answered by cos · \(chiefOfStaff.summary)"
-        }
         guard isStreaming || !output.isEmpty else { return nil }
         switch answerSource {
         case .model: return nil
@@ -5715,11 +5696,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
-        if item.value == Self.chiefOfStaffCommandID {
-            openChiefOfStaff()
-            return
-        }
-
         if item.value == "translate.mode" {
             input = ""
             overlayPresenter.dismissOverlay()
@@ -6599,7 +6575,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             resetQuickAISize()
         case .copyMessage, .captureMessage, .searchSettings:
             return
-        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop, .chiefOfStaff, .newTask:
+        case .showChatList, .hideChatList, .findInChat, .keepOnTop, .stopKeepingOnTop:
             chatWindowHost?.performWindowSurfaceAction(action)
             // Find and the chat list take the focus themselves.
             return
@@ -9046,12 +9022,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 conversationID: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID)
             )
         }
-        // The pinned Chief of Staff chat carries its instruction, waiting
-        // cards and recent proposals, read from the thread as it is now.
-        assistantSystem = pinnedSystemMessage(
-            forChat: startsNewChat ? newChatID : (currentConversation?.id ?? newChatID),
-            assistant: assistantSystem
-        )
         guard !Task.isCancelled else {
             restoreEnrichmentInput()
             return
@@ -9273,15 +9243,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // submission's own snapshot; every later tool round's exact body is
         // written through it before that round's network call.
         let roundRecorder = chatArchive.map { ChatRoundRecorder(archive: $0) }
-        // The pinned Chief of Staff chat is answered by `cos tell`, which
-        // records both turns in its thread itself.
-        let tellService = currentConversation.flatMap { conversation in
-            chiefOfStaff?.tellService(
-                forChat: conversation.id,
-                text: CosTellReply.message(submittedInput, attachments: attachments.map(\.ref))
-            )
-        }
-        guard let service = tellService ?? makeService(
+        guard let service = makeService(
             provider: provider,
             model: model,
             toolOverride: request.contextEvaluation?.gatedTools,
@@ -9310,10 +9272,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
-        // A branch's message also goes to the Chief of Staff, about its card.
-        if tellService == nil, let conversation = currentConversation, conversation.cosCard != nil {
-            branchDidAsk(conversation, text: CosTellReply.message(submittedInput, attachments: attachments.map(\.ref)))
-        }
         // One model request at a time: a request still live is stopped here,
         // and text it buffered but never drew is dropped, so none of it
         // lands in this answer.
@@ -9390,8 +9348,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         streamFirstTokenAt = nil
 
         streamTask = Task {
-            /// The card a `cos tell` reply made, drawn under the answer.
-            var toldCard: String?
             // A stream that ends for any reason cannot still be waiting on a
             // question: resume it with no answer and take the card down. A
             // stopped stream (`cancel()` moved the generation on) leaves
@@ -9418,7 +9374,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     if let usage = delta.usage {
                         streamUsage = usage
                     }
-                    if let card = delta.cosCard { toldCard = card }
                     if let text = delta.text {
                         if !text.isEmpty {
                             streamingStatus = nil
@@ -9476,8 +9431,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                             id: assistantTurnID,
                             role: .assistant,
                             content: output,
-                            toolRecords: records.isEmpty ? nil : records,
-                            cosTell: tellService == nil ? nil : CosTold(card: toldCard)
+                            toolRecords: records.isEmpty ? nil : records
                         )
                     )
                     currentConversation?.updatedAt = Date()
@@ -9519,14 +9473,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                         }
                     }
                     persistAnsweredConversation()
-                    if tellService == nil, let conversationID = currentConversation?.id {
-                        chiefOfStaff?.chatDidAnswer(
-                            id: conversationID,
-                            question: submittedInput,
-                            answer: output,
-                            attachmentNames: attachments.map(\.ref.name)
-                        )
-                    }
                     // The lines live on the answer now.
                     liveToolRecords = []
                     if usedWebSearch { webSearchNote = nil }
@@ -9588,13 +9534,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                    let context = request.actionTarget {
                     replaceableSelectionContext = context
                 }
-                // A card the Chief of Staff just made takes the keyboard, so
-                // ⌘↩ does it; otherwise the composer does.
-                // A branch's card that came back meanwhile joins after it.
-                let madeCard = toldCard ?? flushDeferredChiefOfStaffReplies()
-                if madeCard.map({ chiefOfStaff?.focusTold($0) == true }) != true {
-                    requestInputFocus()
-                }
+                requestInputFocus()
             } catch is CancellationError {
                 // Stopped by `cancel()`: it already kept the turn.
                 guard generation == streamGeneration else { return }
@@ -9626,7 +9566,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 liveToolRecords = []
                 streamingStatus = nil
                 isStreaming = false
-                flushDeferredChiefOfStaffReplies()
                 isFollowUpQueued = false
                 recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
                 requestInputFocus()
@@ -9640,7 +9579,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 streamingStatus = nil
                 isStreaming = false
                 inFlightTurn = nil
-                flushDeferredChiefOfStaffReplies()
                 threadError = ThreadError(messageID: submittedMessage.id, message: error.localizedDescription)
                 // The failure is durable with the text that arrived.
                 if let chatArchive, let archivedConversationID {
@@ -9715,9 +9653,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// no answer after it (stopped before any text, or a provider error),
     /// so the request alternates as the providers expect.
     static func answeredTurns(_ messages: [QuickMessage]) -> [QuickMessage] {
-        // A Chief of Staff reply (a card a branch made) is not a turn the
-        // model takes: the branch's system message lists those cards.
-        let messages = messages.filter { $0.cosTell == nil }
         return messages.enumerated().compactMap { index, message in
             let next = messages.indices.contains(index + 1) ? messages[index + 1] : nil
             if message.role == .user, next?.role == .user { return nil }
@@ -10322,8 +10257,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // Stop keeps the question and what the model said so far, as the
             // turn's answer; `⌘R` asks the same turn again.
             keepStoppedAnswer()
-            // A branch's card that came back meanwhile joins after it.
-            flushDeferredChiefOfStaffReplies()
             // A stopped answer is terminal in the archive, never left looking
             // like it is still streaming.
             if let chatArchive, let conversationID = currentConversation?.id.uuidString,
@@ -11392,7 +11325,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 // silently dropped, and the cache is not rewritten from a
                 // partial list.
                 let projection = try await chatArchive.projectReadable()
-                self.history = QuickHistoryStore.ordered(projection.conversations)
+                self.history = QuickHistoryStore.ordered(QuickHistoryStore.droppingRetired(projection.conversations))
                 self.archiveDamagedCount = projection.damaged.count
                 if projection.damaged.isEmpty, let historyFileURL {
                     QuickHistoryStore.rebuildCache(self.history, limit: limit, to: historyFileURL)
@@ -11499,7 +11432,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         Task { [weak self] in
             guard let self else { return }
             guard let projection = try? await chatArchive.projectReadable() else { return }
-            self.history = QuickHistoryStore.ordered(projection.conversations)
+            self.history = QuickHistoryStore.ordered(QuickHistoryStore.droppingRetired(projection.conversations))
             self.archiveDamagedCount = projection.damaged.count
         }
     }
@@ -11650,26 +11583,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         merged.append(conversation)
         history = QuickHistoryStore.ordered(merged)
         openChatBase = StoredChatStamp(conversation)
-        saveHistory()
-        syncConversationToArchive(conversation)
-    }
-
-    /// Adds a turn made outside a model request (a Chief of Staff reply) to
-    /// chat `id`, open or not, and saves it.
-    func appendMessage(_ message: QuickMessage, toChat id: UUID) {
-        if currentConversation?.id == id {
-            currentConversation?.messages.append(message)
-            currentConversation?.updatedAt = Date()
-            // The newest answer is the one Copy Response takes, and the one
-            // the thread already draws as a turn.
-            if message.role == .assistant { output = message.content }
-            persistCurrentConversation()
-            return
-        }
-        guard var conversation = history.first(where: { $0.id == id }) else { return }
-        conversation.messages.append(message)
-        conversation.updatedAt = Date()
-        history = QuickHistoryStore.ordered(history.filter { $0.id != id } + [conversation])
         saveHistory()
         syncConversationToArchive(conversation)
     }

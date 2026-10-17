@@ -25,24 +25,6 @@ app. The README lists the integrations in general terms.
   (`Option+Command+M`) call it with an argv array, no shell.
 - Skills are read from `~/.claude/skills`.
 
-## Chief of Staff
-
-AI Chat is the face of the `cos` organ (the chief-of-staff repo). Quick Launch
-reads its thread under `~/.local/share/chief-of-staff` and acts only through
-the `cos` CLI at `~/.local/bin/cos` (`COS_HOME` and `COS_BIN` move both). The
-contract is `../chief-of-staff/docs/CONTRACT.md`.
-
-The pinned conversation sits at the top of the AI Chat list: health in its
-status line, then DECIDE, TODAY, WAITING ON OTHERS, PROJECTS, LATER and FYI
-above the chat, or a Board (`Option+Command+2`). On a card, `Command+Return`
-Do it, `Command+E` Edit, `Command+L` Later, `Command+Delete` No, `Command+R`
-Bring back, `Command+=` and `Command+-` More and Less, `Command+Z` Undo,
-`Command+D` Discuss in a new chat; `Command+N` adds a task. Activity,
-Artifacts and Charter are `Option+Command+3` to `Option+Command+5`. Its
-notifications come from Quick Launch. Type `cos` in the launcher to open it.
-This pinned conversation is the only Chief of Staff face; the old
-ChiefOfStaff.app is retired.
-
 ## Other House pieces
 
 - AI Chat is the House's general chat. RTI keeps its own chats because they

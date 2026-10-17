@@ -15,6 +15,36 @@ struct QuickHistoryStoreTests {
         return folder
     }
 
+    @Test func loadDropsTheRetiredPinnedConversationAndKeepsTheRest() {
+        let folder = freshFolder()
+        let file = folder.appendingPathComponent(QuickHistoryStore.fileName)
+        let retired = QuickConversation(
+            id: QuickHistoryStore.retiredPinnedChatID,
+            providerID: InferenceProvider.deepSeekID,
+            model: "retired"
+        )
+        let ordinary = QuickConversation(providerID: InferenceProvider.deepSeekID, model: "ordinary")
+        QuickHistoryStore.save([retired, ordinary], limit: 10, to: file)
+        QuickHistoryStore.waitForPendingWrites()
+
+        let loaded = QuickHistoryStore.load(from: file, migratingFrom: nil)
+
+        #expect(loaded.map(\.model) == ["ordinary"])
+    }
+
+    @Test func aChatSavedWithRetiredCardFieldsStillDecodes() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","createdAt":0,"updatedAt":0,
+         "providerID":"\(UUID().uuidString)","model":"m","isPinned":false,"cosCard":"3fa91c07",
+         "messages":[{"id":"\(UUID().uuidString)","role":"assistant","content":"Done.",
+                      "cosTell":{"card":"3fa91c07"}}]}
+        """
+        let conversation = try JSONDecoder().decode(QuickConversation.self, from: Data(json.utf8))
+
+        #expect(conversation.messages.map(\.content) == ["Done."])
+        #expect(conversation.model == "m")
+    }
+
     @Test func upsertKeepsNewestConversationAndBoundsHistory() {
         let providerID = InferenceProvider.deepSeekID
         let old = QuickConversation(

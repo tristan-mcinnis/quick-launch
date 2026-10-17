@@ -87,7 +87,6 @@ on them.
 | Skills tool | Skill folders with a `SKILL.md` in `~/.claude/skills` | The tool is not offered. |
 | Memory and Tasks tools, Capture to Memory | A `recall` CLI on `PATH` | The tools are not offered; Capture says recall is not installed. |
 | Vault tool and Vault Search, SearXNG web search, page-reader fallback | An SSH host alias for your own server in `~/.ssh/config` (the "House server"; set its name with `defaults write com.tristanmcinnis.quick-launch HouseServerHost <alias>`) | The Vault tool is not offered, Vault Search says it is unavailable, Automatic web search uses the next backend, and pages are read directly. |
-| Chief of Staff pinned chat | A `cos` CLI at `~/.local/bin/cos` (or `COS_BIN`) | The pinned chat does not appear. |
 | Read aloud | [Local TTS](https://github.com/tristan-mcinnis/local-tts) running on `127.0.0.1:8081` | Says Local TTS is not running. |
 | Continue in pi | `tmux` and `pi` on `PATH` | Settings shows what is missing. |
 
@@ -163,7 +162,7 @@ macOS asks for these the first time a feature needs them:
 | Accessibility | Reading and replacing selected text, Type to Click, window management. |
 | Screen Recording | Screenshots, text from screen, and screen-aware commands. |
 | Automation (System Events, Finder) | System toggles such as Dark Mode, Lock Screen, Empty Trash, and Eject. |
-| Notifications | Answer notices from AI Chat, and Chief of Staff notices when that integration is present. |
+| Notifications | Answer notices from AI Chat. |
 
 ## Usage
 
