@@ -82,10 +82,17 @@ struct AIChatWindowView: View {
                 // A file, link, or picture dropped on the thread attaches to
                 // the next question, as on the composer.
                 .attachmentDropTarget(environmentTray ?? chat.attachmentTray)
-            QuickAIComposer(viewModel: chat, multiline: true) { focused in
-                model.noteFocus(.composer, focused)
-            }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                // The composer floats over the thread's bottom edge: a
+                // draft growing to eight lines changes only the bottom
+                // inset, so no message re-lays out while typing. The soft
+                // edge fades text out under the composer's strips and field.
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    QuickAIComposer(viewModel: chat, multiline: true) { focused in
+                        model.noteFocus(.composer, focused)
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { conversationHeight = $0 }
         .overlay(alignment: .bottom) { QuickAIFloatingChooser(viewModel: chat, composerHeight: composerHeight) }
