@@ -170,9 +170,14 @@ struct ChatRetainedMaterial: Identifiable, Equatable {
 /// rather than borrowing the current settings.
 struct ChatAnswerReceiptSummary: Equatable {
     var route: String
+    var model: String?
+    var provider: String?
     var reasoning: String?
     var context: String
-    var timings: String?
+    /// The whole turn's time, the one figure the collapsed line carries.
+    var total: String?
+    /// First token, tools, retrieval and extraction: the parts of the total.
+    var phases: String?
     var usage: String?
     var outcome: String?
     var materials: [ChatRetainedMaterial]
@@ -181,9 +186,12 @@ struct ChatAnswerReceiptSummary: Equatable {
     /// A turn the archive holds no receipt for.
     static let unrecorded = ChatAnswerReceiptSummary(
         route: "Not recorded",
+        model: nil,
+        provider: nil,
         reasoning: nil,
         context: "This answer is not in the archive.",
-        timings: nil,
+        total: nil,
+        phases: nil,
         usage: nil,
         outcome: nil,
         materials: [],
@@ -192,18 +200,24 @@ struct ChatAnswerReceiptSummary: Equatable {
 
     init(
         route: String,
+        model: String? = nil,
+        provider: String? = nil,
         reasoning: String?,
         context: String,
-        timings: String?,
+        total: String? = nil,
+        phases: String? = nil,
         usage: String?,
         outcome: String?,
         materials: [ChatRetainedMaterial],
         hasReceipt: Bool
     ) {
         self.route = route
+        self.model = model
+        self.provider = provider
         self.reasoning = reasoning
         self.context = context
-        self.timings = timings
+        self.total = total
+        self.phases = phases
         self.usage = usage
         self.outcome = outcome
         self.materials = materials
@@ -230,8 +244,6 @@ struct ChatAnswerReceiptSummary: Equatable {
         let reasoningLine: String?
         if let thinking = used?.thinking, !thinking.isEmpty {
             reasoningLine = "Reasoning \(thinking)"
-        } else if receipt != nil {
-            reasoningLine = "Reasoning by provider default"
         } else {
             reasoningLine = nil
         }
@@ -253,10 +265,10 @@ struct ChatAnswerReceiptSummary: Equatable {
             contextLine = receipt == nil ? "No reading recorded" : "No reading decision recorded"
         }
 
-        let timingsLine: String?
+        let totalLine = receipt?.timings.totalSeconds.map(Self.duration)
+        let phasesLine: String?
         if let receipt {
             var parts: [String] = []
-            if let total = receipt.timings.totalSeconds { parts.append(Self.duration(total)) }
             if let first = receipt.timings.firstTokenSeconds {
                 parts.append("first token \(Self.duration(first))")
             }
@@ -267,9 +279,9 @@ struct ChatAnswerReceiptSummary: Equatable {
             if let extraction = receipt.timings.extractionSeconds, extraction > 0 {
                 parts.append("extraction \(Self.duration(extraction))")
             }
-            timingsLine = parts.isEmpty ? nil : parts.joined(separator: " · ")
+            phasesLine = parts.isEmpty ? nil : parts.joined(separator: " · ")
         } else {
-            timingsLine = nil
+            phasesLine = nil
         }
 
         let usageLine: String?
@@ -296,9 +308,12 @@ struct ChatAnswerReceiptSummary: Equatable {
 
         self.init(
             route: routeLine,
+            model: used?.model.flatMap { $0.isEmpty ? nil : $0 },
+            provider: used?.provider.flatMap { $0.isEmpty ? nil : $0 },
             reasoning: reasoningLine,
             context: contextLine,
-            timings: timingsLine,
+            total: totalLine,
+            phases: phasesLine,
             usage: usageLine,
             outcome: outcomeLine,
             materials: (question?.attachments ?? []).map { attachment in
@@ -459,49 +474,32 @@ struct ChatAnswerContextRecord: View {
         Button {
             expanded.toggle()
         } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: House.Spacing.xs) {
-                    Image(systemName: "chevron.right")
-                        .font(AQDesign.TypeToken.footnote.weight(.semibold))
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                        .frame(width: House.Control.keyCap)
-                        .accessibilityHidden(true)
-                    Text(summary.route)
+            HStack(spacing: House.Spacing.xs) {
+                Image(systemName: "chevron.right")
+                    .font(AQDesign.TypeToken.footnote.weight(.semibold))
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: House.Control.keyCap)
+                    .accessibilityHidden(true)
+                Text(summary.route)
+                    .font(AQDesign.TypeToken.metadata)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: House.Spacing.xs)
+                if let total = summary.total {
+                    Text(total)
                         .font(AQDesign.TypeToken.metadata)
                         .foregroundStyle(AQDesign.ColorToken.textSecondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: House.Spacing.xs)
-                    if let timings = summary.timings {
-                        Text(timings)
-                            .font(AQDesign.TypeToken.metadata)
-                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                }
-                HStack(spacing: House.Spacing.xs) {
-                    Text(summary.context)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.leading, House.Control.keyCap + House.Spacing.xs)
-                    Spacer(minLength: 0)
-                    if !summary.materials.isEmpty {
-                        Text("\(summary.materials.count) source\(summary.materials.count == 1 ? "" : "s")")
-                            .font(AQDesign.TypeToken.metadata)
-                            .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                            .fixedSize()
-                    }
+                        .fixedSize()
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Answer detail")
-        .accessibilityValue(expanded ? "Open" : "Closed")
+        .accessibilityValue(summary.total.map { "\(summary.route), \($0). " + (expanded ? "Open" : "Closed") } ?? summary.route)
         .accessibilityHint(expanded ? "Hide the route and sources" : "Show the route, timings and sources")
     }
 
@@ -513,9 +511,11 @@ struct ChatAnswerContextRecord: View {
             if !summary.hasReceipt {
                 receiptRow("Receipt", "None saved for this answer.")
             }
+            if let model = summary.model { receiptRow("Model", model) }
+            if let provider = summary.provider { receiptRow("Sent to", provider) }
             if let reasoning = summary.reasoning { receiptRow("Reasoning", reasoning) }
             receiptRow("Reading", summary.context)
-            if let timings = summary.timings { receiptRow("Timing", timings) }
+            if let phases = summary.phases { receiptRow("Timing", phases) }
             if let usage = summary.usage { receiptRow("Usage", usage) }
             if let outcome = summary.outcome { receiptRow("Outcome", outcome) }
             if !summary.materials.isEmpty { materials }
@@ -555,6 +555,26 @@ struct ChatAnswerContextRecord: View {
     }
 
     private func materialRow(_ material: ChatRetainedMaterial) -> some View {
+        ChatMaterialRow(
+            material: material,
+            onOpen: { notice in Task { actionNotice = await onOpen?(notice) } },
+            onExport: { notice in Task { actionNotice = await onExport?(notice) } }
+        )
+    }
+}
+
+/// One retained source. Open and Export are quiet until the row is hovered or
+/// holds keyboard focus; they stay in the accessibility tree throughout.
+private struct ChatMaterialRow: View {
+    let material: ChatRetainedMaterial
+    let onOpen: (ChatRetainedMaterial) -> Void
+    let onExport: (ChatRetainedMaterial) -> Void
+
+    private enum Field: Hashable { case open, export }
+    @State private var hovering = false
+    @FocusState private var focus: Field?
+
+    var body: some View {
         HStack(spacing: House.Spacing.xs) {
             Image(systemName: material.status == .missing ? "exclamationmark.triangle" : "doc.text")
                 .font(AQDesign.TypeToken.metadata)
@@ -583,18 +603,20 @@ struct ChatAnswerContextRecord: View {
                     : AQDesign.ColorToken.textTertiary)
                 .fixedSize()
             if material.hasBytes {
-                Button("Open") {
-                    Task { actionNotice = await onOpen?(material) }
+                Group {
+                    Button("Open") { onOpen(material) }
+                        .focused($focus, equals: .open)
+                        .accessibilityLabel("Open \(material.name)")
+                    Button("Export") { onExport(material) }
+                        .focused($focus, equals: .export)
+                        .accessibilityLabel("Export \(material.name)")
                 }
                 .buttonStyle(InkButtonStyle())
-                .accessibilityLabel("Open \(material.name)")
-                Button("Export") {
-                    Task { actionNotice = await onExport?(material) }
-                }
-                .buttonStyle(InkButtonStyle())
-                .accessibilityLabel("Export \(material.name)")
+                .opacity(hovering || focus != nil ? 1 : 0)
             }
         }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(material.name), \(material.status.label), \(material.detail)")
     }
