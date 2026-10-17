@@ -214,6 +214,8 @@ struct QuickSettings: Codable, Sendable {
     var translatorHotkey: ActionHotkey = ActionHotkey(keyCode: 17, modifiers: 1_048_576 | 131_072)
     var lastTranslationTarget: String = "zh-Hans"
     var lastTranslationSource: String = "en"
+    /// "auto" detects the source per request; a language code fixes it.
+    var translationSourceSelection: String = "auto"
 
     // Type to Click (⌃⌥C by default): show named targets, then fuzzy-filter controls and menus in the
     // app behind Quick Launch, then use Return to act. It stays open by
@@ -375,6 +377,7 @@ struct QuickSettings: Codable, Sendable {
         lastTranslationTarget = try c.decodeIfPresent(String.self, forKey: .lastTranslationTarget) ?? "zh-Hans"
         lastTranslationSource = try c.decodeIfPresent(String.self, forKey: .lastTranslationSource)
             ?? (lastTranslationTarget == "en" ? "zh-Hans" : "en")
+        translationSourceSelection = try c.decodeIfPresent(String.self, forKey: .translationSourceSelection) ?? "auto"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,

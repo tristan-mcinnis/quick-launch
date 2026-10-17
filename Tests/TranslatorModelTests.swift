@@ -120,17 +120,17 @@ struct TranslatorModelTests {
         let model = TranslatorModel(lastTarget: .english)
         model.source = "earlier source"
         model.translation = "earlier translation"
-        model.isTargetPickerPresented = true
+        model.toggleLanguagePicker(.target)
         model.prepare(target: nil, selectedText: nil)
         #expect(model.source.isEmpty && model.translation.isEmpty)
-        #expect(!model.isTargetPickerPresented)
+        #expect(model.languagePicker == nil)
         #expect(model.target == .english)
     }
 
     @Test func emptySwapPersistsTheNewDirection() {
         let model = TranslatorModel(lastTarget: .simplifiedChinese)
         var remembered: TranslationTarget?
-        model.onTargetChange = { remembered = $0 }
+        model.onLanguagesChange = { [weak model] in remembered = model?.target }
         model.swap()
         #expect(remembered == .english)
     }
@@ -248,12 +248,13 @@ struct TranslatorModelTests {
 
         let model = TranslatorModel(lastTarget: .english)
         var remembered: TranslationTarget?
-        model.onTargetChange = { remembered = $0 }
-        model.targetQuery = "jap"
-        #expect(model.filteredTargets.map(\.code) == ["ja"])
-        model.setTarget(model.filteredTargets[0])
+        model.onLanguagesChange = { [weak model] in remembered = model?.target }
+        model.toggleLanguagePicker(.target)
+        model.pickerQuery = "jap"
+        #expect(model.pickerOptions == [.fixed(.japanese)])
+        model.choosePickerOption(model.pickerOptions[0])
         #expect(remembered == .japanese)
-        #expect(!model.isTargetPickerPresented && model.targetQuery.isEmpty)
+        #expect(model.languagePicker == nil && model.pickerQuery.isEmpty)
     }
 
     @Test func retainedLaunchSelectionIsImportedOnlyOnExplicitClick() async {

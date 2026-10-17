@@ -680,7 +680,7 @@ struct LauncherResultRow: View {
             case .conversation: "Chat"
             case .askAI: "AI Command"
             case .folder: "Folder"
-            case .answer: "Answer"
+            case .answer: item.isInlineTranslation ? "Translate" : "Answer"
             case .command: "Command"
             }
         }

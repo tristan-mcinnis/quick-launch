@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import HouseDesign
 
-/// Its own window: source text above, translation below, the target language
-/// on the right, the keys in the footer. Same tokens as the launcher, and the
+/// Its own window: source text above, translation below, the source and
+/// target languages on the right with Swap between them, the keys in the
+/// footer. Same tokens as the launcher, and the
 /// launcher footer's strip: status dot and context, then `KeyHint`s. Every
 /// key it names comes from `TranslatorKey`.
 struct TranslatorView: View {
@@ -20,8 +21,8 @@ struct TranslatorView: View {
                 .padding(.horizontal, AQDesign.Space.panel)
                 .frame(height: House.Control.xlarge)
             HouseDivider()
-            if model.isTargetPickerPresented {
-                targetPicker
+            if model.languagePicker != nil {
+                languagePicker
             } else {
                 panes
             }
@@ -35,8 +36,9 @@ struct TranslatorView: View {
             guard !Task.isCancelled else { return }
             sourceFocused = true
         }
-        .onChange(of: model.isTargetPickerPresented) { _, presented in
-            if presented { focusPicker() } else { focusSource() }
+        .onChange(of: model.languagePicker) { _, side in
+            pickerIndex = 0
+            if side != nil { focusPicker() } else { focusSource() }
         }
     }
 
@@ -49,36 +51,66 @@ struct TranslatorView: View {
             Text("Translate")
                 .font(AQDesign.TypeToken.subheading)
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
-            Text("from \((model.detectedSource ?? model.sourceLanguage).title)")
-                .font(AQDesign.TypeToken.caption)
-                .foregroundStyle(AQDesign.ColorToken.textSecondary)
             Spacer()
             if model.isTranslating {
                 ThinkingIndicator().frame(width: 18, height: 18)
             }
+            languageChip("from \(sourceChipTitle)", key: .source, help: TranslatorKey.sourceHelp) {
+                model.toggleLanguagePicker(.source)
+            }
             Button {
-                model.isTargetPickerPresented.toggle()
+                model.swap()
             } label: {
-                HStack(spacing: AQDesign.Space.standard) {
-                    Text("to \(model.target.title)")
-                        .font(AQDesign.TypeToken.label)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    KeyCapGroup(keys: TranslatorKey.target.shortcut.keyCaps)
-                }
-                .padding(.horizontal, AQDesign.Space.standard)
-                .frame(height: House.Control.chip)
-                .background(
-                    RoundedRectangle(
-                        cornerRadius: AQDesign.fieldCornerRadius,
-                        style: .continuous
-                    )
-                    .fill(AQDesign.ColorToken.chipFill)
-                )
-                .contentShape(Rectangle())
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .frame(width: House.Control.chip, height: House.Control.chip)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(TranslatorKey.targetHelp)
+            .help(TranslatorKey.swapHelp)
+            .accessibilityLabel("Swap languages")
+            languageChip("to \(model.target.title)", key: .target, help: TranslatorKey.targetHelp) {
+                model.toggleLanguagePicker(.target)
+            }
         }
+    }
+
+    /// Auto names the language it found once a request has run.
+    private var sourceChipTitle: String {
+        switch model.sourceSelection {
+        case .auto: model.detectedSource.map { "\($0.title) · auto" } ?? "Auto detect"
+        case .fixed(let language): language.title
+        }
+    }
+
+    private func languageChip(
+        _ title: String,
+        key: TranslatorKey,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: AQDesign.Space.standard) {
+                Text(title)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    .lineLimit(1)
+                KeyCapGroup(keys: key.shortcut.keyCaps)
+            }
+            .padding(.horizontal, AQDesign.Space.standard)
+            .frame(height: House.Control.chip)
+            .background(
+                RoundedRectangle(
+                    cornerRadius: AQDesign.fieldCornerRadius,
+                    style: .continuous
+                )
+                .fill(AQDesign.ColorToken.chipFill)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private var panes: some View {
@@ -166,28 +198,28 @@ struct TranslatorView: View {
         }
     }
 
-    private var targetPicker: some View {
+    private var languagePicker: some View {
         VStack(spacing: 0) {
             HStack(spacing: AQDesign.Space.row) {
                 Image(systemName: "magnifyingglass")
                     .font(AQDesign.TypeToken.glyph)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
                     .accessibilityHidden(true)
-                TextField("Type a language", text: $model.targetQuery)
+                TextField("Type a language", text: $model.pickerQuery)
                     .textFieldStyle(.plain)
                     .font(AQDesign.TypeToken.input)
                     .focused($pickerFocused)
                     .onSubmit { choose(pickerIndex) }
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onKeyPress(.upArrow) { move(-1); return .handled }
-                    .onChange(of: model.targetQuery) { _, _ in pickerIndex = 0 }
+                    .onChange(of: model.pickerQuery) { _, _ in pickerIndex = 0 }
                 KeyCapGroup(keys: ["esc"])
             }
             .padding(.horizontal, AQDesign.Space.panel)
             .frame(height: AQDesign.inputHeight)
             HouseDivider()
             SelectableListPane(
-                items: model.filteredTargets,
+                items: model.pickerOptions,
                 selectedIndex: $pickerIndex,
                 rowSpacing: PanelSizing.actionRowSpacing,
                 rowHeight: AQDesign.rowHeight,
@@ -197,11 +229,11 @@ struct TranslatorView: View {
                     bottom: AQDesign.Space.standard,
                     trailing: AQDesign.Space.standard
                 ),
-                onActivate: { target in model.setTarget(target) }
+                onActivate: { option in model.choosePickerOption(option) }
             ) { _, item, _ in
                 HStack(spacing: AQDesign.Space.row) {
                     IconTile {
-                        Image(systemName: "globe")
+                        Image(systemName: item == .auto ? "wand.and.stars" : "globe")
                             .font(AQDesign.TypeToken.caption)
                             .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     }
@@ -209,7 +241,7 @@ struct TranslatorView: View {
                         .font(AQDesign.TypeToken.label)
                         .foregroundStyle(AQDesign.ColorToken.textPrimary)
                     Spacer()
-                    if item == model.target {
+                    if item == model.pickerSelection {
                         Image(systemName: "checkmark")
                             .font(AQDesign.TypeToken.caption)
                             .foregroundStyle(AQDesign.ColorToken.textSecondary)
@@ -244,14 +276,14 @@ struct TranslatorView: View {
 
     private func move(_ delta: Int) {
         pickerIndex = ListSelection.wrappedIndex(
-            pickerIndex, by: delta, count: model.filteredTargets.count
+            pickerIndex, by: delta, count: model.pickerOptions.count
         )
     }
 
     private func choose(_ index: Int) {
-        let targets = model.filteredTargets
-        guard targets.indices.contains(index) else { return }
-        model.setTarget(targets[index])
+        let options = model.pickerOptions
+        guard options.indices.contains(index) else { return }
+        model.choosePickerOption(options[index])
     }
 
     private func focusSource() {
@@ -268,8 +300,8 @@ final class TranslatorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    /// The `TranslatorKey` table (⌘↩ copy, ⇧⌘↩ paste back, ⌘S swap, ⌘T
-    /// target, ⇧⌘V clipboard, ⌘W close) and esc.
+    /// The `TranslatorKey` table (⌘↩ copy, ⇧⌘↩ paste back, ⌘S swap, ⌘F
+    /// source, ⌘T target, ⇧⌘V clipboard, ⌘W close) and esc.
     var shortcutHandler: ((String?, UInt16, NSEvent.ModifierFlags) -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

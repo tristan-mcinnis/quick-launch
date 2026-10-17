@@ -15,7 +15,7 @@ import Testing
 @Suite("Translator keys", .serialized)
 @MainActor
 struct TranslatorKeyTests {
-    // Key codes: Return 36, keypad Enter 76, S 1, T 17, P 35, V 9, W 13.
+    // Key codes: Return 36, keypad Enter 76, S 1, F 3, T 17, P 35, V 9, W 13.
 
     @Test func theTargetLanguageIsCommandTAndCommandPDoesNothing() {
         #expect(TranslatorKey.target.shortcut == .command("t"))
@@ -109,14 +109,15 @@ struct TranslatorKeyTests {
             QuickViewModel.FooterHint(label: "Copy", keys: ["⌘", "↩"]),
             QuickViewModel.FooterHint(label: "Paste back", keys: ["⇧", "⌘", "↩"]),
             QuickViewModel.FooterHint(label: "Swap", keys: ["⌘", "S"]),
-            QuickViewModel.FooterHint(label: "Target", keys: ["⌘", "T"]),
             QuickViewModel.FooterHint(label: "Close", keys: ["esc"]),
         ])
         #expect(!model.footerHints.contains { $0.keys == ["⌘", "P"] })
         // The hint is built from the table, so a rebind renames it.
-        #expect(model.footerHints.first { $0.label == "Target" }?.keys == TranslatorKey.target.shortcut.keyCaps)
+        #expect(model.footerHints.first { $0.label == "Swap" }?.keys == TranslatorKey.swap.shortcut.keyCaps)
 
-        model.isTargetPickerPresented = true
+        model.toggleLanguagePicker(.source)
+        #expect(model.footerContext == "Source Language")
+        model.toggleLanguagePicker(.target)
         #expect(model.footerContext == "Target Language")
         #expect(model.footerHints == [
             QuickViewModel.FooterHint(label: "Choose", keys: ["↩"]),
@@ -124,6 +125,8 @@ struct TranslatorKeyTests {
         ])
 
         #expect(TranslatorKey.targetHelp == "Change target language (⌘T)")
+        #expect(TranslatorKey.sourceHelp == "Change source language (⌘F)")
+        #expect(TranslatorKey.swapHelp == "Swap languages (⌘S)")
         #expect(TranslatorKey.sourcePlaceholder == "Type or paste text. ⇧⌘V uses the clipboard.")
         #expect(!TranslatorKey.targetHelp.contains("—") && !TranslatorKey.sourcePlaceholder.contains("—"))
     }
@@ -149,10 +152,20 @@ struct TranslatorKeyTests {
             #expect(panes.size == TranslatorView.size)
             try Self.save(panes, name: "g4-translator-panes-\(suffix).png")
 
-            model.isTargetPickerPresented = true
-            model.targetQuery = "ch"
+            model.toggleLanguagePicker(.target)
+            model.pickerQuery = "ch"
             let picker = try Self.render(model, appearance: appearance, scheme: scheme)
             try Self.save(picker, name: "g4-translator-picker-\(suffix).png")
+
+            model.toggleLanguagePicker(.source)
+            let sourcePicker = try Self.render(model, appearance: appearance, scheme: scheme)
+            try Self.save(sourcePicker, name: "g4-translator-source-picker-\(suffix).png")
+
+            model.languagePicker = nil
+            model.setSourceSelection(.fixed(.english))
+            model.translation = "最近的车站在哪里？"
+            let fixed = try Self.render(model, appearance: appearance, scheme: scheme)
+            try Self.save(fixed, name: "g4-translator-fixed-source-\(suffix).png")
         }
     }
 

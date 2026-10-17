@@ -963,8 +963,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The Translator window: opened from ⇧⌘T or the Translate item. Arrives
     /// with the selection of the app behind it; toggles closed on repeat.
-    func showTranslator(retainedSelection handedOffSelection: String? = nil) {
+    func showTranslator(retainedSelection handedOffSelection: String? = nil, target requestedTarget: TranslationTarget? = nil) {
         guard let vm = viewModel else { return }
+        if let requestedTarget {
+            let model = translatorModel ?? makeTranslatorModel(for: vm)
+            translatorModel = model
+            if model.target != requestedTarget { model.setTarget(requestedTarget, remember: false) }
+        }
         if let panel = translatorPanel, panel.isVisible, panel.isKeyWindow {
             // A handoff means the user asked to translate a selection: bring the
             // existing window forward and import it, don't toggle it shut.
@@ -1053,14 +1058,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let model = TranslatorModel(
             lastTarget: TranslationTarget.named(vm.settings.lastTranslationTarget) ?? .simplifiedChinese,
             lastSource: TranslationTarget.named(vm.settings.lastTranslationSource),
+            sourceSelection: SourceSelection(code: vm.settings.translationSourceSelection),
             serviceFactory: { [weak vm] in vm?.makeCurrentService() },
             selectedTextService: selectedTextService,
             pasteboard: vm.pasteboard
         )
-        model.onTargetChange = { [weak vm, weak model] target in
-            vm?.settings.lastTranslationTarget = target.code
-            if let model { vm?.settings.lastTranslationSource = model.sourceLanguage.code }
-            vm?.settings.save()
+        model.onLanguagesChange = { [weak vm, weak model] in
+            guard let vm, let model else { return }
+            vm.settings.lastTranslationTarget = model.target.code
+            vm.settings.lastTranslationSource = model.sourceLanguage.code
+            vm.settings.translationSourceSelection = model.sourceSelection.code
+            vm.settings.save()
         }
         model.onCommit = { record in
             TranslationHistoryStore.append(record, to: TranslationHistoryStore.defaultURL())
@@ -1091,8 +1099,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.shortcutHandler = { [weak self, weak model] characters, keyCode, modifiers in
             guard let self, let model else { return false }
             if VirtualKey(rawValue: keyCode) == .escape, modifiers.isEmpty {
-                if model.isTargetPickerPresented {
-                    model.isTargetPickerPresented = false
+                if model.languagePicker != nil {
+                    model.languagePicker = nil
                 } else if !model.source.isEmpty {
                     model.clear()
                 } else {
@@ -1111,8 +1119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 Task { @MainActor in _ = await model.pasteBack() }
             case .swap:
                 model.swap()
+            case .source:
+                model.toggleLanguagePicker(.source)
             case .target:
-                model.isTargetPickerPresented.toggle()
+                model.toggleLanguagePicker(.target)
             case .useClipboard:
                 model.useClipboardAsSource()
             case .close:
@@ -1761,5 +1771,8 @@ extension AppDelegate: OverlayPresenting {
     }
     func openTranslator() { showTranslator() }
     func openTranslator(retainedSelection: String?) { showTranslator(retainedSelection: retainedSelection) }
+    func openTranslator(text: String, target: TranslationTarget) {
+        showTranslator(retainedSelection: text, target: target)
+    }
     func openTypeToClick() { showTypeToClick() }
 }

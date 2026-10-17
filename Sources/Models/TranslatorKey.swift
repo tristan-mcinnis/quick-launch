@@ -15,6 +15,8 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
     case pasteBack
     /// ⌘S: swap the source and the translation.
     case swap
+    /// ⌘F: open or close the source-language list ("from").
+    case source
     /// ⌘T: open or close the target-language list.
     case target
     /// ⇧⌘V: use the clipboard as the source.
@@ -27,6 +29,7 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
         case .copy: .commandReturn
         case .pasteBack: .commandShiftReturn
         case .swap: .command("s")
+        case .source: .command("f")
         case .target: .command("t")
         case .useClipboard: .commandShift("v")
         case .close: .command("w")
@@ -39,8 +42,8 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
         case .copy: "Copy"
         case .pasteBack: "Paste back"
         case .swap: "Swap"
-        case .target: "Target"
-        case .useClipboard, .close: nil
+        // The language chips show their own keys, and the footer has no room.
+        case .source, .target, .useClipboard, .close: nil
         }
     }
 
@@ -61,6 +64,16 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
         "Change target language (\(TranslatorKey.target.shortcut.keyCaps.joined()))"
     }
 
+    /// The tooltip on the source chip: "Change source language (⌘F)".
+    static var sourceHelp: String {
+        "Change source language (\(TranslatorKey.source.shortcut.keyCaps.joined()))"
+    }
+
+    /// The tooltip on the swap button: "Swap languages (⌘S)".
+    static var swapHelp: String {
+        "Swap languages (\(TranslatorKey.swap.shortcut.keyCaps.joined()))"
+    }
+
     /// The empty source field: "Type or paste text. ⇧⌘V uses the clipboard."
     static var sourcePlaceholder: String {
         "Type or paste text. \(TranslatorKey.useClipboard.shortcut.keyCaps.joined()) uses the clipboard."
@@ -69,15 +82,19 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
 
 extension TranslatorModel {
     /// The word beside the footer's status dot, as the launcher footer's
-    /// context: "Translator", or "Target Language" while the list is open.
+    /// context: "Translator", or which language list is open.
     var footerContext: String {
-        isTargetPickerPresented ? "Target Language" : "Translator"
+        switch languagePicker {
+        case .source: "Source Language"
+        case .target: "Target Language"
+        case nil: "Translator"
+        }
     }
 
     /// The footer's key hints, in the launcher footer's own hint type. They
     /// come from `TranslatorKey`, so the footer names the keys that work.
     var footerHints: [QuickViewModel.FooterHint] {
-        if isTargetPickerPresented {
+        if languagePicker != nil {
             return [
                 QuickViewModel.FooterHint(label: "Choose", keys: KeyShortcut.returnKey.keyCaps),
                 QuickViewModel.FooterHint(label: "Back", keys: ["esc"]),

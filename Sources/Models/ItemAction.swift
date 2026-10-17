@@ -408,6 +408,10 @@ enum ItemActionCatalog {
                 actions.append(ItemAction(kind: .delete, title: "Remove Folder", systemImage: "trash", shortcut: .control("x"), isDestructive: true))
             }
             return actions
+        case .answer where item.isInlineTranslation && item.value.isEmpty:
+            return [
+                ItemAction(kind: .primary, title: "Open in Translator", systemImage: "character.bubble", shortcut: .returnKey),
+            ]
         case .answer:
             return [
                 ItemAction(kind: .primary, title: "Copy Answer", systemImage: "doc.on.doc", shortcut: .returnKey),

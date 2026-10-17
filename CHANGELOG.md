@@ -2,6 +2,20 @@
 
 ## Unreleased — 2026-10-17
 
+- **Type "good morning in japanese" to translate from the launcher.** Root
+  search reads `<text> in <language>` (or `into`) the way Raycast's
+  Translator does. A row shows the live translation from the chosen model.
+  Return copies it, ⌘↩ pastes it, and Return before it arrives opens the
+  Translator on the text and language. A full language name puts the row on
+  top. A prefix ("in jap") puts it just under Ask AI. A local answer such as
+  `5 km in miles` still wins.
+
+- **The Translator lets you choose the source language.** A "from" chip (⌘F)
+  offers Auto detect or a fixed language beside the "to" chip (⌘T), with a
+  Swap button between them. A fixed source is named in the request, and the
+  choice is remembered. Picking the same language on both sides flips the
+  pair. The footer drops its Target hint because the chips show their keys.
+
 - **Four features are removed.** The Emoji & Symbols catalog, the color
   picker (Pick Color from Screen, the Colors catalog and its settings), the
   clarifying-questions card (the `ask_user_question` tool and its setting)

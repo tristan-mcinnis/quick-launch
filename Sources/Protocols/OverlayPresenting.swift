@@ -19,6 +19,9 @@ protocol OverlayPresenting: AnyObject {
     /// explicitly, so it survives the overlay closing (which clears the
     /// launch-scoped selection).
     func openTranslator(retainedSelection: String?)
+    /// Opens the Translator on `text`, translating to `target`: Return on
+    /// the launcher's inline translation row before its result is in.
+    func openTranslator(text: String, target: TranslationTarget)
     func openTypeToClick()
     /// A capture that hid the view's window for a moment (Selected Area)
     /// succeeded: the window comes back, as `recoverFromExternalActionFailure`
@@ -51,6 +54,11 @@ extension OverlayPresenting {
     /// selection.
     func openTranslator(retainedSelection: String?) {
         openTranslator()
+    }
+
+    /// Default: open on the text with the remembered target.
+    func openTranslator(text: String, target: TranslationTarget) {
+        openTranslator(retainedSelection: text)
     }
 }
 

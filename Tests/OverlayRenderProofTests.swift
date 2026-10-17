@@ -131,6 +131,18 @@ struct OverlayRenderProofTests {
         try Self.save(image, name: "translator-dark.png")
     }
 
+    @Test func rendersTheInlineTranslationRow() async throws {
+        let vm = Self.makeViewModel(appearance: .dark)
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "おはようございます", finishReason: "stop")])
+        vm.service = mock
+        vm.input = "good morning in japanese"
+        vm.rootInputDidChange(vm.input)
+        await vm.inlineTranslationSettled()
+        #expect(vm.inlineTranslation?.status == .ready)
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-inline-translation-dark.png")
+    }
+
     @Test func rendersCommandsCatalogWithReadAloudAndStopReadingRows() throws {
         // The Commands catalog caps its empty-query list well under the full
         // `systemCommands` count, so a fresh, unpinned row needs a query to

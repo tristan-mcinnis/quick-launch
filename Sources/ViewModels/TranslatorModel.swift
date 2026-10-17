@@ -54,6 +54,45 @@ struct TranslationTarget: Equatable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// What the Translator translates from: detected per request, or one
+/// language the user chose.
+enum SourceSelection: Equatable, Hashable, Sendable, Identifiable {
+    case auto
+    case fixed(TranslationTarget)
+
+    var id: String { code }
+
+    var title: String {
+        switch self {
+        case .auto: "Auto detect"
+        case .fixed(let language): language.title
+        }
+    }
+
+    /// Stored in settings: "auto" or a language code.
+    var code: String {
+        switch self {
+        case .auto: "auto"
+        case .fixed(let language): language.code
+        }
+    }
+
+    init(code: String) {
+        self = TranslationTarget.named(code).map(SourceSelection.fixed) ?? .auto
+    }
+
+    var language: TranslationTarget? {
+        if case .fixed(let language) = self { return language }
+        return nil
+    }
+}
+
+/// Which language list the Translator has open.
+enum LanguagePickerSide: Equatable, Sendable {
+    case source
+    case target
+}
+
 /// Source-language detection and the Companion's direction rule.
 enum LanguageDetection {
     /// More than 15% CJK scalars means the text is Chinese (or Japanese/Korean).
@@ -134,7 +173,10 @@ final class TranslatorModel {
     var translation = ""
     var pinyin: String?
     var target: TranslationTarget
+    /// The language the text is in: the chosen one, or the last detected.
+    /// Swap sends text back to it.
     var sourceLanguage: TranslationTarget
+    private(set) var sourceSelection: SourceSelection
     var sourceFocusRevision = 0
     private(set) var isWaitingForTranslation = false
 
@@ -149,15 +191,17 @@ final class TranslatorModel {
     var detectedSource: TranslationTarget?
     var isTranslating = false
     var message: String?
-    var isTargetPickerPresented = false
-    var targetQuery = ""
+    var languagePicker: LanguagePickerSide?
+    var pickerQuery = ""
     var pendingCommit: Commit?
 
     enum Commit: Equatable { case copy, paste }
 
     @ObservationIgnored var serviceFactory: () -> (any QuickService)?
     @ObservationIgnored var selectedTextService: (any SelectedTextServicing)?
-    @ObservationIgnored var onTargetChange: ((TranslationTarget) -> Void)?
+    /// Called when the target, the source language or the source choice
+    /// changes, so the app can remember the pair.
+    @ObservationIgnored var onLanguagesChange: (() -> Void)?
     @ObservationIgnored var onCommit: ((TranslationRecord) -> Void)?
     @ObservationIgnored var debounce: Duration = TranslatorModel.debounce
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
@@ -179,15 +223,19 @@ final class TranslatorModel {
     init(
         lastTarget: TranslationTarget = .simplifiedChinese,
         lastSource: TranslationTarget? = nil,
+        sourceSelection: SourceSelection = .auto,
         serviceFactory: @escaping () -> (any QuickService)? = { nil },
         selectedTextService: (any SelectedTextServicing)? = nil,
         pasteboard: (any PasteboardWriting)? = nil
     ) {
         self.target = lastTarget
-        let rememberedSource = lastSource ?? (lastTarget == .english ? .simplifiedChinese : .english)
+        let rememberedSource = sourceSelection.language
+            ?? lastSource
+            ?? (lastTarget == .english ? .simplifiedChinese : .english)
         self.sourceLanguage = rememberedSource == lastTarget
-            ? (lastTarget == .english ? .simplifiedChinese : .english)
+            ? Self.alternative(to: lastTarget)
             : rememberedSource
+        self.sourceSelection = sourceSelection.language == lastTarget ? .auto : sourceSelection
         self.serviceFactory = serviceFactory
         self.selectedTextService = selectedTextService
         // In memory unless the app passes the system pasteboard, so a test
@@ -208,8 +256,8 @@ final class TranslatorModel {
     ) {
         clear()
         message = nil
-        isTargetPickerPresented = false
-        targetQuery = ""
+        languagePicker = nil
+        pickerQuery = ""
         requestSourceFocus()
         pasteTarget = selectionTarget
         knownSourceOfSwappedText = nil
@@ -242,15 +290,42 @@ final class TranslatorModel {
         source = text
         translation = ""
         pinyin = nil
-        isTargetPickerPresented = false
+        languagePicker = nil
         requestSourceFocus()
         translateNow()
     }
 
-    var filteredTargets: [TranslationTarget] {
-        let query = targetQuery.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return TranslationTarget.all }
-        return TranslationTarget.all.filter { FuzzyMatcher.score(query: query, candidate: $0.title) != nil }
+    /// The open list's rows: Auto detect and every language on the source
+    /// side, every language on the target side, narrowed by `pickerQuery`.
+    var pickerOptions: [SourceSelection] {
+        guard let languagePicker else { return [] }
+        let languages = TranslationTarget.all.map(SourceSelection.fixed)
+        let options = languagePicker == .source ? [.auto] + languages : languages
+        let query = pickerQuery.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return options }
+        return options.filter { FuzzyMatcher.score(query: query, candidate: $0.title) != nil }
+    }
+
+    /// The row the open list marks as current.
+    var pickerSelection: SourceSelection? {
+        switch languagePicker {
+        case .source: sourceSelection
+        case .target: .fixed(target)
+        case nil: nil
+        }
+    }
+
+    func toggleLanguagePicker(_ side: LanguagePickerSide) {
+        languagePicker = languagePicker == side ? nil : side
+        pickerQuery = ""
+    }
+
+    func choosePickerOption(_ option: SourceSelection) {
+        switch languagePicker {
+        case .source: setSourceSelection(option)
+        case .target: if let language = option.language { setTarget(language) }
+        case nil: break
+        }
     }
 
     // MARK: Typing
@@ -307,21 +382,48 @@ final class TranslatorModel {
         pendingCommit = nil
     }
 
-    func setTarget(_ newTarget: TranslationTarget) {
+    /// `remember: false` applies a one-off target (the launcher handing over
+    /// "hi in japanese") without changing the saved pair.
+    func setTarget(_ newTarget: TranslationTarget, remember: Bool = true) {
         cancelTranslation()
         translation = ""
         pinyin = nil
         if sourceLanguage == newTarget {
-            sourceLanguage = target == newTarget
-                ? (newTarget == .english ? .simplifiedChinese : .english)
-                : target
+            sourceLanguage = target == newTarget ? Self.alternative(to: newTarget) : target
+        }
+        if sourceSelection.language == newTarget {
+            sourceSelection = .fixed(sourceLanguage)
         }
         target = newTarget
-        isTargetPickerPresented = false
-        targetQuery = ""
-        onTargetChange?(newTarget)
+        languagePicker = nil
+        pickerQuery = ""
+        if remember { onLanguagesChange?() }
         message = "Target: \(newTarget.title)"
         if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translateNow() }
+    }
+
+    /// Choosing the target as the source flips the pair, so the two never
+    /// match.
+    func setSourceSelection(_ selection: SourceSelection) {
+        cancelTranslation()
+        translation = ""
+        pinyin = nil
+        knownSourceOfSwappedText = nil
+        if let language = selection.language {
+            if language == target { target = sourceLanguage == target ? Self.alternative(to: target) : sourceLanguage }
+            sourceLanguage = language
+        }
+        sourceSelection = selection
+        detectedSource = selection.language
+        languagePicker = nil
+        pickerQuery = ""
+        onLanguagesChange?()
+        message = "From: \(selection.title)"
+        if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translateNow() }
+    }
+
+    nonisolated static func alternative(to language: TranslationTarget) -> TranslationTarget {
+        language == .english ? .simplifiedChinese : .english
     }
 
     /// The translation becomes the source and the target flips to the
@@ -334,6 +436,7 @@ final class TranslatorModel {
         let newTarget = recognized.flatMap { $0 == target ? nil : $0 } ?? sourceLanguage
         cancelTranslation()
         sourceLanguage = previousTarget
+        if sourceSelection != .auto { sourceSelection = .fixed(previousTarget) }
         target = newTarget
         let hasCompletedTranslation = !previousTranslation.isEmpty
         knownSourceOfSwappedText = hasCompletedTranslation ? previousTarget : nil
@@ -343,8 +446,8 @@ final class TranslatorModel {
         translation = hasCompletedTranslation ? previousSource : ""
         pinyin = target.isChinese ? Pinyin.romanize(translation) : nil
         detectedSource = hasCompletedTranslation ? previousTarget : nil
-        onTargetChange?(newTarget)
-        isTargetPickerPresented = false
+        onLanguagesChange?()
+        languagePicker = nil
         requestSourceFocus()
         message = hasCompletedTranslation ? "Languages swapped" : "Direction flipped"
         if !hasCompletedTranslation, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -380,6 +483,7 @@ final class TranslatorModel {
         isWaitingForTranslation = false
         let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let chosenSource = sourceSelection.language
         guard let service = serviceFactory() else {
             message = "Choose a model in Settings › Models"
             return
@@ -388,14 +492,15 @@ final class TranslatorModel {
         isTranslating = true
         let requestTarget = target
         let knownSource = knownSourceOfSwappedText
-        let prompt = Self.prompt(for: text, target: requestTarget)
+        let prompt = Self.prompt(for: text, target: requestTarget, source: chosenSource)
         requestTask = Task { [weak self] in
-            let detected = await LanguageDetection.recognizeForTranslation(text)
+            let detected = chosenSource == nil ? await LanguageDetection.recognizeForTranslation(text) : nil
             guard !Task.isCancelled else { return }
-            self?.detectedSource = knownSource ?? detected
-            if let detectedSource = self?.detectedSource, detectedSource != requestTarget {
+            self?.detectedSource = chosenSource ?? knownSource ?? detected
+            if let detectedSource = self?.detectedSource, detectedSource != requestTarget,
+               detectedSource != self?.sourceLanguage {
                 self?.sourceLanguage = detectedSource
-                self?.onTargetChange?(requestTarget)
+                self?.onLanguagesChange?()
             }
             var collected = ""
             do {
@@ -427,8 +532,9 @@ final class TranslatorModel {
         }
     }
 
-    static func prompt(for text: String, target: TranslationTarget) -> String {
-        "Translate the following text to \(target.title). Keep the meaning, tone, names, numbers, and paragraph breaks. Return only the translation, no preamble.\n\n\(text)"
+    nonisolated static func prompt(for text: String, target: TranslationTarget, source: TranslationTarget? = nil) -> String {
+        let from = source.map { " from \($0.title)" } ?? ""
+        return "Translate the following text\(from) to \(target.title). Keep the meaning, tone, names, numbers, and paragraph breaks. Return only the translation, no preamble.\n\n\(text)"
     }
 
     // MARK: Committing

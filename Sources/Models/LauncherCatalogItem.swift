@@ -134,7 +134,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .conversation: "Continue"
         case .askAI: "Ask"
         case .folder: "Open"
-        case .answer: "Copy"
+        case .answer: isInlineTranslation && value.isEmpty ? "Open in Translator" : "Copy"
         }
     }
 
@@ -163,8 +163,16 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .conversation: return "bubble.left.and.text.bubble.right"
         case .askAI: return "sparkles"
         case .folder: return "folder"
-        case .answer: return "equal.circle"
+        case .answer: return isInlineTranslation ? "character.bubble" : "equal.circle"
         }
+    }
+
+    static let inlineTranslationItemID = "translation"
+
+    /// The live "<text> in <language>" row. Its value stays empty until the
+    /// translation is complete.
+    var isInlineTranslation: Bool {
+        kind == .answer && itemID == Self.inlineTranslationItemID
     }
 }
 

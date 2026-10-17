@@ -61,7 +61,8 @@ whose inner workings they can read and change.
 
 **Text and system tools**
 
-- A Translator window for selected or typed text.
+- A Translator window for selected or typed text, with a chosen or detected
+  source language, and inline translation in search (`good morning in japanese`).
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions, and Agent Watch to keep the Mac awake while
   a coding agent works.

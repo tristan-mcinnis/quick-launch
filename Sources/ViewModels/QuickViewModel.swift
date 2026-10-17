@@ -57,6 +57,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let answer: String
     }
     var rootAnswer: RootAnswer?
+    /// The live row for "<text> in <language>" in root search.
+    var inlineTranslation: InlineTranslation?
+    @ObservationIgnored private var inlineTranslationTask: Task<Void, Never>?
     /// A provider error on a turn of the thread, drawn under that question
     /// with Retry. The turn stays; `⌘R` asks it again. Errors that belong to
     /// no turn (permissions, no provider or key) use `errorMessage`.
@@ -2212,6 +2215,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         parts.append(hasPendingAttachment ? "1" : "0")
         parts.append(isAnswerActive ? "1" : "0")
         parts.append(rootAnswer == nil ? "" : "local")
+        parts.append(inlineTranslation.map { "\($0.status)\u{0}\($0.text)" } ?? "")
         parts.append(inputMode == nil ? "" : "mode")
         parts.append(pendingHouseChoice?.row.id ?? "")
         parts.append(houseCommandRows.map(\.id).joined(separator: ","))
@@ -2326,6 +2330,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // Math, conversions, dates, and system facts answer inline, above everything.
         if let answer = localAnswer(for: query) {
             scored.append((.item(Self.answerItem(RootAnswer(question: query, answer: answer))), 14_000))
+        } else if let translation = inlineTranslation, InlineTranslationQuery.parse(query) == translation.query {
+            // A whole language name reads as a request to translate; a
+            // prefix ("time in japan") sits just under Ask AI.
+            let score = translation.query.namesLanguageExactly ? 13_500 : AskAIRanker.promptScore - 50
+            scored.append((.item(Self.inlineTranslationItem(translation)), score))
         }
         var ranked = scored
             .sorted { lhs, rhs in
@@ -2362,6 +2371,22 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             detail: answer.question,
             value: answer.answer,
             keywords: "answer result"
+        )
+    }
+
+    static func inlineTranslationItem(_ translation: InlineTranslation) -> LauncherCatalogItem {
+        let title = switch translation.status {
+        case .translating: translation.text.isEmpty ? "Translating…" : translation.text
+        case .ready: translation.text
+        case .failed: "Translation unavailable"
+        }
+        return LauncherCatalogItem(
+            kind: .answer,
+            itemID: LauncherCatalogItem.inlineTranslationItemID,
+            title: title,
+            detail: "\(translation.query.target.title) · \(translation.query.phrase)",
+            value: translation.status == .ready ? translation.text : "",
+            keywords: "translate translation"
         )
     }
 
@@ -2554,8 +2579,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 hints.append(FooterHint(label: "Copy", keys: ["⌘", "C"]))
             }
             if catalogScope == nil {
-                if let direction = translationDirection {
-                    hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
+                if let label = translateHintLabel {
+                    hints.append(FooterHint(label: label, keys: ["⇧", "↩"]))
                 } else {
                     hints.append(FooterHint(
                         label: "Capture",
@@ -2583,8 +2608,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return [FooterHint(label: "Back", keys: ["⌫"])]
         }
         var hints = [FooterHint(label: input.isEmpty ? "Open" : "Ask", keys: ["↩"])]
-        if let direction = translationDirection {
-            hints.append(FooterHint(label: direction == .toEnglish ? "To English" : "To Chinese", keys: ["⇧", "↩"]))
+        if let label = translateHintLabel {
+            hints.append(FooterHint(label: label, keys: ["⇧", "↩"]))
         }
         hints.append(FooterHint(
             label: "Capture",
@@ -3914,6 +3939,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     @discardableResult
     func pasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
+        if item.isInlineTranslation, item.value.isEmpty {
+            // Nothing to paste yet: never put an empty string on the clipboard.
+            await performLauncherItem(item)
+            return true
+        }
         var target = selectionTarget
         if let selectedTextService {
             // A stale capture (app quit) or a missed one (opened from the
@@ -3976,6 +4006,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     @discardableResult
     func copyAndPasteLauncherItem(_ item: LauncherCatalogItem) async -> Bool {
+        if item.isInlineTranslation, item.value.isEmpty { return await pasteLauncherItem(item) }
         let pasted = await pasteLauncherItem(item)
         _ = await copyLauncherItem(item)
         return pasted
@@ -4039,9 +4070,16 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 requestInputFocus()
             }
         case .answer:
+            if item.isInlineTranslation, item.value.isEmpty, let query = inlineTranslation?.query {
+                input = ""
+                updateInlineTranslation()
+                overlayPresenter.openTranslator(text: query.phrase, target: query.target)
+                return
+            }
             _ = await copyLauncherItem(item)
             input = ""
             rootAnswer = nil
+            updateInlineTranslation()
             overlayPresenter.dismissOverlay()
         case .askAI:
             if item.value.isEmpty {
@@ -5317,9 +5355,20 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return TranslationDirection.detect(text)
     }
 
+    /// The ⇧↩ hint: the inline row's language, else the script's direction.
+    private var translateHintLabel: String? {
+        if let translation = inlineTranslation { return "To \(translation.query.target.title)" }
+        return translationDirection.map { $0 == .toEnglish ? "To English" : "To Chinese" }
+    }
+
     /// ⇧↩: translate the typed text, direction from the script (or the
     /// Translate-mode override).
     func translateInput() async {
+        // "<text> in <language>": ⇧↩ acts on the row, in its language.
+        if let translation = inlineTranslation {
+            await performLauncherItem(Self.inlineTranslationItem(translation))
+            return
+        }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let direction = translationDirection else { return }
         inputMode = nil
@@ -10681,6 +10730,65 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// with the rows for what is typed.
     func rootInputDidChange(_ newValue: String) {
         if rootAnswer != nil, !newValue.isEmpty { rootAnswer = nil }
+        updateInlineTranslation()
+    }
+
+    nonisolated static let inlineTranslationDebounce: Duration = .milliseconds(300)
+
+    /// Starts, keeps or drops the live translation for the root text. The
+    /// model is asked once per (phrase, language) after a typing pause, and
+    /// only when `rankLauncherMatches` would draw the row; a local answer
+    /// ("5 km in miles") always wins.
+    func updateInlineTranslation() {
+        guard !isAnswerActive, inputMode == nil, !hasPendingAttachment,
+              pendingHouseChoice == nil, rootAnswer == nil,
+              let text = rootLauncherQuery,
+              let query = InlineTranslationQuery.parse(text),
+              localAnswer(for: text) == nil
+        else {
+            inlineTranslationTask?.cancel()
+            inlineTranslationTask = nil
+            inlineTranslation = nil
+            return
+        }
+        if inlineTranslation?.query == query { return }
+        inlineTranslationTask?.cancel()
+        inlineTranslation = InlineTranslation(query: query)
+        inlineTranslationTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.inlineTranslationDebounce)
+            guard !Task.isCancelled else { return }
+            await self?.runInlineTranslation(query)
+        }
+    }
+
+    /// What a caller (or a test) waits on: the typing pause and the request.
+    func inlineTranslationSettled() async {
+        await inlineTranslationTask?.value
+    }
+
+    private func runInlineTranslation(_ query: InlineTranslationQuery) async {
+        guard let service = makeCurrentService() else {
+            inlineTranslation?.status = .failed
+            return
+        }
+        let prompt = TranslatorModel.prompt(for: query.phrase, target: query.target)
+        var collected = ""
+        do {
+            for try await delta in service.send(messages: [QuickMessage(role: .user, content: prompt)]) {
+                guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+                if let piece = delta.text {
+                    collected += piece
+                    inlineTranslation?.text = collected
+                }
+            }
+            guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+            let text = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+            inlineTranslation?.text = text
+            inlineTranslation?.status = text.isEmpty ? .failed : .ready
+        } catch {
+            guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+            inlineTranslation?.status = .failed
+        }
     }
 
     /// The composer's text changed on the Quick AI surface. In Recent Chats
