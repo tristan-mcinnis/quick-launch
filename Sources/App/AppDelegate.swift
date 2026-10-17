@@ -745,11 +745,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKey()
+        ShowPathSignpost.panelOrderedFront()
         viewModel?.requestInputFocus()
     }
 
     func hideOverlay() {
         guard let panel else { return }
+        ShowPathSignpost.abandon()
         panel.orderOut(nil)
         // Read the session's outcome while its state is still intact: the
         // resets below clear the query and the answer.
@@ -792,11 +794,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         viewModel.clearTransientDisplay()
     }
 
-    func toggleOverlay() {
+    func toggleOverlay(fromHotkey: Bool = false) {
         guard let panel else { return }
         if panel.isVisible {
             hideOverlay()
         } else {
+            if fromHotkey { ShowPathSignpost.hotkeyReceived(quickAI: false) }
             showOverlay()
         }
     }
@@ -831,7 +834,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             keyCode: UInt32(keyCode),
             modifiers: GlobalHotKey.carbonModifiers(from: modifierFlags)
         ) { [weak self] in
-            self?.toggleOverlay()
+            self?.toggleOverlay(fromHotkey: true)
         }
         vm.hotkeyRegistrationError = globalHotKey == nil
             ? "Unable to register this shortcut. Check that macOS or another app is not using it."
@@ -957,6 +960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// retained draft. Nothing is submitted.
     func showQuickAI() {
         guard let vm = viewModel else { return }
+        ShowPathSignpost.hotkeyReceived(quickAI: true)
         vm.presentQuickAIComposerForHotkey()
         showOverlay(captureSelectionTarget: false)
     }

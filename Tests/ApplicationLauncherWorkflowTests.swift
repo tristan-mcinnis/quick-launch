@@ -158,6 +158,8 @@ struct LauncherPerformanceBudgetTests {
         }
         let filterTime = filterStart.duration(to: clock.now)
 
+        // Printed so a run records its numbers, not only pass or fail.
+        print("PERF catalog-scan=\(scanTime) filter-x100=\(filterTime) apps=\(catalog.applications.count)")
         #expect(!catalog.applications.isEmpty)
         #expect(scanTime < .milliseconds(250))
         #expect(filterTime < .milliseconds(250))

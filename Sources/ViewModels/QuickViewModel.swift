@@ -3508,6 +3508,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 
     func openQuickAI() {
+        ShowPathSignpost.quickAIOpen { openQuickAIUntraced() }
+    }
+
+    private func openQuickAIUntraced() {
         let preserved = input
         inputMode = nil
         activeVaultSearchMode = nil

@@ -10,6 +10,7 @@ enum FocusRequest {
         Task { @MainActor in
             await Task.yield()
             focused.wrappedValue = true
+            ShowPathSignpost.fieldFocusApplied()
         }
     }
 }
