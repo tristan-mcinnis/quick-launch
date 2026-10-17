@@ -42,3 +42,14 @@ Reading: opening a long chat is cheap because the thread is lazy. The cost shows
 - Frame time and hitches on screen (no display link in tests).
 - Release-build numbers.
 - Real network chunk sizes; 40 characters is a fixed stand-in.
+
+## After B1: streaming re-renders only the tail
+
+Same machine, method and sample (6,000 characters, 150 flushes of 40), debug build, three quiet runs. The flush path is now `StreamingAnswer` (split and render the tail, freeze finished blocks) plus the live run's own incremental layout measure; the text view replaces only the tail's characters.
+
+| Path | Before (mean / median / max) | After (mean / median / max) |
+|---|---|---|
+| Render path: split, render, measure (new test `streamingFlushIncrementalCost`; before = `streamingFlushRenderCost`, still the whole-answer path) | 1.8 to 2.0 / 1.8 to 2.0 / 17 to 31 ms | 0.12 to 0.13 / 0.11 / 0.85 ms |
+| Hosted view: rootView swap + `layoutSubtreeIfNeeded` | 2.2 to 2.6 / 2.0 to 2.1 / 14 to 18 ms | 1.4 to 1.5 / 1.0 / 14 to 15 ms |
+
+Reading: the work of a flush no longer grows with the answer (about 16 times cheaper on the render path). The hosted figure also holds SwiftUI and TextKit 2 layout of the whole text view, which this unit does not touch; its max (14 ms) is the first flush that builds the views. The 60-answer numbers are unchanged (finished answers do not stream).

@@ -29,6 +29,9 @@ struct MarkdownTextView: View {
     var findSpace: String? = nil
     var onFindCurrentOffset: ((CGFloat) -> Void)? = nil
 
+    /// Splits and renders the answer in flight a block at a time.
+    @State private var stream = StreamingAnswer()
+
     /// Scroll target that keeps the newest streamed text at the bottom edge.
     private static let bottomAnchor = "answer-bottom-anchor"
 
@@ -49,10 +52,18 @@ struct MarkdownTextView: View {
     private var segmentStack: some View {
         // Streaming text is transient: it must not evict the finished
         // answers above it (`MarkdownCache`).
-        let segments = MarkdownRenderer.cachedSegments(markdown, transient: isStreaming)
+        let segments: [AnswerSegment]
+        var liveRun: StreamingRun?
+        if isStreaming {
+            let snapshot = stream.update(markdown)
+            segments = snapshot.segments
+            liveRun = snapshot.run
+        } else {
+            segments = MarkdownRenderer.cachedSegments(markdown)
+        }
         return VStack(alignment: .leading, spacing: MarkdownRenderer.segmentSpacing) {
             ForEach(segments) { segment in
-                segmentView(segment, isLast: segment.id == segments.last?.id)
+                segmentView(segment, isLast: segment.id == segments.last?.id, liveRun: liveRun)
             }
             if isStreaming, !endsInProse(segments) {
                 StreamingCaret()
@@ -67,7 +78,7 @@ struct MarkdownTextView: View {
     }
 
     @ViewBuilder
-    private func segmentView(_ segment: AnswerSegment, isLast: Bool) -> some View {
+    private func segmentView(_ segment: AnswerSegment, isLast: Bool, liveRun: StreamingRun?) -> some View {
         let current = findCurrent?.segment == segment.id ? findCurrent?.range : nil
         switch segment.content {
         case .prose(let source):
@@ -75,6 +86,7 @@ struct MarkdownTextView: View {
             ProseSegmentView(
                 markdown: source,
                 showsCaret: isStreaming && isLast,
+                liveRun: isLast ? liveRun : nil,
                 highlights: findRanges[segment.id] ?? [],
                 current: current
             )
@@ -148,6 +160,9 @@ final class AnswerTextView: NSTextView {
 private struct ProseSegmentView: NSViewRepresentable {
     let markdown: String
     let showsCaret: Bool
+    /// The run still streaming, drawn a block at a time. `nil` for a finished
+    /// run, which draws from `markdown`.
+    var liveRun: StreamingRun? = nil
     /// Find in Chat's hits in this run, and the current one.
     var highlights: [TextRange] = []
     var current: TextRange? = nil
@@ -157,6 +172,7 @@ private struct ProseSegmentView: NSViewRepresentable {
         var shownCaret = false
         var shownHighlights: [TextRange] = []
         var shownCurrent: TextRange?
+        var shownRun = StreamingRun.Shown()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -183,7 +199,13 @@ private struct ProseSegmentView: NSViewRepresentable {
             coordinator.shownCaret = showsCaret
             coordinator.shownHighlights = highlights
             coordinator.shownCurrent = current
-            textView.textStorage?.setAttributedString(renderedText())
+            if let liveRun, let storage = textView.textStorage, highlights.isEmpty, current == nil {
+                // Only the tail of the run changed: replace just those characters.
+                liveRun.apply(to: storage, shown: &coordinator.shownRun, suffix: caret)
+            } else {
+                coordinator.shownRun = StreamingRun.Shown()
+                textView.textStorage?.setAttributedString(renderedText())
+            }
         }
     }
 
@@ -193,7 +215,7 @@ private struct ProseSegmentView: NSViewRepresentable {
         context: Context
     ) -> CGSize? {
         let width = proposal.width ?? House.Layout.answerMaxWidth
-        let height = Self.height(markdown: markdown, width: width, showsCaret: showsCaret)
+        let height = Self.height(markdown: markdown, width: width, showsCaret: showsCaret, liveRun: liveRun)
         nsView.textContainer?.containerSize = NSSize(
             width: width,
             height: .greatestFiniteMagnitude
@@ -202,27 +224,40 @@ private struct ProseSegmentView: NSViewRepresentable {
         return CGSize(width: width, height: height)
     }
 
+    /// The streaming caret is house ink at the prose size.
+    private var caret: NSAttributedString {
+        NSAttributedString(string: "\u{258B}", attributes: [
+            .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
+            .foregroundColor: House.NSColorToken.textPrimary,
+        ])
+    }
+
     private func renderedText() -> NSAttributedString {
         // The run carrying the caret is the one still growing.
-        let rendered = MarkdownRenderer.cachedRender(markdown, transient: showsCaret)
+        let rendered = liveRun?.text ?? MarkdownRenderer.cachedRender(markdown, transient: showsCaret)
         guard showsCaret || !highlights.isEmpty || current != nil else { return rendered }
         let text = NSMutableAttributedString(attributedString: rendered)
         // Find in Chat: every hit in the hover fill, the current one in the
         // selection fill. Ink, never colour.
         FindHitGeometry.addHighlights(highlights, current: current, to: text)
-        if showsCaret {
-            // The streaming caret is house ink at the prose size.
-            text.append(NSAttributedString(string: "\u{258B}", attributes: [
-                .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
-                .foregroundColor: House.NSColorToken.textPrimary,
-            ]))
-        }
+        if showsCaret { text.append(caret) }
         return text
     }
 
     /// The text view draws the same string `measuredHeight` measures, plus
     /// the caret's own line while streaming so it is never clipped.
-    private static func height(markdown: String, width: CGFloat, showsCaret: Bool) -> CGFloat {
+    private static func height(
+        markdown: String,
+        width: CGFloat,
+        showsCaret: Bool,
+        liveRun: StreamingRun?
+    ) -> CGFloat {
+        if let liveRun, showsCaret {
+            // The run keeps its own layout, so a flush lays out from the edit.
+            let caretLine = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
+            return liveRun.height(width: width, suffix: nil)
+                + (caretLine.ascender - caretLine.descender + caretLine.leading).rounded(.up)
+        }
         // `sizeThatFits` runs on every body pass, so this is the hot path:
         // the growing run is measured into the live slot, never over the
         // finished answers' measurements.

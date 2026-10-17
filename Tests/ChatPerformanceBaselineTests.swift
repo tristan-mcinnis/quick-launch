@@ -91,6 +91,27 @@ struct ChatPerformanceBaselineTests {
         #expect(!samples.isEmpty)
     }
 
+    /// The same flush through the incremental path the streaming view uses:
+    /// `StreamingAnswer` split and render, and the live run's measure.
+    @Test func streamingFlushIncrementalCost() {
+        let full = Self.sampleAnswer()
+        let chunk = 40
+        let model = StreamingAnswer()
+        let clock = ContinuousClock()
+        var samples: [Double] = []
+        var length = chunk
+        while length <= full.count {
+            let partial = String(full.prefix(length))
+            let start = clock.now
+            let snapshot = model.update(partial)
+            _ = snapshot.run?.height(width: Self.width, suffix: nil)
+            samples.append(Self.milliseconds(start.duration(to: clock.now)))
+            length += chunk
+        }
+        Self.report("flush incremental split+render+measure (\(full.count) chars, \(chunk)-char chunks)", samples)
+        #expect(!samples.isEmpty)
+    }
+
     /// The whole flush as the user's window does it: the streaming answer
     /// view re-hosted with the longer text, text storage replaced, and the
     /// layout settled.

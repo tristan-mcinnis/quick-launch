@@ -128,33 +128,35 @@ enum MarkdownRenderer {
     }
 
     /// A fenced code block's byte range in the source, and what it carries.
-    private struct CodeSpan {
+    struct CodeSpan {
         let range: Range<Int>
         let content: CodeBlockContent
     }
 
-    private static func codeSpans(
+    static func codeSpans(
         in document: Markup,
         bytes: [UInt8],
         lineStarts: [Int]
     ) -> [CodeSpan] {
         var blocks: [CodeBlock] = []
         collectCodeBlocks(document, into: &blocks)
-        return blocks.compactMap { block in
-            guard let source = block.range,
-                  let lower = utf8Offset(of: source.lowerBound, lineStarts: lineStarts),
-                  let upper = utf8Offset(of: source.upperBound, lineStarts: lineStarts),
-                  lower < upper, upper <= bytes.count
-            else { return nil }
-            return CodeSpan(
-                range: lower..<upper,
-                content: CodeBlockContent(infoString: block.language, code: codeText(block))
-            )
-        }
-        .sorted { $0.range.lowerBound < $1.range.lowerBound }
+        return blocks.compactMap { codeSpan(of: $0, bytes: bytes, lineStarts: lineStarts) }
+            .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
-    private static func collectCodeBlocks(_ markup: Markup, into blocks: inout [CodeBlock]) {
+    static func codeSpan(of block: CodeBlock, bytes: [UInt8], lineStarts: [Int]) -> CodeSpan? {
+        guard let source = block.range,
+              let lower = utf8Offset(of: source.lowerBound, lineStarts: lineStarts),
+              let upper = utf8Offset(of: source.upperBound, lineStarts: lineStarts),
+              lower < upper, upper <= bytes.count
+        else { return nil }
+        return CodeSpan(
+            range: lower..<upper,
+            content: CodeBlockContent(infoString: block.language, code: codeText(block))
+        )
+    }
+
+    static func collectCodeBlocks(_ markup: Markup, into blocks: inout [CodeBlock]) {
         if let block = markup as? CodeBlock {
             blocks.append(block)
             return
@@ -165,13 +167,13 @@ enum MarkdownRenderer {
     }
 
     /// The code a fenced block wraps, without the fence's trailing newline.
-    private static func codeText(_ block: CodeBlock) -> String {
+    static func codeText(_ block: CodeBlock) -> String {
         block.code.hasSuffix("\n") ? String(block.code.dropLast()) : block.code
     }
 
     /// The parser reports a line and a UTF-8 byte column, so turning a source
     /// location into a byte offset needs the offset each line starts at.
-    private static func utf8LineStarts(_ bytes: [UInt8]) -> [Int] {
+    static func utf8LineStarts(_ bytes: [UInt8]) -> [Int] {
         var starts = [0]
         for (offset, byte) in bytes.enumerated() where byte == 0x0A {
             starts.append(offset + 1)
@@ -179,12 +181,12 @@ enum MarkdownRenderer {
         return starts
     }
 
-    private static func utf8Offset(of location: SourceLocation, lineStarts: [Int]) -> Int? {
+    static func utf8Offset(of location: SourceLocation, lineStarts: [Int]) -> Int? {
         guard location.line >= 1, location.line <= lineStarts.count else { return nil }
         return lineStarts[location.line - 1] + max(0, location.column - 1)
     }
 
-    private static func appendProse(
+    static func appendProse(
         _ markdown: String,
         bytes: [UInt8],
         range: Range<Int>,
@@ -233,7 +235,7 @@ enum MarkdownRenderer {
     /// `measuredHeight` reads the same string, so the window cannot drift.
     /// The leading is the target minus SF's own line height
     /// (`AQDesign.TypeToken.proseLineSpacing`), about 5 pt for 14 pt text.
-    private static func applyProseLineHeight(_ text: NSAttributedString) -> NSAttributedString {
+    static func applyProseLineHeight(_ text: NSAttributedString) -> NSAttributedString {
         guard text.length > 0 else { return text }
         let leading = AQDesign.TypeToken.proseLineSpacing
         let output = NSMutableAttributedString(attributedString: text)
@@ -304,8 +306,12 @@ enum MarkdownRenderer {
 
 // MARK: - AST Walker
 
-private struct AttributedStringWalker: MarkupWalker {
+struct AttributedStringWalker: MarkupWalker {
     private let output = NSMutableAttributedString()
+    /// A stand-in character at the head of `output` when this walker renders
+    /// blocks that follow text rendered earlier, so `output.length > 0`
+    /// decides the blank line exactly as it did in one whole-document pass.
+    private var seeded = false
     private var fontTraits: NSFontDescriptor.SymbolicTraits = []
     private var isMonospace = false
     private var linkURL: URL?
@@ -321,6 +327,29 @@ private struct AttributedStringWalker: MarkupWalker {
     private var suppressBlockBreak = false
 
     var result: NSAttributedString { output }
+
+    /// `continuing`: the blocks follow already-rendered text (a frozen
+    /// prefix). `carryingBlockBreak`: the prefix ended with a marker whose
+    /// block break is still pending.
+    init(continuing: Bool = false, carryingBlockBreak: Bool = false) {
+        if continuing {
+            output.append(NSAttributedString(string: "\u{0}"))
+            seeded = true
+        }
+        suppressBlockBreak = carryingBlockBreak
+    }
+
+    /// Whether the last block left a pending block break (an empty list
+    /// item), which the next block must inherit.
+    var pendingBlockBreak: Bool { suppressBlockBreak }
+
+    /// The rendered blocks without the stand-in character.
+    var rendered: NSAttributedString {
+        guard seeded else { return output }
+        let text = NSMutableAttributedString(attributedString: output)
+        text.deleteCharacters(in: NSRange(location: 0, length: 1))
+        return text
+    }
 
     // MARK: - Block elements
 
