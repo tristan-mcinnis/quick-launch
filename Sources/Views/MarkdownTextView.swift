@@ -28,6 +28,15 @@ struct MarkdownTextView: View {
     /// and where the measure goes.
     var findSpace: String? = nil
     var onFindCurrentOffset: ((CGFloat) -> Void)? = nil
+    /// False draws streamed text as it arrives (tests, and Reduce Motion
+    /// regardless of this flag).
+    var smoothsReveal = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var clock = RevealClock()
+    /// The answer length the reveal last caught up at; frames pause there
+    /// until more text arrives.
+    @State private var idleAt = -1
 
     /// Splits and renders the answer in flight a block at a time.
     @State private var stream = StreamingAnswer()
@@ -50,6 +59,35 @@ struct MarkdownTextView: View {
     }
 
     private var segmentStack: some View {
+        let total = markdown.utf16.count
+        return Group {
+            if isStreaming, smoothsReveal, !reduceMotion {
+                TimelineView(.animation(paused: idleAt == total)) { context in
+                    answerStack(revealed(total: total, at: context.date))
+                }
+            } else {
+                answerStack(markdown)
+            }
+        }
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming {
+                clock.reset()
+                idleAt = -1
+            }
+        }
+    }
+
+    /// The text to draw this frame. Once the reveal has caught up the
+    /// timeline pauses until the next chunk lands.
+    private func revealed(total: Int, at date: Date) -> String {
+        let count = clock.visible(total: total, now: date)
+        if count >= total, idleAt != total {
+            DispatchQueue.main.async { idleAt = total }
+        }
+        return StreamReveal.prefix(of: markdown, count: count)
+    }
+
+    private func answerStack(_ markdown: String) -> some View {
         // Streaming text is transient: it must not evict the finished
         // answers above it (`MarkdownCache`).
         let segments: [AnswerSegment]
@@ -65,8 +103,8 @@ struct MarkdownTextView: View {
             ForEach(segments) { segment in
                 segmentView(segment, isLast: segment.id == segments.last?.id, liveRun: liveRun)
             }
-            if isStreaming, !endsInProse(segments) {
-                StreamingCaret()
+            if isStreaming {
+                StreamingTail()
             }
             if scrolls {
                 Color.clear
@@ -82,10 +120,10 @@ struct MarkdownTextView: View {
         let current = findCurrent?.segment == segment.id ? findCurrent?.range : nil
         switch segment.content {
         case .prose(let source):
-            // Only the final run carries the streaming caret.
+            // Only the final run is still growing.
             ProseSegmentView(
                 markdown: source,
-                showsCaret: isStreaming && isLast,
+                isStreaming: isStreaming && isLast,
                 liveRun: isLast ? liveRun : nil,
                 highlights: findRanges[segment.id] ?? [],
                 current: current
@@ -120,11 +158,6 @@ struct MarkdownTextView: View {
         }
     }
 
-    private func endsInProse(_ segments: [AnswerSegment]) -> Bool {
-        guard case .prose = segments.last?.content else { return false }
-        return true
-    }
-
     /// Follows the stream: new text appears at the bottom edge, not below it.
     private func followStream(_ proxy: ScrollViewProxy) {
         guard isStreaming else { return }
@@ -132,14 +165,13 @@ struct MarkdownTextView: View {
     }
 }
 
-/// The caret shown while an answer streams, when it lands after a code block
-/// rather than inside prose.
-private struct StreamingCaret: View {
+/// The quiet mark at the end of a streaming answer: three breathing dots,
+/// the same ones that show while the model has said nothing yet. It sits on
+/// its own line under the text, so it never jumps as characters arrive.
+private struct StreamingTail: View {
     var body: some View {
-        Text("\u{258B}")
-            .font(AQDesign.TypeToken.prose)
-            .foregroundStyle(AQDesign.ColorToken.textPrimary)
-            .accessibilityHidden(true)
+        ThinkingIndicator()
+            .frame(height: 14, alignment: .leading)
     }
 }
 
@@ -159,7 +191,7 @@ final class AnswerTextView: NSTextView {
 /// selectable text view that reports the height it needs at the answer width.
 private struct ProseSegmentView: NSViewRepresentable {
     let markdown: String
-    let showsCaret: Bool
+    let isStreaming: Bool
     /// The run still streaming, drawn a block at a time. `nil` for a finished
     /// run, which draws from `markdown`.
     var liveRun: StreamingRun? = nil
@@ -169,7 +201,7 @@ private struct ProseSegmentView: NSViewRepresentable {
 
     final class Coordinator {
         var shownMarkdown: String?
-        var shownCaret = false
+        var shownStreaming = false
         var shownHighlights: [TextRange] = []
         var shownCurrent: TextRange?
         var shownRun = StreamingRun.Shown()
@@ -193,15 +225,15 @@ private struct ProseSegmentView: NSViewRepresentable {
 
     func updateNSView(_ textView: NSTextView, context: Context) {
         let coordinator = context.coordinator
-        if coordinator.shownMarkdown != markdown || coordinator.shownCaret != showsCaret
+        if coordinator.shownMarkdown != markdown || coordinator.shownStreaming != isStreaming
             || coordinator.shownHighlights != highlights || coordinator.shownCurrent != current {
             coordinator.shownMarkdown = markdown
-            coordinator.shownCaret = showsCaret
+            coordinator.shownStreaming = isStreaming
             coordinator.shownHighlights = highlights
             coordinator.shownCurrent = current
             if let liveRun, let storage = textView.textStorage, highlights.isEmpty, current == nil {
                 // Only the tail of the run changed: replace just those characters.
-                liveRun.apply(to: storage, shown: &coordinator.shownRun, suffix: caret)
+                liveRun.apply(to: storage, shown: &coordinator.shownRun)
             } else {
                 coordinator.shownRun = StreamingRun.Shown()
                 textView.textStorage?.setAttributedString(renderedText())
@@ -215,7 +247,7 @@ private struct ProseSegmentView: NSViewRepresentable {
         context: Context
     ) -> CGSize? {
         let width = proposal.width ?? House.Layout.answerMaxWidth
-        let height = Self.height(markdown: markdown, width: width, showsCaret: showsCaret, liveRun: liveRun)
+        let height = Self.height(markdown: markdown, width: width, isStreaming: isStreaming, liveRun: liveRun)
         nsView.textContainer?.containerSize = NSSize(
             width: width,
             height: .greatestFiniteMagnitude
@@ -224,53 +256,35 @@ private struct ProseSegmentView: NSViewRepresentable {
         return CGSize(width: width, height: height)
     }
 
-    /// The streaming caret is house ink at the prose size.
-    private var caret: NSAttributedString {
-        NSAttributedString(string: "\u{258B}", attributes: [
-            .font: NSFont.systemFont(ofSize: House.TypeToken.Size.body),
-            .foregroundColor: House.NSColorToken.textPrimary,
-        ])
-    }
-
     private func renderedText() -> NSAttributedString {
-        // The run carrying the caret is the one still growing.
-        let rendered = liveRun?.text ?? MarkdownRenderer.cachedRender(markdown, transient: showsCaret)
-        guard showsCaret || !highlights.isEmpty || current != nil else { return rendered }
+        // The streaming run is the one still growing.
+        let rendered = liveRun?.text ?? MarkdownRenderer.cachedRender(markdown, transient: isStreaming)
+        guard !highlights.isEmpty || current != nil else { return rendered }
         let text = NSMutableAttributedString(attributedString: rendered)
         // Find in Chat: every hit in the hover fill, the current one in the
         // selection fill. Ink, never colour.
         FindHitGeometry.addHighlights(highlights, current: current, to: text)
-        if showsCaret { text.append(caret) }
         return text
     }
 
-    /// The text view draws the same string `measuredHeight` measures, plus
-    /// the caret's own line while streaming so it is never clipped.
     private static func height(
         markdown: String,
         width: CGFloat,
-        showsCaret: Bool,
+        isStreaming: Bool,
         liveRun: StreamingRun?
     ) -> CGFloat {
-        if let liveRun, showsCaret {
+        if let liveRun, isStreaming {
             // The run keeps its own layout, so a flush lays out from the edit.
-            let caretLine = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
             return liveRun.height(width: width, suffix: nil)
-                + (caretLine.ascender - caretLine.descender + caretLine.leading).rounded(.up)
         }
         // `sizeThatFits` runs on every body pass, so this is the hot path:
         // the growing run is measured into the live slot, never over the
         // finished answers' measurements.
-        let measured = MarkdownRenderer.proseHeight(
+        return MarkdownRenderer.proseHeight(
             markdown: markdown,
             width: width,
-            transient: showsCaret
+            transient: isStreaming
         )
-        guard showsCaret else { return measured }
-        let caretFont = NSFont.systemFont(ofSize: House.TypeToken.Size.body)
-        let caretLine = (caretFont.ascender - caretFont.descender + caretFont.leading)
-            .rounded(.up)
-        return measured + caretLine
     }
 }
 

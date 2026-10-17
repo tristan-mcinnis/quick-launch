@@ -55,7 +55,7 @@ struct StreamingAnswerRenderProofTests {
 
     private static func view(_ markdown: String, streaming: Bool) -> AnyView {
         AnyView(
-            MarkdownTextView(markdown: markdown, isStreaming: streaming, scrolls: false)
+            MarkdownTextView(markdown: markdown, isStreaming: streaming, scrolls: false, smoothsReveal: false)
                 .padding(House.Spacing.lg)
                 .frame(width: width, alignment: .topLeading)
                 .background(House.ColorToken.surface)
@@ -99,10 +99,9 @@ struct StreamingAnswerRenderProofTests {
         let finished = Self.host(Self.answer, streaming: false, appearance: appearance)
         try Self.save(finished, name: "b1-finished-\(suffix).png")
 
-        // The streamed run holds the same prose as the finished answer: the
-        // last run's text is the finished run's text plus the caret.
-        let streamed = Self.textViews(in: streaming).compactMap { $0.textStorage?.string }
-            .map { $0.hasSuffix("\u{258B}") ? String($0.dropLast()) : $0 }.sorted()
+        // The streamed run holds the same prose as the finished answer, and
+        // no caret character is drawn into it.
+        let streamed = Self.textViews(in: streaming).compactMap { $0.textStorage?.string }.sorted()
         let done = Self.textViews(in: finished).compactMap { $0.textStorage?.string }.sorted()
         #expect(streamed == done)
     }
