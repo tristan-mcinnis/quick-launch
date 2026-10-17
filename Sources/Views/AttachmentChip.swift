@@ -540,11 +540,10 @@ private struct ChipAccessibilityActions: ViewModifier {
 
 /// The row of chips above the composer: `Control.chip` plus `Spacing.xs`
 /// above and below, chips `Spacing.xs` apart, scrolling sideways when they
-/// overflow, the routing line at the trailing end, then clear-all.
+/// overflow, then clear-all.
 struct AttachmentStripView: View {
     let chips: [AttachmentChipModel]
     var focusedID: String? = nil
-    var routingLine: String? = nil
     /// Left and right of the row: the composer circles' inset in Quick AI
     /// and AI Chat, the panel inset at root.
     var sideInset: CGFloat = House.Spacing.xs
@@ -573,6 +572,15 @@ struct AttachmentStripView: View {
                         }
                     }
                 }
+                // A chip cut by the edge fades out, so it reads as more to
+                // scroll to, not as a broken label.
+                .mask(alignment: .trailing) {
+                    HStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: House.Spacing.md)
+                    }
+                }
                 .onChange(of: focusedID) { _, id in
                     guard let id else { return }
                     proxy.scrollTo(id)
@@ -581,14 +589,6 @@ struct AttachmentStripView: View {
                     guard let id, focusedID == nil else { return }
                     proxy.scrollTo(id, anchor: .trailing)
                 }
-            }
-            if let routingLine, !routingLine.isEmpty {
-                Text(routingLine)
-                    .font(House.TypeToken.meta)
-                    .foregroundStyle(House.ColorToken.textPrimary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .layoutPriority(1)
             }
             if let selectionPreview {
                 SelectedTextPreviewButton(
@@ -667,11 +667,21 @@ struct ComposerAttachmentStrip: View {
                     .accessibilityAddTraits(.updatesFrequently)
                     .paneOpenTransition()
             }
+            // Where the attachments go, on its own line so it never squeezes
+            // the chips and their remove buttons.
+            if !chips.isEmpty, let routingLine, !routingLine.isEmpty {
+                Text(routingLine)
+                    .font(House.TypeToken.meta)
+                    .foregroundStyle(House.ColorToken.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, sideInset + House.Spacing.xxs)
+                    .padding(.top, House.Spacing.xs)
+            }
             if !chips.isEmpty {
                 AttachmentStripView(
                     chips: chips,
                     focusedID: tray?.focusedItemID?.uuidString,
-                    routingLine: routingLine,
                     sideInset: sideInset,
                     onRemove: remove,
                     onClearAll: clearAll,

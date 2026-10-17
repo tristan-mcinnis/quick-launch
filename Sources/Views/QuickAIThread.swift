@@ -775,15 +775,25 @@ struct QuickAIThread: View {
         turnGeometry.anchoring = nil
         updateReservedHeight()
         knownConversationID = viewModel.currentConversation?.id
+        let savedSpot = knownConversationID.flatMap { viewModel.takeOpeningAnchor(for: $0) }
         revealTask?.cancel()
         turnGeometry.restoring = nil
         guard isHoldingChat, let id = knownConversationID else {
             // Not held: this chat is already shown, so its later turns must
-            // not be taken for a chat being opened.
+            // not be taken for a chat being opened. A short chat with a saved
+            // spot still opens there: the model has stopped following the end.
             revealedChatID = knownConversationID
+            if let anchor = savedSpot {
+                viewModel.isThreadFollowingBottom = false
+                turnGeometry.restoring = anchor
+                restoreAnchor()
+            }
             return
         }
-        if !viewModel.isThreadFollowingBottom, let anchor = viewModel.threadAnchors.anchor(for: id) {
+        if let anchor = savedSpot {
+            // The previous chat's last report can flip the flag back before
+            // this runs; the spot it was opened at is the truth.
+            viewModel.isThreadFollowingBottom = false
             turnGeometry.restoring = anchor
             restoreAnchor()
         } else {
@@ -816,7 +826,7 @@ struct QuickAIThread: View {
 
     /// The held chat is shown once its view sits where it opens.
     private func noteLanding(_ geometry: ThreadGeometry) {
-        guard isHoldingChat else { return }
+        guard isHoldingChat || turnGeometry.restoring != nil else { return }
         if let anchor = turnGeometry.restoring {
             guard let top = turnGeometry.tops[anchor.messageID],
                   abs(geometry.top - anchor.scrollTop(messageTop: top, maximumTop: geometry.maximumTop)) < 1 else { return }

@@ -184,6 +184,45 @@ struct ChatSwitchingTests {
         #expect(vm.threadAnchors.anchor(for: first.id) == nil)
     }
 
+    @Test func aShortChatWithASavedSpotOpensThere() async throws {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = false
+        let vm = QuickViewModel(settings: settings, service: MockQuickService(), pasteboard: FakePasteboard())
+        let provider = settings.providers[0].id
+        // Two messages: below the hold threshold, but one long answer is
+        // enough to scroll and leave an anchor.
+        let long = (1...120).map { "Line \($0) of one long answer." }.joined(separator: "\n")
+        let first = QuickConversation(providerID: provider, model: "model", messages: [
+            QuickMessage(role: .user, content: "Alpha question"),
+            QuickMessage(role: .assistant, content: long)
+        ])
+        let second = conversation("Beta", provider: provider)
+
+        vm.openQuickAI()
+        let host = NSHostingView(rootView: OverlayView(viewModel: vm))
+        host.frame = NSRect(x: 0, y: 0, width: PanelSizing.panelWidth, height: PanelSizing.quickAIHeight)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil }
+        try await Task.sleep(for: .seconds(0.3))
+        vm.loadConversation(first)
+        _ = try await settled(window) { $0 >= 0 }
+        vm.handleThreadKey(.up, command: true, option: false)
+        _ = try await settled(window) { $0 < 1 }
+        vm.handleThreadKey(.pageDown, command: false, option: false)
+        let left = try await settled(window) { $0 > 100 }
+        #expect(vm.threadAnchors.anchor(for: first.id) != nil, "scrolling up leaves an anchor")
+
+        vm.loadConversation(second)
+        _ = try await settled(window) { $0 > 100 }
+        vm.loadConversation(first)
+        let reopened = try await settled(window) { $0 > 100 }
+        #expect(abs(reopened - left) <= 24, "reopened at \(reopened), left at \(left), distance \(String(describing: vm.lastThreadDistanceFromBottom)), anchor \(String(describing: vm.threadAnchors.anchor(for: first.id)))")
+        #expect(!vm.isThreadFollowingBottom)
+    }
+
     // MARK: - Hold and reveal
 
     @Test func onlyAnotherChatWithAFewTurnsIsHeld() {

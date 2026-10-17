@@ -68,11 +68,23 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let message: String
     }
     var threadError: ThreadError?
+    /// Hands the thread the saved spot for the chat it now shows, once.
+    func takeOpeningAnchor(for conversationID: UUID) -> ThreadScrollAnchor? {
+        defer { openingAnchor = nil }
+        guard let opening = openingAnchor, opening.conversationID == conversationID else { return nil }
+        return opening.anchor
+    }
+
     /// Whether the thread keeps the newest text in view. True while the
     /// reader is within `threadFollowThreshold` of the bottom, and again on
     /// every new question; false once they scroll up, which shows the
     /// "Latest" chip.
     var isThreadFollowingBottom = true
+    /// The saved spot the chat just opened was left at, for the thread to
+    /// take on its next chat change. Kept apart from the follow flag, which
+    /// the previous chat's last report can still flip before the thread
+    /// looks.
+    private(set) var openingAnchor: (conversationID: UUID, anchor: ThreadScrollAnchor)?
     /// Where each chat was left when the reader had scrolled up in it. The
     /// thread writes it as the reader scrolls and reads it when the chat opens.
     @ObservationIgnored var threadAnchors = ThreadScrollAnchorStore()
@@ -11245,7 +11257,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if let anchor = threadAnchors.anchor(for: conversation.id),
            conversation.messages.contains(where: { $0.id == anchor.messageID }) {
             isThreadFollowingBottom = false
+            openingAnchor = (conversation.id, anchor)
         } else {
+            openingAnchor = nil
             threadAnchors.record(nil, for: conversation.id)
             followThreadBottom()
         }

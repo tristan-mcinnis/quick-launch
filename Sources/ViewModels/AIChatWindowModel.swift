@@ -229,13 +229,16 @@ protocol AIChatWindowPresenting: AnyObject {
         return facts
     }
 
-    /// A rail row's second line, short enough for the rail: the question
-    /// count and the time today, the day before that. A row found by its
-    /// text shows its snippet there instead, and this moves to the tooltip.
-    func railDetail(for item: LauncherCatalogItem, now: Date = Date()) -> String {
+    /// A rail row's second line, short enough for the rail: the time today,
+    /// the day before that. The question count joins it on the highlighted
+    /// row, where it is worth the width. A row found by its text shows its
+    /// snippet there instead, and this moves to the tooltip.
+    func railDetail(for item: LauncherCatalogItem, showsCount: Bool = false, now: Date = Date()) -> String {
         guard let facts = railFacts[item.itemID] else { return item.detail }
+        let stamp = QuickViewModel.shortStamp(facts.updatedAt, now: now)
+        guard showsCount else { return stamp }
         let count = facts.questions == 1 ? "1 question" : "\(facts.questions) questions"
-        return "\(count) · \(QuickViewModel.shortStamp(facts.updatedAt, now: now))"
+        return "\(count) · \(stamp)"
     }
 
     /// Characters a rail snippet keeps before its hit: the rail is narrow.

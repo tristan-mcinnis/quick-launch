@@ -570,7 +570,9 @@ struct AIChatWindowTests {
         #expect(!rig.window.isCommandHeld)
         rig.window.isCommandHeld = true
         #expect(rig.window.isCommandHeld)
-        #expect(rig.window.railDetail(for: rig.window.railItems[0]).hasPrefix("1 question · "))
+        let quiet = rig.window.railDetail(for: rig.window.railItems[0])
+        #expect(!quiet.contains("question"), "a resting row says only when: \(quiet)")
+        #expect(rig.window.railDetail(for: rig.window.railItems[0], showsCount: true) == "1 question · \(quiet)")
     }
 
     @Test func theRowContextMenuPinsRenamesAndDeletesThatRow() throws {

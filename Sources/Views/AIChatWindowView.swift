@@ -387,10 +387,10 @@ struct AIChatRail: View {
     private func row(_ item: LauncherCatalogItem, index: Int, total: Int) -> some View {
         let isSelected = index == model.railIndex
         let isOpen = item.itemID == model.openChatItemID
-        let detail = model.railDetail(for: item)
+        let detail = model.railDetail(for: item, showsCount: isSelected)
         let snippet = model.railSnippet(for: item)
         let number = model.railNumber(at: index)
-        let showsNumber = number != nil && (model.isCommandHeld || isSelected || isOpen)
+        let showsNumber = number != nil && model.isCommandHeld
         // In one Results list a pinned row keeps its pin, as Pinned would say.
         let showsPin = item.isPinned && model.isRailSearching
         Group {
@@ -431,7 +431,7 @@ struct AIChatRail: View {
                 .buttonStyle(.plain)
                 // A row found by its text shows the snippet; the count and
                 // time move here.
-                .help(snippet == nil ? item.title : "\(item.title), \(detail)")
+                .help(snippet == nil ? item.title : "\(item.title), \(model.railDetail(for: item, showsCount: true))")
             }
         }
         .contextMenu {
@@ -445,7 +445,7 @@ struct AIChatRail: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(item.title), \(snippet?.plainText ?? detail)\(item.isPinned ? ", pinned" : "")\(isOpen ? ", open" : "")"
+            "\(item.title), \(snippet?.plainText ?? model.railDetail(for: item, showsCount: true))\(item.isPinned ? ", pinned" : "")\(isOpen ? ", open" : "")"
         )
         .accessibilityValue(isSelected ? "Selected, \(index + 1) of \(total)" : "\(index + 1) of \(total)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -491,7 +491,7 @@ struct AIChatRail: View {
     }
 
     /// The row's second line: the snippet while a search found the chat by
-    /// its text, else the question count and time.
+    /// its text, else the time (with the question count on the highlighted row).
     @ViewBuilder
     private func rowSecondLine(detail: String, snippet: ChatSnippet?) -> some View {
         if let snippet {

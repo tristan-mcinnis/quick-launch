@@ -51,3 +51,15 @@ Numbers: unmeasured. The hotkey needs the installed app and a human or UI
 driver on a real display, which this headless run does not have. The first
 unit that claims a show-path speed-up must record the median of ten presses
 here, before and after, with the method above.
+
+## Show-path units: what was and was not done (2026-10-18)
+
+- U1 early-key buffer (queue printable keys in `KeyablePanel.sendEvent`, replay
+  once focus lands) was NOT built. Only the synchronous first responder landed.
+  A buffer risks double insertion and needs a real key-event driver to prove;
+  neither exists headless. Open.
+- U2 landed as a reorder (panel first, capture work after). The stubbed
+  slow-selection-reader acceptance test was not written. Open.
+- Speed numbers for U1 and U2: unmeasured. Before and after medians of ten
+  `HotkeyToFieldFocus` presses still need the installed app on a real display.
+  No commit in this branch should be read as a measured speed-up.
