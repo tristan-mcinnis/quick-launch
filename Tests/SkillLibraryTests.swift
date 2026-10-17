@@ -40,6 +40,32 @@ struct SkillLibraryTests {
         }
     }
 
+    @Test func validityChecksTheFileAndSeesAddedAndRemovedSkills() throws {
+        let (library, root) = try makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(library.isValid("costing"))
+        #expect(!library.isValid("empty"))
+        #expect(!library.isValid("later"))
+        let later = root.appending(path: "later", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: later, withIntermediateDirectories: true)
+        try "# later".write(to: later.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+        #expect(library.isValid("later"))
+        try FileManager.default.removeItem(at: later)
+        #expect(!library.isValid("later"))
+    }
+
+    @Test func validityNeverListsTheFolder() throws {
+        let (library, root) = try makeLibrary()
+        // Search-only permission: a path can be opened, the folder cannot be listed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o111], ofItemAtPath: root.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        #expect(library.names().isEmpty)
+        #expect(library.isValid("costing"))
+    }
+
     @Test func truncatesALargeSkill() throws {
         let (library, root) = try makeLibrary()
         defer { try? FileManager.default.removeItem(at: root) }

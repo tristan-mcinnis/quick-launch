@@ -2,9 +2,9 @@ import Foundation
 
 /// Read-only access to the canonical skills folder, `~/.claude/skills`.
 ///
-/// A skill name is valid only when it is a folder listed there that holds a
+/// A skill name is valid only when it is a plain folder name there that holds a
 /// `SKILL.md`. Nothing supplied by a model or a setting is joined into a path
-/// until it has matched that listing, so `../` and absolute paths can never
+/// until it has passed the plain-name check, so `../` and absolute paths can never
 /// reach the file system.
 struct SkillLibrary: Sendable {
     let root: URL
@@ -27,14 +27,16 @@ struct SkillLibrary: Sendable {
             .sorted()
     }
 
-    /// True only for a plain folder name that is actually listed. A name
-    /// with a slash, a backslash, or any dot is refused before the listing
-    /// is read: no skill folder has one, and it is how a path would sneak in.
+    /// True only for a plain folder name that holds a `SKILL.md`. A name with
+    /// a slash, a backslash, or any dot is refused before the file system is
+    /// touched: no skill folder has one, and it is how a path would sneak in.
+    /// It stats one file instead of listing the folder, because the slash
+    /// notice calls it on every render.
     func isValid(_ name: String) -> Bool {
         guard !name.isEmpty, !name.contains("/"), !name.contains("\\"),
               !name.contains(".")
         else { return false }
-        return names().contains(name)
+        return FileManager.default.fileExists(atPath: skillFile(name).path)
     }
 
     /// The skill's `SKILL.md`, truncated to `maxCharacters`, or nil when the
