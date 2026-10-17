@@ -746,6 +746,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.orderFrontRegardless()
         panel.makeKey()
         ShowPathSignpost.panelOrderedFront()
+        // Put the caret in the field now so a key typed straight after the
+        // hotkey lands in it; the request below stays as the fallback for
+        // when the field is not in the hosting view yet.
+        if let viewModel, !viewModel.searchablePaneOwningFocus {
+            ShowFocus.focusInput(in: panel)
+        }
         viewModel?.requestInputFocus()
     }
 
