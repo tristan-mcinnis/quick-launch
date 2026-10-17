@@ -676,19 +676,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if viewModel?.catalogScope == nil {
                 viewModel?.captureLaunchSelection()
             }
-            viewModel?.captureImageFromClipboard()
         }
-        if let vm = viewModel, vm.settings.clipboardHistoryEnabled {
-            clipboardHistory.capture(from: .general, limit: vm.settings.clipboardHistoryLimit)
-        }
-        applicationCatalog.refreshIfNeeded()
         // A Quick AI thread kept from the last open shows the chat as the
         // store has it now: the AI Chat window may have added to it,
         // renamed it, or deleted it since.
         viewModel?.refreshOpenChatFromStore()
-        // Keep the Screenshots badge and first entry honest without ever
-        // touching the disk on the keystroke path.
-        viewModel?.warmScreenshotCatalogIfStale()
         // What the other house apps can do right now, read off the main
         // thread. A missing or dead app costs the launcher nothing.
         viewModel?.refreshHouseCommands()
@@ -753,6 +745,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             ShowFocus.focusInput(in: panel)
         }
         viewModel?.requestInputFocus()
+        // Everything below is not needed to draw the first frame or to gate
+        // Send, so it runs after the panel is up. The selection chip is
+        // captured above, before the panel took focus.
+        if captureSelectionTarget {
+            viewModel?.captureImageFromClipboard()
+        }
+        if let vm = viewModel, vm.settings.clipboardHistoryEnabled {
+            clipboardHistory.capture(from: .general, limit: vm.settings.clipboardHistoryLimit)
+        }
+        applicationCatalog.refreshIfNeeded()
+        // Keep the Screenshots badge and first entry honest without ever
+        // touching the disk on the keystroke path.
+        viewModel?.warmScreenshotCatalogIfStale()
     }
 
     func hideOverlay() {

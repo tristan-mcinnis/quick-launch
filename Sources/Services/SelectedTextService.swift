@@ -30,7 +30,7 @@ final class SelectedTextService: SelectedTextServicing {
     /// read must stay on the main thread: the panel takes focus immediately
     /// after, so deferring the read off-main would race the focus steal and
     /// read the wrong (or no) selection.
-    private static let axMessagingTimeout: Float = 0.5
+    nonisolated static let axMessagingTimeout: Float = 0.15
 
     init() {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
