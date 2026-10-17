@@ -34,7 +34,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// `rootAnswer`) lives on the Quick AI surface, so a non-empty answer
     /// presents it.
     var output: String = "" {
-        didSet { if !output.isEmpty { isQuickAIPresented = true } }
+        didSet { if !output.isEmpty, !isQuickAIPresented { isQuickAIPresented = true } }
     }
     /// Where the answer on screen came from. A model answer is a turn of the
     /// thread and the header names the model; a command action's output and
@@ -344,7 +344,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var catalogScope: LauncherCatalogScope?
     var pendingQuickLinkID: String?
     var actionQuery: String = ""
-    var applicationSelectionIndex: Int = 0
+    var applicationSelectionIndex: Int = 0 {
+        didSet { selectionShowsDetailPane = showsDetailPane }
+    }
+    /// `showsDetailPane` as of the last selection change. The panel watches
+    /// this instead of the index, so it wakes when the pane opens or closes
+    /// and not on every arrow press.
+    private(set) var selectionShowsDetailPane = false
     var inputFocusRequest: Int = 0
     /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
     var justCopied: Bool = false

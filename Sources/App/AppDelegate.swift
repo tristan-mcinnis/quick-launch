@@ -1364,7 +1364,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Panel auto-resize observer
 
     /// Observe the QuickViewModel reactively (Observation framework) and resize
-    /// the panel only when output/isStreaming/errorMessage actually change.
+    /// the panel only when something that sets its height or width changes
+    /// (`PanelResizeTrigger` lists them).
     /// Replaces an earlier 80ms polling loop that kept the menu bar app at
     /// 7-8% CPU even when idle (issue #24).
     private func startPanelSizeObserver(viewModel: QuickViewModel) {
@@ -1373,42 +1374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func armPanelSizeObserver(viewModel: QuickViewModel) {
-        withObservationTracking { [weak viewModel] in
-            guard let viewModel else { return }
-            _ = viewModel.output
-            _ = viewModel.isStreaming
-            _ = viewModel.errorMessage
-            _ = viewModel.isActionPalettePresented
-            _ = viewModel.isTransformChooserPresented
-            // The model chooser and the Add Context menu are inline blocks on
-            // the root surface: each one changes the window height. The Quick
-            // AI surface (and Recent Chats inside it) is the size the user
-            // left it at; nothing on it is measured.
-            _ = viewModel.isModelChooserPresented
-            _ = viewModel.isAddContextMenuPresented
-            _ = viewModel.isQuickAIPresented
-            _ = viewModel.isRecentChatsPresented
-            // The remembered Quick AI size: a finished drag and Reset
-            // Quick AI Size both land here.
-            _ = viewModel.quickAISize
-            _ = viewModel.modelChooserOptions.count
-            _ = viewModel.addContextOptions.count
-            _ = viewModel.isApplicationActionPanePresented
-            _ = viewModel.isCatalogActionPanePresented
-            _ = viewModel.catalogScope
-            _ = viewModel.actionQuery
-            _ = viewModel.input
-            _ = viewModel.pendingImage
-            _ = viewModel.activeItemActionForm
-            _ = viewModel.deleteArmedItemID
-            _ = viewModel.lastQuestion
-            _ = viewModel.pendingContext
-            _ = viewModel.applicationSelectionIndex
-            _ = viewModel.screenshotIndexProgress
-            _ = viewModel.screenshotFiles
-            _ = viewModel.clipboardEntries
-            _ = viewModel.settings.showMenuBar
-        } onChange: { [weak self, weak viewModel] in
+        PanelResizeTrigger.arm(viewModel: viewModel) { [weak self, weak viewModel] in
             Task { @MainActor in
                 guard let self, let viewModel else { return }
                 self.syncStatusItemVisibilityAndPresentation(viewModel: viewModel)
@@ -1449,7 +1415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             panelShrinkTask?.cancel()
             panelShrinkTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(120))
+                try? await Task.sleep(for: PanelResizeTrigger.shrinkHold)
                 guard !Task.isCancelled, let self, let vm = self.viewModel else { return }
                 self.panelShrinkTask = nil
                 let target = self.targetPanelSize(vm)
