@@ -10931,8 +10931,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// view (`moved` false) changes the distance, never the choice.
     func threadDidScroll(distanceFromBottom: CGFloat, moved: Bool = true) {
         lastThreadDistanceFromBottom = distanceFromBottom
-        guard moved else { return }
         let follows = distanceFromBottom <= Self.threadFollowThreshold
+        // Nothing below the view is always "at the bottom", moved or not: room
+        // reserved under a new question can settle without a scroll event.
+        guard moved || follows else { return }
         if isThreadFollowingBottom != follows { isThreadFollowingBottom = follows }
     }
 

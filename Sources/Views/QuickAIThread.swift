@@ -109,10 +109,7 @@ struct QuickAIThread: View {
                             turnGeometry.tops[message.id] = top
                             updateReservedHeight()
                             performPendingFindScroll(for: message.id)
-                            if turnGeometry.anchoring == message.id {
-                                turnGeometry.anchoring = nil
-                                scrollToQuestion(message.id)
-                            }
+                            if turnGeometry.anchoring == message.id { scrollToQuestion(message.id) }
                         }
                         .id(message.id)
                     // The search line belongs to the newest question;
@@ -168,7 +165,17 @@ struct QuickAIThread: View {
                     toolLine(notice, symbol: viewModel.threadNoticeSymbol)
                         .id(Self.threadNoticeID)
                 }
-                if reservedHeight > 0 { Color.clear.frame(height: reservedHeight) }
+                if anchoredTurnID != nil, anchoredTurnID == lastUserMessageID {
+                    // Also what the turn's end is measured against: lazy
+                    // layout only estimates the content's height.
+                    Color.clear.frame(height: reservedHeight)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .named(Self.contentSpace)).minY
+                        } action: { top in
+                            turnGeometry.endTop = top
+                            updateReservedHeight()
+                        }
+                }
             }
             .frame(maxWidth: QuickAIView.threadColumnWidth)
             .padding(.top, House.Spacing.xl)
@@ -188,6 +195,10 @@ struct QuickAIThread: View {
         } action: { old, new in
             threadGeometry = new
             updateReservedHeight()
+            // The new question is not in the lazy stack until the content
+            // grows to hold it; a scroll to it before that finds nothing, so
+            // it is asked again as the content lays out, until it reports.
+            if let id = turnGeometry.anchoring, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { scrollToQuestion(id) }
             // Only a move of the view (the reader's scroll, or one the
             // thread made) decides whether it follows the bottom; text
             // landing under a still view does not. A scroll the thread
@@ -199,10 +210,15 @@ struct QuickAIThread: View {
         }
         .onScrollPhaseChange { previous, phase in
             scrollPhase = phase
+            // The reader's own scroll takes over from the pending anchor.
+            if phase == .interacting || phase == .decelerating { turnGeometry.anchoring = nil }
             // A scroll that just came to rest (the reader's, or an animated
             // one the thread made) is judged where it landed.
             if phase == .idle, previous != .idle {
-                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom)
+                // A move the thread made (an animation) can end with new
+                // text already below it; that only ever joins the bottom,
+                // it never leaves it. Only the reader's own scroll does.
+                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom, moved: previous != .animating)
             }
         }
         .overlay {
@@ -224,6 +240,7 @@ struct QuickAIThread: View {
         .modifier(NewTurnAnchor(lastUserMessageID: lastUserMessageID, conversationID: viewModel.currentConversation?.id, reservedHeight: reservedHeight, roomUsedUp: {
             // Only a streaming answer's own growth; the estimates while a new
             // turn is first laid out must not pull the view to the end.
+            turnGeometry.anchoring = nil
             if viewModel.isStreaming, !viewModel.output.isEmpty { followBottom() }
         }, questionChanged: questionChanged, conversationChanged: { anchoredTurnID = nil; updateReservedHeight(); knownConversationID = viewModel.currentConversation?.id }))
         .onChange(of: viewModel.conversationMessages.count) { _, _ in followBottom() }
@@ -309,6 +326,8 @@ struct QuickAIThread: View {
         var pending: (id: UUID, offset: CGFloat)?
         /// The question sent to the top, waiting to be laid out.
         var anchoring: UUID?
+        /// Where the space under the newest turn starts: the turn's measured end.
+        var endTop: CGFloat?
     }
 
     /// "↓ Latest": the reader scrolled up from newer text. Clicking it, or
@@ -651,9 +670,8 @@ struct QuickAIThread: View {
         var room: CGFloat = 0
         if let id = anchoredTurnID, id == lastUserMessageID {
             let view = threadGeometry.visibleHeight
-            if let top = turnGeometry.tops[id] {
-                let turn = threadGeometry.contentHeight - reservedHeight - top - House.Spacing.md
-                room = max(0, view - turn - House.Spacing.md)
+            if let top = turnGeometry.tops[id], let end = turnGeometry.endTop {
+                room = max(0, view - (end - top) - House.Spacing.md)
             } else {
                 room = view
             }
@@ -696,8 +714,12 @@ struct QuickAIThread: View {
     /// takes over from the animation at once.
     private func anchorNewTurn(_ id: UUID) {
         anchoredTurnID = id
+        turnGeometry.endTop = nil
         updateReservedHeight()
-        turnGeometry.anchoring = turnGeometry.tops[id] == nil ? id : nil
+        // Held until the reader moves the view or the answer outgrows the
+        // room: lazy layout re-estimates the heights above and below the
+        // question as it lays out, and each change must keep it at the top.
+        turnGeometry.anchoring = id
         scrollToQuestion(id)
     }
 
@@ -724,6 +746,7 @@ struct QuickAIThread: View {
     }
 
     private func scroll(to target: QuickViewModel.ThreadScrollRequest.Target) {
+        turnGeometry.anchoring = nil
         let geometry = threadGeometry
         var findTarget: CGFloat?
         if case .messageOffset(let id, let offset) = target {

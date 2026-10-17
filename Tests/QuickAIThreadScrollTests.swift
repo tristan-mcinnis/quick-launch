@@ -70,6 +70,24 @@ struct QuickAIThreadScrollTests {
         Issue.record("the thread did not settle")
     }
 
+    /// Waits until `condition` holds and the view's offset has stopped
+    /// changing for several looks in a row, so a reading is taken at rest and
+    /// never inside the 0.2 s scroll animation. Returns that offset.
+    private func settleStill(in window: NSWindow, _ condition: @MainActor (CGFloat) -> Bool) async throws -> CGFloat {
+        let deadline = Date().addingTimeInterval(15)
+        var last: CGFloat?
+        var steady = 0
+        while Date() < deadline {
+            try await spin(0.05)
+            let offset = scrollOffset(in: window) ?? -1
+            if let previous = last, abs(offset - previous) < 0.01, condition(offset) { steady += 1 } else { steady = 0 }
+            last = offset
+            if steady >= 8 { return offset }
+        }
+        Issue.record("the thread did not come to rest")
+        return last ?? -1
+    }
+
     private func distance(_ vm: QuickViewModel) -> CGFloat { vm.lastThreadDistanceFromBottom ?? -1 }
 
     /// Lets the main run loop lay the view out for a while.
@@ -158,9 +176,8 @@ struct QuickAIThreadScrollTests {
         // The new question is brought to the top once: the view moves down
         // by about the thread it just left behind, and rests there while the
         // short answer fits under the question.
-        try await settle { (scrollOffset(in: window) ?? 0) > before + PanelSizing.quickAIHeight / 2 }
-        let landed = try #require(scrollOffset(in: window))
-        try await spin(0.5)
+        let landed = try await settleStill(in: window) { $0 > before + PanelSizing.quickAIHeight / 2 }
+        try await spin(0.05)
         #expect(abs((scrollOffset(in: window) ?? 0) - landed) <= 1, "the view does not move again")
         #expect(distance(vm) <= 1, "the reserved room leaves nothing to scroll")
         #expect(!vm.showsJumpToLatest)
@@ -172,25 +189,31 @@ struct QuickAIThreadScrollTests {
         await mock.setResponses([StreamDelta(text: "", finishReason: "stop")])
         vm.input = "the whole plan again"
         await vm.submit()
-        try await settle { (scrollOffset(in: window) ?? 0) > PanelSizing.quickAIHeight }
-        let atQuestion = try #require(scrollOffset(in: window))
+        let atQuestion = try await settleStill(in: window) { $0 > PanelSizing.quickAIHeight }
 
         // A few lines fit under the question: the view does not move.
         vm.isStreaming = true
         vm.output = (1...3).map { "Line \($0) of the answer." }.joined(separator: "\n")
-        try await spin(0.5)
-        #expect(abs((scrollOffset(in: window) ?? 0) - atQuestion) <= 1, "an answer that fits moves nothing")
+        let afterShort = try await settleStill(in: window) { _ in true }
+        #expect(abs(afterShort - atQuestion) <= 1, "an answer that fits moves nothing")
 
         // Grown past the view, the thread follows its newest line.
         for step in 1...12 {
             vm.output += "\n" + (1...10).map { "Step \(step).\($0) of the plan." }.joined(separator: "\n")
-            try await spin(0.2)
+            try await spin(0.05)
         }
-        // The stream ends: the thread settles on its last line.
-        vm.isStreaming = false
-        try await settle { distance(vm) <= QuickViewModel.threadFollowThreshold }
+        // Lazy layout only estimates the height of what was just appended, so
+        // a scroll to the end lands short until the next flush corrects it.
+        for line in 1...6 {
+            vm.output += "\nLast line \(line)."
+            try await spin(0.05)
+        }
+        // Judged while the stream is still running: once it ends the fake
+        // answer is dropped and the content shrinks back under the question.
+        try await settle { distance(vm) <= QuickViewModel.threadFollowThreshold && (scrollOffset(in: window) ?? 0) > atQuestion }
         #expect(vm.isThreadFollowingBottom)
         #expect((scrollOffset(in: window) ?? 0) > atQuestion, "the view followed the end")
         #expect(!vm.showsJumpToLatest)
+        vm.isStreaming = false
     }
 }
