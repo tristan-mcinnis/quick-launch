@@ -189,7 +189,7 @@ struct LauncherCatalogTests {
 }
 
 @MainActor
-private final class FakeLauncherCatalog: LauncherCatalogServicing {
+final class FakeLauncherCatalog: LauncherCatalogServicing {
     var snippets = [LauncherCatalogItem(
         kind: .snippet, itemID: "one", title: "Greeting", detail: "Test", value: "Hello"
     )]

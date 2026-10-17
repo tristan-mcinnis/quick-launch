@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Observation
 
 /// What starts a panel resize pass. Only state that sets the window's
@@ -15,6 +16,21 @@ enum PanelResizeTrigger {
     /// Passes started since launch. A test seam: it counts the changes that
     /// start a pass, synchronously, without waiting on the run loop.
     private(set) static var passCount = 0
+
+    enum Step: Equatable {
+        /// Grow or change width now, and drop any pending shrink.
+        case applyNow
+        /// Shorter than the window: wait `shrinkHold`, growth cancels it.
+        case holdShrink
+        case none
+    }
+
+    /// The frame is compared with a 1 pt tolerance on both axes.
+    static func step(frameHeight: CGFloat, frameWidth: CGFloat, targetHeight: CGFloat, targetWidth: CGFloat) -> Step {
+        if targetHeight > frameHeight + 1 || abs(frameWidth - targetWidth) > 1 { return .applyNow }
+        if targetHeight < frameHeight - 1 { return .holdShrink }
+        return .none
+    }
 
     static func arm(viewModel: QuickViewModel, onChange: @escaping @Sendable () -> Void) {
         withObservationTracking { [weak viewModel] in

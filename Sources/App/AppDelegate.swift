@@ -1375,6 +1375,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func armPanelSizeObserver(viewModel: QuickViewModel) {
         PanelResizeTrigger.arm(viewModel: viewModel) { [weak self, weak viewModel] in
+            // Observation calls this before the new value lands (willSet), so
+            // the pass cannot run on this stack: it would read the old state.
+            // The main-actor hop runs when this run-loop turn's main queue
+            // drains, which is before Core Animation commits the turn's
+            // layout, so growth still reaches the window in the same frame.
             Task { @MainActor in
                 guard let self, let viewModel else { return }
                 self.syncStatusItemVisibilityAndPresentation(viewModel: viewModel)
@@ -1398,13 +1403,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let total = target.height
         let width = target.width
         let frame = panel.frame
-        let needsWidthChange = abs(frame.width - width) > 1
-        if total > frame.height + 1 || needsWidthChange {
+        let step = PanelResizeTrigger.step(frameHeight: frame.height, frameWidth: frame.width, targetHeight: total, targetWidth: width)
+        if step == .applyNow {
             // Growth (and width changes) apply on the spot.
             panelShrinkTask?.cancel()
             panelShrinkTask = nil
             applyPanelFrame(height: total, width: width)
-        } else if total < frame.height - 1 {
+        } else if step == .holdShrink {
             // Shrinks wait one beat while the panel is visible: transitions
             // pass through short-lived states (submit clears the list before
             // streaming starts), and applying those made the window dip and
