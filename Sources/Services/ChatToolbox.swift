@@ -10,7 +10,18 @@ struct ChatToolOutcome: Sendable, Equatable {
     /// builds a successful outcome needs nothing new; every failure, refusal
     /// and timeout below sets it explicitly, so the turn's receipt never
     /// reports a vault or memory failure as a success.
-    var status: ToolRoundStatus = .succeeded
+    let status: ToolRoundStatus
+
+    /// The thread line follows the status: anything but `.succeeded` marks
+    /// the record failed, so a timeout, an unreadable result or a refused
+    /// name is drawn outside the folded tool group, never inside it.
+    init(content: String, record: ChatToolRecord, status: ToolRoundStatus = .succeeded) {
+        var record = record
+        if status != .succeeded { record.failed = true }
+        self.content = content
+        self.record = record
+        self.status = status
+    }
 }
 
 /// The read-only tools a chat can let the model call beside `search_web`:
