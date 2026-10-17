@@ -23,6 +23,11 @@ struct QuickAIThreadScrollTests {
     /// A long answered thread in the real view, in a window nobody sees,
     /// settled at the bottom.
     private func hosted() async throws -> (QuickViewModel, NSWindow) {
+        let (vm, window, _) = try await hostedWithService()
+        return (vm, window)
+    }
+
+    private func hostedWithService() async throws -> (QuickViewModel, NSWindow, MockQuickService) {
         var settings = QuickSettings()
         settings.autoCopy = false
         settings.historyEnabled = false
@@ -38,7 +43,17 @@ struct QuickAIThreadScrollTests {
         window.isReleasedWhenClosed = false
         window.contentView = host
         try await settle { (vm.lastThreadDistanceFromBottom ?? .infinity) <= QuickViewModel.threadFollowThreshold }
-        return (vm, window)
+        return (vm, window, mock)
+    }
+
+    /// The thread's scroll view and how far its view has scrolled.
+    private func scrollOffset(in window: NSWindow) -> CGFloat? {
+        func find(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.documentView != nil, scroll.documentView!.frame.height > 100 { return scroll }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        guard let root = window.contentView, let scroll = find(root) else { return nil }
+        return scroll.contentView.bounds.origin.y
     }
 
     /// Waits until `condition` holds and the view has been still for a
@@ -130,5 +145,52 @@ struct QuickAIThreadScrollTests {
         #expect(vm.isThreadFollowingBottom)
         #expect(distance(vm) <= QuickViewModel.threadFollowThreshold, "the newest line stays in view")
         vm.isStreaming = false
+    }
+
+    @Test func aNewQuestionGoesToTheTopAndAShortAnswerLeavesTheViewStill() async throws {
+        let (vm, window, mock) = try await hostedWithService()
+        defer { window.contentView = nil }
+        let before = try #require(scrollOffset(in: window))
+
+        await mock.setResponses([StreamDelta(text: "Short answer.", finishReason: "stop")])
+        vm.input = "and in one line?"
+        await vm.submit()
+        // The new question is brought to the top once: the view moves down
+        // by about the thread it just left behind, and rests there while the
+        // short answer fits under the question.
+        try await settle { (scrollOffset(in: window) ?? 0) > before + PanelSizing.quickAIHeight / 2 }
+        let landed = try #require(scrollOffset(in: window))
+        try await spin(0.5)
+        #expect(abs((scrollOffset(in: window) ?? 0) - landed) <= 1, "the view does not move again")
+        #expect(distance(vm) <= 1, "the reserved room leaves nothing to scroll")
+        #expect(!vm.showsJumpToLatest)
+    }
+
+    @Test func aStreamingAnswerFollowsTheEndOnlyOnceItOutgrowsTheView() async throws {
+        let (vm, window, mock) = try await hostedWithService()
+        defer { window.contentView = nil }
+        await mock.setResponses([StreamDelta(text: "", finishReason: "stop")])
+        vm.input = "the whole plan again"
+        await vm.submit()
+        try await settle { (scrollOffset(in: window) ?? 0) > PanelSizing.quickAIHeight }
+        let atQuestion = try #require(scrollOffset(in: window))
+
+        // A few lines fit under the question: the view does not move.
+        vm.isStreaming = true
+        vm.output = (1...3).map { "Line \($0) of the answer." }.joined(separator: "\n")
+        try await spin(0.5)
+        #expect(abs((scrollOffset(in: window) ?? 0) - atQuestion) <= 1, "an answer that fits moves nothing")
+
+        // Grown past the view, the thread follows its newest line.
+        for step in 1...12 {
+            vm.output += "\n" + (1...10).map { "Step \(step).\($0) of the plan." }.joined(separator: "\n")
+            try await spin(0.2)
+        }
+        // The stream ends: the thread settles on its last line.
+        vm.isStreaming = false
+        try await settle { distance(vm) <= QuickViewModel.threadFollowThreshold }
+        #expect(vm.isThreadFollowingBottom)
+        #expect((scrollOffset(in: window) ?? 0) > atQuestion, "the view followed the end")
+        #expect(!vm.showsJumpToLatest)
     }
 }
