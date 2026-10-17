@@ -73,6 +73,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// every new question; false once they scroll up, which shows the
     /// "Latest" chip.
     var isThreadFollowingBottom = true
+    /// Where each chat was left when the reader had scrolled up in it. The
+    /// thread writes it as the reader scrolls and reads it when the chat opens.
+    @ObservationIgnored var threadAnchors = ThreadScrollAnchorStore()
     /// How close to the bottom counts as reading the newest text.
     static let threadFollowThreshold = House.Control.row
     /// Return while an answer streams queues the typed follow-up: it stays
@@ -2920,10 +2923,17 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return Self.quickAIPlaceholder
     }
 
+<<<<<<< ours
     /// The one quiet line an empty Quick AI surface shows. Add Context and
     /// the commands are named by the composer placeholder and the model by
     /// the header, so only Recent Chats, which nothing else names, is here.
     /// Empty once the surface has anything to draw.
+=======
+    /// The one faint line an empty Quick AI surface shows, naming the two
+    /// ways in the composer placeholder does not (Recent Chats, Change
+    /// Model) with their real keys; attaching and commands are the
+    /// placeholder's. Empty once the surface has anything to draw.
+>>>>>>> theirs
     var quickAIEmptyStateHints: [String] {
         guard conversationMessages.isEmpty,
               !isStreaming,
@@ -2932,7 +2942,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
               pendingQuestion == nil,
               lastQuestion == nil
         else { return [] }
+<<<<<<< ours
         return ["\(shortcutLabel(for: .recentChats)) opens recent chats"]
+=======
+        return ["\(shortcutLabel(for: .recentChats)) recent chats  ·  \(shortcutLabel(for: .changeModel)) change model"]
+>>>>>>> theirs
     }
 
     /// What Return does from the Quick AI composer right now, drawn inside
@@ -10928,8 +10942,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// view (`moved` false) changes the distance, never the choice.
     func threadDidScroll(distanceFromBottom: CGFloat, moved: Bool = true) {
         lastThreadDistanceFromBottom = distanceFromBottom
-        guard moved else { return }
         let follows = distanceFromBottom <= Self.threadFollowThreshold
+        // Nothing below the view is always "at the bottom", moved or not: room
+        // reserved under a new question can settle without a scroll event.
+        guard moved || follows else { return }
         if isThreadFollowingBottom != follows { isThreadFollowingBottom = follows }
     }
 
@@ -11236,8 +11252,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         threadNotice = nil
         pendingQuestion = nil
         input = ""
-        // Another chat opens on its newest turn.
-        followThreadBottom()
+        // Another chat opens where it was left, or on its newest turn.
+        if let anchor = threadAnchors.anchor(for: conversation.id),
+           conversation.messages.contains(where: { $0.id == anchor.messageID }) {
+            isThreadFollowingBottom = false
+        } else {
+            threadAnchors.record(nil, for: conversation.id)
+            followThreadBottom()
+        }
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         resumeRetainedAttachments(for: conversation)

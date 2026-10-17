@@ -157,6 +157,7 @@ struct CodeBlockView: View {
 
     @State private var wrap = CodeBlockWrapState.initialState
     @State private var didCopy = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copyRevision = 0
 
     var body: some View {
@@ -253,9 +254,12 @@ struct CodeBlockView: View {
         HStack(spacing: AQDesign.Space.compact + 2) {
             Image(systemName: systemImage)
                 .font(AQDesign.TypeToken.caption)
+                .id(systemImage)
+                .transition(ChatMotion.copySwapTransition(reduceMotion: reduceMotion))
             Text(title)
                 .font(AQDesign.TypeToken.metadata)
         }
+        .animation(ChatMotion.copySwapAnimation(reduceMotion: reduceMotion), value: systemImage)
         .foregroundStyle(
             isActive ? AQDesign.ColorToken.textPrimary : AQDesign.ColorToken.textSecondary
         )

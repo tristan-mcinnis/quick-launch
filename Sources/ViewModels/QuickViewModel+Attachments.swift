@@ -417,7 +417,9 @@ extension QuickViewModel {
         )
         let characters = attachmentTray.readyContents.compactMap(\.text).reduce(0) { $0 + $1.utf8.count }
         if characters > share { return "Will be cut to fit \(provider.name)" }
-        return provider.location == .local ? "Only on this Mac" : "Will send to \(provider.name)"
+        // A cloud document to the provider the user already chose is routine:
+        // the answer's own record names where it went.
+        return provider.location == .local ? "Only on this Mac" : nil
     }
 
     static let pendingImageAsTextLine = "Will send as text (read on this Mac)"

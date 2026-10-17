@@ -10,7 +10,18 @@ struct ChatToolOutcome: Sendable, Equatable {
     /// builds a successful outcome needs nothing new; every failure, refusal
     /// and timeout below sets it explicitly, so the turn's receipt never
     /// reports a vault or memory failure as a success.
-    var status: ToolRoundStatus = .succeeded
+    let status: ToolRoundStatus
+
+    /// The thread line follows the status: anything but `.succeeded` marks
+    /// the record failed, so a timeout, an unreadable result or a refused
+    /// name is drawn outside the folded tool group, never inside it.
+    init(content: String, record: ChatToolRecord, status: ToolRoundStatus = .succeeded) {
+        var record = record
+        if status != .succeeded { record.failed = true }
+        self.content = content
+        self.record = record
+        self.status = status
+    }
 }
 
 /// The read-only tools a chat can let the model call beside `search_web`:
@@ -283,7 +294,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Memory search failed: \(error.localizedDescription). Answer without it.",
-                record: ChatToolRecord(kind: .memory, summary: "Memory search failed"),
+                record: ChatToolRecord(kind: .memory, summary: "Memory search failed", failed: true),
                 status: .failed
             )
         }
@@ -323,7 +334,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading today's captures failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Today's captures failed"),
+                record: ChatToolRecord(kind: .today, summary: "Today's captures failed", failed: true),
                 status: .failed
             )
         }
@@ -365,7 +376,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading today's tasks failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Today's tasks failed"),
+                record: ChatToolRecord(kind: .today, summary: "Today's tasks failed", failed: true),
                 status: .failed
             )
         }
@@ -409,7 +420,7 @@ struct ChatToolbox: Sendable {
         } catch {
             return ChatToolOutcome(
                 content: "Reading open tasks failed: \(error.localizedDescription). Answer without them.",
-                record: ChatToolRecord(kind: .today, summary: "Open tasks failed"),
+                record: ChatToolRecord(kind: .today, summary: "Open tasks failed", failed: true),
                 status: .failed
             )
         }
@@ -542,7 +553,7 @@ struct ChatToolbox: Sendable {
         }
         return ChatToolOutcome(
             content: "Vault search could not answer: \(reason). Answer without it and say the vault did not respond.",
-            record: ChatToolRecord(kind: .vault, summary: "\(label): unavailable — \(reason)"),
+            record: ChatToolRecord(kind: .vault, summary: "\(label): unavailable — \(reason)", failed: true),
             status: roundStatus
         )
     }

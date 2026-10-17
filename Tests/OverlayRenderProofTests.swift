@@ -538,7 +538,7 @@ struct OverlayRenderProofTests {
                 name: "quick-ai-two-long-questions-\(suffix).png"
             )
 
-            // The empty surface: three quiet hints with their real keys.
+            // The empty surface: one faint line with their real keys.
             let empty = Self.makeViewModel(appearance: preference)
             empty.input = ""
             #expect(empty.handleTab())

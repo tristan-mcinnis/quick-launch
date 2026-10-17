@@ -29,12 +29,18 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     var summary: String
     /// Files and records the call found, in the order the tool ranked them.
     var sources: [ChatSource]
+    /// Set only when the call failed; nil in a record saved before this
+    /// field existed, so an older chat still opens.
+    var failed: Bool?
 
-    init(kind: Kind, summary: String, sources: [ChatSource] = []) {
+    init(kind: Kind, summary: String, sources: [ChatSource] = [], failed: Bool = false) {
         self.kind = kind
         self.summary = summary
         self.sources = sources
+        self.failed = failed ? true : nil
     }
+
+    var isFailure: Bool { failed == true }
 
     /// The glyph for the line. Tertiary ink, like every tool line.
     var systemImage: String {
@@ -65,6 +71,13 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
     var path: String?
 
     var id: String { (path ?? "") + "\u{1F}" + title }
+
+    /// The day to draw beside the title: none when the title already names
+    /// it (a daily note's file name is its date).
+    var shownDay: String? {
+        guard let day, !title.contains(day) else { return nil }
+        return day
+    }
 
     init(title: String, day: String? = nil, path: String? = nil) {
         self.title = title

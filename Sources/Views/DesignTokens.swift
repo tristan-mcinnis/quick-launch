@@ -194,3 +194,77 @@ enum AQDesign {
     static let controlHeight = House.Control.row      // 40
     static let footerHeight = House.Control.footer    // 40
 }
+
+/// AI Chat's one motion table. Durations that overlap DESIGN Motion are
+/// that value; the rest are the chat's own. Every animation in the chat
+/// views comes from here, and Reduce Motion is resolved in this one place:
+/// no movement, a plain fade or nothing.
+enum ChatMotion {
+    static let hover = House.Motion.hover
+    static let select = House.Motion.select
+    static let fast = House.Motion.fast
+    static let normal = House.Motion.normal
+    /// Rail slide, open and close.
+    static let slide = House.Motion.normal
+    static let disclosure: Double = 0.175
+    static let appear: Double = 0.3
+    static let appearStagger: Double = 0.05
+    static let copySwap: Double = 0.25
+
+    static func hoverAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: hover)
+    }
+
+    static func selectAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: select)
+    }
+
+    static func fastAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: fast)
+    }
+
+    static func scrollAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: normal)
+    }
+
+    static func slideCurve(opening: Bool) -> (Double, Double, Double, Double) {
+        opening ? (0.165, 0.84, 0.44, 1) : (0.77, 0, 0.175, 1)
+    }
+
+    /// Reduce Motion swaps the slide for a short fade.
+    static func slideAnimation(opening: Bool, reduceMotion: Bool) -> Animation {
+        if reduceMotion { return .easeOut(duration: select) }
+        let c = slideCurve(opening: opening)
+        return .timingCurve(c.0, c.1, c.2, c.3, duration: slide)
+    }
+
+    static func disclosureAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: disclosure)
+    }
+
+    static func appearAnimation(index: Int, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: appear).delay(Double(index) * appearStagger)
+    }
+
+    /// The icon swap on a copy button: scale and turn, or a bare fade.
+    static func copySwapAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: copySwap)
+    }
+
+    static func copySwapTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .modifier(
+            active: CopySwapEffect(progress: 1),
+            identity: CopySwapEffect(progress: 0)
+        )
+    }
+
+    private struct CopySwapEffect: ViewModifier {
+        let progress: Double
+        func body(content: Content) -> some View {
+            content
+                .opacity(1 - progress)
+                .scaleEffect(1 - 0.5 * progress)
+                .rotationEffect(.degrees(-90 * progress))
+        }
+    }
+}

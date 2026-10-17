@@ -531,6 +531,45 @@ struct AttachmentFlowTests {
         #expect(!line.contains("Deck.pptx") || line.hasPrefix("Cut Deck.pptx"), "the current one is cut last")
     }
 
+    // MARK: - Routing line
+
+    @Test func theStripSaysNothingForARoutineCloudDocument() async {
+        let rig = make()
+        await rig.extractor.set(.content(Self.document("Notes.txt", text: "short")), for: "Notes.txt")
+        rig.vm.openQuickAI()
+        rig.vm.attachmentTray.add(.file(Self.file("Notes.txt")))
+        await settle(rig.vm)
+        #expect(rig.vm.chatDestinationIsRoutine)
+        #expect(rig.vm.attachmentRoutingLine == nil)
+    }
+
+    @Test func theStripNamesAnOnThisMacRoute() async {
+        let rig = make { $0.selectedProviderID = InferenceProvider.mlxVisionID }
+        await rig.extractor.set(.content(Self.document("Notes.txt", text: "short")), for: "Notes.txt")
+        rig.vm.openQuickAI()
+        rig.vm.attachmentTray.add(.file(Self.file("Notes.txt")))
+        await settle(rig.vm)
+        #expect(rig.vm.attachmentRoutingLine == "Only on this Mac")
+    }
+
+    @Test func theStripNamesACutToFitDocument() async {
+        let rig = make(configure: Self.smallWindow)
+        let big = String(repeating: "Budget line. ", count: 6_000)
+        await rig.extractor.set(.content(Self.document("Big.txt", text: big)), for: "Big.txt")
+        rig.vm.openQuickAI()
+        rig.vm.attachmentTray.add(.file(Self.file("Big.txt")))
+        await settle(rig.vm)
+        #expect(rig.vm.attachmentRoutingLine?.hasPrefix("Will be cut to fit") == true)
+    }
+
+    @Test func theStripNamesWhereAPictureGoes() async {
+        let rig = make { $0.visionProviderID = InferenceProvider.deepSeekID }
+        rig.vm.openQuickAI()
+        rig.vm.attachmentTray.add(.image(Self.image, name: "Pasted image", kind: .image))
+        await settle(rig.vm)
+        #expect(rig.vm.attachmentRoutingLine == "Will send the image to DeepSeek API")
+    }
+
     // MARK: - Open in AI Chat, Clear history, search
 
     @Test func clearHistoryEmptiesTheSessionStore() async {

@@ -134,7 +134,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
             self.glyphOverride = nil
         }
         if phase == .ready {
-            detail = ["Ready", detail].filter { !$0.isEmpty }.joined(separator: " · ")
+            // "Ready" is spoken, not drawn: a chip in the strip is ready by default.
             spokenDetail = ["ready to send", spokenDetail ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
         }
     }
@@ -397,7 +397,7 @@ struct AttachmentChip: View {
             .contentShape(RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous))
             .onTapGesture { if let onOpen { onOpen() } }
             .onHover { hovering in isHovering = hovering }
-            .animation(reduceMotion ? nil : .easeOut(duration: House.Motion.hover), value: isHovering)
+            .animation(ChatMotion.hoverAnimation(reduceMotion: reduceMotion), value: isHovering)
             .help(model.help)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.accessibilityLabel)
@@ -587,7 +587,8 @@ struct AttachmentStripView: View {
                     .font(House.TypeToken.meta)
                     .foregroundStyle(House.ColorToken.textPrimary)
                     .lineLimit(1)
-                    .fixedSize()
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
             }
             if let selectionPreview {
                 SelectedTextPreviewButton(

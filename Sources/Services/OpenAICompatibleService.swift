@@ -597,7 +597,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
             } catch {
                 return CallOutcome(
                     content: Self.wrappedSearchResult("Search failed: \(error.localizedDescription)"),
-                    record: ChatToolRecord(kind: .web, summary: "Web search failed"),
+                    record: ChatToolRecord(kind: .web, summary: "Web search failed", failed: true),
                     status: .failed
                 )
             }

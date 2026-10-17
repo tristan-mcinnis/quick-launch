@@ -79,6 +79,9 @@ struct AttachmentTrayTests {
         #expect(tray.readingStatusLine == nil)
         #expect(tray.items[0].content?.text == "Text of report.pdf.")
         #expect(tray.readyContents.count == 1)
+        let chip = AttachmentChipModel(item: tray.items[0])
+        #expect(!chip.detailLine.contains("Ready"), "a chip is ready by default, so the word is not drawn")
+        #expect(chip.accessibilityLabel.contains("ready to send"), "VoiceOver still hears it")
     }
 
     @Test func twoReadingChipsReadAsACount() async {

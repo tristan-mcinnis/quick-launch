@@ -125,7 +125,11 @@ struct ChatContextRenderProofTests {
             #expect(summary.route.contains("fell back from deepseek-reasoner"))
             #expect(summary.context.contains("Attached sources"))
             #expect(summary.context.contains("3 chunks"))
-            #expect(summary.timings?.contains("12.4 s") == true)
+            #expect(summary.total == "12.4 s")
+            #expect(summary.phases?.contains("12.4") == false, "the total is not repeated in the phases")
+            #expect(summary.phases?.contains("first token") == true)
+            #expect(summary.model == "deepseek-chat")
+            #expect(summary.provider != nil)
             #expect(summary.usage == "1,204 in · 388 out")
             #expect(summary.materials.count == 3)
 
@@ -200,7 +204,8 @@ struct ChatContextRenderProofTests {
         #expect(summary.hasReceipt == false)
         #expect(summary.route == "No route recorded")
         #expect(summary.context == "No reading recorded")
-        #expect(summary.timings == nil)
+        #expect(summary.total == nil)
+        #expect(summary.phases == nil)
         #expect(summary.materials.isEmpty)
     }
 

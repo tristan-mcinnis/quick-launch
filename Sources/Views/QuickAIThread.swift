@@ -33,6 +33,21 @@ struct QuickAIThread: View {
     /// thread. Read-only: the view model owns the archive, and nothing here
     /// writes to it.
     @State private var archiveProjection = ChatArchiveProjection.unavailable
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The question the thread scrolled to the top of when it was sent, and
+    /// the empty space reserved under its answer: the room the view still has
+    /// below the question, so the view stays put while the answer fits and
+    /// only then follows the end.
+    @State private var anchoredTurnID: UUID?
+    @State private var reservedHeight: CGFloat = 0
+    @State private var knownConversationID: UUID?
+    /// The chat whose first screen has landed. Another chat is drawn at
+    /// opacity 0 until its view reaches where it opens (the saved anchor, or
+    /// the bottom), so the jump from the top never shows; a short timer
+    /// reveals it regardless.
+    @State private var revealedChatID: UUID?
+    @State private var revealTask: Task<Void, Never>?
+    private static let revealTimeout = Duration.milliseconds(400)
 
     /// The thread's content, where `scrollTo(y:)` measures from.
     private nonisolated static let contentSpace = "quick-ai-thread-content"
@@ -72,7 +87,7 @@ struct QuickAIThread: View {
         return nil
     }
 
-    /// The empty surface: three quiet lines naming the ways in, centred in
+    /// The empty surface: one faint line naming the ways in, centred in
     /// the space the thread will take.
     private func emptyStateHints(_ hints: [String]) -> some View {
         VStack(spacing: House.Spacing.xs) {
@@ -99,7 +114,10 @@ struct QuickAIThread: View {
                             proxy.frame(in: .named(Self.contentSpace)).minY
                         } action: { top in
                             turnGeometry.tops[message.id] = top
+                            updateReservedHeight()
                             performPendingFindScroll(for: message.id)
+                            if turnGeometry.anchoring == message.id { scrollToQuestion(message.id) }
+                            if turnGeometry.restoring?.messageID == message.id { restoreAnchor() }
                         }
                         .id(message.id)
                     // The search line belongs to the newest question;
@@ -155,6 +173,17 @@ struct QuickAIThread: View {
                     toolLine(notice, symbol: viewModel.threadNoticeSymbol)
                         .id(Self.threadNoticeID)
                 }
+                if anchoredTurnID != nil, anchoredTurnID == lastUserMessageID {
+                    // Also what the turn's end is measured against: lazy
+                    // layout only estimates the content's height.
+                    Color.clear.frame(height: reservedHeight)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .named(Self.contentSpace)).minY
+                        } action: { top in
+                            turnGeometry.endTop = top
+                            updateReservedHeight()
+                        }
+                }
             }
             .frame(maxWidth: QuickAIView.threadColumnWidth)
             .padding(.top, House.Spacing.xl)
@@ -173,21 +202,39 @@ struct QuickAIThread: View {
             )
         } action: { old, new in
             threadGeometry = new
+            updateReservedHeight()
+            // The new question is not in the lazy stack until the content
+            // grows to hold it; a scroll to it before that finds nothing, so
+            // it is asked again as the content lays out, until it reports.
+            if let id = turnGeometry.anchoring, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { scrollToQuestion(id) }
+            if turnGeometry.restoring != nil, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { restoreAnchor() }
+            noteLanding(new)
+            recordAnchor(new)
             // Only a move of the view (the reader's scroll, or one the
             // thread made) decides whether it follows the bottom; text
             // landing under a still view does not. A scroll the thread
             // animates is judged where it lands, not on its first frame.
-            viewModel.threadDidScroll(
-                distanceFromBottom: new.distanceFromBottom,
-                moved: old.top != new.top && scrollPhase != .animating
-            )
+            if !isHoldingChat {
+                viewModel.threadDidScroll(
+                    distanceFromBottom: new.distanceFromBottom,
+                    moved: old.top != new.top && scrollPhase != .animating
+                )
+            }
         }
         .onScrollPhaseChange { previous, phase in
             scrollPhase = phase
+            // The reader's own scroll takes over from the pending anchor.
+            if phase == .interacting || phase == .decelerating {
+                turnGeometry.anchoring = nil
+                turnGeometry.restoring = nil
+            }
             // A scroll that just came to rest (the reader's, or an animated
             // one the thread made) is judged where it landed.
             if phase == .idle, previous != .idle {
-                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom)
+                // A move the thread made (an animation) can end with new
+                // text already below it; that only ever joins the bottom,
+                // it never leaves it. Only the reader's own scroll does.
+                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom, moved: previous != .animating)
             }
         }
         .overlay {
@@ -199,7 +246,20 @@ struct QuickAIThread: View {
             // flag says: a scroll to a message there never moves the view.
             if viewModel.showsJumpToLatest, !threadGeometry.fitsView { latestChip }
         }
-        .onAppear { followBottom() }
+        .onAppear {
+            knownConversationID = viewModel.currentConversation?.id
+            revealedChatID = knownConversationID
+            followBottom()
+        }
+        // A new question goes to the top of the view, once; the answer then
+        // fills the room under it. Declared before the follow handlers so
+        // the reserved room is known when they run.
+        .modifier(NewTurnAnchor(lastUserMessageID: lastUserMessageID, conversationID: viewModel.currentConversation?.id, reservedHeight: reservedHeight, roomUsedUp: {
+            // Only a streaming answer's own growth; the estimates while a new
+            // turn is first laid out must not pull the view to the end.
+            turnGeometry.anchoring = nil
+            if viewModel.isStreaming, !viewModel.output.isEmpty { followBottom() }
+        }, questionChanged: questionChanged, conversationChanged: openedConversation))
         .onChange(of: viewModel.conversationMessages.count) { _, _ in followBottom() }
         .onChange(of: viewModel.output) { _, _ in followBottom() }
         .onChange(of: viewModel.isStreaming) { _, _ in followBottom() }
@@ -220,13 +280,15 @@ struct QuickAIThread: View {
         }
         // A new question (or another chat) follows the bottom again.
         .onChange(of: viewModel.isThreadFollowingBottom) { _, follows in
-            if follows { scrollToEnd() }
+            if follows { followBottom() }
         }
         // Show more and Collapse, the page keys, ⌘↑ ⌘↓, and the chip.
         .onChange(of: viewModel.threadScrollRequest) { _, request in
             guard let request else { return }
             scroll(to: request.target)
         }
+        .opacity(isHoldingChat ? 0 : 1)
+        .animation(isHoldingChat ? nil : ChatMotion.fastAnimation(reduceMotion: reduceMotion), value: isHoldingChat)
         .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
         .task(id: archiveLoadKey) { await reloadArchiveProjection() }
     }
@@ -281,6 +343,12 @@ struct QuickAIThread: View {
     @MainActor final class TurnGeometry {
         var tops: [UUID: CGFloat] = [:]
         var pending: (id: UUID, offset: CGFloat)?
+        /// The question sent to the top, waiting to be laid out.
+        var anchoring: UUID?
+        /// Where the space under the newest turn starts: the turn's measured end.
+        var endTop: CGFloat?
+        /// Where an opened chat was left, until the view has landed there.
+        var restoring: ThreadScrollAnchor?
     }
 
     /// "↓ Latest": the reader scrolled up from newer text. Clicking it, or
@@ -363,7 +431,7 @@ struct QuickAIThread: View {
         let above = records.filter(\.drawsAboveAnswer)
         return VStack(alignment: .leading, spacing: House.Spacing.md) {
             if !above.isEmpty {
-                toolLineGroup(above.map { ($0.summary, $0.systemImage) })
+                toolLineGroup(above.map(\.activityLine))
             }
             // Answers never collapse: Raycast folds only what you send.
             answerProse(
@@ -417,8 +485,9 @@ struct QuickAIThread: View {
     /// so nothing moves when the answer lands.
     @ViewBuilder
     private var liveToolLines: some View {
-        let lines = (viewModel.webSearchNote.map { [($0, "globe")] } ?? [])
-            + viewModel.liveToolRecords.map { ($0.summary, $0.systemImage) }
+        let lines = (viewModel.webSearchNote.map {
+            [ToolActivitySummary.Line(text: $0, symbol: "globe", name: "web")]
+        } ?? []) + viewModel.liveToolRecords.map(\.activityLine)
         if !lines.isEmpty {
             toolLineGroup(lines)
                 .id(Self.webSearchNoteID)
@@ -426,9 +495,21 @@ struct QuickAIThread: View {
     }
 
     /// Consecutive tool lines, closer together than the turns around them.
-    private func toolLineGroup(_ lines: [(text: String, symbol: String)]) -> some View {
-        VStack(alignment: .leading, spacing: House.Spacing.xs) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+    /// Two or more that went well fold into one activity line; a failure or
+    /// a pending approval is drawn outside it, never inside.
+    private func toolLineGroup(_ lines: [ToolActivitySummary.Line]) -> some View {
+        let summary = ToolActivitySummary.summarize(lines)
+        return VStack(alignment: .leading, spacing: House.Spacing.xs) {
+            if let headline = summary.headline {
+                ToolActivityGroup(headline: headline, lines: summary.folded) { line in
+                    toolLine(line.text, symbol: line.symbol)
+                }
+            } else {
+                ForEach(Array(summary.folded.enumerated()), id: \.offset) { _, line in
+                    toolLine(line.text, symbol: line.symbol)
+                }
+            }
+            ForEach(Array(summary.exposed.enumerated()), id: \.offset) { _, line in
                 toolLine(line.text, symbol: line.symbol)
             }
         }
@@ -472,7 +553,7 @@ struct QuickAIThread: View {
                 .foregroundStyle(AQDesign.ColorToken.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let day = source.day {
+            if let day = source.shownDay {
                 Text(day)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -490,12 +571,12 @@ struct QuickAIThread: View {
             }
             .buttonStyle(.plain)
             .help("Open \(path)")
-            .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+            .accessibilityLabel("Source: \(source.title)\(source.shownDay.map { ", \($0)" } ?? "")")
             .accessibilityHint("Opens the file")
         } else {
             label
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Source: \(source.title)\(source.day.map { ", \($0)" } ?? "")")
+                .accessibilityLabel("Source: \(source.title)\(source.shownDay.map { ", \($0)" } ?? "")")
         }
     }
 
@@ -614,14 +695,180 @@ struct QuickAIThread: View {
         threadPosition.scrollTo(edge: .bottom)
     }
 
+    /// Sizes the empty space under the thread's last turn: the view's height
+    /// less the turn's own, so the question can sit at the top with nothing to
+    /// scroll while its answer is short, and none once the answer is taller
+    /// than the view. Measured from the content's height less the space
+    /// already reserved; the whole view until the question has been laid out.
+    private func updateReservedHeight() {
+        var room: CGFloat = 0
+        if let id = anchoredTurnID, id == lastUserMessageID {
+            let view = threadGeometry.visibleHeight
+            if let top = turnGeometry.tops[id], let end = turnGeometry.endTop {
+                room = max(0, view - (end - top) - House.Spacing.md)
+            } else {
+                room = view
+            }
+        }
+        if abs(room - reservedHeight) > 0.5 { reservedHeight = room }
+    }
+
+    /// Watches for a new question and for another chat. Its own modifier so
+    /// the thread's `body` stays cheap to type-check.
+    private struct NewTurnAnchor: ViewModifier {
+        let lastUserMessageID: UUID?
+        let conversationID: UUID?
+        let reservedHeight: CGFloat
+        let roomUsedUp: () -> Void
+        let questionChanged: (UUID?, UUID?) -> Void
+        let conversationChanged: () -> Void
+
+        func body(content: Content) -> some View {
+            content
+                .onChange(of: lastUserMessageID) { old, new in questionChanged(old, new) }
+                .onChange(of: conversationID) { _, _ in conversationChanged() }
+                // The answer just outgrew the room under its question: from
+                // here the thread follows its end.
+                .onChange(of: reservedHeight == 0) { _, none in if none { roomUsedUp() } }
+        }
+    }
+
+    /// Opening a chat changes the last question too; a question asked in the
+    /// chat that is open (or the first of a new one) is sent to the top.
+    private func questionChanged(_ old: UUID?, _ new: UUID?) {
+        let conversationID = viewModel.currentConversation?.id
+        defer { knownConversationID = conversationID }
+        guard let new else { return }
+        let asked = old != nil ? conversationID == knownConversationID : viewModel.conversationMessages.count <= 2
+        if asked { anchorNewTurn(new) }
+    }
+
+    /// Sends the new question to the top of the view in one 0.2 s ease-out
+    /// (no animation under Reduce Motion). The reader's own scroll or key
+    /// takes over from the animation at once.
+    private func anchorNewTurn(_ id: UUID) {
+        turnGeometry.restoring = nil
+        anchoredTurnID = id
+        turnGeometry.endTop = nil
+        updateReservedHeight()
+        // Held until the reader moves the view or the answer outgrows the
+        // room: lazy layout re-estimates the heights above and below the
+        // question as it lays out, and each change must keep it at the top.
+        turnGeometry.anchoring = id
+        scrollToQuestion(id)
+    }
+
+    // MARK: - Opening a chat
+
+    /// A chat with a few turns, opened from elsewhere, is held back until it
+    /// has landed; a new chat or its first turns never are.
+    fileprivate static let heldMinimumMessages = 3
+
+    private var isHoldingChat: Bool {
+        ThreadReveal.isHolding(current: viewModel.currentConversation?.id, revealed: revealedChatID, messageCount: viewModel.conversationMessages.count)
+    }
+
+    /// Another chat is on the thread: send the view where that chat was left
+    /// (or to its end) and keep it hidden until it has landed.
+    private func openedConversation() {
+        anchoredTurnID = nil
+        turnGeometry.anchoring = nil
+        updateReservedHeight()
+        knownConversationID = viewModel.currentConversation?.id
+        revealTask?.cancel()
+        turnGeometry.restoring = nil
+        guard isHoldingChat, let id = knownConversationID else {
+            // Not held: this chat is already shown, so its later turns must
+            // not be taken for a chat being opened.
+            revealedChatID = knownConversationID
+            return
+        }
+        if !viewModel.isThreadFollowingBottom, let anchor = viewModel.threadAnchors.anchor(for: id) {
+            turnGeometry.restoring = anchor
+            restoreAnchor()
+        } else {
+            scrollToEnd()
+        }
+        revealTask = Task {
+            try? await Task.sleep(for: Self.revealTimeout)
+            guard !Task.isCancelled else { return }
+            revealChat()
+        }
+    }
+
+    private func revealChat() {
+        revealTask?.cancel()
+        turnGeometry.restoring = nil
+        revealedChatID = viewModel.currentConversation?.id
+    }
+
+    /// Scrolls to the open chat's saved anchor. Asked again as the lazy
+    /// stack lays out, until the view has landed.
+    private func restoreAnchor() {
+        guard let anchor = turnGeometry.restoring else { return }
+        if let top = turnGeometry.tops[anchor.messageID] {
+            let target = anchor.scrollTop(messageTop: top, maximumTop: .greatestFiniteMagnitude)
+            performScroll { threadPosition.scrollTo(y: target) }
+        } else {
+            performScroll { threadPosition.scrollTo(id: anchor.messageID, anchor: .top) }
+        }
+    }
+
+    /// The held chat is shown once its view sits where it opens.
+    private func noteLanding(_ geometry: ThreadGeometry) {
+        guard isHoldingChat else { return }
+        if let anchor = turnGeometry.restoring {
+            guard let top = turnGeometry.tops[anchor.messageID],
+                  abs(geometry.top - anchor.scrollTop(messageTop: top, maximumTop: geometry.maximumTop)) < 1 else { return }
+            revealChat()
+        } else if viewModel.isThreadFollowingBottom, geometry.contentHeight > 0,
+                  geometry.distanceFromBottom <= QuickViewModel.threadFollowThreshold {
+            revealChat()
+        }
+    }
+
+    /// Remembers where the reader left this chat: the message at the top of
+    /// the view and the offset into it, or nothing at the bottom.
+    private func recordAnchor(_ geometry: ThreadGeometry) {
+        guard !isHoldingChat, turnGeometry.restoring == nil,
+              let id = viewModel.currentConversation?.id, id == knownConversationID,
+              !viewModel.conversationMessages.isEmpty, geometry.visibleHeight > 0 else { return }
+        if geometry.fitsView || geometry.distanceFromBottom <= QuickViewModel.threadFollowThreshold {
+            viewModel.threadAnchors.record(nil, for: id)
+        } else if let anchor = ThreadScrollAnchor.make(
+            viewTop: geometry.top,
+            order: viewModel.conversationMessages.map(\.id),
+            tops: turnGeometry.tops
+        ) {
+            viewModel.threadAnchors.record(anchor, for: id)
+        }
+    }
+
+    private func scrollToQuestion(_ id: UUID) {
+        var transaction = Transaction(animation: ChatMotion.scrollAnimation(reduceMotion: reduceMotion))
+        transaction.disablesAnimations = reduceMotion
+        // A message not laid out yet is only estimated, and a second id
+        // scroll to the same place is ignored; once it has a top, scroll to it.
+        withTransaction(transaction) {
+            if let top = turnGeometry.tops[id] {
+                threadPosition.scrollTo(y: top)
+            } else {
+                threadPosition.scrollTo(id: id, anchor: .top)
+            }
+        }
+    }
+
     /// New text keeps the newest line in view only while the reader is at
-    /// the bottom; scrolled up, the view stays where they are.
+    /// the bottom, and only once the answer is taller than the view; scrolled
+    /// up, or while it still fits under its question, the view stays put.
     private func followBottom() {
-        guard viewModel.isThreadFollowingBottom else { return }
+        guard viewModel.isThreadFollowingBottom, reservedHeight == 0, turnGeometry.restoring == nil else { return }
         scrollToEnd()
     }
 
     private func scroll(to target: QuickViewModel.ThreadScrollRequest.Target) {
+        turnGeometry.anchoring = nil
+        turnGeometry.restoring = nil
         let geometry = threadGeometry
         var findTarget: CGFloat?
         if case .messageOffset(let id, let offset) = target {
@@ -701,5 +948,15 @@ struct QuickAIThread: View {
         .frame(minHeight: House.Control.keyCap)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Error: \(message)")
+    }
+}
+
+/// Whether the open chat is held back until it has landed. Only a chat with a
+/// few turns, opened from elsewhere, is held; a chat that was shown while it
+/// was short stays shown as it grows.
+enum ThreadReveal {
+    static func isHolding(current: UUID?, revealed: UUID?, messageCount: Int) -> Bool {
+        guard let current, messageCount >= QuickAIThread.heldMinimumMessages else { return false }
+        return current != revealed
     }
 }
