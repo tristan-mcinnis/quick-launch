@@ -232,7 +232,11 @@ struct OverlayView: View {
                         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
                         .layoutPriority(1)
                 } else if viewModel.isGridCatalog {
-                    ScreenshotGridView(viewModel: viewModel)
+                    if viewModel.catalogScope == .screenshots {
+                        ScreenshotGridView(viewModel: viewModel)
+                    } else {
+                        EmojiGridView(viewModel: viewModel)
+                    }
                 } else {
                     HStack(alignment: .top, spacing: 0) {
                         launcherList
@@ -634,7 +638,11 @@ struct LauncherResultRow: View {
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
             }
         case .item(let item):
-            if item.kind == .screenshot,
+            if item.kind == .emoji {
+                IconTile {
+                    Text(item.value).font(AQDesign.TypeToken.body)
+                }
+            } else if item.kind == .screenshot,
                       let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
                 IconTile(fillsTile: true) {
                     Image(nsImage: thumbnail).resizable().scaledToFill()
@@ -694,6 +702,7 @@ struct LauncherResultRow: View {
             case .snippet: "Snippet"
             case .quickLink: "Quicklink"
             case .clipboard: "Clipboard"
+            case .emoji: "Emoji"
             case .screenshot: "Screenshot"
             case .conversation: "Chat"
             case .askAI: "AI Command"
@@ -795,6 +804,8 @@ private struct ItemActionPane: View {
                 Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                     .resizable().scaledToFit()
             }
+        } else if let item, item.kind == .emoji {
+            IconTile { Text(item.value).font(AQDesign.TypeToken.body) }
         } else if let item {
             IconTile {
                 Image(systemName: item.systemImage)
@@ -833,6 +844,7 @@ private struct ItemActionPane: View {
         case .clipboard: return item.detail
         case .quickLink: return "Quick Link"
         case .command: return item.detail
+        case .emoji: return "Emoji"
         case .screenshot: return item.detail
         case .conversation: return item.detail
         case .askAI: return item.detail

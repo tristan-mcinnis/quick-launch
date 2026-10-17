@@ -16,13 +16,20 @@
   choice is remembered. Picking the same language on both sides flips the
   pair. The footer drops its Target hint because the chips show their keys.
 
-- **Four features are removed.** The Emoji & Symbols catalog, the color
-  picker (Pick Color from Screen, the Colors catalog and its settings), the
-  clarifying-questions card (the `ask_user_question` tool and its setting)
-  and the Welcome overlay are gone. Old settings keys for them are ignored
-  on load, and saved Emoji or Color item records are dropped. Saved chats
-  that carry a question card load without it. Files the features left on
-  disk, such as `color-history.json`, are not deleted.
+- **The Emoji & Symbols catalog is back.** It was removed earlier in this
+  release and is restored as it was: the 9-column grid with Frequently Used
+  first, search by name or plain word, Return pastes and ⌘↩ copies, and the
+  skin tone setting in Settings › Clipboard & Capture. Saved skin tone, pins,
+  aliases, and hotkeys for emoji load again. New: ⌘⇧C copies the code points
+  (`U+1F525`), as in Raycast's Copy Unicode.
+
+- **Three features are removed.** The color picker (Pick Color from Screen,
+  the Colors catalog and its settings), the clarifying-questions card (the
+  `ask_user_question` tool and its setting) and the Welcome overlay are gone.
+  Old settings keys for them are ignored on load, and saved Color item
+  records are dropped. Saved chats that carry a question card load without
+  it. Files the features left on disk, such as `color-history.json`, are not
+  deleted.
 
 - **The Chief of Staff face is retired.** House captures, makes recallable
   and assists in the moment; synthesis and judging happen downstream. AI Chat

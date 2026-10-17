@@ -80,6 +80,7 @@ struct ItemsSettingsView: View {
             case .quickLink: "Quicklink"
             case .command: (value?.hasPrefix("window.") ?? false) ? "Window" : "Command"
             case .clipboard: "Clipboard"
+            case .emoji: "Emoji"
             case .screenshot: "Screenshot"
             case .conversation: "Chat"
             case .askAI: "AI"

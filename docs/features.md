@@ -277,6 +277,13 @@ hotkeys, and pin to top (`Command+Shift+P`).
   offers Paste, Copy, or Copy & Paste. Paste targets the topmost external window
   directly behind Quick Launch.
 
+## Emoji and symbols
+
+The Emoji & Symbols catalog is a grid: Frequently Used first, emoji, flags,
+arrows, math, currency, punctuation, and key symbols, searched by name or plain
+words (`fire`, `thumbs up`, `command`). `Return` pastes, `Command+Return`
+copies. One skin tone setting applies to every emoji that takes one.
+
 ## Window management
 
 The full set: Maximize, Almost Maximize, Maximize Height/Width, Reasonable Size,
@@ -366,6 +373,7 @@ failures or cancellations, successful command actions, and hotkey runs.
 | Chats | Continue the chat in Quick AI; `Command+J` opens it in AI Chat | Enter the catalog, or `Command+P` inside Quick AI |
 | AI Chat | Open the chat window | The AI Chat command, `Command+J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
+| Emoji | Paste the symbol | Open the catalog and type a name |
 | Vault Search | Show a cited result | Enter the catalog, choose a mode, type the project and question |
 | Screenshots | Attach or act on a capture | Open the catalog and type a name |
 

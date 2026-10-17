@@ -88,6 +88,69 @@ private struct ScreenshotGridCell: View {
     }
 }
 
+/// Emoji & Symbols as a grid: Frequently Used first, then everything that
+/// matches. Arrow keys move the highlight; Return pastes, ⌘↩ copies.
+struct EmojiGridView: View {
+    @Bindable var viewModel: QuickViewModel
+    static let columns = 9
+    /// One cell is a composer-height tile. `PanelSizing` measures the grid
+    /// with the same token, so the window and the view cannot drift.
+    static let cellHeight = House.Control.composer
+    /// A section header takes one spacing step of its own.
+    static let headerHeight = House.Spacing.xl
+
+    var body: some View {
+        let items = viewModel.launcherMatches
+        let sections = viewModel.gridSections
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                HStack(spacing: AQDesign.Space.standard) {
+                    SectionLabel(text: section.title)
+                    Text("\(section.range.count)")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                }
+                .frame(height: Self.headerHeight)
+                .padding(.horizontal, House.Spacing.sm)
+                LazyVGrid(
+                    columns: Array(
+                        repeating: GridItem(.flexible(), spacing: AQDesign.Space.compact),
+                        count: Self.columns
+                    ),
+                    spacing: AQDesign.Space.compact
+                ) {
+                    ForEach(section.range, id: \.self) { index in
+                        if case .item(let item) = items[index] {
+                            Button {
+                                viewModel.applicationSelectionIndex = index
+                                Task { await viewModel.performLauncherResult(items[index]) }
+                            } label: {
+                                Text(item.value)
+                                    .font(.system(size: House.TypeToken.Size.display))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: Self.cellHeight - AQDesign.Space.compact)
+                                    // One selection language across the app:
+                                    // fill, inset ring, and a 1 pt drop.
+                                    .background(
+                                        RowHighlight(
+                                            isSelected: index == viewModel.applicationSelectionIndex
+                                        )
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(item.title)
+                            .accessibilityLabel(item.title)
+                        }
+                    }
+                }
+                .padding(.horizontal, AQDesign.Space.standard)
+            }
+        }
+        .padding(.vertical, AQDesign.Space.compact)
+    }
+}
+
 /// The compact type/pinned filter over the clipboard catalog.
 private enum ClipboardFilterSegment: String, CaseIterable, Identifiable {
     case all, text, images, files, pinned

@@ -156,6 +156,8 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     case setHotkey
     case delete
     case copyPath
+    /// An emoji or symbol as code points (`U+1F525`).
+    case copyUnicode
     case pin
     case saveAsSnippet
     case saveAsQuickLink
@@ -330,6 +332,12 @@ enum ItemActionCatalog {
                 ItemAction(kind: .revealInFinder, title: "Reveal in Finder", systemImage: "folder", shortcut: .commandShift("r")),
                 ItemAction(kind: .copyPath, title: "Copy File Path", systemImage: "doc.on.clipboard", shortcut: .commandShift("c")),
                 ItemAction(kind: .delete, title: "Move to Trash", systemImage: "trash", shortcut: .control("x"), isDestructive: true),
+            ]
+        case .emoji:
+            return [
+                ItemAction(kind: .primary, title: pasteTitle, systemImage: "arrow.turn.down.right", shortcut: .returnKey),
+                ItemAction(kind: .secondary, title: "Copy to Clipboard", systemImage: "doc.on.doc", shortcut: .commandReturn),
+                ItemAction(kind: .copyUnicode, title: "Copy Unicode", systemImage: "number", shortcut: .commandShift("c")),
             ]
         case .quickLink:
             var actions = [

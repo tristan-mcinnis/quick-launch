@@ -170,9 +170,13 @@ struct OverlayRenderProofTests {
         try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-readaloud-stop-dark.png")
     }
 
-    @Test func rendersScreenshotDetailPane() throws {
+    @Test func rendersEmojiGridAndScreenshotDetailPane() throws {
         let vm = Self.makeViewModel(appearance: .dark)
         vm.settings.screenshotTextSearch = false
+        vm.enterCatalog(.emoji)
+        vm.input = ""
+        try Self.save(try Self.render(viewModel: vm, appearance: .darkAqua), name: "overlay-emoji-dark.png")
+
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-proof-shots-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -219,7 +223,7 @@ struct OverlayRenderProofTests {
         vm.input = ""
         try Self.saveSettings(vm, tab: .general, name: "settings-dark.png")
         try Self.saveSettings(vm, tab: .items, name: "settings-items-dark.png")
-        // Clipboard, Screenshots, and Text from Screen live on this tab.
+        // Emoji & Symbols, Screenshots, and Text from Screen live on this tab.
         try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-dark.png")
         try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-light.png", appearance: .aqua)
     }

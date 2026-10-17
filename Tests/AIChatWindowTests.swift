@@ -795,7 +795,7 @@ struct AIChatWindowTests {
     /// and the default global hotkeys.
     @Test func theNewKeysAreFreeEverywhere() {
         let kinds: [LauncherItemKind] = [
-            .snippet, .quickLink, .clipboard, .command, .screenshot,
+            .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
             .conversation, .askAI, .folder, .answer,
         ]
         var results: [LauncherSearchResult] = kinds.map { kind in

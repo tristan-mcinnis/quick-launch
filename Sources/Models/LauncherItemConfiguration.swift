@@ -6,6 +6,7 @@ enum LauncherItemKind: String, Codable, Sendable {
     case quickLink
     case clipboard
     case command
+    case emoji
     case screenshot
     case conversation
     /// The one row that sends the typed text to the AI.

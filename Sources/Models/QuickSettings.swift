@@ -207,6 +207,9 @@ struct QuickSettings: Codable, Sendable {
     /// Show the screenshots browser as a grid instead of a list.
     var screenshotUseGrid: Bool = false
 
+    /// 0 is the default yellow; 1...5 are the Fitzpatrick skin tone modifiers.
+    var emojiSkinTone: Int = 0
+
     /// Keep the line breaks Vision found when copying text from the screen.
     var ocrKeepLineBreaks: Bool = true
 
@@ -449,6 +452,7 @@ struct QuickSettings: Codable, Sendable {
             guard hotkey.isValidShortcut, hotkey != action.defaultHotkey else { return }
             result[entry.key] = hotkey
         }
+        emojiSkinTone = try c.decodeIfPresent(Int.self, forKey: .emojiSkinTone) ?? 0
         ocrKeepLineBreaks = try c.decodeIfPresent(Bool.self, forKey: .ocrKeepLineBreaks) ?? true
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         visionProviderID = try c.decodeIfPresent(UUID.self, forKey: .visionProviderID)

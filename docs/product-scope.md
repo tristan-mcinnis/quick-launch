@@ -12,12 +12,13 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 8. Search and paste a bounded local clipboard history (text, images, rich text, and files).
 9. Resize the previous window into deterministic whole-screen, halves, thirds, two-thirds, and fourths layouts, or move it to another display.
 10. Keep the Mac awake with a native Caffeinate toggle or a timed session.
-11. Translate typed or selected text between Chinese and English with one key.
-12. Attach a fresh or saved screenshot to a question and follow up on it.
-13. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
-14. Read the text inside a dragged screen area on this Mac and copy or paste it.
-17. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
-18. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
+11. Paste emoji and symbols by name.
+12. Translate typed or selected text between Chinese and English with one key.
+13. Attach a fresh or saved screenshot to a question and follow up on it.
+14. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
+15. Read the text inside a dragged screen area on this Mac and copy or paste it.
+18. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
+19. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
 
 Screenshot capture to the chat context is in the core: a window or display
 capture attaches to one question and follow-ups in that thread, never to
@@ -83,6 +84,7 @@ The app stays running as a small menu-bar process.
 | Chats | Continue the chat in Quick AI; `⌘J` opens it in AI Chat | Enter the catalog, or `⌘P` for Recent Chats inside Quick AI |
 | AI Chat | Open the chat window on the last chat, or a new one | The "AI Chat" command, `⌘J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
+| Emoji | Paste the symbol | Open the catalog and type a name |
 | Vault Search | Show a cited current, reconciliation, history, or portfolio result | Enter the catalog, choose a mode, type the project and question |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
