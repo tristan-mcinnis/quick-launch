@@ -87,7 +87,7 @@ struct QuickAIThread: View {
         return nil
     }
 
-    /// The empty surface: three quiet lines naming the ways in, centred in
+    /// The empty surface: one faint line naming the ways in, centred in
     /// the space the thread will take.
     private func emptyStateHints(_ hints: [String]) -> some View {
         VStack(spacing: House.Spacing.xs) {

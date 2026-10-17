@@ -636,15 +636,12 @@ struct QuickAIPolishTests {
         let vm = make(service: mock)
         vm.input = ""
         #expect(vm.handleTab())
-        #expect(vm.quickAIEmptyStateHints == [
-            "@ attaches files, links, or selected text",
-            "⌘P opens recent chats",
-            "⇧⌘O changes the model",
-        ])
+        #expect(vm.quickAIEmptyStateHints == ["⌘P recent chats  ·  ⇧⌘O change model"])
         // The keys come from the tables, so a rebind renames the hint.
-        #expect(vm.quickAIEmptyStateHints[1].hasPrefix(QuickViewModel.recentChatsShortcut.keyCaps.joined()))
-        #expect(vm.quickAIEmptyStateHints[2].hasPrefix(ResultAction.changeModel.defaultShortcut.keyCaps.joined()))
-        #expect(vm.quickAIEmptyStateHints[0].first == QuickViewModel.addContextTrigger)
+        #expect(vm.quickAIEmptyStateHints[0].hasPrefix(QuickViewModel.recentChatsShortcut.keyCaps.joined()))
+        #expect(vm.quickAIEmptyStateHints[0].hasSuffix(ResultAction.changeModel.defaultShortcut.keyCaps.joined() + " change model"))
+        // Attaching and commands live in the placeholder, which names the @.
+        #expect(QuickViewModel.quickAIPlaceholder.contains(QuickViewModel.addContextTrigger))
 
         vm.input = "@"
         #expect(vm.addContextTriggerDidChange(vm.input), "the @ it names opens Add Context")
@@ -653,7 +650,7 @@ struct QuickAIPolishTests {
         await ask(vm, mock, "hello", reply: "Hi.")
         #expect(vm.quickAIEmptyStateHints.isEmpty, "gone after the first turn")
         vm.startNewConversation()
-        #expect(vm.quickAIEmptyStateHints.count == 3, "back on a new chat")
+        #expect(vm.quickAIEmptyStateHints.count == 1, "back on a new chat")
     }
 
     @Test func theHintsWaitWhileAQuestionIsInFlight() {

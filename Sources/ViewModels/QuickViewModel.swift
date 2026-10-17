@@ -2921,9 +2921,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return Self.quickAIPlaceholder
     }
 
-    /// The three quiet lines an empty Quick AI surface shows, each naming a
-    /// way in with its real key: Add Context, Recent Chats, Change Model.
-    /// Empty once the surface has anything to draw.
+    /// The one faint line an empty Quick AI surface shows, naming the two
+    /// ways in the composer placeholder does not (Recent Chats, Change
+    /// Model) with their real keys; attaching and commands are the
+    /// placeholder's. Empty once the surface has anything to draw.
     var quickAIEmptyStateHints: [String] {
         guard conversationMessages.isEmpty,
               !isStreaming,
@@ -2932,11 +2933,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
               pendingQuestion == nil,
               lastQuestion == nil
         else { return [] }
-        return [
-            "\(Self.addContextTrigger) attaches files, links, or selected text",
-            "\(shortcutLabel(for: .recentChats)) opens recent chats",
-            "\(shortcutLabel(for: .changeModel)) changes the model",
-        ]
+        return ["\(shortcutLabel(for: .recentChats)) recent chats  ·  \(shortcutLabel(for: .changeModel)) change model"]
     }
 
     /// What Return does from the Quick AI composer right now, drawn inside
