@@ -38,6 +38,8 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selection
     @State private var hoveredID: Item.ID?
+    @State private var pacer = SelectionPacer()
+    @State private var keyboardDriven = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -63,6 +65,7 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
                         .buttonStyle(.plain)
                         .onHover { hovering in
                             if hovering {
+                                guard !keyboardDriven else { return }
                                 hoveredID = item.id
                             } else if hoveredID == item.id {
                                 hoveredID = nil
@@ -76,13 +79,18 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
                     }
                 }
                 .padding(listInsets)
-                .animation(selectionAnimation, value: selectedIndex)
+                .animation(selectionAnimation(for: selectedIndex), value: selectedIndex)
                 .animation(hoverAnimation, value: hoveredID)
             }
             .scrollIndicators(.never)
+            .onContinuousHover { phase in
+                if case .active = phase, keyboardDriven { keyboardDriven = false }
+            }
             .onChange(of: selectedIndex) { _, index in
+                keyboardDriven = true
+                hoveredID = nil
                 guard scrollsToSelection, items.indices.contains(index) else { return }
-                proxy.scrollTo(items[index].id, anchor: .center)
+                proxy.scrollTo(items[index].id)
             }
         }
     }
@@ -101,8 +109,9 @@ struct SelectableListPane<Item: Identifiable, Row: View>: View {
         }
     }
 
-    private var selectionAnimation: Animation? {
-        reduceMotion ? nil : .easeOut(duration: AQDesign.Motion.select)
+    private func selectionAnimation(for index: Int) -> Animation? {
+        let animate = pacer.animates(for: index, now: Date())
+        return reduceMotion || !animate ? nil : .easeOut(duration: AQDesign.Motion.select)
     }
 
     private var hoverAnimation: Animation? {
@@ -117,6 +126,36 @@ enum ListSelection {
     static func wrappedIndex(_ index: Int, by delta: Int, count: Int) -> Int {
         guard count > 0 else { return index }
         return (index + delta + count) % count
+    }
+
+    /// Key repeat arrives faster than this; a deliberate press does not.
+    static let repeatThreshold: TimeInterval = 0.08
+
+    /// Whether a selection change slides (`true`) or cuts. A change that
+    /// follows the previous one within `repeatThreshold` is a held key.
+    static func shouldAnimateSelection(
+        previous: Date?, now: Date, threshold: TimeInterval = repeatThreshold
+    ) -> Bool {
+        guard let previous else { return true }
+        return now.timeIntervalSince(previous) >= threshold
+    }
+}
+
+/// Remembers when the selection last moved so the slide can be judged at
+/// render time, before the animation for that change is chosen. Not observed:
+/// it only feeds `ListSelection.shouldAnimateSelection`.
+@MainActor
+final class SelectionPacer {
+    private var index: Int?
+    private var changedAt: Date?
+    private var animate = true
+
+    func animates(for newIndex: Int, now: Date) -> Bool {
+        guard newIndex != index else { return animate }
+        animate = ListSelection.shouldAnimateSelection(previous: changedAt, now: now)
+        if index != nil { changedAt = now }
+        index = newIndex
+        return animate
     }
 }
 
