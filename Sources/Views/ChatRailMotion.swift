@@ -8,20 +8,17 @@ import HouseDesign
 /// (DESIGN.md). A window narrower than the layout minimum lays the rail
 /// over the conversation instead of squeezing it.
 enum ChatRailMotion {
-    static let duration: Double = 0.2
+    static let duration: Double = ChatMotion.slide
 
     /// Cubic Bézier control points (x1, y1, x2, y2), or nil when Reduce
     /// Motion swaps the slide for a plain fade.
     static func curve(opening: Bool, reduceMotion: Bool) -> (Double, Double, Double, Double)? {
         if reduceMotion { return nil }
-        return opening ? (0.165, 0.84, 0.44, 1) : (0.77, 0, 0.175, 1)
+        return ChatMotion.slideCurve(opening: opening)
     }
 
     static func animation(opening: Bool, reduceMotion: Bool) -> Animation {
-        guard let c = curve(opening: opening, reduceMotion: reduceMotion) else {
-            return .easeOut(duration: AQDesign.Motion.select)
-        }
-        return .timingCurve(c.0, c.1, c.2, c.3, duration: duration)
+        ChatMotion.slideAnimation(opening: opening, reduceMotion: reduceMotion)
     }
 
     /// The rail takes its own column only while the window is as wide as

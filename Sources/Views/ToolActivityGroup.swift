@@ -5,17 +5,17 @@ import HouseDesign
 /// 50 ms apart. Reduce Motion: no animation at all (DESIGN.md).
 enum ToolActivityMotion {
     /// The open and close curve, and each row's fade.
-    static let expandDuration: Double = 0.175
-    static let rowFadeDuration: Double = 0.3
-    static let rowStagger: Double = 0.05
+    static let expandDuration: Double = ChatMotion.disclosure
+    static let rowFadeDuration: Double = ChatMotion.appear
+    static let rowStagger: Double = ChatMotion.appearStagger
 
     /// Reduce Motion: no movement and no stagger, rows just appear.
     static func expandAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeOut(duration: expandDuration)
+        ChatMotion.disclosureAnimation(reduceMotion: reduceMotion)
     }
 
     static func rowAnimation(index: Int, reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeOut(duration: rowFadeDuration).delay(Double(index) * rowStagger)
+        ChatMotion.appearAnimation(index: index, reduceMotion: reduceMotion)
     }
 }
 

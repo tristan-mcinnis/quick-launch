@@ -397,7 +397,7 @@ struct AttachmentChip: View {
             .contentShape(RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous))
             .onTapGesture { if let onOpen { onOpen() } }
             .onHover { hovering in isHovering = hovering }
-            .animation(reduceMotion ? nil : .easeOut(duration: House.Motion.hover), value: isHovering)
+            .animation(ChatMotion.hoverAnimation(reduceMotion: reduceMotion), value: isHovering)
             .help(model.help)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.accessibilityLabel)

@@ -288,7 +288,7 @@ struct QuickAIThread: View {
             scroll(to: request.target)
         }
         .opacity(isHoldingChat ? 0 : 1)
-        .animation(isHoldingChat ? nil : .easeOut(duration: House.Motion.fast), value: isHoldingChat)
+        .animation(isHoldingChat ? nil : ChatMotion.fastAnimation(reduceMotion: reduceMotion), value: isHoldingChat)
         .accessibilityLabel("Conversation with \(viewModel.activeModelDisplay)")
         .task(id: archiveLoadKey) { await reloadArchiveProjection() }
     }
@@ -845,7 +845,7 @@ struct QuickAIThread: View {
     }
 
     private func scrollToQuestion(_ id: UUID) {
-        var transaction = Transaction(animation: reduceMotion ? nil : .easeOut(duration: House.Motion.normal))
+        var transaction = Transaction(animation: ChatMotion.scrollAnimation(reduceMotion: reduceMotion))
         transaction.disablesAnimations = reduceMotion
         // A message not laid out yet is only estimated, and a second id
         // scroll to the same place is ignored; once it has a top, scroll to it.

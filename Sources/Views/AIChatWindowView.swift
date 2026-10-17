@@ -57,7 +57,7 @@ struct AIChatWindowView: View {
         .background(AQDesign.ColorToken.windowSurface)
         // The header shares the title-bar row with the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
-        .animation(ChatRailMotion.animation(opening: model.isRailVisible, reduceMotion: reduceMotion), value: model.isRailVisible)
+        .animation(ChatMotion.slideAnimation(opening: model.isRailVisible, reduceMotion: reduceMotion), value: model.isRailVisible)
         .preferredColorScheme(chat.settings.appearance.swiftUIColorScheme)
         .onChange(of: chat.threadError) { _, error in
             guard let error else { return }
