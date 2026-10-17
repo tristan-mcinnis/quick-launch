@@ -1881,7 +1881,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Maximum rows the launcher list shows at once. The empty-query root
     /// must fit two learned favourites, Ask AI, and every catalog root, so
-    /// this tracks the number of catalogs; the list scrolls past 12 rows.
+    /// this tracks the number of catalogs and the list scrolls past it.
     static let maxLauncherRows = LauncherCatalogScope.allCases.count + 3
     /// The saved-media grid's cell cap: 9 columns by 7 rows.
     static let screenshotGridCells = 63
