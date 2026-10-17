@@ -195,6 +195,18 @@ struct ChatPerformanceBaselineTests {
         }
         let measureTime = Self.milliseconds(measureStart.duration(to: clock.now))
 
+        // Back to this chat after another one filled the caches: with
+        // `cacheLimit` entries it is warm, at 64 it started cold again.
+        for index in 0..<60 {
+            _ = MarkdownRenderer.measuredHeight(markdown: "Other chat \(index).\n\n" + Self.sampleAnswer(targetLength: 1_000), width: Self.width)
+        }
+        let returnStart = clock.now
+        for answer in answers {
+            _ = MarkdownRenderer.measuredHeight(markdown: answer, width: Self.width)
+        }
+        let returnTime = Self.milliseconds(returnStart.duration(to: clock.now))
+        print(String(format: "PERF 60 answers measured again after another 60-answer chat: %.3f ms", returnTime))
+
         let stack = NSHostingView(rootView: ScrollView {
             VStack(alignment: .leading, spacing: House.Spacing.md) {
                 ForEach(Array(answers.enumerated()), id: \.offset) { _, answer in

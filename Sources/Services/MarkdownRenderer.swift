@@ -73,9 +73,16 @@ enum MarkdownRenderer {
     /// measured window cannot drift.
     static let segmentSpacing: CGFloat = House.Spacing.xs
 
+    /// Entries each cache keeps. A 60-answer chat holds several prose runs
+    /// per answer; at 64 a chat re-parsed and re-measured as it scrolled,
+    /// and switching away and back started cold. Keys are the text itself
+    /// (and the width, for heights), so an edit or a resize misses by
+    /// construction and no id-based invalidation is needed.
+    nonisolated static let cacheLimit = 512
+
     // MARK: - Segments
 
-    @MainActor private static var segmentsCache = MarkdownCache<String, [AnswerSegment]>(limit: 64)
+    @MainActor private static var segmentsCache = MarkdownCache<String, [AnswerSegment]>(limit: cacheLimit)
 
     /// The answer split at its fenced code blocks, cached for the view and
     /// for `measuredHeight`.
@@ -205,7 +212,7 @@ enum MarkdownRenderer {
     /// when the answer text changes; a small cache makes a repeat render
     /// free. Keyed by source: an answer is several prose runs around its code
     /// blocks, and while streaming only the last one changes.
-    @MainActor private static var renderCache = MarkdownCache<String, NSAttributedString>(limit: 64)
+    @MainActor private static var renderCache = MarkdownCache<String, NSAttributedString>(limit: cacheLimit)
 
     /// Pass `transient: true` for the run still streaming, so its per-flush
     /// strings never evict the finished answers above it.
@@ -256,7 +263,7 @@ enum MarkdownRenderer {
         let width: CGFloat
     }
 
-    @MainActor private static var heightCache = MarkdownCache<MeasuredRun, CGFloat>(limit: 64)
+    @MainActor private static var heightCache = MarkdownCache<MeasuredRun, CGFloat>(limit: cacheLimit)
 
     /// Height one prose run needs at `width`. Reads the same string the text
     /// view draws, so the measurement cannot drift from the render.

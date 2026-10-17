@@ -73,6 +73,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// every new question; false once they scroll up, which shows the
     /// "Latest" chip.
     var isThreadFollowingBottom = true
+    /// Where each chat was left when the reader had scrolled up in it. The
+    /// thread writes it as the reader scrolls and reads it when the chat opens.
+    @ObservationIgnored var threadAnchors = ThreadScrollAnchorStore()
     /// How close to the bottom counts as reading the newest text.
     static let threadFollowThreshold = House.Control.row
     /// Return while an answer streams queues the typed follow-up: it stays
@@ -11241,8 +11244,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         threadNotice = nil
         pendingQuestion = nil
         input = ""
-        // Another chat opens on its newest turn.
-        followThreadBottom()
+        // Another chat opens where it was left, or on its newest turn.
+        if let anchor = threadAnchors.anchor(for: conversation.id),
+           conversation.messages.contains(where: { $0.id == anchor.messageID }) {
+            isThreadFollowingBottom = false
+        } else {
+            threadAnchors.record(nil, for: conversation.id)
+            followThreadBottom()
+        }
         activeVaultSearchMode = nil
         vaultSearchAnchor = nil
         resumeRetainedAttachments(for: conversation)

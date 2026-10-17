@@ -53,3 +53,14 @@ Same machine, method and sample (6,000 characters, 150 flushes of 40), debug bui
 | Hosted view: rootView swap + `layoutSubtreeIfNeeded` | 2.2 to 2.6 / 2.0 to 2.1 / 14 to 18 ms | 1.4 to 1.5 / 1.0 / 14 to 15 ms |
 
 Reading: the work of a flush no longer grows with the answer (about 16 times cheaper on the render path). The hosted figure also holds SwiftUI and TextKit 2 layout of the whole text view, which this unit does not touch; its max (14 ms) is the first flush that builds the views. The 60-answer numbers are unchanged (finished answers do not stream).
+
+## After B6: switching chats
+
+Same machine and method (debug, quiet, two runs each). Cache limit 64 to 512; new line in `sixtyAnswerChatBuildAndLayout`: measure the 60 answers again after another 60-answer chat has passed through the caches (a switch away and back).
+
+| Step | Limit 64 | Limit 512 |
+|---|---|---|
+| 60 answers measured again after another chat | 58.5 and 74.5 ms (cold again) | 0.57 ms |
+| Measure all cold (unchanged) | 58 to 62 ms | 58 to 59 ms |
+
+Not measured: frame time of the switch on screen. The chat now opens where it was left (per-chat anchor) and is held at opacity 0 until it lands there, at most 400 ms.
