@@ -147,7 +147,6 @@ struct QuickSettings: Codable, Sendable {
     var checkForUpdatesOnLaunch: Bool = false
 
     // First run
-    var hasSeenWelcome: Bool = false
     var launchAtLoginPromptShown: Bool = false
 
     // Saved prompts (aliases)
@@ -207,13 +206,6 @@ struct QuickSettings: Codable, Sendable {
     var screenshotColumns: Int = 3
     /// Show the screenshots browser as a grid instead of a list.
     var screenshotUseGrid: Bool = false
-
-    // Colors picked with the screen eyedropper
-    var colorFormat: ColorFormat = .hex
-    var colorHistoryLimit: Int = 50
-
-    /// 0 is the default yellow; 1...5 are the Fitzpatrick skin tone modifiers.
-    var emojiSkinTone: Int = 0
 
     /// Keep the line breaks Vision found when copying text from the screen.
     var ocrKeepLineBreaks: Bool = true
@@ -297,10 +289,6 @@ struct QuickSettings: Codable, Sendable {
     var newChatTasksEnabled: Bool = true
     var newChatVaultEnabled: Bool = true
     var newChatSkillsEnabled: Bool = true
-    /// Whether Quick AI offers the model the `ask_user_question` tool. Off by
-    /// default: the model answers instead of asking which kind of help is
-    /// wanted. On, the inline multiple-choice card is back.
-    var quickAIClarifyingQuestionsEnabled: Bool = false
     /// The size the user dragged the Quick AI surface to. The standard
     /// 750 × 475 until the first drag; never smaller than that. Root search
     /// is not user-sized and has no stored size.
@@ -335,7 +323,6 @@ struct QuickSettings: Codable, Sendable {
         showMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showMenuBar) ?? true
         caffeinateEnabled = try c.decodeIfPresent(Bool.self, forKey: .caffeinateEnabled) ?? true
         checkForUpdatesOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdatesOnLaunch) ?? false
-        hasSeenWelcome = try c.decodeIfPresent(Bool.self, forKey: .hasSeenWelcome) ?? false
         launchAtLoginPromptShown = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginPromptShown) ?? false
         savedPromptPrefix = try c.decodeIfPresent(String.self, forKey: .savedPromptPrefix) ?? "/"
         savedPrompts = try c.decodeIfPresent([SavedPrompt].self, forKey: .savedPrompts) ?? SavedPrompt.defaults
@@ -459,9 +446,6 @@ struct QuickSettings: Codable, Sendable {
             guard hotkey.isValidShortcut, hotkey != action.defaultHotkey else { return }
             result[entry.key] = hotkey
         }
-        colorFormat = try c.decodeIfPresent(ColorFormat.self, forKey: .colorFormat) ?? .hex
-        colorHistoryLimit = try c.decodeIfPresent(Int.self, forKey: .colorHistoryLimit) ?? 50
-        emojiSkinTone = try c.decodeIfPresent(Int.self, forKey: .emojiSkinTone) ?? 0
         ocrKeepLineBreaks = try c.decodeIfPresent(Bool.self, forKey: .ocrKeepLineBreaks) ?? true
         appearance = try c.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
         visionProviderID = try c.decodeIfPresent(UUID.self, forKey: .visionProviderID)
@@ -499,10 +483,6 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .reopenRetentionSeconds
         ) ?? 10
-        quickAIClarifyingQuestionsEnabled = try c.decodeIfPresent(
-            Bool.self,
-            forKey: .quickAIClarifyingQuestionsEnabled
-        ) ?? false
         modelWebSearchEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .modelWebSearchEnabled

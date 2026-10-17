@@ -126,7 +126,7 @@ struct OverlayView: View {
                         // control left of the field does.
                         viewModel.addContextTriggerDidChange(newValue)
                     }
-                    .disabled(viewModel.isStreaming && !viewModel.isAskQuestionActive)
+                    .disabled(viewModel.isStreaming)
 
                 // Working / copied lives in the same slot; at rest the row
                 // carries one control, the menu, exactly as the design does.
@@ -216,11 +216,7 @@ struct OverlayView: View {
                         .frame(maxHeight: PanelSizing.launcherListMaximumHeight)
                         .layoutPriority(1)
                 } else if viewModel.isGridCatalog {
-                    if viewModel.catalogScope == .screenshots {
-                        ScreenshotGridView(viewModel: viewModel)
-                    } else {
-                        EmojiGridView(viewModel: viewModel)
-                    }
+                    ScreenshotGridView(viewModel: viewModel)
                 } else {
                     HStack(alignment: .top, spacing: 0) {
                         launcherList
@@ -620,11 +616,7 @@ struct LauncherResultRow: View {
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)
             }
         case .item(let item):
-            if item.kind == .emoji {
-                IconTile {
-                    Text(item.value).font(AQDesign.TypeToken.body)
-                }
-            } else if item.kind == .screenshot,
+            if item.kind == .screenshot,
                       let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
                 IconTile(fillsTile: true) {
                     Image(nsImage: thumbnail).resizable().scaledToFill()
@@ -684,13 +676,11 @@ struct LauncherResultRow: View {
             case .snippet: "Snippet"
             case .quickLink: "Quicklink"
             case .clipboard: "Clipboard"
-            case .emoji: "Emoji"
             case .screenshot: "Screenshot"
             case .conversation: "Chat"
             case .askAI: "AI Command"
             case .folder: "Folder"
             case .answer: "Answer"
-            case .color: "Color"
             case .command: "Command"
             }
         }
@@ -787,8 +777,6 @@ private struct ItemActionPane: View {
                 Image(nsImage: AppIconCache.icon(forPath: application.url.path))
                     .resizable().scaledToFit()
             }
-        } else if let item, item.kind == .emoji {
-            IconTile { Text(item.value).font(AQDesign.TypeToken.body) }
         } else if let item {
             IconTile {
                 Image(systemName: item.systemImage)
@@ -827,13 +815,11 @@ private struct ItemActionPane: View {
         case .clipboard: return item.detail
         case .quickLink: return "Quick Link"
         case .command: return item.detail
-        case .emoji: return "Emoji"
         case .screenshot: return item.detail
         case .conversation: return item.detail
         case .askAI: return item.detail
         case .folder: return item.detail
         case .answer: return item.detail
-        case .color: return item.detail
         case .application: return "Application"
         }
     }
@@ -1547,10 +1533,6 @@ struct ComposerKeyRouting: ViewModifier {
     }
 
     private func move(_ delta: Int) -> KeyPress.Result {
-        if viewModel.isAskQuestionActive {
-            viewModel.moveAskQuestionSelection(delta)
-            return .handled
-        }
         // The `/` palette has no field of its own: the draft is its search,
         // so the composer keeps the keyboard and these keys are routed here.
         if viewModel.isSlashCommandPalettePresented {

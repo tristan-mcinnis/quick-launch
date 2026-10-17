@@ -16,8 +16,6 @@ struct ClipboardLinksSettingsView: View {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
                 clipboardCard.settingsAnchor("clipboard.history")
                 screenshotsCard.settingsAnchor("clipboard.screenshots")
-                colorsCard.settingsAnchor("clipboard.colors")
-                emojiCard.settingsAnchor("clipboard.emoji")
                 screenTextCard.settingsAnchor("clipboard.screenText")
                 quicklinksCard.settingsAnchor("clipboard.quicklinks")
                 catalogCard.settingsAnchor("clipboard.catalog")
@@ -256,60 +254,6 @@ struct ClipboardLinksSettingsView: View {
         }
     }
 
-    private var colorsCard: some View {
-        SettingsCard("Colors") {
-            SettingsRow(title: "Copy picked colors as", isFirst: true) {
-                Picker("Copy picked colors as", selection: colorFormatSelection) {
-                    ForEach(ColorFormat.allCases) { format in
-                        Text("\(format.title)  \u{00B7}  \(format.sample)").tag(format)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 260)
-            }
-
-            SettingsRow(
-                title: "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)"
-            ) {
-                Stepper(
-                    "Keep \(viewModel.settings.colorHistoryLimit) picked colors (pinned colors never expire)",
-                    value: viewModel.settingsBinding(\.colorHistoryLimit),
-                    in: 10...200,
-                    step: 10
-                )
-                .labelsHidden()
-            }
-
-            SettingsRow(title: "\(viewModel.colorItems.count) saved colors") {
-                Button("Clear Colors", role: .destructive) {
-                    viewModel.clearColorHistory()
-                }
-            }
-
-            CardNote {
-                CardText("Run \u{201C}Pick Color from Screen\u{201D} to magnify any pixel on any display. In the Colors list: \u{2318}1…\u{2318}4 copy the other notations, \u{2318}\u{21E7}P pins, and \u{2303}X deletes.")
-            }
-        }
-    }
-
-    private var emojiCard: some View {
-        SettingsCard("Emoji & Symbols") {
-            SettingsRow(title: "Skin tone", isFirst: true) {
-                Picker("Skin tone", selection: skinToneSelection) {
-                    ForEach(Array(EmojiCatalog.skinToneTitles.enumerated()), id: \.offset) { index, title in
-                        Text("\(EmojiCatalog.applyingSkinTone(index, to: "\u{1F44D}"))  \(title)").tag(index)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 200)
-            }
-
-            CardNote {
-                CardText("Applies to the emoji that accept a tone. Symbols, flags, and objects are unchanged.")
-            }
-        }
-    }
-
     private var screenTextCard: some View {
         SettingsCard("Text from Screen") {
             SettingsRow(title: "Keep line breaks in text read from the screen", isFirst: true) {
@@ -369,17 +313,6 @@ struct ClipboardLinksSettingsView: View {
                 }
             }
         }
-    }
-
-    private var colorFormatSelection: Binding<ColorFormat> {
-        Binding(
-            get: { viewModel.settings.colorFormat },
-            set: { viewModel.applyColorFormat($0) }
-        )
-    }
-
-    private var skinToneSelection: Binding<Int> {
-        viewModel.settingsBinding(\.emojiSkinTone) { _ in viewModel.invalidateLauncherRanking() }
     }
 
     private var browserSelection: Binding<String> {

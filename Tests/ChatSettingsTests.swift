@@ -1,14 +1,14 @@
 // ChatSettingsTests — Settings for chats (v1.5.0 group G3): the Chat card's
 // chat defaults, Keep AI Chat on top on the window's own key, the status
 // lines for Continue in pi and the tool backends, the history limit, and the
-// copy of the "Quick AI and AI Chat" card and the Welcome card.
+// copy of the "Quick AI and AI Chat" card.
 
 import AppKit
 import Foundation
 import Testing
 @testable import QuickLaunch
 
-@Suite("Settings: Chat card, history limit, Welcome", .serialized)
+@Suite("Settings: Chat card, history limit", .serialized)
 @MainActor
 struct ChatSettingsTests {
 
@@ -348,21 +348,5 @@ struct ChatSettingsTests {
             SavedPromptsEditor.toolsDetail,
         ]
         for line in copy { #expect(!line.contains("\u{2014}"), "no em dash: \(line)") }
-    }
-
-    @Test func theWelcomeCardDescribesTodaysApp() {
-        let lines = WelcomeOverlayView.lines(hotkey: QuickSettings().hotkeyDisplayName).map(\.text)
-        #expect(lines == [
-            "\u{2325}Space opens search",
-            "Tab asks Quick AI",
-            "\u{2318}J opens AI Chat",
-            "@ adds context",
-            "Tools can read your memory and the vault",
-        ])
-        #expect(WelcomeOverlayView.lines(hotkey: "\u{2303}Space").first?.text == "\u{2303}Space opens search")
-        for line in lines + [WelcomeOverlayView.summary] {
-            #expect(!line.contains("\u{2014}"))
-            #expect(!line.localizedCaseInsensitiveContains("clipboard"), "auto-copy is not the product any more")
-        }
     }
 }

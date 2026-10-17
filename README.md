@@ -55,7 +55,7 @@ whose inner workings they can read and change.
 
 - Screenshot attachments, a Screenshots catalog with on-device OCR, and
   commands for the focused window, a screen area, or selected text.
-- Text from screen, a colour picker, and a bounded local Clipboard History.
+- Text from screen and a bounded local Clipboard History.
 - Type to Click labels every clickable control in the frontmost app, so you can
   click one by typing its name.
 
@@ -65,7 +65,7 @@ whose inner workings they can read and change.
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions, and Agent Watch to keep the Mac awake while
   a coding agent works.
-- Emoji and symbols, and system toggles such as Dark Mode and Empty Trash.
+- System toggles such as Dark Mode and Empty Trash.
 
 **Models and providers**
 
@@ -250,8 +250,7 @@ tooling and landing page. His copyright stays in
 It is built on Apple's
 [swift-markdown](https://github.com/apple/swift-markdown) (Apache-2.0) and
 [swift-cmark](https://github.com/swiftlang/swift-cmark), the cmark-gfm parser
-by John MacFarlane, GitHub and others (BSD-2-Clause). Emoji names come from
-the Unicode Character Database.
+by John MacFarlane, GitHub and others (BSD-2-Clause).
 
 The interface draws on earlier tools. No code from them is included.
 

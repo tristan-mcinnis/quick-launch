@@ -238,8 +238,8 @@ final class InteractionJournalStore {
     /// by a keyed digest.
     nonisolated static let safeItemIDPrefixes = [
         "application:", "catalog:", "command:", "folder:", "snippet:",
-        "quickLink:", "clipboard:", "emoji:", "screenshot:", "conversation:",
-        "answer:", "askAI:", "color:", "action:",
+        "quickLink:", "clipboard:", "screenshot:", "conversation:",
+        "answer:", "askAI:", "action:",
     ]
 
     /// Identifier shapes the journal always re-keys, whatever their kind

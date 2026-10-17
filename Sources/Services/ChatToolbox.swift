@@ -13,8 +13,8 @@ struct ChatToolOutcome: Sendable, Equatable {
     var status: ToolRoundStatus = .succeeded
 }
 
-/// The read-only tools a chat can let the model call beside `search_web`
-/// and `ask_user_question`: memory search and today's captures over
+/// The read-only tools a chat can let the model call beside `search_web`:
+/// memory search and today's captures over
 /// the `recall` memory notes, task reads over both canonical task backends, `search_vault`
 /// over the SSH vault lane, and `read_skill` over
 /// `~/.claude/skills`. Each backend is a protocol seam (or, for skills, the

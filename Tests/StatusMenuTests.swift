@@ -105,7 +105,7 @@ struct StatusMenuTests {
         let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
         #expect(titles == [
             "Open Quick Launch", "AI Chat", "Settings…", "Caffeinate",
-            "Show Welcome Again", "Quick Launch v1.5.0", "View Quick Launch on GitHub",
+            "Quick Launch v1.5.0", "View Quick Launch on GitHub",
             "Quit Quick Launch",
         ])
     }

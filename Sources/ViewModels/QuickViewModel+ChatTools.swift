@@ -183,10 +183,10 @@ extension QuickViewModel {
     // MARK: - Any message (⌘K › Copy Message, Capture Message to Memory)
 
     /// The messages those two lists offer: every question and answer of the
-    /// open chat, newest first. A model's question card is not text to copy.
+    /// open chat, newest first.
     var paletteMessages: [QuickMessage] {
         conversationMessages
-            .filter { $0.role != .system && $0.askUserQuestion == nil }
+            .filter { $0.role != .system }
             .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .reversed()
     }

@@ -3,57 +3,9 @@ import Foundation
 import Testing
 @testable import QuickLaunch
 
-@Suite("Core features: emoji, translate, caffeinate, latest screenshot", .serialized)
+@Suite("Core features: translate, caffeinate, latest screenshot", .serialized)
 @MainActor
 struct CoreFeatureTests {
-    // MARK: Emoji & Symbols
-
-    @Test func emojiCatalogIsLargeNamedAndSearchable() {
-        let items = EmojiCatalog.items
-        #expect(items.count > 1_200)
-        #expect(items.allSatisfy { $0.kind == .emoji && !$0.title.isEmpty && !$0.value.isEmpty })
-        #expect(Set(items.map(\.id)).count == items.count)
-
-        let vm = QuickViewModel()
-        vm.enterCatalog(.emoji)
-        vm.input = "fire"
-        #expect(vm.catalogMatches.first?.value == "🔥")
-        vm.input = "thumbs up"
-        #expect(vm.catalogMatches.first?.value == "👍")
-        vm.input = "command"
-        #expect(vm.catalogMatches.contains { $0.value == "⌘" })
-        vm.input = "check"
-        #expect(vm.catalogMatches.prefix(2).contains { $0.value.unicodeScalars.first == "✅" })
-        vm.input = "warning"
-        #expect(vm.catalogMatches.first?.value.unicodeScalars.first == "⚠")
-        vm.input = "rocket"
-        #expect(vm.catalogMatches.first?.value == "🚀")
-        vm.input = "china"
-        #expect(vm.catalogMatches.first?.value == "🇨🇳")
-    }
-
-    @Test func emojiRootAndActions() {
-        let vm = QuickViewModel()
-        vm.input = "emoji"
-        #expect(vm.launcherMatches.contains(.catalog(.emoji, count: EmojiCatalog.items.count)))
-        vm.enterCatalog(.emoji)
-        vm.input = "sparkles"
-        let first = vm.launcherMatches.first!
-        #expect(vm.focusedItemActions.map(\.title) == ["Paste to Active App", "Copy to Clipboard"])
-        vm.handleCommandK()
-        #expect(vm.contextualCatalogItem?.value.unicodeScalars.first == "✨")
-        #expect(first == .item(vm.contextualCatalogItem!))
-    }
-
-    @Test func emojiPasteCopiesWhenNoTargetExists() async {
-        let pasteboard = FakePasteboard()
-        let vm = QuickViewModel(pasteboard: pasteboard)
-        vm.enterCatalog(.emoji)
-        vm.input = "rocket"
-        await vm.submitResolvingFuzzyAlias()
-        #expect(pasteboard.string == "🚀")
-    }
-
     // MARK: Translate
 
     @Test func translationDirectionFollowsTheScript() {

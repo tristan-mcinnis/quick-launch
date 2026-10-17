@@ -23,8 +23,6 @@ struct PinnedItemTests {
         #expect(ItemActionCatalog.actions(for: .item(shot), pasteTarget: nil).map(\.title).contains("Pin to Top"))
         let command = LauncherCatalogItem(kind: .command, itemID: "w", title: "Left Half", detail: "", value: "window.leftHalf")
         #expect(!ItemActionCatalog.actions(for: .item(command), pasteTarget: nil).map(\.title).contains("Pin to Top"))
-        let emoji = LauncherCatalogItem(kind: .emoji, itemID: "e", title: "Fire", detail: "", value: "🔥")
-        #expect(!ItemActionCatalog.actions(for: .item(emoji), pasteTarget: nil).map(\.title).contains("Pin to Top"))
     }
 
     @Test func configurationKeepsThePinAndReadsOldRecords() throws {

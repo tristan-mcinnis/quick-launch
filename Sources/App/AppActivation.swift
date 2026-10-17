@@ -85,7 +85,7 @@ enum AppActivation {
 
 /// One of the app's windows, as the menu-bar decision sees it.
 struct WindowPresence: Equatable, Sendable {
-    /// A titled window: AI Chat, Settings, Welcome, or a system panel such
+    /// A titled window: AI Chat, Settings, or a system panel such
     /// as About. The launcher, the Translator, and Type to Click are
     /// borderless panels and never hold the menu bar.
     var isNormal: Bool

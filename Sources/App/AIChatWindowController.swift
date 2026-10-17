@@ -135,7 +135,6 @@ enum ComposerCaretMove: Equatable, Sendable {
             && !chat.input.isEmpty
             && !chat.isSlashCommandPalettePresented
             && !chat.isRecentChatsPresented
-            && !chat.isAskQuestionActive
             && !chat.isTransformChooserPresented
             && !chat.isTransformArgumentFieldPresented
             && !chat.isModelChooserPresented

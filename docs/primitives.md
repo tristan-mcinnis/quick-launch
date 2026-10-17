@@ -23,8 +23,8 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   prefix, so it beats every weak match. Local answers (math, conversions,
   dates, a typed address) sit above everything.
 - **Catalog.** A named list of items of one kind: Snippets, Quick Links,
-  Clipboard History, Emoji & Symbols, Screenshots, Folders, Caffeinate,
-  Chats, Vault Search, Colors, Commands (windows, screenshots, toggles, System Settings
+  Clipboard History, Screenshots, Folders, Caffeinate,
+  Chats, Vault Search, Commands (windows, screenshots, toggles, System Settings
   panes, clipboard and screen helpers). Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
@@ -163,11 +163,10 @@ return.
   header line. AI Chat's find bar names its own keys too.
 - **⌘K pane.** Header (item), action rows with key caps, search field at the
   bottom. Edit, alias, and hotkey are small forms inside the pane.
-- **Grid.** Catalogs of glyphs (Emoji & Symbols) render as a 9-column grid
-  with section headers (Frequently Used, All). Arrows move the highlight;
-  the same actions apply.
+- **Grid.** The Screenshots catalog can render as a grid, with the column
+  count set in Settings. Arrows move the highlight; the same actions apply.
 - **Detail pane.** Catalogs of things worth previewing (Screenshots,
-  Clipboard History, Snippets, Quick Links, Colors) show the list on the left and a preview plus an
+  Clipboard History, Snippets, Quick Links) show the list on the left and a preview plus an
   Information block on the right; the panel widens to fit.
 - **Answer.** Model answers live on the Quick AI surface: the thread
   scrolls, follows the newest text only while you are at the bottom, and
@@ -202,8 +201,7 @@ return.
   and laid out only when its text changed.
 - The clipboard image is decoded once per pasteboard change. App icons are
   cached and warmed after launch. Clipboard History writes off the main thread.
-- Catalog data is read once at launch (apps) or lazily on first open
-  (emoji). Nothing polls except the 1-second clipboard change-count check.
+- Catalog data is read once at launch (apps). Nothing polls except the 1-second clipboard change-count check.
 - No helper processes, no HTTP server, one package dependency.
 
 ## 5. Learning

@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// The "Quick AI and AI Chat" card in the General pane: what Return does on
-/// a finished answer, the Tab hint, when a new chat starts, whether the
-/// model may ask clarifying questions, and the model both answer with. The
-/// AI Chat window shares these settings with Quick AI (one store), so the
-/// card names both; only Primary Action differs, and its detail says how.
+/// a finished answer, the Tab hint, when a new chat starts, and the model
+/// both answer with. The AI Chat window shares these settings with Quick AI
+/// (one store), so the card names both; only Primary Action differs, and its
+/// detail says how.
 ///
 /// Every row is a binding straight into `QuickSettings`, so a change applies
 /// immediately and survives a relaunch, the same as every other General row.
@@ -47,17 +47,6 @@ struct QuickAISettingsView: View {
                 .labelsHidden()
                 .frame(width: 160)
                 .accessibilityLabel("Start New Chat")
-            }
-
-            SettingsRow(
-                title: "Clarifying questions",
-                detail: "Let the model pause and ask a short multiple-choice question when a request cannot be answered without your decision. Off, it answers the most reasonable reading."
-            ) {
-                Toggle(
-                    "Let the model ask clarifying questions",
-                    isOn: viewModel.settingsBinding(\.quickAIClarifyingQuestionsEnabled)
-                )
-                .toggleStyle(InkToggleStyle())
             }
 
             SettingsRow(title: "Model", detail: modelDetail) {

@@ -696,17 +696,6 @@ private struct GeneralTab: View {
                 )
                 .toggleStyle(InkToggleStyle())
             }
-
-            SettingsRow(title: "Show welcome screen on next launch") {
-                Toggle(
-                    "Show welcome screen on next launch",
-                    isOn: viewModel.settingsBinding(
-                        get: { !$0.hasSeenWelcome },
-                        set: { settings, show in settings.hasSeenWelcome = !show }
-                    )
-                )
-                .toggleStyle(InkToggleStyle())
-            }
         }
     }
 

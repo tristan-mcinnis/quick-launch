@@ -143,7 +143,7 @@ History.
 The house rule is `../design-system/SWIFT.md`; this repo is its reference
 implementation (floor **macOS 26, swift-tools 6.2, Swift Testing**). Local
 application: a `@MainActor` store that hands its disk work to `JSONFileStore`
-(clipboard, color, launcher usage, chat history) satisfies the actor rule, since
+(clipboard, launcher usage, chat history) satisfies the actor rule, since
 the file store serialises the I/O off the main thread. View models reach AppKit
 singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 

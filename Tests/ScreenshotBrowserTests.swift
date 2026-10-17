@@ -231,6 +231,24 @@ struct ScreenshotBrowserTests {
         #expect(!vm.isGridCatalog)
     }
 
+    @Test func anUpArrowInAShortScreenshotGridNeverLandsOnANegativeIndex() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for day in 1...2 {
+            try write(String(format: "Screenshot 2026-01-%02d at 03.04.05.png", day), in: folder)
+        }
+        let vm = QuickViewModel()
+        vm.settings.screenshotTextSearch = false
+        vm.settings.screenshotUseGrid = true
+        vm.settings.screenshotColumns = 3
+        vm.screenshotsFolder = folder
+        vm.enterCatalog(.screenshots)
+        #expect(vm.launcherMatches.count == 2)
+        vm.applicationSelectionIndex = 0
+        vm.moveSelectionVertically(-1)
+        #expect(vm.applicationSelectionIndex == 1)
+    }
+
     @Test func saveCaptureCommandExistsAndIsOfferedOnlyWithACapture() throws {
         let vm = QuickViewModel()
         #expect(vm.systemCommands.contains { $0.value == "screenshot.save" }, "Save is a discoverable command")

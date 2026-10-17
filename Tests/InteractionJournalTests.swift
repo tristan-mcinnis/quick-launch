@@ -350,10 +350,9 @@ struct InteractionJournalTests {
         let realIdentifiers = [
             "application:com.apple.Safari", "catalog:snippets", "command:window.leftHalf",
             "folder:downloads", "snippet:9F3A1C", "quickLink:1b2c3d",
-            "clipboard:9f3a1c2b", "emoji:emoji-1f600", "screenshot:file-9f3a1c",
+            "clipboard:9f3a1c2b", "screenshot:file-9f3a1c",
             "conversation:11111111-1111-1111-1111-111111111111", "answer:answer",
-            "askAI:ask", "color:ff8800ff",
-            "action:translate",
+            "askAI:ask", "action:translate",
         ]
         for identifier in realIdentifiers {
             #expect(store.sanitizedItemID(identifier) == identifier, "\(identifier) should survive")

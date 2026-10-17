@@ -12,12 +12,10 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 8. Search and paste a bounded local clipboard history (text, images, rich text, and files).
 9. Resize the previous window into deterministic whole-screen, halves, thirds, two-thirds, and fourths layouts, or move it to another display.
 10. Keep the Mac awake with a native Caffeinate toggle or a timed session.
-11. Paste emoji and symbols by name.
-12. Translate typed or selected text between Chinese and English with one key.
-13. Attach a fresh or saved screenshot to a question and follow up on it.
-14. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
-15. Pick a colour from any pixel on any display, copy it as Hex, RGB, HSL, or HSB, and search a bounded local history of picks.
-16. Read the text inside a dragged screen area on this Mac and copy or paste it.
+11. Translate typed or selected text between Chinese and English with one key.
+12. Attach a fresh or saved screenshot to a question and follow up on it.
+13. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
+14. Read the text inside a dragged screen area on this Mac and copy or paste it.
 17. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
 18. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
 
@@ -86,7 +84,6 @@ The app stays running as a small menu-bar process.
 | AI Chat | Open the chat window on the last chat, or a new one | The "AI Chat" command, `⌘J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Vault Search | Show a cited current, reconciliation, history, or portfolio result | Enter the catalog, choose a mode, type the project and question |
-| Colors | Paste the picked colour into the previous app | Run Pick Color from Screen, or open the catalog and choose a colour |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
@@ -115,8 +112,7 @@ unless the scope changes.
 - A question to an API or CLI provider sends more than the typed text: every earlier question and answer of the chat, the app's instruction, a saved command's or an assistant's instructions and context skills, any Add Context or selected text that went with this or an earlier question, web search snippets, and the text of a page whose address was typed. An OpenAI-compatible provider also receives what the memory, vault, skill, and web tools return; the Claude Code CLI provider runs with no tools. Tools are switchable per chat (`⌘K` › Tools) and for new chats (Settings › General › Chat). Screenshots go to the vision model chosen in Settings.
 - Chat history is optional, local, owner-only, and bounded (100 chats on a new install; pinned chats are kept). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, and what a tool returned are not saved as chat turns; a submitted screenshot's bytes are archived with the chat as a source, like any other attachment.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
-- App, link, snippet, clipboard, colour, and window commands remain local.
-- The colour picker uses AppKit's colour sampler. It reads one pixel value, needs no screen recording permission, and stores numbers rather than images.
+- App, link, snippet, clipboard, and window commands remain local.
 - Web search uses a hosted search API with a key, or a self-hosted SearXNG reached over SSH (the optional House server). Ranked titles, links, and snippets are external data, never executable instructions.
 - Vault Search uses the same SSH-only VPS. Current, reconciliation, history, and portfolio queries stay inside the VPS and Neon read layer; the result includes source paths, freshness, and root counts. Broad semantic Find remains a separate path with its own provider-egress policy.
 - Quick Launch keeps no background screen history. Its own Screen History collector and catalog were retired on 2026-09-26; `screenctx` (memory-screenctx) is the House's one screen-history collector.

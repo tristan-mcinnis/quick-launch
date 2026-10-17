@@ -44,7 +44,6 @@ struct QuickAIThread: View {
     private static let liveAnswerID = "quick-ai-live-answer"
     private static let detachedQuestionID = "quick-ai-detached-question"
     private static let detachedAnswerID = "quick-ai-detached-answer"
-    private static let liveQuestionID = "quick-ai-live-question"
     private static let statusLineID = "quick-ai-status"
     private static let webSearchNoteID = "quick-ai-web-search"
     private static let threadNoticeID = "quick-ai-thread-notice"
@@ -129,25 +128,11 @@ struct QuickAIThread: View {
                         .id(Self.detachedQuestionID)
                     liveToolLines
                 }
-                // The model paused to ask. The live card sits where the
-                // answer will; once picked it joins the thread as the
-                // record and the answer continues under it.
-                if let ask = viewModel.pendingAskQuestion, !ask.isAnswered {
-                    AskUserQuestionCard(
-                        question: ask,
-                        selectedIndex: viewModel.askQuestionSelectionIndex,
-                        isInteractive: true,
-                        onMove: { viewModel.moveAskQuestionSelection($0) },
-                        onPick: { viewModel.answerAskQuestion(index: $0) }
-                    )
-                    .id(Self.liveQuestionID)
-                }
                 // While the search itself runs its note is the status,
                 // already drawn above; the dots take over once the model is
                 // thinking.
                 if viewModel.isStreaming,
                    viewModel.output.isEmpty,
-                   !viewModel.isAskQuestionActive,
                    viewModel.streamingStatus == nil || viewModel.streamingStatus != viewModel.webSearchNote {
                     statusLine
                         .id(Self.statusLineID)
@@ -220,7 +205,6 @@ struct QuickAIThread: View {
         .onChange(of: viewModel.isStreaming) { _, _ in followBottom() }
         .onChange(of: viewModel.streamingStatus) { _, _ in followBottom() }
         .onChange(of: viewModel.threadError) { _, _ in followBottom() }
-        .onChange(of: viewModel.pendingAskQuestion?.isAnswered) { _, _ in followBottom() }
         .onChange(of: viewModel.liveToolRecords.count) { _, _ in followBottom() }
         .onChange(of: viewModel.threadNotice) { _, notice in
             followBottom()
@@ -341,13 +325,7 @@ struct QuickAIThread: View {
             // Never a saved turn; nothing to draw if one ever arrives.
             EmptyView()
         case .assistant:
-            if let question = message.askUserQuestion {
-                // The record of a question the model asked and the option
-                // the user picked.
-                AskUserQuestionCard(question: question, isInteractive: false)
-            } else {
-                answerTurn(message)
-            }
+            answerTurn(message)
         }
     }
 

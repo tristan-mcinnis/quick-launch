@@ -47,7 +47,7 @@ actor ChatArchive {
         "enabledTools", "assistantID",
     ]
     /// The keys the live `QuickMessage` owns on the turn payload.
-    static let turnOwnedKeys: Set<String> = ["askUserQuestion", "toolRecords"]
+    static let turnOwnedKeys: Set<String> = ["toolRecords"]
 
     nonisolated let root: URL
     nonisolated let attachments: AttachmentArchive
@@ -1043,13 +1043,10 @@ actor ChatArchive {
         )
     }
 
-    /// One legacy message as a turn, keeping the card and the tool records in
-    /// the turn's own namespaced payload.
+    /// One legacy message as a turn, keeping the tool records in the turn's own
+    /// namespaced payload.
     static func turn(for message: QuickMessage) -> TurnRecord {
         var payload = AppPayload(namespace: namespace)
-        if let question = message.askUserQuestion {
-            payload["askUserQuestion"] = jsonValue(question)
-        }
         if let tools = message.toolRecords {
             payload["toolRecords"] = jsonValue(tools)
         }
@@ -1133,7 +1130,6 @@ actor ChatArchive {
             id: id,
             role: role,
             content: turn.text,
-            askUserQuestion: payload?["askUserQuestion"].flatMap { Self.decodeValue($0, as: AskUserQuestion.self) },
             toolRecords: payload?["toolRecords"].flatMap { Self.decodeValue($0, as: [ChatToolRecord].self) },
             attachments: turn.attachments.isEmpty ? nil : turn.attachments.map(legacyReference(for:))
         )

@@ -23,7 +23,6 @@ struct QuickSettingsTests {
         #expect(settings.launchAtLogin == true)
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
-        #expect(settings.hasSeenWelcome == false)
         #expect(settings.configurationVersion == 26)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
@@ -239,7 +238,6 @@ struct QuickSettingsTests {
         settings.launchAtLogin = false
         settings.showMenuBar = false
         settings.checkForUpdatesOnLaunch = false
-        settings.hasSeenWelcome = true
         settings.hotkeyKeyCode = 36   // Return key
         settings.hotkeyModifiers = 786432  // Command + Option
         settings.select(providerID: InferenceProvider.deepSeekID, model: "deepseek-v4-pro")
@@ -253,7 +251,6 @@ struct QuickSettingsTests {
         #expect(loaded.launchAtLogin == false)
         #expect(loaded.showMenuBar == false)
         #expect(loaded.checkForUpdatesOnLaunch == false)
-        #expect(loaded.hasSeenWelcome == true)
         #expect(loaded.hotkeyKeyCode == 36)
         #expect(loaded.hotkeyModifiers == 786432)
         #expect(loaded.selectedProviderID == InferenceProvider.deepSeekID)
@@ -272,7 +269,6 @@ struct QuickSettingsTests {
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.showMenuBar == true)
         #expect(loaded.checkForUpdatesOnLaunch == false)
-        #expect(loaded.hasSeenWelcome == false)
         #expect(loaded.hotkeyKeyCode == 49)
         #expect(loaded.hotkeyModifiers == 524288)
     }
@@ -288,7 +284,6 @@ struct QuickSettingsTests {
         let loaded = QuickSettings.load(from: defaults)
         #expect(loaded.autoCopy == true)
         #expect(loaded.launchAtLogin == true)
-        #expect(loaded.hasSeenWelcome == false)
     }
 
     // MARK: - 6. Second save overwrites first
@@ -309,19 +304,6 @@ struct QuickSettingsTests {
     }
 
     // MARK: - Additional edge cases
-
-    // 7. hasSeenWelcome can be toggled and persisted
-    @Test func testHasSeenWelcomeToggle() {
-        let defaults = freshDefaults()
-        var settings = QuickSettings()
-        #expect(settings.hasSeenWelcome == false)
-
-        settings.hasSeenWelcome = true
-        settings.save(to: defaults)
-
-        let loaded = QuickSettings.load(from: defaults)
-        #expect(loaded.hasSeenWelcome == true)
-    }
 
     // 8. Custom hotkey key code persists correctly
     @Test func testCustomHotkeyKeyCodePersists() {

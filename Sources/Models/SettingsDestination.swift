@@ -45,7 +45,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .keyboard: "Rebind the in-app keys; see what stays fixed."
         case .items: "Aliases and hotkeys for apps, folders, and commands."
         case .models: "Providers, models, and the quick-action instruction."
-        case .clipboard: "Clipboard history, colors, emoji, and Quicklinks."
+        case .clipboard: "Clipboard history, screenshots, and Quicklinks."
         case .prompts: "Saved AI commands, their aliases, and hotkeys."
         case .about: "Version, updates, and source."
         }
@@ -177,7 +177,7 @@ enum SettingsDestinationIndex {
         group("general.behaviour", .general, "general.behaviour", "Launcher Behaviour",
               "Auto-copy, launch at login, menu bar icon, screen awareness, and OCR",
               ["auto copy", "first answer", "launch at login", "menu bar", "icon", "double tap", "right command",
-               "screenshot", "ocr", "search text", "welcome", "behaviour", "behavior"]),
+               "screenshot", "ocr", "search text", "behaviour", "behavior"]),
         group("general.caffeinate", .general, "general.caffeinate", "Caffeinate",
               "Keep this Mac awake, agent watch, battery cutoff, and the display",
               ["caffeine", "keep awake", "sleep", "power", "assertion", "awake"]),
@@ -195,7 +195,7 @@ enum SettingsDestinationIndex {
               ["display", "screen", "idle", "sleep", "assertion", "dim"]),
         group("general.quickAI", .general, "general.quickAI", "Quick AI and AI Chat",
               "Primary action, Tab hint, new-chat interval, and model",
-              ["quick ai", "ai chat", "primary action", "tab", "new chat", "model", "clarifying questions"]),
+              ["quick ai", "ai chat", "primary action", "tab", "new chat", "model"]),
         group("general.chat", .general, "general.chat", "Chat defaults",
               "Tools a new chat starts with, web search, and pi handoff",
               ["chat", "tools", "memory", "vault", "skills", "web search", "assistant", "on top", "pi"]),
@@ -255,12 +255,6 @@ enum SettingsDestinationIndex {
         group("clipboard.screenshots", .clipboard, "clipboard.screenshots", "Screenshots",
               "Saved-capture folders, media types, OCR, and grid layout",
               ["screenshot", "screenshots", "capture", "folder", "video", "media", "grid", "columns", "ocr"]),
-        group("clipboard.colors", .clipboard, "clipboard.colors", "Colors",
-              "Color format and picked-color history",
-              ["color", "colour", "format", "hex", "rgb", "history", "picker"]),
-        group("clipboard.emoji", .clipboard, "clipboard.emoji", "Emoji & Symbols",
-              "Emoji skin tone for the Emoji catalog",
-              ["emoji", "symbols", "skin tone", "fitzpatrick"]),
         group("clipboard.screenText", .clipboard, "clipboard.screenText", "Text from Screen",
               "On-device OCR behaviour for text copied off the screen",
               ["ocr", "line breaks", "screen text", "text from screen", "vision"]),

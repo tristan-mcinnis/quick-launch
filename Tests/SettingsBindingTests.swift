@@ -40,17 +40,17 @@ struct SettingsBindingTests {
 
     @Test func derivedBindingSavesTransformedValue() async {
         let vm = QuickViewModel(service: MockQuickService())
-        let original = saved().hasSeenWelcome
-        defer { vm.updateSettings { $0.hasSeenWelcome = original } }
+        let original = saved().screenshotTextSearch
+        defer { vm.updateSettings { $0.screenshotTextSearch = original } }
 
-        let showWelcome = vm.settingsBinding(
-            get: { !$0.hasSeenWelcome },
-            set: { settings, show in settings.hasSeenWelcome = !show }
+        let hideTextSearch = vm.settingsBinding(
+            get: { !$0.screenshotTextSearch },
+            set: { settings, hide in settings.screenshotTextSearch = !hide }
         )
-        showWelcome.wrappedValue = true
+        hideTextSearch.wrappedValue = true
 
-        #expect(showWelcome.wrappedValue == true)
-        #expect(saved().hasSeenWelcome == false)
+        #expect(hideTextSearch.wrappedValue == true)
+        #expect(saved().screenshotTextSearch == false)
     }
 
     @Test func updateSettingsPersistsMutation() async {

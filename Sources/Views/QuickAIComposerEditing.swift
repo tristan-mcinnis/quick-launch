@@ -8,7 +8,7 @@ enum QuickAIComposerEditing {
         guard event.type == .keyDown, editor.isEditable, !editor.hasMarkedText(),
               model.isQuickAIPresented, !model.isAIChatWindow,
               model.inputMode == nil, !model.isRecentChatsPresented,
-              !model.isAskQuestionActive, !model.isTransformChooserPresented,
+              !model.isTransformChooserPresented,
               !model.isModelChooserPresented, !model.isAssistantChooserPresented,
               !model.isAddContextMenuPresented, !model.isActionPalettePresented,
               !model.isItemActionPanePresented, !model.attachmentTray.isStripFocused

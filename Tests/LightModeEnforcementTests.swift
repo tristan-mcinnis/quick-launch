@@ -26,7 +26,6 @@ struct LightModeEnforcementTests {
     }()
 
     private static let overlayViews = [
-        "WelcomeOverlayView.swift",
         "SettingsView.swift",
         "OverlayView.swift",
     ]

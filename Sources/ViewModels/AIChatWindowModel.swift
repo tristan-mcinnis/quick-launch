@@ -752,9 +752,9 @@ protocol AIChatWindowPresenting: AnyObject {
         switch focus {
         case .composer:
             guard !chat.isActionPalettePresented, !chat.isItemActionPanePresented else { return .ignored }
-            // A chooser or the question card over the composer takes Return
-            // whatever the modifier; a new line would land under it.
-            if chat.isAskQuestionActive || chat.isModelChooserPresented || chat.isAssistantChooserPresented
+            // A chooser over the composer takes Return whatever the
+            // modifier; a new line would land under it.
+            if chat.isModelChooserPresented || chat.isAssistantChooserPresented
                 || chat.isCaptureChooserPresented || chat.isAddContextMenuPresented || chat.isTransformChooserPresented {
                 chat.submitFromComposer()
                 return .handled
@@ -869,11 +869,6 @@ struct FindCorpusEntry {
         case .system:
             parts = []
         case .assistant:
-            // A question the model asked draws as a card, not as prose.
-            guard message.askUserQuestion == nil else {
-                parts = []
-                return
-            }
             parts = MarkdownRenderer.segments(message.content).map { segment in
                 switch segment.content {
                 case .prose(let source):

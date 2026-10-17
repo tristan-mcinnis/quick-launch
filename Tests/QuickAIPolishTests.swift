@@ -473,19 +473,6 @@ struct QuickAIPolishTests {
         #expect(vm.quickAIComposerPlaceholder == "Ask anything, @ to attach, or / for commands…")
     }
 
-    @Test func theQuestionCardSaysTheWaitIsYours() {
-        let vm = make()
-        vm.openQuickAI()
-        vm.isStreaming = true
-        vm.pendingAskQuestion = AskUserQuestion(
-            question: "Which folder?",
-            options: [AskUserQuestionOption(label: "Code"), AskUserQuestionOption(label: "Vault")]
-        )
-        #expect(vm.quickAIComposerPlaceholder == "Pick an option above… esc stops")
-        vm.pendingAskQuestion = nil
-        #expect(vm.quickAIComposerPlaceholder == "Type a follow-up; it sends when this answer ends")
-    }
-
     @Test func aFollowUpThatStartsANewChatIsNotCalledOne() async {
         let mock = MockQuickService()
         let vm = make(service: mock) { $0.newChatInterval = .always }
@@ -608,13 +595,13 @@ struct QuickAIPolishTests {
             QuickViewModel.transcriptCollapseShortcut,
         ]
         let kinds: [LauncherItemKind] = [
-            .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
-            .conversation, .askAI, .folder, .answer, .color,
+            .snippet, .quickLink, .clipboard, .command, .screenshot,
+            .conversation, .askAI, .folder, .answer,
         ]
         var results: [LauncherSearchResult] = kinds.map { kind in
             .item(LauncherCatalogItem(
                 kind: kind,
-                itemID: kind == .color ? "#FF0000" : "item",
+                itemID: "item",
                 title: "Item",
                 detail: "",
                 value: "https://example.com/?utm_source=proof",
@@ -734,43 +721,6 @@ struct QuickAIPolishTests {
         #expect(vm.activeModelID == picked)
         #expect(vm.currentConversation?.id == chats[0].id)
         #expect(!vm.isModelChooserPresented)
-    }
-
-    @Test func theChooserStaysShutWhileTheQuestionCardWaits() async {
-        let vm = make()
-        vm.openQuickAI()
-        vm.isStreaming = true
-        let before = vm.activeModelID
-        vm.presentAskQuestion(AskUserQuestion(
-            question: "Which folder?",
-            options: [AskUserQuestionOption(label: "Code"), AskUserQuestionOption(label: "Vault")]
-        ))
-        #expect(vm.isAskQuestionActive)
-
-        vm.toggleModelChooserFromHeader()
-        #expect(!vm.isModelChooserPresented, "the header click does not open a chooser over the card")
-        #expect(vm.performShortcut(characters: "o", keyCode: 31, modifiers: [.command, .shift]),
-                "the key is taken, not passed to another action")
-        #expect(!vm.isModelChooserPresented)
-
-        vm.moveAskQuestionSelection(1)
-        await vm.submitResolvingFuzzyAlias()
-        #expect(vm.pendingAskQuestion?.selectedIndex == 1, "Return answered the card")
-        #expect(vm.activeModelID == before)
-    }
-
-    @Test func theQuestionCardClosesAChooserThatWasAlreadyOpen() {
-        let vm = make()
-        vm.openQuickAI()
-        vm.isStreaming = true
-        vm.toggleModelChooserFromHeader()
-        #expect(vm.isModelChooserPresented, "a chooser may open while an answer streams")
-        vm.presentAskQuestion(AskUserQuestion(
-            question: "Which folder?",
-            options: [AskUserQuestionOption(label: "Code"), AskUserQuestionOption(label: "Vault")]
-        ))
-        #expect(!vm.isModelChooserPresented, "the card owns ↑↓ and Return, so nothing stays over it")
-        #expect(vm.quickAIComposerAction.label == "Pick")
     }
 
     // MARK: - The composer names what Return does in a chooser

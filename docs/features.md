@@ -90,11 +90,6 @@ searches by title and message text. `Return` opens the highlighted chat,
 root search lists the same chats with the same row actions. Pinned chats are
 marked and are never pruned.
 
-### Clarifying questions
-
-**Let the model ask clarifying questions** (off by default) decides whether the
-model may pause with a multiple-choice card.
-
 ## AI Chat
 
 `Command+J` on Quick AI, or the header's **Open in AI Chat** button, moves the
@@ -282,24 +277,6 @@ hotkeys, and pin to top (`Command+Shift+P`).
   offers Paste, Copy, or Copy & Paste. Paste targets the topmost external window
   directly behind Quick Launch.
 
-## Emoji and symbols
-
-The Emoji & Symbols catalog is a grid: Frequently Used first, emoji, flags,
-arrows, math, currency, punctuation, and key symbols, searched by name or plain
-words (`fire`, `thumbs up`, `command`). `Return` pastes, `Command+Return`
-copies. One skin tone setting applies to every emoji that takes one.
-
-## Colors
-
-Pick Color from Screen magnifies any pixel on any display with the system loupe
-(no screen recording permission), copies it in your chosen notation, and closes.
-The pick is kept in the local Colors catalog.
-
-- Rows show a swatch with Hex, RGB, HSL, HSB, and a colour name. `Command+1`…
-  `Command+4` copy the other notations, `Command+Shift+P` pins, `Control+X`
-  deletes.
-- **Pick Color and Paste** sends it straight to the app behind the panel.
-
 ## Window management
 
 The full set: Maximize, Almost Maximize, Maximize Height/Width, Reasonable Size,
@@ -390,8 +367,6 @@ failures or cancellations, successful command actions, and hotkey runs.
 | AI Chat | Open the chat window | The AI Chat command, `Command+J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Vault Search | Show a cited result | Enter the catalog, choose a mode, type the project and question |
-| Colors | Paste the picked colour into the previous app | Run Pick Color from Screen, or open the catalog |
-| Emoji | Paste the symbol | Open the catalog and type a name |
 | Screenshots | Attach or act on a capture | Open the catalog and type a name |
 
 ## Models and providers
@@ -435,7 +410,6 @@ failures or cancellations, successful command actions, and hotkey runs.
   full copy so a later paste restores the original representation.
 - Snippet and Quicklink values are stored owner-only and are not logged or copied
   into Quick Launch settings.
-- Picked colours are stored as numbers, not pixels or screenshots.
 - Text read from a screen area is recognised on this Mac and goes to the
   clipboard; the pixels are not saved.
 - Selected-text actions use macOS Accessibility only to read or replace the

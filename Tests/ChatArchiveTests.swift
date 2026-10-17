@@ -74,11 +74,6 @@ struct ChatArchiveTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let archive = try ChatArchive(root: directory)
         let assistantID = UUID()
-        let card = AskUserQuestion(
-            question: "Which one?",
-            options: [AskUserQuestionOption(label: "A", detail: nil), AskUserQuestionOption(label: "B", detail: nil)],
-            selectedIndex: 1
-        )
         let toolRecords = [ChatToolRecord(kind: .vault, summary: "Searched vault", sources: [
             ChatSource(title: "Acme", day: "2026-09-01", path: "/tmp/acme.md"),
         ])]
@@ -86,7 +81,7 @@ struct ChatArchiveTests {
             assistantID: assistantID,
             messages: [
                 QuickMessage(role: .user, content: "Ask me"),
-                QuickMessage(role: .assistant, content: "Which?", askUserQuestion: card, toolRecords: toolRecords),
+                QuickMessage(role: .assistant, content: "Which?", toolRecords: toolRecords),
             ]
         )
         _ = await archive.migrate(legacy: [conversation], appVersion: "1.0.0")
@@ -98,14 +93,8 @@ struct ChatArchiveTests {
         #expect(record.appPayload?["enabledTools"]?.arrayValue?.count == 2)
         #expect(record.appPayload?["customTitle"]?.stringValue == "Quarterly")
 
-        // The card and the tool records survive in the assistant turn's payload.
+        // The tool records survive in the assistant turn's payload.
         let assistantTurn = try #require(record.turns.last)
-        let decodedCard = try #require(ChatArchive.decodeValue(
-            assistantTurn.appPayload?["askUserQuestion"] ?? .null,
-            as: AskUserQuestion.self
-        ))
-        #expect(decodedCard.selectedIndex == 1)
-        #expect(decodedCard.options.count == 2)
         let decodedTools = try #require(ChatArchive.decodeValue(
             assistantTurn.appPayload?["toolRecords"] ?? .null,
             as: [ChatToolRecord].self
@@ -120,7 +109,6 @@ struct ChatArchiveTests {
         #expect(rebuilt.titleSource == "Summarize the report")
         #expect(rebuilt.isPinned == true)
         #expect(rebuilt.assistantID == assistantID)
-        #expect(rebuilt.messages.last?.askUserQuestion?.selectedIndex == 1)
         #expect(rebuilt.messages.last?.toolRecords?.first?.summary == "Searched vault")
     }
 

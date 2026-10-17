@@ -5,7 +5,7 @@ import AppKit
 /// always shows the hotkey the user set, the moment they change it.
 ///
 /// Order: the two windows first (Quick Launch, then AI Chat), then Settings
-/// and Caffeinate; Welcome; the version and GitHub; Quit.
+/// and Caffeinate; the version and GitHub; Quit.
 /// Every item carries a `Command` as its tag and sends one action, so the
 /// menu can be built and read in a test without the app.
 @MainActor
@@ -15,7 +15,6 @@ enum StatusMenu {
         case openAIChat
         case openSettings
         case toggleCaffeinate
-        case showWelcome
         case openWebsite
         case quit
     }
@@ -75,9 +74,6 @@ enum StatusMenu {
         add("Settings…", .openSettings, key: ",")
         let caffeinate = add(caffeinateMenuTitle(state), .toggleCaffeinate)
         caffeinate.state = state.hasCaffeinateSession ? .on : .off
-
-        menu.addItem(.separator())
-        add("Show Welcome Again", .showWelcome)
 
         menu.addItem(.separator())
         add("Quick Launch v\(state.version)", nil)

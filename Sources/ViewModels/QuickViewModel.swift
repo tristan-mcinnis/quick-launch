@@ -414,14 +414,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// when the ask is stopped, and with the thread. The surface draws it
     /// as its own pill so an answer never draws without its question.
     var pendingQuestion: String?
-    /// The model's live multiple-choice question, nil when none is waiting.
-    /// Kept after the pick (with `selectedIndex` set) until the answer
-    /// finishes, so the card never blinks out of the thread mid-stream.
-    var pendingAskQuestion: AskUserQuestion?
-    /// The option the ↑/↓ keys are on while the card is live.
-    var askQuestionSelectionIndex: Int = 0
-    /// Resumes the service's tool call once the user picks.
-    private var askQuestionContinuation: CheckedContinuation<AskUserQuestionAnswer?, Never>?
     var isCaffeinating: Bool = false
     /// A Caffeinate session is in force (manual, timed, or agents), even while
     /// the battery has paused the assertion. Distinct from `isCaffeinating`,
@@ -750,10 +742,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var applicationCatalog: (any ApplicationCatalogServicing)?
     var launcherCatalog: (any LauncherCatalogServicing)?
     var clipboardHistory: (any ClipboardHistoryServicing)?
-    /// Colors picked with the screen eyedropper, newest first.
-    var colorHistory: (any ColorHistoryServicing)?
-    /// The eyedropper itself. Nil in tests that never pick.
-    var colorSampler: (any ScreenColorSampling)?
     var webSearchService: (any WebSearchServicing)?
     var vaultSearchService: (any VaultSearchServicing)?
     /// Memory and task reads through `recall`. Nil in tests that do not fake it.
@@ -1002,8 +990,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         applicationCatalog: (any ApplicationCatalogServicing)? = nil,
         launcherCatalog: (any LauncherCatalogServicing)? = nil,
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
-        colorHistory: (any ColorHistoryServicing)? = nil,
-        colorSampler: (any ScreenColorSampling)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
         vaultSearchService: (any VaultSearchServicing)? = nil,
         pageReader: (any WebPageReading)? = nil,
@@ -1040,8 +1026,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.applicationCatalog = applicationCatalog
         self.launcherCatalog = launcherCatalog
         self.clipboardHistory = clipboardHistory
-        self.colorHistory = colorHistory
-        self.colorSampler = colorSampler
         self.webSearchService = webSearchService
         self.vaultSearchService = vaultSearchService
         self.pageReader = pageReader
@@ -1064,7 +1048,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
         self.houseCommandCatalog = houseCommandCatalog
         self.currentVersion = currentVersion
-        self.colorHistory?.preferredFormat = settings.colorFormat
         self.screenshotTextIndex.onProgress = { [weak self] progress in
             self?.screenshotIndexProgress = progress
             // Newly recognized text changes what queries match; drop cached
@@ -1247,25 +1230,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         await clipboardHistory?.payload(for: item)
     }
 
-    /// Picked colors, pinned first, as launcher items.
-    var colorItems: [LauncherCatalogItem] { colorHistory?.entries ?? [] }
-
-    /// The stored color behind a row, for the swatch and the "Copy As" rows.
-    func color(for item: LauncherCatalogItem) -> PickedColor? {
-        guard item.kind == .color else { return nil }
-        return colorHistory?.color(for: item) ?? PickedColor(hexString: item.itemID)
-    }
-
-    /// The emoji catalog with the chosen skin tone applied, computed once per
-    /// tone. Ids never change, so pins and favourites survive a tone change.
-    var emojiItems: [LauncherCatalogItem] {
-        let tone = settings.emojiSkinTone
-        guard tone > 0 else { return EmojiCatalog.items }
-        if let cached = emojiTonedItems, cached.tone == tone { return cached.items }
-        let toned = EmojiCatalog.items(skinTone: tone)
-        emojiTonedItems = (tone, toned)
-        return toned
-    }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
 
     var vaultSearchItems: [LauncherCatalogItem] {
@@ -1372,22 +1336,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 detail: "Save an address you open often; {query} asks for words first",
                 value: "quicklink.create",
                 keywords: "new quicklink quick link add url address bookmark search"
-            ),
-            LauncherCatalogItem(
-                kind: .command,
-                itemID: "color.pick",
-                title: "Pick Color from Screen",
-                detail: "Magnify any pixel on any display, then copy it as \(settings.colorFormat.title)",
-                value: "color.pick",
-                keywords: "color colour picker eyedropper hex rgb hsl swatch pixel"
-            ),
-            LauncherCatalogItem(
-                kind: .command,
-                itemID: "color.pickPaste",
-                title: "Pick Color and Paste",
-                detail: "Pick a pixel, then paste it into the app behind Quick Launch",
-                value: "color.pickPaste",
-                keywords: "color colour picker eyedropper paste hex css"
             ),
             LauncherCatalogItem(
                 kind: .command,
@@ -1669,8 +1617,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// command row — resolves it from the selection, the clipboard, or the
     /// last answer. Checks local-tts health first so a dead service reports
     /// itself instead of failing silently; the panel stays open to show
-    /// that error, exactly like the other screen helpers (`pickColorFromScreen`,
-    /// `copyTextFromScreenArea`).
+    /// that error, exactly like the other screen helper
+    /// (`copyTextFromScreenArea`).
     func performReadAloud(text explicitText: String? = nil) async {
         guard let localSpeechService else {
             errorMessage = "Local TTS is not available in this build."
@@ -1802,14 +1750,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .snippets: return snippets
         case .quickLinks: return quickLinks
         case .clipboard: return filteredClipboardEntries
-        case .emoji: return emojiItems
         case .screenshots: return screenshotItems
         case .caffeinate: return caffeinateItems
         case .chats: return conversationItems
         case .commands: return systemCommands
         case .folders: return folderItems
         case .vaultSearch: return vaultSearchItems
-        case .colors: return colorItems
         }
     }
 
@@ -1921,9 +1867,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Files are listed when the catalog is entered, so typing never hits the disk.
     private(set) var screenshotFiles: [LauncherCatalogItem] = []
 
-    /// Memoized skin-toned emoji, rebuilt only when the tone changes.
-    @ObservationIgnored private var emojiTonedItems: (tone: Int, items: [LauncherCatalogItem])?
-
     func reloadScreenshotFiles() {
         screenshotFiles = ScreenshotLibrary.items(
             inFolders: screenshotFolders,
@@ -1940,41 +1883,38 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// must fit two learned favourites, Ask AI, and every catalog root, so
     /// this tracks the number of catalogs; the list scrolls past 12 rows.
     static let maxLauncherRows = LauncherCatalogScope.allCases.count + 3
-    /// The emoji grid shows more: 9 columns by 7 rows.
-    static let maxGridCells = 63
-    static let gridColumns = 9
-    /// The saved-media grid's cell cap, matching the emoji grid.
+    /// The saved-media grid's cell cap: 9 columns by 7 rows.
     static let screenshotGridCells = 63
-    /// Emoji & Symbols is a grid. The screenshots browser is a grid when the
-    /// user chose one. The grid stays put while the ⌘K pane floats over it;
-    /// swapping layouts under a popover made the whole window shift.
+    /// The screenshots browser is a grid when the user chose one. The grid
+    /// stays put while the ⌘K pane floats over it; swapping layouts under a
+    /// popover made the whole window shift.
     var isGridCatalog: Bool {
-        catalogScope == .emoji || (catalogScope == .screenshots && settings.screenshotUseGrid)
+        catalogScope == .screenshots && settings.screenshotUseGrid
     }
 
-    /// The live column count: the emoji grid is fixed at nine, the screenshot
-    /// grid follows the user's setting (2...6).
+    /// The live column count: the screenshot grid follows the user's setting
+    /// (2...6).
     var gridColumnCount: Int {
-        catalogScope == .screenshots ? max(2, min(6, settings.screenshotColumns)) : Self.gridColumns
+        max(2, min(6, settings.screenshotColumns))
     }
 
     /// The row cap for the current scope. A screenshot grid lists more cells
     /// than the list's rows so the grid is worth using.
     private var effectiveRowLimit: Int {
         if catalogScope == .screenshots, settings.screenshotUseGrid { return Self.screenshotGridCells }
-        return Self.maxRows(for: catalogScope)
+        return Self.maxLauncherRows
     }
 
     /// Catalogs that show the detail pane beside their list. Snippets and
     /// Quicklinks join the preview-worthy set so a row's stored value is
     /// readable before it is pasted or opened.
     static let detailPaneScopes: Set<LauncherCatalogScope> = [
-        .screenshots, .clipboard, .snippets, .quickLinks, .colors,
+        .screenshots, .clipboard, .snippets, .quickLinks,
     ]
 
     /// Item kinds the detail pane knows how to draw.
     static let detailPaneKinds: Set<LauncherItemKind> = [
-        .screenshot, .clipboard, .snippet, .quickLink, .color,
+        .screenshot, .clipboard, .snippet, .quickLink,
     ]
 
     /// Preview-worthy local catalogs share one stable two-pane layout. The
@@ -2029,9 +1969,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             launcherRowCount: showsChooser ? 0 : launcherMatches.count,
             gridRows: isGridCatalog
                 ? Int((Double(launcherMatches.count) / Double(gridColumnCount)).rounded(.up))
-                    + max(0, gridSections.count - 1)
                 : 0,
-            gridSections: isGridCatalog ? gridSections.count : 0,
             showsDetailPane: showsDetailPane
         )
         // The launch-selection chip and an open chooser are inline content
@@ -2123,35 +2061,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         updateSettings { $0.quickAISize = .standard }
     }
 
-    struct GridSection: Equatable {
-        let title: String
-        let range: Range<Int>
-    }
-
-    /// Section headers over `launcherMatches` in the emoji grid.
-    var gridSections: [GridSection] {
-        guard isGridCatalog, catalogScope == .emoji else { return [] }
-        let count = launcherMatches.count
-        guard count > 0 else { return [] }
-        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if query.isEmpty, emojiFavouriteCount > 0 {
-            let favourites = min(emojiFavouriteCount, count)
-            var sections = [GridSection(title: "Frequently Used", range: 0..<favourites)]
-            if favourites < count { sections.append(GridSection(title: "All", range: favourites..<count)) }
-            return sections
-        }
-        return [GridSection(title: query.isEmpty ? "All" : "Results", range: 0..<count)]
-    }
-
-    private var emojiFavouriteCount: Int {
-        guard settings.launcherLearningEnabled else { return 0 }
-        return min(18, launcherUsage.topItemIDs(scope: LauncherCatalogScope.emoji.rawValue, limit: 18).count)
-    }
-
-    static func maxRows(for scope: LauncherCatalogScope?) -> Int {
-        scope == .emoji ? maxGridCells : maxLauncherRows
-    }
-
     func screenshotText(for item: LauncherCatalogItem) -> String? {
         screenshotTextIndex.text(for: item)
     }
@@ -2209,8 +2118,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                   settings.launcherLearningEnabled else {
                 return Array(items.prefix(rows))
             }
-            let favouriteLimit = catalogScope == .emoji ? 18 : rows
-            let favourites = launcherUsage.topItemIDs(scope: scope, limit: favouriteLimit)
+            let favourites = launcherUsage.topItemIDs(scope: scope, limit: rows)
             let pinned = items.filter(\.isPinned)
             let ordered = pinned + favourites.compactMap { id in items.first { $0.id == id && !$0.isPinned } }
             let rest = items.filter { item in !ordered.contains { $0.id == item.id } }
@@ -2916,8 +2824,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     var contextualCatalogItem: LauncherCatalogItem? {
         guard var item = resolveContextualCatalogItem() else { return nil }
-        // Some sources (raw screenshot files, the emoji catalog) carry no
-        // pin flag; without the stamp the ⌘K pane kept offering "Pin to
+        // Some sources (raw screenshot files) carry no pin flag; without the stamp the ⌘K pane kept offering "Pin to
         // Top" on an item that was already pinned.
         if !item.isPinned { item.isPinned = isLauncherItemPinned(item) }
         return item
@@ -2929,17 +2836,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if let draftCatalogItem, draftCatalogItem.id == contextualCatalogItemID {
             return draftCatalogItem
         }
-        if contextualCatalogItemID.hasPrefix("emoji:") {
-            return emojiItems.first { $0.id == contextualCatalogItemID }
-        }
         if contextualCatalogItemID.hasPrefix("screenshot:") {
             return screenshotFiles.first { $0.id == contextualCatalogItemID }
         }
         if contextualCatalogItemID.hasPrefix("conversation:") {
             return conversationItems.first { $0.id == contextualCatalogItemID }
-        }
-        if contextualCatalogItemID.hasPrefix("color:") {
-            return colorItems.first { $0.id == contextualCatalogItemID }
         }
         return (configurableCatalogItems + clipboardEntries + systemCommands).first {
             $0.id == contextualCatalogItemID
@@ -2982,13 +2883,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// While an answer streams, Return queues what is typed and sends it
     /// when the answer ends; Escape stops the answer.
     static let streamingPlaceholder = "Type a follow-up; it sends when this answer ends"
-    /// While the model waits on its question card, the wait is the user's.
-    static let askQuestionPlaceholder = "Pick an option above… esc stops"
 
     /// What the empty Quick AI composer says right now: what typing will do.
     var quickAIComposerPlaceholder: String {
         if isRecentChatsPresented { return Self.recentChatsPlaceholder }
-        if isAskQuestionActive { return Self.askQuestionPlaceholder }
         if isStreaming { return Self.streamingPlaceholder }
         if hasPendingChatContext { return "Ask about the attached context…" }
         if isFollowUp, !shouldStartNewConversation { return Self.quickAIFollowUpPlaceholder }
@@ -3004,8 +2902,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
               threadNotice == nil,
               output.isEmpty,
               pendingQuestion == nil,
-              lastQuestion == nil,
-              pendingAskQuestion == nil
+              lastQuestion == nil
         else { return [] }
         return [
             "\(Self.addContextTrigger) attaches files, links, or selected text",
@@ -3044,7 +2941,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     static let queuedActionLabel = "Queued"
 
     var quickAIComposerAction: ComposerAction {
-        if isAskQuestionActive { return ComposerAction(label: "Pick", keys: ["↩"]) }
         // A chooser above the composer takes Return (the order of
         // `topLayer`), so the field names the chooser's own action: two ↩
         // hints on one screen never disagree.
@@ -3308,12 +3204,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
 
     func submitResolvingFuzzyAlias() async {
-        // While a question is waiting, Return picks the highlighted option:
-        // the pick folds back into the thread and the model continues.
-        if let question = pendingAskQuestion, !question.isAnswered {
-            answerAskQuestion(index: askQuestionSelectionIndex)
-            return
-        }
         // A chooser floats above Recent Chats (`topLayer`), so it takes
         // Return first, in the same order Escape closes them.
         if isTransformArgumentFieldPresented {
@@ -3424,7 +3314,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         applicationSelectionIndex = 0
     }
 
-    /// ↑↓ move a whole grid row in Emoji & Symbols, one item elsewhere.
+    /// ↑↓ move a whole grid row in the screenshots grid, one item elsewhere.
     func moveSelectionVertically(_ direction: Int) {
         moveApplicationSelection(isGridCatalog ? direction * gridColumnCount : direction)
     }
@@ -3944,8 +3834,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .snippets: return visible(snippets)
         case .quickLinks: return visible(quickLinks)
         case .clipboard: return visible(filteredClipboardEntries)
-        case .emoji: return visible(emojiItems)
-        case .colors: return visible(colorItems)
         case .screenshots: return visible(screenshotItems)
         case .caffeinate: return visible(caffeinateItems)
         case .chats: return chatCount(excluding: hidden)
@@ -4112,7 +4000,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
         case .snippet:
             await insertSnippet(item, mode: .paste)
-        case .clipboard, .emoji, .color:
+        case .clipboard:
             _ = await pasteLauncherItem(item)
         case .screenshot:
             if item.screenshotMediaKind == .video {
@@ -4694,10 +4582,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Opens the chooser for the last answer. Every provider's visible models
     /// are offered, and the row for the model already in use starts selected.
     func openModelChooser(_ purpose: ModelChooserPurpose) {
-        // The model's question card owns ↑↓ and Return while it waits; a
-        // chooser on top of it would draw one thing and let the keys do
-        // another.
-        guard !isAskQuestionActive else { return }
         let options = modelChooserEntries()
         guard !options.isEmpty else {
             errorMessage = "No model is available. Add a provider in Settings › Models."
@@ -4792,7 +4676,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// or a rename/alias form. Those keep their own keyboard commands.
     var canOpenAttachments: Bool {
         isQuickAIPresented && !isRecentChatsPresented && inputMode == nil
-            && !isStreaming && !isAskQuestionActive
+            && !isStreaming
             && !isItemActionPanePresented && activeItemActionForm == nil
     }
 
@@ -5574,16 +5458,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return
         }
 
-        if item.value == "color.pick" {
-            Task { await pickColorFromScreen() }
-            return
-        }
-
-        if item.value == "color.pickPaste" {
-            Task { await pickColorFromScreen(thenPaste: true) }
-            return
-        }
-
         if item.value == "paste.plain" {
             guard let text = pasteboard.readString(), !text.isEmpty else {
                 errorMessage = "The clipboard has no text."
@@ -5866,75 +5740,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-    }
-
-    // MARK: - Color picker
-
-    /// Shows the system loupe over every display, stores the pick, and copies
-    /// it in the preferred notation. The overlay does not come back: the
-    /// colour is on the clipboard and the picker is finished. `thenPaste`
-    /// sends it to the app behind Quick Launch as well.
-    func pickColorFromScreen(thenPaste: Bool = false) async {
-        guard let colorSampler else {
-            errorMessage = "The color picker is not available in this build."
-            requestInputFocus()
-            return
-        }
-        input = ""
-        prepareForExternalAction?()
-        guard let color = await colorSampler.sample() else {
-            // Escape closes the loupe: nothing picked, nothing copied.
-            recoverFromExternalActionFailure?()
-            requestInputFocus()
-            return
-        }
-        let item = recordPickedColor(color)
-        if thenPaste {
-            if await pasteLauncherItem(item) {
-                overlayPresenter.dismissOverlay()
-            } else {
-                // The paste failed. It was copied instead, and the reason
-                // needs the panel back to be readable.
-                overlayPresenter.presentOverlay()
-            }
-            invalidateLauncherRanking()
-            return
-        }
-        _ = await copyLauncherItem(item)
-        errorMessage = nil
-        invalidateLauncherRanking()
-        overlayPresenter.dismissOverlay()
-    }
-
-    /// Adds a pick to the local history and returns the row it became.
-    @discardableResult
-    func recordPickedColor(_ color: PickedColor) -> LauncherCatalogItem {
-        colorHistory?.preferredFormat = settings.colorFormat
-        if let recorded = colorHistory?.record(color, limit: settings.colorHistoryLimit) {
-            return recorded
-        }
-        let text = color.string(in: settings.colorFormat)
-        return LauncherCatalogItem(
-            kind: .color,
-            itemID: color.storageID,
-            title: text,
-            detail: color.name,
-            value: text
-        )
-    }
-
-    /// Settings changed the notation: rewrite the stored rows to match.
-    func applyColorFormat(_ format: ColorFormat) {
-        settings.colorFormat = format
-        persistSettings(settings)
-        colorHistory?.preferredFormat = format
-        invalidateLauncherRanking()
-    }
-
-    func clearColorHistory() {
-        colorHistory?.clear()
-        applicationSelectionIndex = 0
-        invalidateLauncherRanking()
     }
 
     func runningApplication(for application: LaunchableApplication) -> (any RunningApplicationControlling)? {
@@ -7248,8 +7053,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 }
             case .clipboard:
                 clipboardHistory?.togglePin(item)
-            case .color:
-                colorHistory?.togglePin(item)
             case .snippet, .quickLink, .screenshot, .askAI, .folder:
                 togglePinLauncherItem(item)
             default:
@@ -7286,18 +7089,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             openActionPane(for: result, form: .alias)
         case .setHotkey:
             openActionPane(for: result, form: .hotkey)
-        case .copyAs:
-            guard case .item(let item) = result,
-                  let raw = action.commandValue,
-                  let format = ColorFormat(rawValue: raw),
-                  let color = color(for: item)
-            else { return true }
-            let text = color.string(in: format)
-            pasteboard.writeString(text)
-            markJustCopied()
-            closeItemActionPane()
-            input = ""
-            overlayPresenter.dismissOverlay()
         case .copyPath:
             let path: String
             switch result {
@@ -7317,10 +7108,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     _ = deleteSnippet(item)
                 case .clipboard:
                     clipboardHistory?.remove(item)
-                    closeItemActionPane()
-                    applicationSelectionIndex = 0
-                case .color:
-                    colorHistory?.remove(item)
                     closeItemActionPane()
                     applicationSelectionIndex = 0
                 case .conversation:
@@ -7854,10 +7641,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return clipboardEntries.contains { $0.itemID == configuration.itemID }
         case .screenshot:
             return screenshotFiles.contains { $0.itemID == configuration.itemID }
-        case .color:
-            return colorItems.contains { $0.itemID == configuration.itemID }
-        case .emoji:
-            return emojiItems.contains { $0.itemID == configuration.itemID }
         case .answer:
             return false
         case .askAI, .snippet, .quickLink, .command, .folder:
@@ -9349,11 +9132,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         streamFirstTokenAt = nil
 
         streamTask = Task {
-            // A stream that ends for any reason cannot still be waiting on a
-            // question: resume it with no answer and take the card down. A
-            // stopped stream (`cancel()` moved the generation on) leaves
-            // everything to `cancel()`, which already did this.
-            defer { if generation == streamGeneration { clearAskQuestion(with: nil) } }
             do {
                 for try await delta in stream {
                     if Task.isCancelled || generation != streamGeneration { break }
@@ -9695,7 +9473,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// composer ("Queued ↩") and is sent when the stream ends.
     private func queueFollowUp() {
         // Waiting for chips to read is the same send, not a new one.
-        guard isStreaming, !isAskQuestionActive, !isWaitingForAttachments,
+        guard isStreaming, !isWaitingForAttachments,
               !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
         isFollowUpQueued = true
@@ -9712,11 +9490,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         await submitTypedText()
     }
 
-    /// A layer above the composer is open: the question card, a chooser,
-    /// Recent Chats, or the `⌘K` pane or palette. A queued follow-up waits
+    /// A layer above the composer is open: a chooser, Recent Chats, or the
+    /// `⌘K` pane or palette. A queued follow-up waits
     /// for it to close.
     private var holdsQueuedFollowUp: Bool {
-        isAskQuestionActive || isTransformChooserPresented || isModelChooserPresented
+        isTransformChooserPresented || isModelChooserPresented
             || isAddContextMenuPresented || isRecentChatsPresented || presentedLayer != nil
     }
 
@@ -10157,8 +9935,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         chatTools: Bool = true,
         toolOverride: Set<ChatToolKind>? = nil,
         /// A `.textOnly` saved action offers the model no tools at all,
-        /// including the clarifying-question tool, which is derived here
-        /// rather than through `toolOverride`.
+        /// which is derived here rather than through `toolOverride`.
         textOnly: Bool = false,
         /// True when this turn carries a source. The tools are offered
         /// either way now; this adds the sentence that keeps the answer on
@@ -10194,15 +9971,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     try await roundRecorder.beforeRequest(round)
                 }
             }
-            // The question card is behind the Quick AI setting "Let the model
-            // ask clarifying questions"; off, the tool is not offered at all.
-            var askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
-            if settings.quickAIClarifyingQuestionsEnabled, !textOnly {
-                askUserQuestion = { [weak self] question in
-                    guard let self else { return nil }
-                    return await self.awaitAskQuestionAnswer(question)
-                }
-            }
             return OpenAICompatibleService(
                 baseURL: url,
                 modelName: model,
@@ -10212,7 +9980,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     grounded: grounded
                 ),
                 webSearch: webSearch,
-                askUserQuestion: askUserQuestion,
                 tools: chatTools && !textOnly
                     ? ChatToolbox(
                         enabled: tools,
@@ -10253,7 +10020,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             && pendingQuestion != nil
         // A send waiting for its chips: the reads stop, the typed text stays.
         cancelAttachmentWait()
-        clearAskQuestion(with: nil)
         if cancelledModelRequest {
             // Stop keeps the question and what the model said so far, as the
             // turn's answer; `⌘R` asks the same turn again.
@@ -10657,107 +10423,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
     }
 
-    // MARK: - Ask User Question
-
-    /// True while the model is waiting for an option to be picked.
-    var isAskQuestionActive: Bool { pendingAskQuestion?.isAnswered == false }
-
-    /// ↑/↓ walk the options and wrap at both ends, so a wrong nudge never
-    /// dead-ends the keyboard.
-    func moveAskQuestionSelection(_ delta: Int) {
-        guard let question = pendingAskQuestion, !question.isAnswered else { return }
-        let count = question.options.count
-        guard count > 0 else { return }
-        askQuestionSelectionIndex = ((askQuestionSelectionIndex + delta) % count + count) % count
-    }
-
-    /// Return picks the highlighted option, or a click picks its own. The
-    /// choice folds back into the thread as the user's answer and the model
-    /// continues with it.
-    func answerAskQuestion(index: Int) {
-        guard let question = pendingAskQuestion,
-              !question.isAnswered,
-              question.options.indices.contains(index)
-        else { return }
-        let chosen = question.options[index]
-        askQuestionSelectionIndex = index
-        var answered = question
-        answered.selectedIndex = index
-        pendingAskQuestion = answered
-        recordAskQuestion(answered)
-        resumeAskQuestion(with: AskUserQuestionAnswer(label: chosen.label, detail: chosen.detail))
-    }
-
-    /// The tool loop's side of the card: show it, then suspend the request
-    /// until the user picks. Nil means they dismissed it (or the request was
-    /// cancelled); the model answers normally either way.
-    private func awaitAskQuestionAnswer(_ question: AskUserQuestion) async -> AskUserQuestionAnswer? {
-        guard !Task.isCancelled else { return nil }
-        presentAskQuestion(question)
-        let answer = await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<AskUserQuestionAnswer?, Never>) in
-                if Task.isCancelled {
-                    continuation.resume(returning: nil)
-                } else {
-                    askQuestionContinuation = continuation
-                }
-            }
-        } onCancel: { [weak self] in
-            Task { @MainActor in self?.clearAskQuestion(with: nil) }
-        }
-        pendingAskQuestion = nil
-        askQuestionSelectionIndex = 0
-        return answer
-    }
-
-    /// Puts the card on screen with its first option selected. Split from the
-    /// wait so the state change and the suspension are separate: the tool
-    /// loop calls both, and a test can assert the card without a live stream.
-    func presentAskQuestion(_ question: AskUserQuestion) {
-        askQuestionSelectionIndex = 0
-        pendingAskQuestion = question
-        streamingStatus = nil
-        // The card takes ↑↓ and Return, so no chooser stays open over it.
-        isModelChooserPresented = false
-        isAssistantChooserPresented = false
-        isCaptureChooserPresented = false
-        isAddContextMenuPresented = false
-        isTransformChooserPresented = false
-        // The composer was disabled while the model worked, so its focus
-        // needs reclaiming for the Return fallback path.
-        requestInputFocus()
-    }
-
-    /// Hands the pick (or a dismissal) to the suspended tool call. Resumes
-    /// at most once: a second call finds no continuation and only clears.
-    private func resumeAskQuestion(with answer: AskUserQuestionAnswer?) {
-        let continuation = askQuestionContinuation
-        askQuestionContinuation = nil
-        continuation?.resume(returning: answer)
-    }
-
-    /// Takes a waiting card down without an answer: Escape, cancel, reset, or
-    /// the end of the stream.
-    private func clearAskQuestion(with answer: AskUserQuestionAnswer?) {
-        resumeAskQuestion(with: answer)
-        pendingAskQuestion = nil
-        askQuestionSelectionIndex = 0
-    }
-
-    /// The transcript record: the question as it was asked, with the picked
-    /// option marked, and the pick folded in as the user's turn.
-    private func recordAskQuestion(_ question: AskUserQuestion) {
-        currentConversation?.messages.append(QuickMessage(
-            role: .assistant,
-            content: question.question,
-            askUserQuestion: question
-        ))
-        if let chosen = question.chosenLabel {
-            currentConversation?.messages.append(QuickMessage(role: .user, content: chosen))
-        }
-        currentConversation?.updatedAt = Date()
-    }
-
     // MARK: - Just-copied flash
 
     func markJustCopied() {
@@ -10879,7 +10544,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             pendingChatTools = nil
             pendingModelChoice = nil
             threadNotice = nil
-            clearAskQuestion(with: nil)
             replaceableSelectionContext = nil
             clearTransformFlowState()
             currentConversation = nil
@@ -11184,7 +10848,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     @discardableResult
     func handleThreadKey(_ key: ThreadKey, command: Bool, option: Bool) -> Bool {
-        guard isQuickAIPresented, !isRecentChatsPresented, !isAskQuestionActive,
+        guard isQuickAIPresented, !isRecentChatsPresented,
               !isTransformChooserPresented, !isModelChooserPresented, !isAddContextMenuPresented,
               !isActionPalettePresented, !isItemActionPanePresented
         else { return false }

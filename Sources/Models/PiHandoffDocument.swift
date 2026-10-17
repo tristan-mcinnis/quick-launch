@@ -58,14 +58,7 @@ enum PiHandoffDocument {
                 for line in above + extra {
                     turn.append("Tool: \(line)")
                 }
-                if let question = message.askUserQuestion {
-                    // The card the model asked with; the pick follows as the
-                    // user's next turn.
-                    turn.append("Asked: \(question.question)")
-                    turn.append("Options: " + question.options.map(\.label).joined(separator: " / "))
-                } else {
-                    turn.append(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
+                turn.append(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
                 let sources = message.sources
                 if !sources.isEmpty {
                     turn.append("Sources:\n" + sources.map(sourceLine).joined(separator: "\n"))

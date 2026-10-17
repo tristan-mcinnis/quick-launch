@@ -277,14 +277,12 @@ enum PanelSizing {
         showsFooter: Bool = false,
         launcherRowCount: Int = 0,
         gridRows: Int = 0,
-        gridSections: Int = 0,
         showsDetailPane: Bool = false
     ) -> CGFloat {
         var total = inputHeight
         if hasAttachment { total += attachmentHeight }
         if gridRows > 0 {
             total += CGFloat(gridRows) * House.Control.composer
-                + CGFloat(gridSections) * House.Spacing.xl
                 + launcherListInset
         } else if suggestionCount > 0 {
             var block = min(CGFloat(suggestionCount), 12) * launcherRowHeight

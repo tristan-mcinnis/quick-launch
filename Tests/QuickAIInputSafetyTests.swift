@@ -207,9 +207,8 @@ struct QuickAIInputSafetyTests {
         #expect(QuickViewModel.screenshotFileName(now: Date(timeIntervalSince1970: 0)).hasSuffix(".png"))
     }
 
-    @Test func textOnlyHasNoWireToolsEvenWhenClarificationIsEnabled() throws {
-        var settings = settings()
-        settings.quickAIClarifyingQuestionsEnabled = true
+    @Test func textOnlyHasNoWireTools() throws {
+        let settings = settings()
         let provider = try #require(settings.providers.first { $0.kind == .openAICompatible })
         let vm = QuickViewModel(settings: settings)
         let plain = try #require(vm.makeService(provider: provider, model: provider.selectedModel, textOnly: true) as? OpenAICompatibleService)
@@ -217,12 +216,6 @@ struct QuickAIInputSafetyTests {
         let requestData = try #require(request.httpBody)
         let body = try #require(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
         #expect(body["tools"] == nil)
-        let ordinary = try #require(vm.makeService(provider: provider, model: provider.selectedModel) as? OpenAICompatibleService)
-        let ordinaryRequest = try ordinary.buildRequest(prompt: "Question")
-        let ordinaryData = try #require(ordinaryRequest.httpBody)
-        let ordinaryBody = try #require(JSONSerialization.jsonObject(with: ordinaryData) as? [String: Any])
-        let tools = ordinaryBody["tools"] as? [[String: Any]] ?? []
-        #expect(tools.contains { ($0["function"] as? [String: Any])?["name"] as? String == "ask_user_question" })
     }
 }
 

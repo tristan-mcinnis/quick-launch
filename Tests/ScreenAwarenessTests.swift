@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import QuickLaunch
 
-@Suite("Screen Awareness, OCR search, emoji grid, detail pane", .serialized)
+@Suite("Screen Awareness, OCR search, detail pane", .serialized)
 @MainActor
 struct ScreenAwarenessTests {
     private static let safari = SelectionTarget(processIdentifier: 4242, applicationName: "Safari")
@@ -245,47 +245,6 @@ struct ScreenAwarenessTests {
     }
 
     // MARK: Grid and detail pane
-
-    @Test func emojiCatalogIsAGridWithFrequentlyUsedFirst() {
-        let store = LauncherUsageStore(fileURL: nil)
-        let vm = QuickViewModel(launcherUsage: store)
-        vm.enterCatalog(.emoji)
-        #expect(vm.isGridCatalog)
-        #expect(vm.launcherMatches.count == QuickViewModel.maxGridCells)
-        #expect(vm.gridSections.map(\.title) == ["All"])
-        #expect(!vm.showsDetailPane)
-        #expect(vm.currentPanelWidth == PanelSizing.panelWidth)
-
-        vm.applicationSelectionIndex = 0
-        vm.moveSelectionVertically(1)
-        #expect(vm.applicationSelectionIndex == QuickViewModel.gridColumns)
-        vm.moveApplicationSelection(1)
-        #expect(vm.applicationSelectionIndex == QuickViewModel.gridColumns + 1)
-        // Up from the first row wraps to the last row, never a negative index.
-        vm.applicationSelectionIndex = 0
-        vm.moveSelectionVertically(-1)
-        #expect(vm.applicationSelectionIndex == QuickViewModel.maxGridCells - QuickViewModel.gridColumns)
-
-        vm.input = "rocket"
-        let rocket = vm.launcherMatches.first!
-        vm.learn(rocket)
-        vm.input = ""
-        #expect(vm.gridSections.map(\.title) == ["Frequently Used", "All"])
-        #expect(vm.gridSections.first?.range == 0..<1)
-        #expect(vm.launcherMatches.first == rocket)
-    }
-
-    @Test func anUpArrowInAShortEmojiGridNeverLandsOnANegativeIndex() {
-        let vm = QuickViewModel(launcherUsage: LauncherUsageStore(fileURL: nil))
-        vm.enterCatalog(.emoji)
-        vm.input = "mask"
-        // Four matches is fewer than one nine-cell grid row, so the old wrap
-        // arithmetic produced -1 and trapped when the row was announced.
-        #expect(vm.launcherMatches.count == 4)
-        vm.applicationSelectionIndex = 0
-        vm.moveSelectionVertically(-1)
-        #expect(vm.applicationSelectionIndex == 3)
-    }
 
     @Test func screenshotsAndClipboardShowADetailPaneAndWidenThePanel() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quick-launch-detail-\(UUID().uuidString)")

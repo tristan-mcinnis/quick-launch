@@ -2,7 +2,7 @@
 // surfaces, in both appearances, written to
 // /tmp/quick-launch-render-proof/g3-*.png: the Chat card (chat defaults,
 // Keep AI Chat on top, the two status lines), the "Quick AI and AI Chat"
-// card, the History card with Chats to keep, and the Welcome card.
+// card, and the History card with Chats to keep.
 
 import AppKit
 import SwiftUI
@@ -63,16 +63,6 @@ struct G3SettingsRenderProofTests {
         for (appearance, preference, suffix) in Self.appearances {
             let vm = Self.makeViewModel(preference)
             try Self.saveCard(HistorySettingsView(viewModel: vm), preference: preference, appearance: appearance, name: "g3-settings-history-card-\(suffix).png")
-        }
-    }
-
-    @Test func rendersTheWelcomeCard() throws {
-        for (appearance, preference, suffix) in Self.appearances {
-            let vm = Self.makeViewModel(preference)
-            let card = WelcomeOverlayView(viewModel: vm, onContinue: {})
-                .padding(House.Spacing.xxl)
-                .background(AQDesign.ColorToken.windowSurface)
-            try Self.save(try Self.renderFitting(card, appearance: appearance), name: "g3-welcome-\(suffix).png")
         }
     }
 

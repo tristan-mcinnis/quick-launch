@@ -6,7 +6,6 @@ enum LauncherItemKind: String, Codable, Sendable {
     case quickLink
     case clipboard
     case command
-    case emoji
     case screenshot
     case conversation
     /// The one row that sends the typed text to the AI.
@@ -15,8 +14,6 @@ enum LauncherItemKind: String, Codable, Sendable {
     case folder
     /// A local answer computed as you type (math, a conversion, a date).
     case answer
-    /// A color sampled from the screen with the eyedropper.
-    case color
 }
 
 /// User-owned configuration shared by searchable launcher items.

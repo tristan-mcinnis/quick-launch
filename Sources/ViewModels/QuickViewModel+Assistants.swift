@@ -109,8 +109,7 @@ extension QuickViewModel {
     }
 
     func openAssistantChooser() {
-        // The question card owns ↑↓ and Return while it waits.
-        guard !isAskQuestionActive, !assistants.isEmpty else { return }
+        guard !assistants.isEmpty else { return }
         let options = assistantChooserOptions
         assistantChooserIndex = options.firstIndex { $0.assistantID == activeAssistant?.id } ?? 0
         isAssistantChooserPresented = true

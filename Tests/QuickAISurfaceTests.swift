@@ -570,44 +570,4 @@ struct QuickAISurfaceTests {
         #expect(ModelProfile.displayName(forModelID: "DEEPSEEK-FLASH") == "DeepSeek V4.1 Flash", "ids come back from servers in any case")
         #expect(ModelProfile.displayName(forModelID: "") == "")
     }
-
-    // MARK: - Ask User Question setting
-
-    @Test func theAskToolIsAbsentUnlessTheSettingIsOn() throws {
-        let off = make()
-        #expect(!off.settings.quickAIClarifyingQuestionsEnabled, "off by default")
-        let provider = try #require(off.settings.providers.first { $0.id == InferenceProvider.deepSeekID })
-        off.service = nil
-        let offService = try #require(
-            off.makeService(provider: provider, model: provider.selectedModel) as? OpenAICompatibleService
-        )
-        #expect(!offService.offersAskUserQuestion)
-
-        let on = make { $0.quickAIClarifyingQuestionsEnabled = true }
-        on.service = nil
-        let onService = try #require(
-            on.makeService(provider: provider, model: provider.selectedModel) as? OpenAICompatibleService
-        )
-        #expect(onService.offersAskUserQuestion)
-    }
-
-    @Test func theAskToolDescriptionTellsTheModelWhenNotToAsk() throws {
-        let function = try #require(
-            OpenAICompatibleService.askUserQuestionToolDefinition["function"] as? [String: Any]
-        )
-        let description = try #require(function["description"] as? String)
-        #expect(description.contains("only when"))
-        #expect(description.contains("one reasonable reading"))
-        #expect(description.contains("Do not ask which kind of help is wanted."))
-        #expect(!description.contains("Prefer this over guessing"))
-    }
-
-    @Test func theSettingRoundTrips() throws {
-        var settings = QuickSettings()
-        settings.quickAIClarifyingQuestionsEnabled = true
-        let back = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(settings))
-        #expect(back.quickAIClarifyingQuestionsEnabled)
-        let legacy = try JSONDecoder().decode(QuickSettings.self, from: Data(#"{"configurationVersion":22}"#.utf8))
-        #expect(!legacy.quickAIClarifyingQuestionsEnabled)
-    }
 }

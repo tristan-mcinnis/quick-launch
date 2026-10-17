@@ -24,7 +24,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var detail: String
     var value: String
     var requiresInput: Bool = false
-    /// Extra search words that are not part of the title (emoji names, tags).
+    /// Extra search words that are not part of the title (command synonyms, tags).
     var keywords: String = ""
     /// Pinned items stay at the top of their catalog. Clipboard entries and
     /// chats also never expire while pinned.
@@ -62,13 +62,13 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     }
 
     /// Whether "Hide from Quick Launch" applies to this row. A local answer,
-    /// the Ask AI row, a typed web address, and the fixed emoji grid are
-    /// computed, fixed, or short-lived, so hiding one would be a lie. Every user-owned catalog row (apps,
+    /// the Ask AI row, and a typed web address are computed or short-lived,
+    /// so hiding one would be a lie. Every user-owned catalog row (apps,
     /// snippets, Quicklinks, commands, clipboard entries, folders,
-    /// screenshots, colors, and chats) can be hidden.
+    /// screenshots, and chats) can be hidden.
     var canBeHidden: Bool {
         switch kind {
-        case .answer, .askAI, .emoji:
+        case .answer, .askAI:
             return false
         case .quickLink:
             return !itemID.hasPrefix("typed:")
@@ -100,8 +100,6 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
 
     /// Icons for the helper commands that are neither toggles nor panes.
     static let helperCommandIcons = [
-        "color.pick": "eyedropper",
-        "color.pickPaste": "eyedropper.halffull",
         "ocr.area": "text.viewfinder",
         "ocr.areaPaste": "text.viewfinder",
         "paste.plain": "doc.on.clipboard",
@@ -129,7 +127,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
     var defaultActionTitle: String {
         switch kind {
         case .application: "Open"
-        case .snippet, .clipboard, .emoji: "Paste"
+        case .snippet, .clipboard: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
         case .command: value.hasPrefix("vault.") ? "Search" : (value.hasPrefix(SettingsDestination.valuePrefix) ? "Open" : "Run")
         case .screenshot: "Paste"
@@ -137,7 +135,6 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .askAI: "Ask"
         case .folder: "Open"
         case .answer: "Copy"
-        case .color: "Paste"
         }
     }
 
@@ -162,13 +159,11 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
                 return toggle.systemImage
             }
             return "rectangle.3.group"
-        case .emoji: return "face.smiling"
         case .screenshot: return "photo"
         case .conversation: return "bubble.left.and.text.bubble.right"
         case .askAI: return "sparkles"
         case .folder: return "folder"
         case .answer: return "equal.circle"
-        case .color: return "eyedropper"
         }
     }
 }
@@ -204,14 +199,12 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case snippets
     case quickLinks
     case clipboard
-    case emoji
     case screenshots
     case caffeinate
     case chats
     case commands
     case folders
     case vaultSearch
-    case colors
 
     var id: String { rawValue }
     var title: String {
@@ -219,14 +212,12 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "Snippets"
         case .quickLinks: "Quicklinks"
         case .clipboard: "Clipboard History"
-        case .emoji: "Emoji & Symbols"
         case .screenshots: "Screenshots"
         case .caffeinate: "Caffeinate"
         case .chats: "Chats"
         case .commands: "Commands"
         case .folders: "Folders"
         case .vaultSearch: "Vault Search"
-        case .colors: "Colors"
         }
     }
     var aliases: [String] {
@@ -234,14 +225,12 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: ["snippets", "snippet", "sni"]
         case .quickLinks: ["quick links", "links", "link"]
         case .clipboard: ["clipboard history", "clipboard", "clip"]
-        case .emoji: ["emoji", "emojis", "symbols", "symbol", "emoji and symbols"]
         case .screenshots: ["screenshots", "screenshot", "shots", "capture", "photos"]
         case .caffeinate: ["caffeinate", "caffeine", "awake", "keep awake", "decaffeinate", "sleep"]
         case .chats: ["chats", "quick ai", "ai chats", "history", "conversations", "recent chats"]
         case .commands: ["commands", "window management", "windows", "toggles", "settings panes"]
         case .folders: ["folders", "folder", "places", "locations", "finder"]
         case .vaultSearch: ["vault search", "vault", "projects", "project search"]
-        case .colors: ["colors", "colours", "color picker", "colour picker", "pick color", "eyedropper", "hex", "swatches"]
         }
     }
     var systemImage: String {
@@ -249,14 +238,12 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .snippets: "text.quote"
         case .quickLinks: "link"
         case .clipboard: "clipboard"
-        case .emoji: "face.smiling"
         case .screenshots: "camera.viewfinder"
         case .caffeinate: "cup.and.saucer"
         case .chats: "bubble.left.and.text.bubble.right"
         case .commands: "command"
         case .folders: "folder"
         case .vaultSearch: "magnifyingglass"
-        case .colors: "eyedropper"
         }
     }
 }

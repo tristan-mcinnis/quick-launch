@@ -22,8 +22,6 @@ A single-user, native Swift, macOS-only AI action overlay. ~33.6k lines across ~
 | Window layouts | 17 presets + saved layouts + undo | WindowLayout / WindowManager, deterministic previous-window layouts |
 | Markdown/LaTeX/code render of AI output | Yes | Markdown yes (MarkdownRenderer); no LaTeX/Mermaid |
 | Web search from the bar | Portals / context modes | Model-driven web search tool + SearXNG service |
-| Emoji | Not called out | EmojiCatalog with tones |
-| Colour tools | No | Colors catalog + screen colour picker |
 | Screen capture history | No | ScreenHistory* pipeline (capture, OCR index, vault save, retirement) |
 | Vault search | No | VaultSearchService |
 | Caffeinate control | No | Native CaffeinateManager |

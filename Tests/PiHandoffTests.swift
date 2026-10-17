@@ -168,38 +168,6 @@ struct PiHandoffTests {
         """)
     }
 
-    @Test func aQuestionTheModelAskedIsWrittenWithItsOptionsAndThePick() {
-        let question = AskUserQuestion(
-            question: "Which city?",
-            options: [AskUserQuestionOption(label: "Lima"), AskUserQuestionOption(label: "Cusco")],
-            selectedIndex: 1
-        )
-        let markdown = PiHandoffDocument.markdown(
-            title: "Trip",
-            modelName: "",
-            messages: [
-                QuickMessage(role: .user, content: "Plan a trip"),
-                QuickMessage(role: .assistant, content: "Which city?", askUserQuestion: question),
-                QuickMessage(role: .user, content: "Cusco"),
-            ],
-            date: Self.date,
-            timeZone: Self.utc
-        )
-        #expect(markdown.contains("""
-        Assistant:
-
-        Asked: Which city?
-
-        Options: Lima / Cusco
-
-        ---
-
-        You:
-
-        Cusco
-        """))
-    }
-
     @Test func attachmentsAreListedUnderTheirQuestionWithTheirTextAndNoPictures() {
         let pdf = ChatAttachmentRef(
             kind: .pdf, name: "Q3 report.pdf", pageCount: 42, contentHash: "h1", extractorVersion: 1,
@@ -590,13 +558,13 @@ struct PiHandoffTests {
             QuickViewModel.transcriptCollapseShortcut,
         ]
         let kinds: [LauncherItemKind] = [
-            .snippet, .quickLink, .clipboard, .command, .emoji, .screenshot,
-            .conversation, .askAI, .folder, .answer, .color,
+            .snippet, .quickLink, .clipboard, .command, .screenshot,
+            .conversation, .askAI, .folder, .answer,
         ]
         var results: [LauncherSearchResult] = kinds.map { kind in
             .item(LauncherCatalogItem(
                 kind: kind,
-                itemID: kind == .color ? "#FF0000" : "item",
+                itemID: "item",
                 title: "Item",
                 detail: "",
                 value: "https://example.com/?utm_source=proof",

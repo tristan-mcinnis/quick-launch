@@ -17,13 +17,11 @@ struct ToolLoopTests {
     private static func service(
         tools: ChatToolbox = ChatToolbox(),
         contextBudget: ContextBudget = .unlimited,
-        toolTimeBudget: Duration = OpenAICompatibleService.defaultToolTimeBudget,
-        askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)? = nil
+        toolTimeBudget: Duration = OpenAICompatibleService.defaultToolTimeBudget
     ) -> OpenAICompatibleService {
         OpenAICompatibleService(
             baseURL: URL(string: "http://127.0.0.1:11451/v1")!,
             modelName: "test-model",
-            askUserQuestion: askUserQuestion,
             tools: tools,
             contextBudget: contextBudget,
             toolTimeBudget: toolTimeBudget,
@@ -187,30 +185,6 @@ struct ToolLoopTests {
         let messages = try #require(second["messages"] as? [[String: Any]])
         let result = messages.last { $0["role"] as? String == "tool" }
         #expect((result?["content"] as? String)?.contains("ran out of time") == true)
-    }
-
-    @Test func timeOnTheQuestionCardDoesNotCountAgainstTheBudget() async throws {
-        let ask = #"{"question":"Which one?","options":[{"label":"A"},{"label":"B"}]}"#
-        LoopStubHTTP.reset([
-            Self.toolCallRound("call_q", name: "ask_user_question", arguments: ask),
-            Self.toolCallRound("call_m", name: "recall_memory", arguments: #"{"query":"A"}"#),
-            Self.answerRound("Done."),
-        ])
-        let memory = FakeMemory(hits: [FakeMemory.hit("a.md")])
-        let collected = try await Self.collect(
-            Self.service(
-                tools: ChatToolbox(enabled: [.memory], memory: memory),
-                toolTimeBudget: .milliseconds(400),
-                askUserQuestion: { _ in
-                    // The user takes longer to pick than the whole budget.
-                    try? await Task.sleep(for: .milliseconds(700))
-                    return AskUserQuestionAnswer(label: "A", detail: nil)
-                }
-            ).send(messages: [QuickMessage(role: .user, content: "q")])
-        )
-        #expect(collected.text == "Done.")
-        #expect(try Self.body(1)["tool_choice"] == nil, "the pick took the time, not the tools")
-        #expect(collected.records.map(\.summary) == ["Searched memory: 1 hit"])
     }
 
     // MARK: - The context budget

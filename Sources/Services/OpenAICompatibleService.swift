@@ -84,21 +84,18 @@ struct ProviderRequestRound: Sendable, Equatable {
 /// it holds no connection state between calls.
 ///
 /// Function tools are offered only when their backend exists:
-/// `search_web` when `webSearch` is set, `ask_user_question` when
-/// `askUserQuestion` is set, and the read-only memory, vault, and skill
-/// tools that `tools` (a `ChatToolbox`) carries for the chat. The service
-/// runs the tool loop itself: a `tool_calls` finish runs the calls (or asks
-/// the user through the closure, which suspends until they pick), feeds the
-/// results back as `tool` messages, and streams the next round.
+/// `search_web` when `webSearch` is set, and the read-only memory, vault,
+/// and skill tools that `tools` (a `ChatToolbox`) carries for the chat. The
+/// service runs the tool loop itself: a `tool_calls` finish runs the calls,
+/// feeds the results back as `tool` messages, and streams the next round.
 ///
 /// The loop is bounded twice: at most `maxToolRounds` rounds may call
-/// tools, and the whole loop has `toolTimeBudget` of wall-clock time (time
-/// spent waiting on the user's pick does not count). When either runs out,
+/// tools, and the whole loop has `toolTimeBudget` of wall-clock time. When
+/// either runs out,
 /// one last round tells the model to answer with what it has, with
 /// `tool_choice` set to `none`. Before every request the transcript is cut
 /// to `contextBudget`. Callers keep the same one-stream interface: progress
-/// arrives as `StreamDelta.status`, a paused question as
-/// `StreamDelta.question`, and each finished call's thread line as
+/// arrives as `StreamDelta.status`, and each finished call's thread line as
 /// `StreamDelta.toolRecord`.
 ///
 /// `reasoningEffort` is passed in by the caller, which is the layer that
@@ -110,9 +107,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
     let apiKey: String?
     let systemPrompt: String
     let webSearch: (@Sendable (String) async throws -> String)?
-    /// Asks the user a multiple-choice question and suspends until they
-    /// pick. Nil answer means they dismissed it.
-    let askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)?
     /// Memory, vault, and skill tools for this chat.
     let tools: ChatToolbox
     /// How much of the chat one request may carry.
@@ -146,14 +140,10 @@ struct OpenAICompatibleService: QuickService, Sendable {
     /// Added to the last tool result when the loop is out of rounds or time.
     static let answerNowNote = "Tool limit reached: you cannot call more tools for this answer. Answer now with what you have, and say what you could not check."
 
-    /// Whether the request body will carry the `ask_user_question` tool.
-    var offersAskUserQuestion: Bool { askUserQuestion != nil }
-
     /// Every tool name the request offers.
     var offeredToolNames: Set<String> {
         var names = tools.toolNames
         if webSearch != nil { names.insert("search_web") }
-        if askUserQuestion != nil { names.insert("ask_user_question") }
         return names
     }
 
@@ -165,7 +155,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
         apiKey: String? = nil,
         systemPrompt: String = QuickSettings.defaultSystemPrompt,
         webSearch: (@Sendable (String) async throws -> String)? = nil,
-        askUserQuestion: (@Sendable (AskUserQuestion) async -> AskUserQuestionAnswer?)? = nil,
         tools: ChatToolbox = ChatToolbox(),
         contextBudget: ContextBudget = .unlimited,
         attachmentTrim: ContextBudget.Trim = ContextBudget.Trim(),
@@ -181,7 +170,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
         self.apiKey = apiKey
         self.systemPrompt = systemPrompt
         self.webSearch = webSearch
-        self.askUserQuestion = askUserQuestion
         self.tools = tools
         self.contextBudget = contextBudget
         self.attachmentTrim = attachmentTrim
@@ -293,7 +281,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
         ]
         var definitions: [[String: Any]] = []
         if webSearch != nil { definitions.append(Self.searchToolDefinition) }
-        if askUserQuestion != nil { definitions.append(Self.askUserQuestionToolDefinition) }
         definitions += tools.definitions
         if !definitions.isEmpty {
             body["tools"] = definitions
@@ -325,48 +312,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
                     ]
                 ],
                 "required": ["query"],
-            ],
-        ],
-    ] }
-
-    /// The multiple-choice question tool. The description is the trigger:
-    /// Raycast's manual notes the reliable way to get a question is naming
-    /// the tool or describing the flow, so the model has to recognise
-    /// ambiguity from this text alone.
-    static var askUserQuestionToolDefinition: [String: Any] { [
-        "type": "function",
-        "function": [
-            "name": "ask_user_question",
-            "description": "Ask the user a short multiple-choice question only when the request is genuinely ambiguous and cannot be answered without a decision the user must make, or when they asked you to offer options. Never ask on a request that has one reasonable reading: answer it. Do not ask which kind of help is wanted. The question appears inline in the conversation; the user picks one option with the keyboard and you continue with that answer. Ask one question at a time, with 2 to 5 short options.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "question": [
-                        "type": "string",
-                        "description": "The question to ask, one short sentence.",
-                    ],
-                    "options": [
-                        "type": "array",
-                        "minItems": AskUserQuestion.minimumOptions,
-                        "maxItems": AskUserQuestion.maximumOptions,
-                        "description": "The choices, in the order they should be shown. 2 to 5 of them.",
-                        "items": [
-                            "type": "object",
-                            "properties": [
-                                "label": [
-                                    "type": "string",
-                                    "description": "Short option text, one to four words.",
-                                ],
-                                "detail": [
-                                    "type": "string",
-                                    "description": "Optional one-line explanation of what this option means.",
-                                ],
-                            ],
-                            "required": ["label"],
-                        ],
-                    ],
-                ],
-                "required": ["question", "options"],
             ],
         ],
     ] }
@@ -431,9 +376,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         var transcript = initial
         let clock = ContinuousClock()
         let started = clock.now
-        // Time on the question card is the user's, not the loop's.
-        var waitedOnUser: Duration = .zero
-        func remaining() -> Duration { toolTimeBudget - (clock.now - started - waitedOnUser) }
+        func remaining() -> Duration { toolTimeBudget - (clock.now - started) }
         // What the attachment fitting already cut: the thread's line names
         // those files with whatever this loop leaves out.
         var reportedTrim = attachmentTrim
@@ -469,22 +412,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
             var calls: [ToolCall] = []
             for call in toolCalls {
                 try Task.checkCancellation()
-                if call.name == "ask_user_question" {
-                    let waitStarted = clock.now
-                    let (content, status) = await askResult(for: call, continuation: continuation)
-                    waitedOnUser += clock.now - waitStarted
-                    transcript.append(Self.toolResult(call, content: content))
-                    // The wait on the user is theirs, not the tool's: the
-                    // call records only that it was answered or dismissed.
-                    calls.append(Self.toolCall(
-                        call,
-                        status: status,
-                        summary: nil,
-                        elapsed: .zero,
-                        adapter: self.askUserQuestion == nil ? "unavailable" : "question"
-                    ))
-                    continue
-                }
                 let left = remaining()
                 guard left > .zero else {
                     let outcome = ChatToolbox.outOfTime(call.name)
@@ -573,7 +500,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
     static func adapterName(for toolName: String) -> String {
         switch toolName {
         case "search_web": "web"
-        case "ask_user_question": "question"
         case ChatToolbox.Name.recallMemory, ChatToolbox.Name.recallCapturesToday: "memory"
         case ChatToolbox.Name.recallTasksToday, ChatToolbox.Name.recallOpenTasks: "tasks"
         case ChatToolbox.Name.searchVault: "vault"
@@ -625,7 +551,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         var adapter: String? = nil
     }
 
-    /// Runs one non-question call, raced against the loop's remaining time
+    /// Runs one call, raced against the loop's remaining time
     /// so a stuck backend cannot hold the answer past the budget.
     private func run(
         _ call: PendingToolCall,
@@ -687,36 +613,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
             status: .refused,
             adapter: "unavailable"
         )
-    }
-
-    /// The question card: a malformed call, or one with fewer than two
-    /// usable options, never ends the turn: the reason goes back and the
-    /// model answers. The call is `succeeded` when the user picked, and
-    /// `refused` when it was unusable or dismissed.
-    private func askResult(
-        for call: PendingToolCall,
-        continuation: AsyncThrowingStream<StreamDelta, Error>.Continuation
-    ) async -> (content: String, status: ToolRoundStatus) {
-        guard let askUserQuestion else {
-            return (AskUserQuestionResult.unusable("the tool is unavailable"), .refused)
-        }
-        guard let question = AskUserQuestionParser.parse(arguments: call.arguments) else {
-            return (
-                AskUserQuestionResult.unusable("it needs a question and at least two options with labels"),
-                .refused
-            )
-        }
-        continuation.yield(StreamDelta(
-            text: nil,
-            finishReason: nil,
-            status: "Waiting for your answer…",
-            question: question
-        ))
-        let answer = await askUserQuestion(question)
-        guard let answer else {
-            return (AskUserQuestionResult.dismissed, .refused)
-        }
-        return (AskUserQuestionResult.picked(answer, in: question), .succeeded)
     }
 
     /// Streams one chat-completions round into `continuation` and returns

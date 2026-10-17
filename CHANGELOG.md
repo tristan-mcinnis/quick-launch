@@ -2,6 +2,14 @@
 
 ## Unreleased — 2026-10-17
 
+- **Four features are removed.** The Emoji & Symbols catalog, the color
+  picker (Pick Color from Screen, the Colors catalog and its settings), the
+  clarifying-questions card (the `ask_user_question` tool and its setting)
+  and the Welcome overlay are gone. Old settings keys for them are ignored
+  on load, and saved Emoji or Color item records are dropped. Saved chats
+  that carry a question card load without it. Files the features left on
+  disk, such as `color-history.json`, are not deleted.
+
 - **The Chief of Staff face is retired.** House captures, makes recallable
   and assists in the moment; synthesis and judging happen downstream. AI Chat
   loses the pinned conversation, the waiting cards, Discuss branches, the

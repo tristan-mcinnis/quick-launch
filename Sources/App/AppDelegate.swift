@@ -175,7 +175,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private(set) var viewModel: QuickViewModel?
     private var panel: KeyablePanel?
-    private var welcomePanel: NSPanel?
     private var settingsPanel: NSPanel?
     /// The AI Chat window, built on first open.
     private var aiChatController: AIChatWindowController?
@@ -208,8 +207,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let applicationCatalog = ApplicationCatalogService()
     private let launcherCatalog = LauncherCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
-    private let colorHistory = ColorHistoryStore()
-    private let colorSampler = ScreenColorSampler()
     private let webSearchService = WebSearchRouter(
         searxng: SearXNGSearchService(),
         tavily: TavilySearchService(
@@ -273,8 +270,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             applicationCatalog: applicationCatalog,
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
-            colorHistory: colorHistory,
-            colorSampler: colorSampler,
             webSearchService: webSearchService,
             vaultSearchService: vaultSearchService,
             pageReader: pageReader,
@@ -359,8 +354,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // a. Load settings from UserDefaults
         let settings = QuickSettings.load()
         viewModel.settings = settings
-        // Stored colors are written in whichever notation settings ask for.
-        colorHistory.preferredFormat = settings.colorFormat
         caffeinateManager.onChange = { [weak viewModel] in
             viewModel?.syncCaffeinateState()
         }
@@ -540,12 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // to fit the current overlay content.
         startPanelSizeObserver(viewModel: viewModel)
 
-        // f. Show WelcomeOverlayView first so the user sees UI immediately.
-        if !settings.hasSeenWelcome {
-            showWelcomePanel()
-        } else if !settings.launchAtLoginPromptShown {
-            // Welcome already seen on a prior launch but login prompt never shown
-            // (upgrade path) — show it now.
+        if !settings.launchAtLoginPromptShown {
             promptForLaunchAtLogin(viewModel: viewModel)
         }
 
@@ -1342,7 +1330,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .openAIChat: showAIChatFromMenu()
         case .openSettings: openSettingsFromMenu()
         case .toggleCaffeinate: toggleCaffeinateFromMenu()
-        case .showWelcome: showWelcomeFromMenu()
         case .openWebsite: openWebsite()
         case .quit: NSApp.terminate(nil)
         case nil: break
@@ -1586,12 +1573,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showSettingsPanel()
     }
 
-    @objc private func showWelcomeFromMenu() {
-        welcomePanel?.orderOut(nil)
-        welcomePanel = nil
-        showWelcomePanel()
-    }
-
     @objc private func toggleCaffeinateFromMenu() {
         guard let viewModel,
               let item = viewModel.systemCommands.first(where: {
@@ -1727,48 +1708,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func showAIChatFromMenu() {
         if panel?.isVisible == true { hideOverlay() }
         showAIChat(on: screenContainingMouse())
-    }
-
-    // MARK: - Welcome panel
-
-    func showWelcomePanel() {
-        guard let vm = viewModel else { return }
-        let welcomePanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 540),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        welcomePanel.title = "Welcome"
-        welcomePanel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 2)
-        welcomePanel.isReleasedWhenClosed = false
-        welcomePanel.isOpaque = false
-        welcomePanel.backgroundColor = .clear
-        welcomePanel.titlebarAppearsTransparent = true
-        welcomePanel.titleVisibility = .hidden
-        welcomePanel.appearance = vm.settings.appearance.nsAppearance
-        welcomePanel.center()
-
-        let hostingController = NSHostingController(
-            rootView: WelcomeOverlayView(viewModel: vm, onContinue: { [weak self, weak welcomePanel] in
-                Task { @MainActor [weak self, weak welcomePanel] in
-                    guard let self else { return }
-                    self.viewModel?.settings.hasSeenWelcome = true
-                    self.viewModel?.settings.save()
-                    welcomePanel?.orderOut(nil)
-                    self.welcomePanel = nil
-                    // Follow up with the launch-at-login dialog, then show overlay
-                    if let vm = self.viewModel, !vm.settings.launchAtLoginPromptShown {
-                        self.promptForLaunchAtLogin(viewModel: vm)
-                    }
-                    self.showOverlay()
-                }
-            })
-        )
-        welcomePanel.contentViewController = hostingController
-        self.welcomePanel = welcomePanel
-        welcomePanel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Mirror of apfel-clip's launch-at-login alert — asked once, persisted.
