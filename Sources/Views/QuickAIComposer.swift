@@ -30,6 +30,22 @@ struct QuickAIComposer: View {
     private var activeTray: AttachmentTray? { tray ?? environmentTray ?? viewModel.attachmentTray }
     private var editsMessage: Bool { !viewModel.isRecentChatsPresented && viewModel.inputMode == nil }
     static let quickLineLimit = 4
+    /// The longest label the primary button shows beside its key cap.
+    static let widestPrimaryLabel = "Paste Response"
+
+    @ViewBuilder
+    private func primaryLabel(label: String, keys: [String], confirmation: String?) -> some View {
+        HStack(spacing: House.Spacing.xs) {
+            if let confirmation {
+                Image(systemName: "checkmark")
+                    .accessibilityHidden(true)
+                Text(confirmation)
+            } else {
+                Text(label)
+                KeyCapGroup(keys: keys)
+            }
+        }
+    }
 
     /// The field's name. In the AI Chat window it is a message field, not
     /// "Ask Quick AI"; in Recent Chats it searches.
@@ -184,15 +200,13 @@ struct QuickAIComposer: View {
                     viewModel.performComposerPrimaryAction()
                     viewModel.requestInputFocus()
                 } label: {
-                    HStack(spacing: House.Spacing.xs) {
-                        if let confirmation = viewModel.composerConfirmation {
-                            Image(systemName: "checkmark")
-                                .accessibilityHidden(true)
-                            Text(confirmation)
-                        } else {
-                            Text(action.label)
-                            KeyCapGroup(keys: action.keys)
-                        }
+                    // Sized by the widest label it ever carries, so a label
+                    // swap (Ask, Stop, Copied) never moves the field.
+                    ZStack(alignment: .trailing) {
+                        primaryLabel(label: Self.widestPrimaryLabel, keys: ["↩"], confirmation: nil)
+                            .hidden()
+                            .accessibilityHidden(true)
+                        primaryLabel(label: action.label, keys: action.keys, confirmation: viewModel.composerConfirmation)
                     }
                     .font(AQDesign.TypeToken.label)
                     .foregroundStyle(AQDesign.ColorToken.textPrimary)

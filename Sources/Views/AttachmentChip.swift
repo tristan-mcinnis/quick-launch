@@ -664,6 +664,7 @@ struct ComposerAttachmentStrip: View {
                     .padding(.horizontal, sideInset + House.Spacing.xxs)
                     .padding(.top, House.Spacing.xs)
                     .accessibilityAddTraits(.updatesFrequently)
+                    .paneOpenTransition()
             }
             if !chips.isEmpty {
                 AttachmentStripView(
@@ -677,8 +678,11 @@ struct ComposerAttachmentStrip: View {
                     selectionPreview: selectionPreview,
                     onTransform: transformAction
                 )
+                .paneOpenTransition()
             }
         }
+        .paneOpenAnimation(value: chips.isEmpty)
+        .paneOpenAnimation(value: tray?.notice != nil)
         .onChange(of: tray?.notice) { _, notice in
             guard let notice else { return }
             QuickAIAnnouncement.post(notice, priority: .medium)

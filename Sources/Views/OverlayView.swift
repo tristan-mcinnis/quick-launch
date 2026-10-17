@@ -143,16 +143,20 @@ struct OverlayView: View {
                         .foregroundStyle(AQDesign.ColorToken.success)
                         .accessibilityLabel("Saved to Screenshots")
                         .help("Saved to Screenshots")
+                        .paneOpenTransition()
                 } else if viewModel.justCopied {
                     Image(systemName: "checkmark.circle.fill")
                         .font(AQDesign.TypeToken.input)
                         .foregroundStyle(AQDesign.ColorToken.success)
                         .accessibilityLabel("Copied to clipboard")
                         .help("Copied to clipboard")
+                        .paneOpenTransition()
                 }
 
                 moreMenu
             }
+            .paneOpenAnimation(value: viewModel.justCopied)
+            .paneOpenAnimation(value: viewModel.justSaved)
             .padding(.horizontal, AQDesign.Space.panel)
             .frame(minHeight: AQDesign.inputHeight)
 
@@ -165,10 +169,16 @@ struct OverlayView: View {
             // only the launch-selection strip: an attached or clipboard
             // selection reaches the same chooser and argument field.
             if viewModel.hasTransformSource {
-                if viewModel.isTransformChooserPresented {
-                    HouseDivider()
-                    TransformChooserPane(viewModel: viewModel)
+                Group {
+                    if viewModel.isTransformChooserPresented {
+                        Group {
+                            HouseDivider()
+                            TransformChooserPane(viewModel: viewModel)
+                        }
+                        .paneOpenTransition()
+                    }
                 }
+                .paneOpenAnimation(value: viewModel.isTransformChooserPresented)
                 if viewModel.isTransformArgumentFieldPresented {
                     HouseDivider()
                     TransformArgumentPane(viewModel: viewModel)
@@ -190,11 +200,17 @@ struct OverlayView: View {
                 AddContextPane(viewModel: viewModel)
             }
 
-            if ComposerAttachmentStrip.hasChips(viewModel: viewModel, tray: activeTray)
-                || activeTray?.notice != nil {
-                HouseDivider()
-                ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray, sideInset: AQDesign.Space.panel)
+            Group {
+                if ComposerAttachmentStrip.hasChips(viewModel: viewModel, tray: activeTray)
+                    || activeTray?.notice != nil {
+                    Group {
+                        HouseDivider()
+                        ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray, sideInset: AQDesign.Space.panel)
+                    }
+                    .paneOpenTransition()
+                }
             }
+            .paneOpenAnimation(value: ComposerAttachmentStrip.hasChips(viewModel: viewModel, tray: activeTray))
 
             if !viewModel.isTransformChooserPresented,
                !viewModel.isTransformArgumentFieldPresented,

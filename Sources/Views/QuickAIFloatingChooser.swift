@@ -13,6 +13,12 @@ struct QuickAIFloatingChooser: View {
     /// The Transform chooser, the model chooser, and Add Context float above
     /// the composer here, where at root they sit inline under the input row.
     var body: some View {
+        Group { chooser }
+            .paneOpenAnimation(value: viewModel.isTransformChooserPresented)
+    }
+
+    @ViewBuilder
+    private var chooser: some View {
         if viewModel.isTransformReviewPresented
             || viewModel.isTransformArgumentFieldPresented
             || viewModel.isSlashCommandPalettePresented
@@ -46,6 +52,7 @@ struct QuickAIFloatingChooser: View {
             .panelShadows()
             .padding(.horizontal, House.Spacing.xs)
             .padding(.bottom, composerHeight)
+            .paneOpenTransition()
         }
     }
 }
