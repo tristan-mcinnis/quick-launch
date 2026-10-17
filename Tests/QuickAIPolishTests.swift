@@ -636,20 +636,11 @@ struct QuickAIPolishTests {
         let vm = make(service: mock)
         vm.input = ""
         #expect(vm.handleTab())
-<<<<<<< ours
         #expect(vm.quickAIEmptyStateHints == ["⌘P opens recent chats"])
         // The key comes from the table, so a rebind renames the hint.
         #expect(vm.quickAIEmptyStateHints[0].hasPrefix(QuickViewModel.recentChatsShortcut.keyCaps.joined()))
         // Tab and @ stay discoverable through the composer placeholder.
         #expect(QuickViewModel.quickAIPlaceholder.contains(String(QuickViewModel.addContextTrigger)))
-=======
-        #expect(vm.quickAIEmptyStateHints == ["⌘P recent chats  ·  ⇧⌘O change model"])
-        // The keys come from the tables, so a rebind renames the hint.
-        #expect(vm.quickAIEmptyStateHints[0].hasPrefix(QuickViewModel.recentChatsShortcut.keyCaps.joined()))
-        #expect(vm.quickAIEmptyStateHints[0].hasSuffix(ResultAction.changeModel.defaultShortcut.keyCaps.joined() + " change model"))
-        // Attaching and commands live in the placeholder, which names the @.
-        #expect(QuickViewModel.quickAIPlaceholder.contains(QuickViewModel.addContextTrigger))
->>>>>>> theirs
 
         vm.input = "@"
         #expect(vm.addContextTriggerDidChange(vm.input), "the @ it names opens Add Context")

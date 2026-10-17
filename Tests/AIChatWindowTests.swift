@@ -851,11 +851,7 @@ struct AIChatWindowTests {
     @Test func theEmptySurfaceAndHeaderNameTheNewKeys() {
         let vm = QuickViewModel(service: MockQuickService())
         vm.openQuickAI()
-<<<<<<< ours
         #expect(vm.quickAIEmptyStateHints[0] == "⌘P opens recent chats")
-=======
-        #expect(vm.quickAIEmptyStateHints.first?.hasPrefix("⌘P recent chats") == true)
->>>>>>> theirs
         #expect(ResultAction.continueInAIChat.title == "Open in AI Chat")
     }
 }

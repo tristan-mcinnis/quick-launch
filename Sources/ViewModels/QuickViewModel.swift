@@ -2923,17 +2923,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return Self.quickAIPlaceholder
     }
 
-<<<<<<< ours
     /// The one quiet line an empty Quick AI surface shows. Add Context and
     /// the commands are named by the composer placeholder and the model by
     /// the header, so only Recent Chats, which nothing else names, is here.
     /// Empty once the surface has anything to draw.
-=======
-    /// The one faint line an empty Quick AI surface shows, naming the two
-    /// ways in the composer placeholder does not (Recent Chats, Change
-    /// Model) with their real keys; attaching and commands are the
-    /// placeholder's. Empty once the surface has anything to draw.
->>>>>>> theirs
     var quickAIEmptyStateHints: [String] {
         guard conversationMessages.isEmpty,
               !isStreaming,
@@ -2942,11 +2935,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
               pendingQuestion == nil,
               lastQuestion == nil
         else { return [] }
-<<<<<<< ours
         return ["\(shortcutLabel(for: .recentChats)) opens recent chats"]
-=======
-        return ["\(shortcutLabel(for: .recentChats)) recent chats  ·  \(shortcutLabel(for: .changeModel)) change model"]
->>>>>>> theirs
     }
 
     /// What Return does from the Quick AI composer right now, drawn inside
