@@ -542,7 +542,7 @@ struct OverlayRenderProofTests {
             let empty = Self.makeViewModel(appearance: preference)
             empty.input = ""
             #expect(empty.handleTab())
-            #expect(empty.quickAIEmptyStateHints.count == 3)
+            #expect(empty.quickAIEmptyStateHints.count == 1)
             try Self.save(
                 try Self.renderQuickAI(empty, appearance: appearance),
                 name: "quick-ai-empty-hints-\(suffix).png"

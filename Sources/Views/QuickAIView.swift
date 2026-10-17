@@ -116,33 +116,18 @@ struct QuickAIView: View {
                 }
                 .accessibilityValue(viewModel.isRecentChatsPresented ? "Open" : "Closed")
             }
-            // Raycast's expand glyph is a boxed up-right arrow; this is the
-            // nearest SF Symbol. As in Raycast it moves the chat to the AI
-            // Chat window (`⌘J`), a labelled button with its key, so moving a
-            // longer conversation is one obvious click. In Recent Chats it
-            // moves the highlighted chat, as `⌘J` does.
-            Button {
+            // The expand glyph moves the chat to the AI Chat window (`⌘J`);
+            // in Recent Chats it moves the highlighted chat, as `⌘J` does.
+            // The tooltip names the action and its key.
+            QuickAIGlyphButton(
+                symbol: "arrow.up.right.square",
+                font: AQDesign.TypeToken.glyphMedium,
+                color: AQDesign.ColorToken.textPrimary,
+                label: ResultAction.continueInAIChat.title,
+                help: "\(ResultAction.continueInAIChat.title) (\(viewModel.shortcutLabel(for: .continueInAIChat)))"
+            ) {
                 viewModel.continueInAIChat()
-            } label: {
-                HStack(spacing: House.Spacing.xs) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(AQDesign.TypeToken.label)
-                    Text(ResultAction.continueInAIChat.title)
-                        .font(AQDesign.TypeToken.label)
-                    KeyCapGroup(keys: viewModel.shortcutKeyCaps(for: .continueInAIChat))
-                }
-                .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                .padding(.horizontal, House.Spacing.sm)
-                .frame(height: House.Control.chip)
-                .background(
-                    RoundedRectangle(cornerRadius: House.Radius.sm, style: .continuous)
-                        .fill(AQDesign.ColorToken.chipFill)
-                )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(ResultAction.continueInAIChat.title)
-            .help("\(ResultAction.continueInAIChat.title) (\(viewModel.shortcutLabel(for: .continueInAIChat)))")
         }
         // A tighter left inset than right: with the compact button and the
         // row gap, the title starts where Raycast's does.
@@ -169,7 +154,6 @@ private struct RecentChatsList: View {
                 SectionLabel(text: "Recent Chats")
                 Spacer()
                 KeyHint(label: "Move", keys: ["↑", "↓"])
-                KeyHint(label: "Open", keys: ["↩"])
                 // Escape clears a search before it leaves the list.
                 KeyHint(label: viewModel.input.isEmpty ? "Back" : "Clear", keys: ["esc"])
             }
@@ -195,7 +179,8 @@ private struct RecentChatsList: View {
                     result: .item(item),
                     isSelected: isSelected,
                     position: index + 1,
-                    total: items.count
+                    total: items.count,
+                    showsTypeLabel: false
                 )
                 .padding(.horizontal, House.Spacing.xs)
             }

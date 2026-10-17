@@ -235,10 +235,7 @@ protocol AIChatWindowPresenting: AnyObject {
     func railDetail(for item: LauncherCatalogItem, now: Date = Date()) -> String {
         guard let facts = railFacts[item.itemID] else { return item.detail }
         let count = facts.questions == 1 ? "1 question" : "\(facts.questions) questions"
-        let stamp = Calendar.current.isDate(facts.updatedAt, inSameDayAs: now)
-            ? facts.updatedAt.formatted(date: .omitted, time: .shortened)
-            : facts.updatedAt.formatted(.dateTime.month(.abbreviated).day())
-        return "\(count) · \(stamp)"
+        return "\(count) · \(QuickViewModel.shortStamp(facts.updatedAt, now: now))"
     }
 
     /// Characters a rail snippet keeps before its hit: the rail is narrow.

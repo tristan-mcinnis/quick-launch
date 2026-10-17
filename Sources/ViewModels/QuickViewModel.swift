@@ -1784,11 +1784,18 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         visibleLauncherItems(searchedChatItems(matching: query))
     }
 
+    /// A chat's time as the lists draw it: the clock today, the day before.
+    static func shortStamp(_ date: Date, now: Date = Date()) -> String {
+        Calendar.current.isDate(date, inSameDayAs: now)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
     /// One chat as a launcher row: its title, question count, and time,
     /// and the snippet when a search found it by its text.
     func conversationItem(_ conversation: QuickConversation, snippet: ChatSnippet? = nil) -> LauncherCatalogItem {
         let turns = conversation.messages.filter { $0.role == .user }.count
-        let stamp = conversation.updatedAt.formatted(date: .abbreviated, time: .shortened)
+        let stamp = Self.shortStamp(conversation.updatedAt)
         let count = turns == 1 ? "1 question" : "\(turns) questions"
         return LauncherCatalogItem(
             kind: .conversation,
@@ -2913,8 +2920,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return Self.quickAIPlaceholder
     }
 
-    /// The three quiet lines an empty Quick AI surface shows, each naming a
-    /// way in with its real key: Add Context, Recent Chats, Change Model.
+    /// The one quiet line an empty Quick AI surface shows. Add Context and
+    /// the commands are named by the composer placeholder and the model by
+    /// the header, so only Recent Chats, which nothing else names, is here.
     /// Empty once the surface has anything to draw.
     var quickAIEmptyStateHints: [String] {
         guard conversationMessages.isEmpty,
@@ -2924,11 +2932,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
               pendingQuestion == nil,
               lastQuestion == nil
         else { return [] }
-        return [
-            "\(Self.addContextTrigger) attaches files, links, or selected text",
-            "\(shortcutLabel(for: .recentChats)) opens recent chats",
-            "\(shortcutLabel(for: .changeModel)) changes the model",
-        ]
+        return ["\(shortcutLabel(for: .recentChats)) opens recent chats"]
     }
 
     /// What Return does from the Quick AI composer right now, drawn inside
