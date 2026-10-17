@@ -148,7 +148,6 @@ struct TranslatorParityTests {
         let (vm, _, pasteboard, _) = await makeLauncher(reply: "こんにちは")
         type("hello in japanese", into: vm)
         await vm.inlineTranslationSettled()
-        #expect(vm.footerHints.contains { $0.label == "To Japanese" && $0.keys == ["⇧", "↩"] })
         await vm.translateInput()
         #expect(pasteboard.string == "こんにちは")
     }

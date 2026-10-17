@@ -95,6 +95,19 @@ struct LauncherCatalogTests {
         #expect(vm.isCatalogActionPanePresented)
     }
 
+    @Test func catalogCountsReadAsPluralsAndTypeLabelsHideWhenUniform() {
+        #expect(QuickViewModel.catalogCountDetail(1) == "1 item")
+        #expect(QuickViewModel.catalogCountDetail(12) == "12 items")
+        let vm = QuickViewModel(launcherCatalog: FakeLauncherCatalog())
+        // Empty launcher: Ask AI plus catalog roots, so kinds differ.
+        #expect(vm.showsRowTypeLabels)
+        vm.enterCatalog(.snippets)
+        #expect(vm.footerHints.map(\.label).allSatisfy { $0 != "Back" && $0 != "Copy" })
+        if vm.catalogMatches.count > 1 {
+            #expect(!vm.showsRowTypeLabels, "every snippet row says Snippet")
+        }
+    }
+
     @Test func snippetsAndQuickLinksCarryTheDetailPane() {
         let service = FakeLauncherCatalog()
         let vm = QuickViewModel(launcherCatalog: service)

@@ -448,7 +448,6 @@ struct ShortcutRegistryTests {
         #expect(vm.setShortcut(replacement, for: .attachWindow) == nil)
 
         #expect(ScreenshotKind.window.overlayKeyCaps(vm.shortcuts) == ["⌥", "⌘", "J"])
-        #expect(vm.footerHints.first { $0.label == "Capture" }?.keys == ["⌥", "⌘", "J"])
         #expect(ScreenshotKind.display.overlayKeyCaps(vm.shortcuts) == ["⇧", "⌘", "D"], "the other kind is untouched")
 
         // The panel intercepts the capture keys before the model sees them;

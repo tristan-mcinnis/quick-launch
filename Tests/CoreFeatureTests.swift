@@ -23,7 +23,7 @@ struct CoreFeatureTests {
         let vm = QuickViewModel(service: mock)
         vm.input = "hello there"
         #expect(vm.translationDirection == .toChinese)
-        #expect(vm.footerHints.map(\.label).contains("To Chinese"))
+        #expect(!vm.footerHints.map(\.label).contains("To Chinese"), "⇧↩ works but is not advertised")
         await vm.translateInput()
         let sent = await mock.lastPrompt ?? ""
         #expect(sent.contains("Simplified Chinese"))

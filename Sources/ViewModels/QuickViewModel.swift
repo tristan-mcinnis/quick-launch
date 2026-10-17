@@ -2457,9 +2457,21 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     private static func displayDetail(_ result: LauncherSearchResult) -> String {
         switch result {
         case .application: "Application"
-        case .catalog(let scope, let count): "\(scope.title), \(count) items"
+        case .catalog(let scope, let count):
+            count > 0 ? "\(scope.title), \(catalogCountDetail(count))" : scope.title
         case .item(let item): item.detail
         }
+    }
+
+    /// "1 item", "12 items"; a zero count is left off by the caller.
+    static func catalogCountDetail(_ count: Int) -> String {
+        count == 1 ? "1 item" : "\(count) items"
+    }
+
+    /// The trailing type label tells rows apart; when every visible row is
+    /// the same kind it only repeats itself.
+    var showsRowTypeLabels: Bool {
+        Set(launcherMatches.map { LauncherResultRow.typeLabel(for: $0) }).count != 1
     }
 
     // MARK: - Footer and badges
@@ -2580,27 +2592,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let matches = launcherMatches
         if !matches.isEmpty {
             let index = min(applicationSelectionIndex, matches.count - 1)
+            // Primary key and ⌘K only; Copy, Capture, ⇧↩ and ⌫ still work.
             var hints = [FooterHint(label: primaryActionTitle(for: matches[index]), keys: ["↩"])]
-            if case .item = matches[index], catalogScope != nil {
-                hints.append(FooterHint(label: "Copy", keys: ["⌘", "C"]))
-            }
-            if catalogScope == nil {
-                if let label = translateHintLabel {
-                    hints.append(FooterHint(label: label, keys: ["⇧", "↩"]))
-                } else {
-                    hints.append(FooterHint(
-                        label: "Capture",
-                        keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
-                    ))
-                }
-            }
             if case .catalog = matches[index] {
                 // Roots have no ⌘K actions.
             } else {
                 hints.append(FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)))
-            }
-            if catalogScope != nil {
-                hints.append(FooterHint(label: "Back", keys: ["⌫"]))
             }
             return hints
         }
@@ -2610,19 +2607,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 FooterHint(label: "Run", keys: ["↩"]),
             ]
         }
-        if catalogScope != nil {
-            return [FooterHint(label: "Back", keys: ["⌫"])]
-        }
-        var hints = [FooterHint(label: input.isEmpty ? "Open" : "Ask", keys: ["↩"])]
-        if let label = translateHintLabel {
-            hints.append(FooterHint(label: label, keys: ["⇧", "↩"]))
-        }
-        hints.append(FooterHint(
-            label: "Capture",
-            keys: ScreenshotKind.window.overlayKeyCaps(shortcuts)
-        ))
-        hints.append(FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)))
-        return hints
+        if catalogScope != nil { return [] }
+        return [
+            FooterHint(label: input.isEmpty ? "Open" : "Ask", keys: ["↩"]),
+            FooterHint(label: "Actions", keys: shortcutKeyCaps(for: .commandPalette)),
+        ]
     }
 
     private func primaryActionTitle(for result: LauncherSearchResult) -> String {
@@ -5363,12 +5352,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, pendingImage == nil, !text.hasPrefix(settings.savedPromptPrefix) else { return nil }
         return TranslationDirection.detect(text)
-    }
-
-    /// The ⇧↩ hint: the inline row's language, else the script's direction.
-    private var translateHintLabel: String? {
-        if let translation = inlineTranslation { return "To \(translation.query.target.title)" }
-        return translationDirection.map { $0 == .toEnglish ? "To English" : "To Chinese" }
     }
 
     /// ⇧↩: translate the typed text, direction from the script (or the

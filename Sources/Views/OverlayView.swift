@@ -420,7 +420,8 @@ struct OverlayView: View {
                     isSelected: isSelected,
                     hotkey: viewModel.hotkey(for: result),
                     position: index + 1,
-                    total: viewModel.launcherMatches.count
+                    total: viewModel.launcherMatches.count,
+                    showsTypeLabel: viewModel.showsRowTypeLabels
                 )
                 .padding(.horizontal, 10)
                 .frame(minHeight: AQDesign.rowHeight, maxHeight: AQDesign.rowHeight)
@@ -569,6 +570,7 @@ struct LauncherResultRow: View {
     var hotkey: ActionHotkey? = nil
     var position: Int? = nil
     var total: Int? = nil
+    var showsTypeLabel = true
 
     var body: some View {
         HStack(spacing: AQDesign.Space.row) {
@@ -604,7 +606,7 @@ struct LauncherResultRow: View {
                     .accessibilityLabel("Hotkey \(hotkey.displayName)")
             } else if let statusLight {
                 StatusLightLabel(light: statusLight)
-            } else if chatSnippet == nil {
+            } else if chatSnippet == nil, showsTypeLabel {
                 Text(resultType)
                     .font(AQDesign.TypeToken.metadata)
                     .foregroundStyle(AQDesign.ColorToken.textTertiary)
@@ -666,7 +668,7 @@ struct LauncherResultRow: View {
     private var detail: String {
         switch result {
         case .application: "Application"
-        case .catalog(_, let count): "\(count) items"
+        case .catalog(_, let count): count > 0 ? QuickViewModel.catalogCountDetail(count) : ""
         case .item(let item): item.detail
         }
     }
