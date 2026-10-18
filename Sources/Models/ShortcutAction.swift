@@ -65,7 +65,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
     /// code kept, through the rich pasteboard representations.
     case pasteFormatted
     case copyAnswer
-    case readAloud
     case saveSnippet
     case searchWeb
     case regenerate
@@ -94,7 +93,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
              .copyChat, .continueInPi, .captureToMemory, .openSource, .chatList,
              .findInChat:
             .chat
-        case .replaceSelection, .pasteBack, .pasteFormatted, .copyAnswer, .readAloud, .saveSnippet,
+        case .replaceSelection, .pasteBack, .pasteFormatted, .copyAnswer, .saveSnippet,
              .searchWeb, .regenerate, .regenerateWithModel, .transformChooser,
              .transcriptCollapse:
             .answer
@@ -129,7 +128,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .pasteBack: "Paste into Previous App"
         case .pasteFormatted: "Paste Formatted Response"
         case .copyAnswer: "Copy Answer"
-        case .readAloud: "Read Aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
@@ -167,7 +165,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .pasteBack: "Paste the answer into the app behind"
         case .pasteFormatted: "Paste into the app behind with headings, lists and links kept"
         case .copyAnswer: "Copy the answer to the clipboard"
-        case .readAloud: "Speak the answer with the local voice"
         case .saveSnippet: "Keep the answer as a launcher snippet"
         case .searchWeb: "Search the web for the answer's question"
         case .regenerate: "Ask the last question again"
@@ -217,7 +214,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         // Clipboard History global).
         case .pasteFormatted: .controlCommand("v")
         case .copyAnswer: .commandShift("c")
-        case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")
@@ -255,7 +251,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .pasteBack: .pasteBack
         case .pasteFormatted: .pasteFormatted
         case .copyAnswer: .copy
-        case .readAloud: .readAloud
         case .saveSnippet: .saveSnippet
         case .searchWeb: .searchWeb
         case .regenerate: .regenerate
@@ -275,7 +270,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Sendable, Codable {
         case .copyChat: .copyChat
         case .continueInPi: .continueInPi
         case .continueInAIChat: .continueInAIChat
-        case .readAloud: .readAloud
         case .saveSnippet: .saveSnippet
         case .searchWeb: .searchWeb
         case .regenerate: .regenerate

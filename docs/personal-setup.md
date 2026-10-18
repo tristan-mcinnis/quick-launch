@@ -38,7 +38,7 @@ app. The README lists the integrations in general terms.
   collector is `screenctx` (memory-screenctx); Memory.app switches it on and
   off. Quick Launch's own collector was retired on 2026-09-26.
 - The Local Models provider points at the local-models daemon on
-  `127.0.0.1:8078`. Read aloud uses Local TTS on `127.0.0.1:8081`.
+  `127.0.0.1:8078`.
 - The house Swift rule is `../design-system/SWIFT.md`. This repo is its
   reference implementation (macOS 26, swift-tools 6.2, Swift Testing).
 - The Claude Code hooks in `.claude/` run `../design-system/bin/design-lint`

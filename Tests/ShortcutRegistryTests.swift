@@ -158,7 +158,7 @@ struct ShortcutRegistryTests {
             // Known id, extra modifier noise: kept, normalized.
             "openSource": ["keyCode": 5, "modifiers": modifiers([.command, .capsLock, .function])],
             // Known id, a key that is not a shortcut: dropped.
-            "readAloud": ["keyCode": 37, "modifiers": modifiers([.shift])],
+            "searchWeb": ["keyCode": 37, "modifiers": modifiers([.shift])],
             // Known id, the built-in value: dropped, so it stays a default.
             "newChat": ["keyCode": 45, "modifiers": modifiers([.command])],
             // An id this build does not know: dropped.
@@ -169,7 +169,7 @@ struct ShortcutRegistryTests {
             from: try JSONSerialization.data(withJSONObject: object)
         )
         #expect(decoded.shortcutOverrides["openSource"] == ActionHotkey(keyCode: 5, modifiers: modifiers([.command])))
-        #expect(decoded.shortcutOverrides["readAloud"] == nil)
+        #expect(decoded.shortcutOverrides["searchWeb"] == nil)
         #expect(decoded.shortcutOverrides["newChat"] == nil)
         #expect(decoded.shortcutOverrides["notAnAction"] == nil)
         #expect(decoded.shortcuts.isCustomized(.openSource))
@@ -245,7 +245,7 @@ struct ShortcutRegistryTests {
         ]
         for key in rowKeys {
             var settings = QuickSettings()
-            let message = settings.setShortcut(key, for: .readAloud)
+            let message = settings.setShortcut(key, for: .searchWeb)
             #expect(message?.hasPrefix("That key is fixed:") == true, "\(key.displayName) must be reserved")
             #expect(settings.shortcutOverrides.isEmpty)
         }

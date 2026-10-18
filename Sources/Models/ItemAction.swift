@@ -507,7 +507,6 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     /// to the AI Chat window; the launcher closes. Raycast's key for the
     /// same move.
     case continueInAIChat
-    case readAloud
     case saveSnippet
     case searchWeb
     case regenerate
@@ -543,7 +542,6 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copyChat: "Copy Chat"
         case .continueInPi: "Continue in pi"
         case .continueInAIChat: "Open in AI Chat"
-        case .readAloud: "Read aloud"
         case .saveSnippet: "Save Answer as Snippet"
         case .searchWeb: "Search the Web for Answer"
         case .regenerate: "Regenerate Answer"
@@ -572,7 +570,6 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .copyChat: "text.bubble"
         case .continueInPi: "terminal"
         case .continueInAIChat: "macwindow"
-        case .readAloud: "speaker.wave.2"
         case .saveSnippet: "text.badge.plus"
         case .searchWeb: "magnifyingglass"
         case .regenerate: "arrow.clockwise"
@@ -621,7 +618,6 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
         case .continueInPi: .commandOption("p")
         // Raycast's key for the same move. Recent Chats moved to `⌘P`.
         case .continueInAIChat: .command("j")
-        case .readAloud: .command("l")
         case .saveSnippet: .commandShift("n")
         case .searchWeb: .commandShift("w")
         case .regenerate: .command("r")
@@ -650,7 +646,7 @@ enum ResultAction: String, CaseIterable, Identifiable, Sendable {
     /// own: what the action works on. The answer on screen, or the chat.
     var paletteGroup: String {
         switch self {
-        case .replaceSelection, .pasteBack, .pasteFormatted, .copy, .readAloud, .saveSnippet, .searchWeb,
+        case .replaceSelection, .pasteBack, .pasteFormatted, .copy, .saveSnippet, .searchWeb,
              .regenerate, .regenerateWithModel, .openSource, .captureToMemory:
             "Answer"
         case .copyChat, .continueInPi, .continueInAIChat, .changeModel, .changeAssistant,

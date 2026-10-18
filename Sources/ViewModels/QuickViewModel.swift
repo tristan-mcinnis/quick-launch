@@ -451,9 +451,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var caffeinateEndsAt: Date?
     var caffeinateReason: String?
     private var caffeinateCountdownTask: Task<Void, Never>?
-    /// True while local-tts is playing a Read Aloud request; shows the Stop
-    /// Reading row.
-    var isSpeaking: Bool = false
     /// Clock for anything time-derived in the launcher rows; tests pin it.
     var now: () -> Date = Date.init
     /// Typing-capture modes beyond Quick Link input.
@@ -814,8 +811,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// cannot reach. Nil until that window has been built.
     @ObservationIgnored var ownWindowLayout: (any OwnWindowLaying)?
     var caffeinateManager: (any CaffeinateManaging)?
-    /// The on-device voice for Read Aloud. Nil in a build without local-tts wired.
-    var localSpeechService: (any LocalSpeechServicing)?
     var screenshotService: (any ScreenshotCapturing)?
     var screenAwareness: (any ScreenAwarenessReading)?
     /// AppKit seams (pasteboard, Finder/URL opening, running apps, displays).
@@ -1019,7 +1014,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         pageReader: (any WebPageReading)? = nil,
         windowManager: (any WindowManaging)? = nil,
         caffeinateManager: (any CaffeinateManaging)? = nil,
-        localSpeechService: (any LocalSpeechServicing)? = nil,
         launcherUsage: LauncherUsageStore? = nil,
         interactionJournal: InteractionJournalStore? = nil,
         screenshotService: (any ScreenshotCapturing)? = nil,
@@ -1055,7 +1049,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.pageReader = pageReader
         self.windowManager = windowManager
         self.caffeinateManager = caffeinateManager
-        self.localSpeechService = localSpeechService
         self.launcherUsage = launcherUsage ?? LauncherUsageStore(fileURL: nil)
         self.interactionJournal = interactionJournal ?? InteractionJournalStore(fileURL: nil)
         self.interactionJournal.retentionDays = settings.interactionJournalRetentionDays
@@ -1460,7 +1453,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             ),
         ]
         let caffeine = caffeinateStatusRow
-        let readAloud = speechReadAloudRow
         let translate = LauncherCatalogItem(
             kind: .command,
             itemID: "translate.mode",
@@ -1492,9 +1484,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         commands.append(contentsOf: screenshots)
         // Only the status row lives at the root: typing "caffeinate" answers
         // "is it on?" in one line. Timers and Agent Watch sit in the catalog.
-        commands.append(contentsOf: [translate, typeToClick, caffeine, readAloud])
+        commands.append(contentsOf: [translate, typeToClick, caffeine])
         if aiChatOpener != nil { commands.append(aiChatCommand) }
-        if let speechStopRow { commands.append(speechStopRow) }
         commands.append(settings)
         commands.append(contentsOf: utilityCommands)
         // Everything the other house apps publish, last: this app's own
@@ -1571,128 +1562,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             statusLight: settings.caffeinateAgentWatch ? .on : .off
         )
         return [caffeinateStatusRow] + timed + [until, agentWatch]
-    }
-
-    // MARK: - Read Aloud
-
-    /// What Return will send to local-tts, and why: the selection Ask AI
-    /// captured, else the clipboard, else the last answer, else nothing.
-    private enum SpeechSource {
-        case selection(String)
-        case clipboard(String)
-        case answer(String)
-        case none
-
-        var text: String? {
-            switch self {
-            case .selection(let text), .clipboard(let text), .answer(let text): text
-            case .none: nil
-            }
-        }
-
-        var detail: String {
-            switch self {
-            case .selection: "the selected text"
-            case .clipboard: "the clipboard"
-            case .answer: "the last answer"
-            case .none: "Select some text first"
-            }
-        }
-    }
-
-    /// Peeks at the current selection without prompting for Accessibility
-    /// access, the same `promptForPermission: false` seam the web-search
-    /// fallback uses, so a row's detail never surprises the user with a
-    /// permission dialog.
-    private var speechReadAloudSource: SpeechSource {
-        if let text = captureSelectedText(promptForPermission: false)?.text,
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .selection(text)
-        }
-        if let text = pasteboard.readString(),
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .clipboard(text)
-        }
-        if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .answer(output)
-        }
-        return .none
-    }
-
-    /// The one Read Aloud row at the launcher root. Its detail says what
-    /// Return will read; when nothing is available it nudges the user
-    /// instead of disappearing, since this repo has no disabled-row concept.
-    var speechReadAloudRow: LauncherCatalogItem {
-        LauncherCatalogItem(
-            kind: .command,
-            itemID: "speech.readAloud",
-            title: "Read Aloud",
-            detail: speechReadAloudSource.detail,
-            value: "speech.readAloud",
-            keywords: "tts text to speech speak voice read aloud say"
-        )
-    }
-
-    /// Appears only while local-tts is playing; Return kills the player.
-    var speechStopRow: LauncherCatalogItem? {
-        guard isSpeaking else { return nil }
-        return LauncherCatalogItem(
-            kind: .command,
-            itemID: "speech.stop",
-            title: "Stop Reading",
-            detail: "Stop the current Read Aloud playback",
-            value: "speech.stop",
-            keywords: "stop reading tts speech",
-            statusLight: .on
-        )
-    }
-
-    /// Speaks `text`, or — called with no argument from the Read Aloud
-    /// command row — resolves it from the selection, the clipboard, or the
-    /// last answer. Checks local-tts health first so a dead service reports
-    /// itself instead of failing silently; the panel stays open to show
-    /// that error, exactly like the other screen helper
-    /// (`copyTextFromScreenArea`).
-    func performReadAloud(text explicitText: String? = nil) async {
-        guard let localSpeechService else {
-            errorMessage = "Local TTS is not available in this build."
-            requestInputFocus()
-            return
-        }
-        let resolved = explicitText ?? speechReadAloudSource.text
-        guard let text = resolved, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Select some text first."
-            requestInputFocus()
-            return
-        }
-        guard await localSpeechService.isHealthy() else {
-            errorMessage = "Local TTS is not running"
-            requestInputFocus()
-            return
-        }
-        if explicitText == nil {
-            input = ""
-            overlayPresenter.dismissOverlay()
-        }
-        errorMessage = nil
-        isSpeaking = true
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.isSpeaking = false }
-            do {
-                try await localSpeechService.speak(text)
-            } catch is CancellationError {
-                // Stop Reading was pressed; not an error.
-            } catch {
-                self.errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    /// Return on the Stop Reading row: kills the afplay child via the
-    /// actor's cancellation seam.
-    func stopReadAloud() async {
-        await localSpeechService?.stop()
     }
 
     /// "42 min" / "1 hr 5 min" until `until`; empty once it has passed.
@@ -4489,7 +4358,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if offersContinueInAIChat { actions.append(.continueInAIChat) }
         if fileOpener != nil, !answerSources.isEmpty { actions.append(.openSource) }
         if hasAnswer {
-            actions.append(contentsOf: [.readAloud, .saveSnippet])
+            actions.append(.saveSnippet)
             if memoryCapture != nil { actions.append(.captureToMemory) }
             actions.append(contentsOf: [.searchWeb, .pasteFormatted])
         }
@@ -4604,9 +4473,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .continueInAIChat:
             isActionPalettePresented = false
             continueInAIChat()
-        case .readAloud:
-            isActionPalettePresented = false
-            await performReadAloud(text: output)
         case .saveSnippet:
             saveOutputAsSnippet()
         case .searchWeb:
@@ -5606,17 +5472,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             errorMessage = nil
             input = ""
             requestInputFocus()
-            return
-        }
-
-        if item.value == "speech.readAloud" {
-            Task { await performReadAloud() }
-            return
-        }
-
-        if item.value == "speech.stop" {
-            input = ""
-            Task { await stopReadAloud() }
             return
         }
 

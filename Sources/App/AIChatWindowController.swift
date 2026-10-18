@@ -538,8 +538,7 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     // MARK: - OverlayPresenting (the window's view model)
 
     func presentOverlay() { showWindow() }
-    /// The window stays: a copy, a hand-off to pi, or a Read Aloud never
-    /// closes it. `⌘W` and the close button do.
+    /// The window stays: a copy or a hand-off to pi never closes it. `⌘W` and the close button do.
     func dismissOverlay() {}
     func openSettings() { app?.openSettings() }
     func openTranslator() { app?.openTranslator() }

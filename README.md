@@ -88,7 +88,6 @@ on them.
 | Skills tool | Skill folders with a `SKILL.md` in `~/.claude/skills` | The tool is not offered. |
 | Memory and Tasks tools, Capture to Memory | A `recall` CLI on `PATH` | The tools are not offered; Capture says recall is not installed. |
 | Vault tool and Vault Search, SearXNG web search, page-reader fallback | An SSH host alias for your own server in `~/.ssh/config` (the "House server"; set its name with `defaults write com.tristanmcinnis.quick-launch HouseServerHost <alias>`) | The Vault tool is not offered, Vault Search says it is unavailable, Automatic web search uses the next backend, and pages are read directly. |
-| Read aloud | [Local TTS](https://github.com/tristan-mcinnis/local-tts) running on `127.0.0.1:8081` | Says Local TTS is not running. |
 | Continue in pi | `tmux` and `pi` on `PATH` | Settings shows what is missing. |
 
 **Settings › General › Chat** shows which of these it found.
@@ -234,7 +233,6 @@ Quick Launch is one of a small family of free, local-first Mac tools that share 
 |---|---|
 | **[Quick Launch](https://github.com/tristan-mcinnis/quick-launch)** | Keyboard-first launcher and instant AI overlay. |
 | [Local Dictation](https://github.com/tristan-mcinnis/local-dictation) | Hold a key, talk, and on-device text lands at your cursor. |
-| [Local TTS](https://github.com/tristan-mcinnis/local-tts) | Fast on-device voice cloning and text-to-speech. |
 | [Local Models](https://github.com/tristan-mcinnis/local-models) | One local daemon that serves a fleet of small models to every app. |
 | [Usage](https://github.com/tristan-mcinnis/usage-menubar) | One menu-bar gauge for every AI subscription and API key. |
 | [RTI](https://github.com/tristan-mcinnis/rti) | Meeting recorder with live transcription and a real-time copilot. |

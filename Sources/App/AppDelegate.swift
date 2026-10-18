@@ -248,7 +248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         watcher: agentSessions,
         power: powerSources
     )
-    private let localSpeechService = LocalSpeechService()
     private let launcherUsage = LauncherUsageStore(fileURL: LauncherUsageStore.defaultFileURL())
     private let interactionJournal = InteractionJournalStore(
         fileURL: InteractionJournalStore.defaultFileURL()
@@ -275,7 +274,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
-            localSpeechService: localSpeechService,
             launcherUsage: launcherUsage,
             interactionJournal: interactionJournal,
             screenshotService: screenshotService,
@@ -1675,7 +1673,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             webSearchService: webSearchService,
             vaultSearchService: vaultSearchService,
             pageReader: pageReader,
-            localSpeechService: localSpeechService,
             launcherUsage: launcherUsage,
             interactionJournal: interactionJournal,
             screenshotService: screenshotService,

@@ -430,7 +430,7 @@ struct ChatListsTests {
         for action in chatLevel {
             #expect(action.paletteGroup == "Chat", "\(action.title)")
         }
-        for action in [ResultAction.copy, .pasteBack, .regenerate, .readAloud, .saveSnippet, .searchWeb] {
+        for action in [ResultAction.copy, .pasteBack, .regenerate, .saveSnippet, .searchWeb] {
             #expect(action.paletteGroup == "Answer", "\(action.title)")
         }
         // What the palette draws: an action's own detail, else its group.

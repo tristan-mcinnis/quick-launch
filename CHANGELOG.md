@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-10-17
 
+- **Read Aloud is removed.** The Read Aloud and Stop Reading commands, the
+  answer's Read aloud action and its `⌘L` key are gone, along with the client
+  for the Local TTS service, which is retired. Saved settings that name them
+  (a rebound key, a Fallback Commands row, an alias, a hotkey or a pin) drop
+  those entries on load; every other setting still applies.
+
 - **Type "good morning in japanese" to translate from the launcher.** Root
   search reads `<text> in <language>` (or `into`) the way Raycast's
   Translator does. A row shows the live translation from the chosen model.

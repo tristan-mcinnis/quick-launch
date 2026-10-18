@@ -91,6 +91,35 @@ struct QuickSettingsTests {
         #expect(loaded.launcherItemConfigurations.map(\.id) == ["folder:downloads"])
     }
 
+    /// Read Aloud and Stop Reading are gone. A saved shortcut, Fallback
+    /// Commands row, alias or hotkey that names one drops on load, and every
+    /// other saved value still applies.
+    @Test func settingsNamingReadAloudDropOnlyThoseEntries() throws {
+        let defaults = freshDefaults()
+        let saved: [String: Any] = [
+            "configurationVersion": 26,
+            "autoCopy": false,
+            "shortcutOverrides": [
+                "readAloud": ["keyCode": 37, "modifiers": 1_048_576 | 524_288],
+                "openSource": ["keyCode": 5, "modifiers": 1_048_576],
+            ],
+            "fallbackCommandIDs": ["command:speech.readAloud", "askAI:ask", "command:speech.stop"],
+            "launcherItemConfigurations": [
+                ["kind": "command", "itemID": "speech.readAloud", "alias": "say", "isPinned": true, "isHidden": false,
+                 "hotkey": ["keyCode": 37, "modifiers": 1_048_576 | 524_288]],
+                ["kind": "command", "itemID": "speech.stop", "alias": "", "isPinned": false, "isHidden": true],
+                ["kind": "folder", "itemID": "downloads", "alias": "dl", "isPinned": false, "isHidden": false],
+            ],
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: saved), forKey: QuickSettings.defaultsKey)
+
+        let loaded = QuickSettings.load(from: defaults)
+        #expect(loaded.autoCopy == false, "the other settings survive")
+        #expect(loaded.shortcutOverrides.keys.sorted() == ["openSource"])
+        #expect(loaded.fallbackCommandIDs == [FallbackCommandID.askAI])
+        #expect(loaded.launcherItemConfigurations.map(\.id) == ["folder:downloads"])
+    }
+
     @Test func typeToClickContinuationPersistsAndLegacySettingsStayContinuous() throws {
         let defaults = freshDefaults()
         var settings = QuickSettings()

@@ -117,6 +117,15 @@ enum FallbackCommandID {
         let itemID = String(identifier.dropFirst("command:".count))
         return itemID.isEmpty ? nil : itemID
     }
+
+    /// Command rows earlier builds offered and this one does not. Settings
+    /// that name one (a Fallback Commands row, an alias, a hotkey) drop it on
+    /// load, so the rest of the saved settings still decode and apply.
+    static let retiredCommandItemIDs: Set<String> = ["speech.readAloud", "speech.stop"]
+
+    static func isRetired(_ identifier: String) -> Bool {
+        commandItemID(from: identifier).map(retiredCommandItemIDs.contains) ?? false
+    }
 }
 
 struct QuickSettings: Codable, Sendable {
@@ -333,11 +342,12 @@ struct QuickSettings: Codable, Sendable {
         savedPrompts = try c.decodeIfPresent([SavedPrompt].self, forKey: .savedPrompts) ?? SavedPrompt.defaults
         // Lossy: a record whose kind was retired (Screen History rows) is
         // dropped, instead of failing the whole blob and resetting every
-        // setting to its default.
-        launcherItemConfigurations = try c.decodeIfPresent(
+        // setting to its default. A record for a retired command goes too.
+        launcherItemConfigurations = (try c.decodeIfPresent(
             LossyDecodableArray<LauncherItemConfiguration>.self,
             forKey: .launcherItemConfigurations
-        )?.elements ?? (Self.defaultWindowConfigurations + Self.defaultFolderConfigurations)
+        )?.elements ?? (Self.defaultWindowConfigurations + Self.defaultFolderConfigurations))
+            .filter { !FallbackCommandID.isRetired($0.id) }
         launcherLearningEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .launcherLearningEnabled
@@ -482,10 +492,10 @@ struct QuickSettings: Codable, Sendable {
         ) ?? true
         quickAIProviderID = try c.decodeIfPresent(UUID.self, forKey: .quickAIProviderID)
         quickAIModel = try c.decodeIfPresent(String.self, forKey: .quickAIModel) ?? ""
-        fallbackCommandIDs = try c.decodeIfPresent(
+        fallbackCommandIDs = (try c.decodeIfPresent(
             [String].self,
             forKey: .fallbackCommandIDs
-        ) ?? [FallbackCommandID.askAI]
+        ) ?? [FallbackCommandID.askAI]).filter { !FallbackCommandID.isRetired($0) }
         reopenRetentionSeconds = try c.decodeIfPresent(
             Int.self,
             forKey: .reopenRetentionSeconds

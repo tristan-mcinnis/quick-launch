@@ -94,7 +94,7 @@ The same key means the same thing on every layer.
 | `⌥⌘I` with selected text | Preview the complete selected passage before sending |
 | `⌥⌘T` | With a selected-text chip: open or close the Transform chooser (Make Shorter, Turn into Bullets, Improve Writing, Summarize, Translate) |
 | `⇧⌘M` | Fold or unfold the newest long question in the thread |
-| `⌘L` / `⇧⌘W` | Read the answer aloud / search the web for it |
+| `⇧⌘W` | Search the web for the answer |
 | `↑` on an empty Quick AI composer | Put the last question back in the composer; `↓` does nothing there |
 | `PageUp` `PageDown` / `⌥↑` `⌥↓` / `⌘↑` `⌘↓` | Scroll the Quick AI thread by a page / by a page / to the top or bottom |
 | `⇧⌘S` | Open the capture chooser: Selected Text, Focused Window, Selected Area, Entire Screen. Return attaches the highlighted row, in Quick Launch or AI Chat |
