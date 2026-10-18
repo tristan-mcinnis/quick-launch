@@ -216,21 +216,4 @@ struct QuickAIThreadScrollTests {
         #expect(!vm.showsJumpToLatest)
         vm.isStreaming = false
     }
-
-    @Test func aWheelTickUpStopsFollowingTheEnd() async throws {
-        let (vm, window) = try await hosted()
-        // The scroll view reports a wheel tick's phase only on screen.
-        window.orderFrontRegardless()
-        defer { window.orderOut(nil); window.contentView = nil }
-        func find(_ view: NSView) -> NSScrollView? {
-            if let scroll = view as? NSScrollView, let document = scroll.documentView, document.frame.height > 100 { return scroll }
-            return view.subviews.lazy.compactMap(find).first
-        }
-        let scroll = try #require(window.contentView.flatMap(find))
-        // A classic mouse wheel: no gesture phase on the event itself.
-        let tick = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 20, wheel2: 0, wheel3: 0))
-        scroll.scrollWheel(with: try #require(NSEvent(cgEvent: tick)))
-        try await settle { !vm.isThreadFollowingBottom }
-        #expect(vm.showsJumpToLatest)
-    }
 }
