@@ -981,12 +981,14 @@ private final class ContinuingTypeToClickService: TypeToClickServicing, @uncheck
     func isAccessibilityTrusted(prompt: Bool) -> Bool { true }
 
     func targets(in pid: pid_t) -> TypeToClickScanResult {
-        let shouldFulfillRescan = lock.withLock {
+        let scan = lock.withLock {
             scans += 1
-            return scans == 2
+            return scans
         }
-        if shouldFulfillRescan { rescanned.fulfill() }
-        let label = shouldFulfillRescan ? "Open" : "File"
+        if scan == 2 { rescanned.fulfill() }
+        // The opened menu stays open: a busy machine can run a third scan
+        // (type-ahead and the post-action refresh both ask for one).
+        let label = scan >= 2 ? "Open" : "File"
         return TypeToClickScanResult(targets: [
             TypeToClickTarget(
                 element: AXUIElementCreateSystemWide(),

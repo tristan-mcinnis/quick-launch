@@ -210,14 +210,20 @@ struct QuickAIThread: View {
             if turnGeometry.restoring != nil, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { restoreAnchor() }
             noteLanding(new)
             recordAnchor(new)
-            // Only a move of the view (the reader's scroll, or one the
-            // thread made) decides whether it follows the bottom; text
-            // landing under a still view does not. A scroll the thread
-            // animates is judged where it lands, not on its first frame.
+            // A scroll to the end lands short while the lazy stack still
+            // estimates heights; once it re-measures, finish the move.
+            if scrollPhase == .idle, old.contentHeight != new.contentHeight,
+               turnGeometry.anchoring == nil, !isHoldingChat,
+               new.distanceFromBottom > QuickViewModel.threadFollowThreshold { followBottom() }
+            // Only the reader's own scroll (a gesture or a wheel tick, both
+            // reported as interacting) decides whether it follows the
+            // bottom. A scroll the thread made can land short while the lazy
+            // stack still estimates heights, and re-measured rows shift the
+            // view; neither is the reader leaving the end.
             if !isHoldingChat {
                 viewModel.threadDidScroll(
                     distanceFromBottom: new.distanceFromBottom,
-                    moved: old.top != new.top && scrollPhase != .animating
+                    moved: old.top != new.top && (scrollPhase == .interacting || scrollPhase == .decelerating)
                 )
             }
         }
@@ -828,8 +834,12 @@ struct QuickAIThread: View {
     private func noteLanding(_ geometry: ThreadGeometry) {
         guard isHoldingChat || turnGeometry.restoring != nil else { return }
         if let anchor = turnGeometry.restoring {
-            guard let top = turnGeometry.tops[anchor.messageID],
+            // A saved spot is never in a thread that fits its view: until
+            // the chat outgrows it, the last chat's layout is still showing.
+            guard !geometry.fitsView, let top = turnGeometry.tops[anchor.messageID],
                   abs(geometry.top - anchor.scrollTop(messageTop: top, maximumTop: geometry.maximumTop)) < 1 else { return }
+            // The saved spot is the reader's own: judged where it landed.
+            viewModel.threadDidScroll(distanceFromBottom: geometry.distanceFromBottom)
             revealChat()
         } else if viewModel.isThreadFollowingBottom, geometry.contentHeight > 0,
                   geometry.distanceFromBottom <= QuickViewModel.threadFollowThreshold {
