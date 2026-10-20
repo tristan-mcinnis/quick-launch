@@ -18,7 +18,7 @@ struct QuickAITitleBlock: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let source = viewModel.answerSourceTitle {
-                // A command's output or a Vault Search is not the model's:
+                // A command's output is not the model's:
                 // the line names where the answer came from.
                 Text(source)
                     .font(AQDesign.TypeToken.metadata)

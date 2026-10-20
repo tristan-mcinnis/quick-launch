@@ -2,7 +2,7 @@
 //
 // Hosts the real OverlayView on the Quick AI surface offscreen, in both
 // appearances, and writes PNGs to /tmp/quick-launch-render-proof/:
-//   c-quick-ai-tools-thread-{dark,light}.png     memory and vault lines, the
+//   c-quick-ai-tools-thread-{dark,light}.png     memory and task lines, the
 //                                                answer, its sources, and the
 //                                                Capture to Memory checkmark
 //   c-quick-ai-tools-streaming-{dark,light}.png  a finished call's line and
@@ -30,15 +30,15 @@ struct ChatToolsRenderProofTests {
             ChatSource(title: "episodic/2026-09-06.md", day: "2026-09-06", path: "/Users/test/memory/episodic/2026-09-06.md"),
         ]
     )
-    private static let vaultLine = ChatToolRecord(
-        kind: .vault,
-        summary: "Searched vault · current: 6 results",
+    private static let tasksLine = ChatToolRecord(
+        kind: .today,
+        summary: "Read tasks: 6 results",
         sources: [
-            ChatSource(title: "Acme Launch status", day: "2026-08-24", path: "/Users/test/vault/kb/databases/projects/acme-launch/00-status.md"),
-            ChatSource(title: "Brief from the client", day: "2026-08-20", path: "/Users/test/vault/kb/databases/emails/brief.md"),
+            ChatSource(title: "Acme Launch status", day: "2026-08-24", path: "/Users/test/memory/kb/databases/projects/acme-launch/00-status.md"),
+            ChatSource(title: "Brief from the client", day: "2026-08-20", path: "/Users/test/memory/kb/databases/emails/brief.md"),
         ]
     )
-    private static let answer = "You picked the **long deck** on 3 September, and the vault still agrees: the Acme Launch status (24 August) names it the current cross-functional reference. The client's brief asks for the consumer section to be rebuilt first."
+    private static let answer = "You picked the **long deck** on 3 September, and the tasks still agree: the Acme Launch status (24 August) names it the current cross-functional reference. The client's brief asks for the consumer section to be rebuilt first."
 
     private static func makeViewModel(_ appearance: NSAppearance.Name) -> (QuickViewModel, MockQuickService) {
         var settings = QuickSettings()
@@ -50,7 +50,6 @@ struct ChatToolsRenderProofTests {
             settings: settings,
             service: mock,
             webSearchService: GatedWebSearchService(result: ""),
-            vaultSearchService: FakeVault(outcome: .failure(VaultSearchError.empty)),
             pasteboard: FakePasteboard()
         )
         vm.fileOpener = FakeFileOpener()
@@ -63,13 +62,13 @@ struct ChatToolsRenderProofTests {
         [(.darkAqua, "dark"), (.aqua, "light")]
     }
 
-    /// An answered thread: the question, the memory and vault lines above
+    /// An answered thread: the question, the memory and task lines above
     /// the answer, the four sources under it, and the capture checkmark.
     private static func answered(_ appearance: NSAppearance.Name) async -> QuickViewModel {
         let (vm, mock) = makeViewModel(appearance)
         await mock.setResponses([
             StreamDelta(text: nil, finishReason: nil, toolRecord: memoryLine),
-            StreamDelta(text: nil, finishReason: nil, toolRecord: vaultLine),
+            StreamDelta(text: nil, finishReason: nil, toolRecord: tasksLine),
             StreamDelta(text: answer, finishReason: "stop"),
         ])
         let memory = FakeMemory()
@@ -85,7 +84,7 @@ struct ChatToolsRenderProofTests {
         for (appearance, suffix) in Self.appearances() {
             let vm = await Self.answered(appearance)
             let message = try #require(vm.conversationMessages.last)
-            #expect(message.tools.map(\.kind) == [.memory, .vault, .capture])
+            #expect(message.tools.map(\.kind) == [.memory, .today, .capture])
             #expect(message.sources.count == 4)
             #expect(vm.isQuickAIPresented)
             let image = try Self.render(vm, appearance: appearance)
@@ -107,7 +106,7 @@ struct ChatToolsRenderProofTests {
             vm.isStreaming = true
             vm.noteLiveToolRecord(ChatToolRecord(kind: .today, summary: "Read today: 2 captures, 31 open tasks"))
             vm.noteLiveToolRecord(ChatToolRecord(kind: .skill, summary: "Read skill: float"))
-            vm.streamingStatus = "Searching the vault…"
+            vm.streamingStatus = "Searching memory…"
             try Self.save(try Self.render(vm, appearance: appearance), name: "c-quick-ai-tools-streaming-\(suffix).png")
         }
     }
@@ -118,7 +117,7 @@ struct ChatToolsRenderProofTests {
         for (appearance, suffix) in Self.appearances() {
             let records = [
                 Self.memoryLine,
-                Self.vaultLine,
+                Self.tasksLine,
                 ChatToolRecord(kind: .skill, summary: "Read skill: float"),
                 ChatToolRecord(kind: .today, summary: "Today's tasks failed", failed: true),
             ]

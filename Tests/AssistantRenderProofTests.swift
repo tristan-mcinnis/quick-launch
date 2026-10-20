@@ -24,6 +24,8 @@ struct AssistantRenderProofTests {
         settings.appearance = appearance
         settings.historyEnabled = false
         settings.autoCopy = false
+        let steIndex = settings.savedPrompts.firstIndex { $0.alias == "ste" } ?? settings.savedPrompts.endIndex
+        settings.savedPrompts.insert(AssistantQuickAITests.researcher, at: steIndex)
         return QuickViewModel(settings: settings, service: service, pasteboard: FakePasteboard())
     }
 
@@ -32,16 +34,16 @@ struct AssistantRenderProofTests {
             // Just picked: the empty surface, the assistant on the model line.
             let pickedMock = MockQuickService()
             let picked = Self.makeViewModel(preference, service: pickedMock)
-            picked.input = "/vault"
+            picked.input = "/researcher"
             await picked.submitResolvingFuzzyAlias()
-            #expect(picked.activeAssistant?.name == "Vault researcher")
+            #expect(picked.activeAssistant?.name == "Memory researcher")
             #expect(picked.quickAITitle == "Quick AI")
             try Self.save(try Self.renderQuickAI(picked, appearance: appearance), name: "d-quick-ai-assistant-picked-\(suffix).png")
 
-            // After an answer: the chat title over "Vault researcher · model".
+            // After an answer: the chat title over "Memory researcher · model".
             let answeredMock = MockQuickService()
             let answered = Self.makeViewModel(preference, service: answeredMock)
-            answered.input = "/vault"
+            answered.input = "/researcher"
             await answered.submit()
             await answeredMock.setResponses([StreamDelta(
                 text: "The pricing decision is in **projects/acme/decisions.md** (2026-08-14): hold the day rate at the 2025 level for Q3.",
@@ -63,9 +65,9 @@ struct AssistantRenderProofTests {
     @Test func rendersTheSavedPromptsEditorAssistantCard() async throws {
         for (appearance, preference, suffix) in Self.appearances {
             let vm = Self.makeViewModel(preference, service: MockQuickService())
-            let index = try #require(vm.settings.savedPrompts.firstIndex { $0.alias == "vault" })
+            let index = try #require(vm.settings.savedPrompts.firstIndex { $0.alias == "researcher" })
             // Chosen tools and one skill that is gone, so every row shows.
-            vm.settings.savedPrompts[index].enabledTools = [.vault, .memory]
+            vm.settings.savedPrompts[index].enabledTools = [.skills, .memory]
             vm.settings.savedPrompts[index].contextRefs = ["costing", "old-notes"]
             let id = vm.settings.savedPrompts[index].id
             let editor = SavedPromptsEditor(

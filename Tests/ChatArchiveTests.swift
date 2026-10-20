@@ -16,7 +16,7 @@ struct ChatArchiveTests {
     private func legacyConversation(
         id: UUID = UUID(),
         assistantID: UUID? = nil,
-        enabledTools: Set<ChatToolKind>? = [.memory, .vault],
+        enabledTools: Set<ChatToolKind>? = [.memory, .skills],
         messages: [QuickMessage]? = nil
     ) -> QuickConversation {
         QuickConversation(
@@ -74,7 +74,7 @@ struct ChatArchiveTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let archive = try ChatArchive(root: directory)
         let assistantID = UUID()
-        let toolRecords = [ChatToolRecord(kind: .vault, summary: "Searched vault", sources: [
+        let toolRecords = [ChatToolRecord(kind: .memory, summary: "Searched memory", sources: [
             ChatSource(title: "Acme", day: "2026-09-01", path: "/tmp/acme.md"),
         ])]
         let conversation = legacyConversation(
@@ -99,7 +99,7 @@ struct ChatArchiveTests {
             assistantTurn.appPayload?["toolRecords"] ?? .null,
             as: [ChatToolRecord].self
         ))
-        #expect(decodedTools.first?.summary == "Searched vault")
+        #expect(decodedTools.first?.summary == "Searched memory")
         #expect(decodedTools.first?.sources.first?.path == "/tmp/acme.md")
 
         // A rebuild keeps the same fields.
@@ -109,7 +109,7 @@ struct ChatArchiveTests {
         #expect(rebuilt.titleSource == "Summarize the report")
         #expect(rebuilt.isPinned == true)
         #expect(rebuilt.assistantID == assistantID)
-        #expect(rebuilt.messages.last?.toolRecords?.first?.summary == "Searched vault")
+        #expect(rebuilt.messages.last?.toolRecords?.first?.summary == "Searched memory")
     }
 
     @Test func migrationLeavesMissingBytesMissingAndNeverFetches() async throws {
@@ -687,7 +687,7 @@ struct ChatArchiveTests {
             attachmentContents: [AttachmentContent(ref: ref, text: "hello", originalBytes: Data("hello".utf8))],
             model: selection,
             context: ContextReceipt(scope: .currentSource, matched: true),
-            tools: [.vault],
+            tools: [.skills],
             requestSnapshot: requestBody,
             requestSnapshotKind: "request",
             endpoint: EndpointDescriptor(scheme: "https", host: "api.deepseek.com", path: "/v1/chat"),
@@ -711,7 +711,7 @@ struct ChatArchiveTests {
         let userTurn = try #require(record.turns.first)
         let request = try #require(userTurn.request)
         #expect(request.status == .pending, "the submit receipt keeps the state it was written with")
-        #expect(request.extra["tools"]?.arrayValue?.map(\.stringValue) == ["vault"])
+        #expect(request.extra["tools"]?.arrayValue?.map(\.stringValue) == ["skills"])
         #expect(request.context?.scope == .currentSource)
         let snapshot = try #require(request.attachmentRefs.first { $0.kind == "request" })
         #expect(snapshot.snapshotHash == SHA256Digest.hex(requestBody))

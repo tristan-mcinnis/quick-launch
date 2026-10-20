@@ -256,56 +256,6 @@ struct ProcessRunnerTests {
         }
     }
 
-    // MARK: - SSHRunner argv snapshots
-
-    @Test func sshArgvMatchesTheOriginalBuilders() {
-        #expect(SSHRunner.executable.path == "/usr/bin/ssh")
-
-        // WebPageReader / SearXNG shape: single remote command string.
-        #expect(
-            SSHRunner.arguments(host: "example-host", remoteCommand: ["curl -s 'http://x'"]) == [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=5",
-                "example-host",
-                "curl -s 'http://x'",
-            ]
-        )
-
-        // VaultSearch shape: -T, then separate argv elements.
-        #expect(
-            SSHRunner.arguments(
-                host: "example-host",
-                remoteCommand: ["python3", "/remote/vault-search.py", "current", "--stdin", "--limit", "10", "--json"],
-                disablePTY: true
-            ) == [
-                "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "example-host",
-                "python3", "/remote/vault-search.py", "current",
-                "--stdin", "--limit", "10", "--json",
-            ]
-        )
-    }
-
-    @Test func serviceRemoteCommandsArePinned() {
-        #expect(
-            SSHVaultSearchService.remoteArguments(remoteScript: "/r/vs.py", mode: .current)
-                == ["python3", "/r/vs.py", "current", "--stdin", "--limit", "10", "--json"]
-        )
-        // History declares --project required, so its call carries the slug the
-        // server-side scope resolver returned.
-        #expect(
-            SSHVaultSearchService.remoteArguments(remoteScript: "/r/vs.py", mode: .history, project: "acme-launch")
-                == ["python3", "/r/vs.py", "history", "--stdin", "--limit", "10", "--json", "--project", "acme-launch"]
-        )
-        #expect(
-            WebPageReader.remoteCommand(for: URL(string: "https://a.example/p?q=it's")!)
-                == ["~/search-tools/venv/bin/python ~/search-tools/read_page.py 'https://a.example/p?q=it%27s'"]
-        )
-        #expect(
-            SearXNGSearchService.remoteCommand(for: URL(string: "http://127.0.0.1:8888/search?q=a'b")!)
-                == ["curl -s --max-time 6 'http://127.0.0.1:8888/search?q=a%27b'"]
-        )
-    }
-
     // MARK: - Helpers
 
     /// Writes an executable script to a temp file. It is run as

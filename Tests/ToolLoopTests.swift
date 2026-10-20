@@ -104,7 +104,7 @@ struct ToolLoopTests {
 
     @Test func aCallToAToolThatIsNotOfferedIsAnsweredNotDropped() async throws {
         LoopStubHTTP.reset([
-            Self.toolCallRound("call_x", name: "search_vault", arguments: #"{"query":"q"}"#),
+            Self.toolCallRound("call_x", name: "search_notes", arguments: #"{"query":"q"}"#),
             Self.answerRound("Answered without it."),
         ])
         let collected = try await Self.collect(
@@ -114,7 +114,7 @@ struct ToolLoopTests {
         #expect(collected.text == "Answered without it.")
         let messages = try #require(try Self.body(1)["messages"] as? [[String: Any]])
         let result = messages.first { $0["role"] as? String == "tool" }
-        #expect(result?["content"] as? String == "The search_vault tool is unavailable.")
+        #expect(result?["content"] as? String == "The search_notes tool is unavailable.")
     }
 
     // MARK: - The round cap

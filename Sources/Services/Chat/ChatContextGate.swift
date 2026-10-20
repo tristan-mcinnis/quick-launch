@@ -8,7 +8,7 @@ import HouseChatCore
 /// as strings for receipts and for a future Attached-sources control.
 struct ChatContextEvaluation: Sendable, Equatable {
     /// Whether the request may reach outside the conversation: web search,
-    /// the vault, memory, tasks, skills. False means every broad tool is
+    /// memory, tasks, skills. False means every broad tool is
     /// withheld for this turn, follow-ups included.
     var allowsExternalRetrieval: Bool
     /// The corpus retrieval may read: `none`, `currentSource`, `history`,

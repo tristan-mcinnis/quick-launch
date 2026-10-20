@@ -24,7 +24,7 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   dates, a typed address) sit above everything.
 - **Catalog.** A named list of items of one kind: Snippets, Quick Links,
   Clipboard History, Emoji & Symbols, Screenshots, Folders, Caffeinate,
-  Chats, Vault Search, Commands (windows, screenshots, toggles, System Settings
+  Chats, Commands (windows, screenshots, toggles, System Settings
   panes, clipboard and screen helpers). Return on a catalog row enters it. Inside, typing filters that
   catalog only. Learned favourites of that catalog float to the top.
 - **Item.** One row. Every item has a kind, a title, a detail line, a
@@ -37,7 +37,7 @@ Root  ──►  Catalog  ──►  Item  ──►  Action
   rebindable key resolves through `ShortcutAction`/`ShortcutTable`, so one
   change in Settings › Keyboard Shortcuts moves all four surfaces at once.
 - **Mode.** A state that captures typing for one purpose: Quick Link input,
-  Caffeinate Until, Rename Chat, a Vault Search mode, or an attached
+  Caffeinate Until, Rename Chat, or an attached
   screenshot waiting for a question. Modes show their name on the left of the
   footer and leave on Backspace.
 - **Tool window.** A window of its own for a job the launcher panel is too
@@ -82,8 +82,8 @@ The same key means the same thing on every layer.
 | `⌃⌘S` | Show or hide the AI Chat chat list |
 | `⌘F` | Find in the AI Chat thread; `↩` or `⌘G` next, `⇧↩` or `⇧⌘G` previous |
 | `⌘1…9` | AI Chat: open the chat list's first nine chats, shown or not |
-| `⌘O` | Open the answer's source (memory and vault hits), or list them when there are several |
-| `⌥⌘K` | The chat's Tools in the ⌘K palette: Memory, Tasks, Vault, Skills, Web search |
+| `⌘O` | Open the answer's source (memory hits), or list them when there are several |
+| `⌥⌘K` | The chat's Tools in the ⌘K palette: Memory, Tasks, Skills, Web search |
 | `⌥⌘M` | Capture to Memory: send the answer on screen to `recall capture` |
 | `⌥⌘A` | Change Assistant, or back to a plain chat |
 | `⇧⌘O` / `⇧⌘R` | Change the model / ask the last question again on another model |
@@ -174,7 +174,7 @@ return.
   scrolls, follows the newest text only while you are at the bottom, and
   shows a "Latest" chip when you are not. A stopped answer stays as the
   turn's answer; a provider error stays under its question with Retry.
-  Command output and Vault Search use the same surface with their source
+  Command output uses the same surface with its source
   named in the header, and never join a chat. A local answer (math, a
   conversion, a date) asked in root search shows under the input row and
   never opens the surface; asked in a chat, it stays there under its own
@@ -235,8 +235,8 @@ one toggle, one Forget button.
   or assistant's instructions and context skills, the capture or selection
   text, the text of attached files and links, web search snippets and
   typed-page text, and, for an OpenAI-compatible
-  provider, what the chat tools return (memory hits from `recall`, vault
-  results over SSH, a skill's `SKILL.md`, web results). The Claude Code CLI
+  provider, what the chat tools return (memory hits from `recall`,
+  a skill's `SKILL.md`, web results). The Claude Code CLI
   provider runs with no tools. Screenshots go to the Vision model setting,
   DeepSeek by default. Tools are switchable per chat (`⌘K` › Tools) and for new chats
   (Settings › General › Chat).

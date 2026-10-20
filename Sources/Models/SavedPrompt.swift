@@ -203,7 +203,7 @@ struct SavedPrompt: Codable, Sendable, Equatable, Identifiable, Hashable {
         commandExecutable = try c.decodeIfPresent(String.self, forKey: .commandExecutable)
         commandArguments = try c.decodeIfPresent([String].self, forKey: .commandArguments)
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
-        enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        enabledTools = try c.decodeToolKinds(forKey: .enabledTools)
         if try c.decodeIfPresent(Bool.self, forKey: .tasksEnabled) == true {
             enabledTools?.insert(.tasks)
         }
@@ -354,17 +354,6 @@ extension SavedPrompt {
     /// The assistants a fresh install has, and the ones configuration
     /// version 25 adds to an existing install when their alias is free.
     static let assistantDefaults: [SavedPrompt] = [
-        SavedPrompt(
-            name: "Vault researcher",
-            alias: "vault",
-            prompt: "Find what my vault and memory say about the following. Cite the source of every fact.\n\n{selection}",
-            systemPrompt: """
-            You research the user's own notes. Before you answer, search the vault and memory for what they say about the question. \
-            Cite the source of every fact you use: the note path or the memory entry it came from. \
-            If the vault and memory have nothing on it, say so. Do not fill the gap with a guess.
-            """,
-            enabledTools: [.vault, .memory, .tasks]
-        ),
         SavedPrompt(
             name: "STE editor",
             alias: "ste",

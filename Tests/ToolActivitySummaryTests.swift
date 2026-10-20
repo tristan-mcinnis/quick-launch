@@ -125,24 +125,22 @@ struct ToolActivitySummaryTests {
     @Test func aTimedOutSearchBesideTwoHitsIsNotHiddenInTheGroup() async throws {
         let timedOut = FakeMemory()
         await timedOut.setSearchResult(.failure(RecallError.timedOut))
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(text: "x", resultCount: 2, sources: [])))
         let lines = [
             try #require(await ChatToolbox(enabled: [.memory], memory: timedOut)
                 .run("recall_memory", arguments: #"{"query":"deck"}"#)).record.activityLine,
-            try #require(await ChatToolbox(enabled: [.vault], vault: vault)
-                .run("search_vault", arguments: #"{"query":"acme"}"#)).record.activityLine,
-            try #require(await ChatToolbox(enabled: [.vault], vault: vault)
-                .run("search_vault", arguments: #"{"query":"acme two"}"#)).record.activityLine,
+            try #require(await ChatToolbox(enabled: [.memory], memory: FakeMemory())
+                .run("recall_memory", arguments: #"{"query":"acme"}"#)).record.activityLine,
+            try #require(await ChatToolbox(enabled: [.memory], memory: FakeMemory())
+                .run("recall_memory", arguments: #"{"query":"acme two"}"#)).record.activityLine,
         ]
         let summary = ToolActivitySummary.summarize(lines)
         #expect(summary.exposed.map(\.text) == ["Memory search timed out"])
-        #expect(summary.headline == "Used vault")
+        #expect(summary.headline == "Used memory")
     }
 
     @Test func aSuccessfulOutcomeStaysFolded() async throws {
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(text: "x", resultCount: 2, sources: [])))
-        let outcome = try #require(await ChatToolbox(enabled: [.vault], vault: vault)
-            .run("search_vault", arguments: #"{"query":"acme"}"#))
+        let outcome = try #require(await ChatToolbox(enabled: [.memory], memory: FakeMemory())
+            .run("recall_memory", arguments: #"{"query":"acme"}"#))
         #expect(outcome.record.activityLine.state == .done)
     }
 }

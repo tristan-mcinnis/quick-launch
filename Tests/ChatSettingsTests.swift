@@ -26,7 +26,7 @@ struct ChatSettingsTests {
 
     // MARK: - Chat defaults
 
-    @Test func aNewInstallStartsWithAllFiveChatDefaultsOn() {
+    @Test func aNewInstallStartsWithAllFourChatDefaultsOn() {
         let settings = QuickSettings()
         #expect(settings.newChatTools == Set(ChatToolKind.allCases))
         for tool in ChatToolKind.allCases {
@@ -36,7 +36,7 @@ struct ChatSettingsTests {
 
     @Test func anOldBlobSplitsTasksFromMemoryAndKeepsItsWebSearchChoice() throws {
         let off = try decode(#"{"configurationVersion":25,"modelWebSearchEnabled":false}"#)
-        #expect(off.newChatTools == [.memory, .tasks, .vault, .skills])
+        #expect(off.newChatTools == [.memory, .tasks, .skills])
         #expect(off.newChatMemoryEnabled)
         #expect(off.newChatTasksEnabled)
         let memoryOff = try decode(#"{"configurationVersion":25,"newChatMemoryEnabled":false}"#)
@@ -57,7 +57,7 @@ struct ChatSettingsTests {
         settings.setNewChatTool(.tasks, on: false)
         settings.setNewChatTool(.skills, on: false)
         let back = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(settings))
-        #expect(back.newChatTools == [.vault, .web])
+        #expect(back.newChatTools == [.web])
         #expect(back.newChatMemoryEnabled == false)
         #expect(back.newChatTasksEnabled == false)
         #expect(back.newChatSkillsEnabled == false)
@@ -65,16 +65,16 @@ struct ChatSettingsTests {
 
     @Test func aNewChatStartsOnTheChatDefaults() {
         let vm = make {
-            $0.newChatVaultEnabled = false
+            $0.newChatSkillsEnabled = false
             $0.modelWebSearchEnabled = false
         }
-        #expect(vm.chatTools == [.memory, .tasks, .skills])
-        #expect(vm.chatToolsSummary == "Memory, Tasks, Skills on")
+        #expect(vm.chatTools == [.memory, .tasks])
+        #expect(vm.chatToolsSummary == "Memory, Tasks on")
         // The switch changes the next chat; a chat's own choice still wins.
-        vm.settings.newChatVaultEnabled = true
-        #expect(vm.chatTools == [.memory, .tasks, .vault, .skills])
+        vm.settings.newChatSkillsEnabled = true
+        #expect(vm.chatTools == [.memory, .tasks, .skills])
         vm.toggleChatTool(.memory)
-        #expect(vm.chatTools == [.tasks, .vault, .skills])
+        #expect(vm.chatTools == [.tasks, .skills])
     }
 
     @Test func theModelIsOfferedOnlyTheChatDefaults() throws {
@@ -86,14 +86,13 @@ struct ChatSettingsTests {
         settings.modelWebSearchEnabled = true
         let vm = QuickViewModel(
             settings: settings,
-            webSearchService: GatedWebSearchService(result: ""),
-            vaultSearchService: FakeVault(outcome: .failure(VaultSearchError.empty))
+            webSearchService: GatedWebSearchService(result: "")
         )
         vm.memoryService = FakeMemory()
         vm.skillLibrary = skills
         let provider = try #require(settings.providers.first { $0.kind == .openAICompatible })
         let service = try #require(vm.makeService(provider: provider, model: "deepseek-flash") as? OpenAICompatibleService)
-        #expect(service.offeredToolNames == ["search_vault", "read_skill", "search_web"])
+        #expect(service.offeredToolNames == ["read_skill", "search_web"])
     }
 
     @Test func theAssistantEditorAndTheChatCardUseOneName() {
@@ -160,74 +159,35 @@ struct ChatSettingsTests {
 
     // MARK: - Status lines
 
-    actor CallLog {
-        var calls: [(URL, [String])] = []
-        func add(_ executable: URL, _ arguments: [String]) { calls.append((executable, arguments)) }
-    }
-
-    private func probe(
-        found: Set<String>,
-        ghostty: Bool,
-        sshConfig: String?,
-        log: CallLog = CallLog()
-    ) -> ChatBackendProbe {
+    private func probe(found: Set<String>, ghostty: Bool) -> ChatBackendProbe {
         ChatBackendProbe(
             resolve: { name in found.contains(name) ? URL(fileURLWithPath: "/opt/homebrew/bin/\(name)") : nil },
-            applicationURL: { _ in ghostty ? URL(fileURLWithPath: "/Applications/Ghostty.app") : nil },
-            run: { executable, arguments, _ in
-                await log.add(executable, arguments)
-                guard let sshConfig else { throw ProcessRunnerError.timedOut(executable: "ssh", seconds: 3) }
-                return ProcessResult(stdout: Data(sshConfig.utf8), stderr: Data(), status: 0)
-            },
-            vaultHost: "example-host"
+            applicationURL: { _ in ghostty ? URL(fileURLWithPath: "/Applications/Ghostty.app") : nil }
         )
     }
 
     @Test func everythingFoundIsReady() async {
-        let log = CallLog()
-        let status = await probe(
-            found: ["tmux", "pi", "recall"],
-            ghostty: true,
-            sshConfig: "user ubuntu\nhostname 203.0.113.7\nport 22\n",
-            log: log
-        ).probe()
-        #expect(status == ChatBackendStatus(
-            tmuxFound: true, piFound: true, ghosttyFound: true, recallFound: true, vaultHostConfigured: true,
-            vaultHost: "example-host"
-        ))
+        let status = await probe(found: ["tmux", "pi", "recall"], ghostty: true).probe()
+        #expect(status == ChatBackendStatus(tmuxFound: true, piFound: true, ghosttyFound: true, recallFound: true))
         #expect(status.piLevel == .ready)
         #expect(status.piLine == "tmux, pi and Ghostty found.")
         #expect(status.toolsLevel == .ready)
-        #expect(status.toolsLine == "recall found. example-host is in your SSH config.")
-        // `ssh -G` reads the config and never connects; argv, no shell.
-        let calls = await log.calls
-        #expect(calls.count == 1)
-        #expect(calls.first?.0 == SSHRunner.executable)
-        #expect(calls.first?.1 == ["-G", "example-host"])
+        #expect(status.toolsLine == "recall found.")
     }
 
     @Test func missingProgramsAreNamed() async {
-        let status = await probe(found: ["tmux"], ghostty: false, sshConfig: "hostname example-host\n").probe()
+        let status = await probe(found: ["tmux"], ghostty: false).probe()
         #expect(status.piLevel == .missing)
         #expect(status.piLine == "pi and Ghostty not found. Continue in pi needs tmux and pi.")
         #expect(status.toolsLevel == .missing)
-        #expect(status.toolsLine == "recall not found, so Memory cannot run. example-host is not in your SSH config.")
+        #expect(status.toolsLine == "recall not found, so Memory cannot run.")
     }
 
     @Test func onlyGhosttyMissingIsPartlyReady() async {
-        let status = await probe(found: ["tmux", "pi"], ghostty: false, sshConfig: nil).probe()
+        let status = await probe(found: ["tmux", "pi"], ghostty: false).probe()
         #expect(status.piLevel == .partial)
         #expect(status.piLine == "Ghostty not found. pi still starts in tmux.")
-        #expect(status.vaultHostConfigured == false, "ssh failing reads as not configured")
         #expect(status.toolsLevel == .missing)
-    }
-
-    @Test func aHostWithAHostNameOfItsOwnIsConfigured() {
-        #expect(ChatBackendProbe.isConfigured(sshConfig: "user ubuntu\nhostname 10.0.0.2", host: "example-host"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname example-host\nport 22", host: "example-host"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "hostname EXAMPLE-HOST", host: "example-host"))
-        #expect(!ChatBackendProbe.isConfigured(sshConfig: "", host: "example-host"))
-        #expect(ChatBackendProbe.sshConfigArguments(host: "example-host") == ["-G", "example-host"])
     }
 
     actor FixedProbe: ChatBackendProbing {
@@ -243,7 +203,7 @@ struct ChatSettingsTests {
         #expect(vm.chatBackendStatus == nil, "no probe, no lookups")
 
         let status = ChatBackendStatus(
-            tmuxFound: true, piFound: false, ghosttyFound: true, recallFound: true, vaultHostConfigured: false
+            tmuxFound: true, piFound: false, ghosttyFound: true, recallFound: true
         )
         let fixed = FixedProbe(status)
         vm.chatBackendProbe = fixed
@@ -252,23 +212,19 @@ struct ChatSettingsTests {
         #expect(await fixed.count == 1)
     }
 
-    @Test func aMacWithoutTheHouseBackendsIsNotOfferedTheirTools() {
-        func status(recall: Bool, vault: Bool) -> ChatBackendStatus {
-            ChatBackendStatus(
-                tmuxFound: false, piFound: false, ghosttyFound: false,
-                recallFound: recall, vaultHostConfigured: vault
-            )
-        }
+    @Test func aMacWithoutRecallIsNotOfferedMemoryTools() {
         let vm = make()
         vm.memoryService = FakeMemory()
-        vm.vaultSearchService = FakeVault(outcome: .failure(VaultSearchError.empty))
-        vm.dropMissingChatBackends(status(recall: true, vault: true))
-        #expect(vm.isChatToolAvailable(.memory) && vm.isChatToolAvailable(.vault), "both found: both stay")
+        vm.dropMissingChatBackends(ChatBackendStatus(
+            tmuxFound: false, piFound: false, ghosttyFound: false, recallFound: true
+        ))
+        #expect(vm.isChatToolAvailable(.memory), "recall found: Memory stays")
 
-        vm.dropMissingChatBackends(status(recall: false, vault: false))
+        vm.dropMissingChatBackends(ChatBackendStatus(
+            tmuxFound: false, piFound: false, ghosttyFound: false, recallFound: false
+        ))
         #expect(!vm.isChatToolAvailable(.memory))
         #expect(!vm.isChatToolAvailable(.tasks))
-        #expect(!vm.isChatToolAvailable(.vault))
     }
 
     // MARK: - History limit

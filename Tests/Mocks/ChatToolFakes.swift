@@ -72,25 +72,6 @@ actor FakeMemory: MemoryRecalling, MemoryCapturing {
     }
 }
 
-/// A vault stand-in for the model's `search_vault` tool.
-actor FakeVault: VaultSearchServicing {
-    var outcome: Result<VaultSearchOutcome, Error>
-    private(set) var calls: [(mode: VaultSearchMode, query: String)] = []
-
-    init(outcome: Result<VaultSearchOutcome, Error>) {
-        self.outcome = outcome
-    }
-
-    func search(mode: VaultSearchMode, query: String) async throws -> String {
-        try await searchWithSources(mode: mode, query: query).text
-    }
-
-    func searchWithSources(mode: VaultSearchMode, query: String) async throws -> VaultSearchOutcome {
-        calls.append((mode, query))
-        return try outcome.get()
-    }
-}
-
 /// Records every file Open Source asked for; opens nothing.
 actor FakeFileOpener: LocalFileOpening {
     private(set) var opened: [URL] = []

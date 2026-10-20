@@ -1,6 +1,6 @@
 // QuickAIThreadTests — the medium Quick AI fixes of v1.5.0 (plan Phase A2,
 // docs/ai-chat-plan-20260911.md section 3): local answers back in root search
-// and a source name for command and Vault Search answers (16), ↑ recall and
+// and a source name for command answers (16), ↑ recall and
 // the thread's own scroll keys (5), Stop keeps the turn and ⌘R asks it again
 // (3), the thread follows the bottom only when the reader is there (4), a
 // provider error stays with its question with Retry (11), Return while
@@ -240,24 +240,6 @@ struct QuickAIThreadTests {
         await ask(vm, mock, "and then", reply: "Two.")
         #expect(vm.answerSourceTitle == nil)
         #expect(vm.quickAIHeaderSubtitle == vm.activeModelDisplay)
-    }
-
-    @Test func aVaultSearchHeaderNamesVaultSearchAndItsMode() async {
-        let vault = ThreadVaultSearchService()
-        var settings = QuickSettings()
-        settings.autoCopy = false
-        settings.historyEnabled = true
-        let vm = QuickViewModel(settings: settings, service: MockQuickService(), vaultSearchService: vault)
-        vm.enterInputMode(.vaultSearch(.current))
-        vm.input = "Acme Launch where do we stand?"
-
-        #expect(await vm.submitInputMode())
-        #expect(vm.isQuickAIPresented)
-        #expect(vm.output == "Vault result")
-        #expect(vm.quickAIHeaderSubtitle == "Vault Search · Current Project")
-        #expect(vm.pendingQuestion == "Acme Launch where do we stand?")
-        #expect(vm.conversationMessages.isEmpty)
-        #expect(vm.history.isEmpty, "a Vault Search is not a chat, as in v1.3.0")
     }
 
     // MARK: - 5. ↑ recall, and the thread's own scroll keys
@@ -918,8 +900,4 @@ struct QuickAIThreadTests {
         #expect(vm.isRecentChatsPresented)
         #expect(vm.recentChatItems.indices.contains(vm.recentChatsIndex))
     }
-}
-
-private actor ThreadVaultSearchService: VaultSearchServicing {
-    func search(mode: VaultSearchMode, query: String) async throws -> String { "Vault result" }
 }

@@ -345,7 +345,7 @@ struct ChatTelemetryTests {
 
     @Test func anUnofferedToolCallIsARecordedRefusal() async throws {
         Self.TelemetryStubHTTP.reset([
-            Self.toolCallRound(id: "call_v", name: "search_vault", arguments: #"{"query":"q","mode":"current"}"#),
+            Self.toolCallRound(id: "call_v", name: "search_notes", arguments: #"{"query":"q"}"#),
             Self.answerRound("Answered without it."),
         ])
         let service = service(tools: ChatToolbox(enabled: [.memory], memory: FakeMemory()))
@@ -422,33 +422,6 @@ struct ChatTelemetryTests {
 
     // MARK: - The toolbox's own status, not a guess from its prose
 
-    @Test func aVaultUnavailableOutcomeIsARecordedFailure() async throws {
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(
-            text: "",
-            resultCount: 0,
-            sources: [],
-            status: .unavailable(reason: "the vault reader is down")
-        )))
-        Self.TelemetryStubHTTP.reset([
-            Self.toolCallRound(
-                id: "call_v",
-                name: "search_vault",
-                arguments: #"{"query":"personal/stack","mode":"current"}"#
-            ),
-            Self.answerRound("The vault did not respond."),
-        ])
-        let service = service(tools: ChatToolbox(enabled: [.vault], vault: vault))
-        let collected = try await collect(service.send(messages: [QuickMessage(role: .user, content: "stack?")]))
-
-        let round = try #require(collected.rounds.first)
-        #expect(round.status == .failed, "an unavailable vault is never recorded as a success")
-        let call = try #require(round.calls.first)
-        #expect(call.status == .failed)
-        #expect(call.extra["adapter"]?.stringValue == "vault")
-        #expect(call.resultSummary?.contains("unavailable") == true)
-        #expect(collected.text == "The vault did not respond.", "a failed tool never ends the turn")
-    }
-
     @Test func aMemoryFailureIsARecordedFailure() async throws {
         let memory = FakeMemory()
         await memory.setSearchResult(.failure(RecallError.failed("no store")))
@@ -468,27 +441,8 @@ struct ChatTelemetryTests {
     }
 
     @Test func aZeroResultSearchIsASuccessfulRound() async throws {
-        // A reader that answered with nothing is a successful read: the empty
-        // answer is the fact, not a failure.
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(
-            text: "No evidence for that.",
-            resultCount: 0,
-            sources: [],
-            status: .noMatch
-        )))
-        Self.TelemetryStubHTTP.reset([
-            Self.toolCallRound(id: "call_v", name: "search_vault", arguments: #"{"query":"q","mode":"current"}"#),
-            Self.answerRound("Nothing found."),
-        ])
-        let service = service(tools: ChatToolbox(enabled: [.vault], vault: vault))
-        let collected = try await collect(service.send(messages: [QuickMessage(role: .user, content: "q")]))
-
-        let round = try #require(collected.rounds.first)
-        #expect(round.status == .succeeded)
-        #expect(round.calls.first?.status == .succeeded)
-        #expect(round.calls.first?.resultSummary?.contains("no results") == true)
-
-        // A memory read with no hits is the same kind of success.
+        // A memory read with no hits is a successful read: the empty answer
+        // is the fact, not a failure.
         Self.TelemetryStubHTTP.reset([
             Self.toolCallRound(id: "call_m", name: "recall_memory", arguments: #"{"query":"nothing"}"#),
             Self.answerRound("Nothing found."),

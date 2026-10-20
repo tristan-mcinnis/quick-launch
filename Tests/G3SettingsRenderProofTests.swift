@@ -34,18 +34,18 @@ struct G3SettingsRenderProofTests {
             let vm = Self.makeViewModel(preference)
             // One switch off, so the card shows both toggle states.
             vm.settings.newChatSkillsEnabled = false
-            // pi ready; the tool backends partly ready (no vault host).
+            // pi and the tool backends ready.
             vm.chatBackendStatus = ChatBackendStatus(
                 tmuxFound: true, piFound: true, ghosttyFound: true,
-                recallFound: true, vaultHostConfigured: false
+                recallFound: true
             )
             try Self.saveCard(ChatSettingsView(viewModel: vm), preference: preference, appearance: appearance, name: "g3-settings-chat-card-\(suffix).png")
 
-            // pi, Ghostty, recall, and the vault host all missing.
+            // pi, Ghostty, and recall all missing.
             let missing = Self.makeViewModel(preference)
             missing.chatBackendStatus = ChatBackendStatus(
                 tmuxFound: true, piFound: false, ghosttyFound: false,
-                recallFound: false, vaultHostConfigured: false
+                recallFound: false
             )
             try Self.saveCard(ChatSettingsView(viewModel: missing), preference: preference, appearance: appearance, name: "g3-settings-chat-card-missing-\(suffix).png")
         }

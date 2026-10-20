@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import QuickLaunch
 
-/// The memory, vault, and skill tools, each on a fake: what the model reads
+/// The memory, task, and skill tools, each on a fake: what the model reads
 /// back, the line the thread shows, and when a tool is offered at all.
 @Suite("Chat toolbox")
 struct ChatToolboxTests {
@@ -23,27 +23,26 @@ struct ChatToolboxTests {
         let (skills, root) = try TemporarySkills.make()
         defer { try? FileManager.default.removeItem(at: root) }
         let memory = FakeMemory()
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(text: "", resultCount: 0, sources: [])))
 
-        let all = ChatToolbox(enabled: [.memory, .tasks, .vault, .skills], memory: memory, vault: vault, skills: skills)
+        let all = ChatToolbox(enabled: [.memory, .tasks, .skills], memory: memory, skills: skills)
         #expect(Self.names(all.definitions) == [
             "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
-            "search_vault", "read_skill",
+            "read_skill",
         ])
         #expect(all.toolNames == [
             "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
-            "search_vault", "read_skill",
+            "read_skill",
         ])
 
         // Memory and Tasks are independent even though the same recall adapter
         // implements both seams.
-        let memoryOnly = ChatToolbox(enabled: [.memory], memory: memory, vault: vault, skills: skills)
+        let memoryOnly = ChatToolbox(enabled: [.memory], memory: memory, skills: skills)
         #expect(Self.names(memoryOnly.definitions) == ["recall_memory", "recall_captures_today"])
-        let tasksOnly = ChatToolbox(enabled: [.tasks], memory: memory, vault: vault, skills: skills)
+        let tasksOnly = ChatToolbox(enabled: [.tasks], memory: memory, skills: skills)
         #expect(Self.names(tasksOnly.definitions) == ["recall_tasks_today", "recall_open_tasks"])
 
         // On, but no backend on this Mac: not offered.
-        let noBackends = ChatToolbox(enabled: [.memory, .vault, .skills])
+        let noBackends = ChatToolbox(enabled: [.memory, .skills])
         #expect(noBackends.definitions.isEmpty)
         #expect(noBackends.isEmpty)
 
@@ -58,26 +57,18 @@ struct ChatToolboxTests {
         let (skills, root) = try TemporarySkills.make()
         defer { try? FileManager.default.removeItem(at: root) }
         let toolbox = ChatToolbox(
-            enabled: [.memory, .tasks, .vault, .skills],
+            enabled: [.memory, .tasks, .skills],
             memory: FakeMemory(),
-            vault: FakeVault(outcome: .success(VaultSearchOutcome(text: "", resultCount: 0, sources: []))),
             skills: skills
         )
         let definitions = toolbox.definitions
         let memory = try #require(Self.description("recall_memory", in: definitions))
         #expect(memory.contains("only when the user asks about their own notes, projects, clients, decisions, or files"))
         #expect(memory.contains("Never call it for general knowledge, arithmetic"))
-        let vault = try #require(Self.description("search_vault", in: definitions))
-        #expect(vault.contains("only when the user asks about their own projects, clients, decisions, or files"))
-        #expect(vault.contains("slow"))
         let skill = try #require(Self.description("read_skill", in: definitions))
         #expect(skill.contains("when the user names a skill or asks how they do something"))
 
-        // The vault's modes are VaultSearchMode's, and the skill names are the folder listing.
-        let vaultFunction = definitions.compactMap { $0["function"] as? [String: Any] }
-            .first { $0["name"] as? String == "search_vault" }
-        let vaultProperties = (vaultFunction?["parameters"] as? [String: Any])?["properties"] as? [String: Any]
-        #expect((vaultProperties?["mode"] as? [String: Any])?["enum"] as? [String] == ["current", "reconcile", "history", "portfolio"])
+        // The skill names are the folder listing.
         let skillFunction = definitions.compactMap { $0["function"] as? [String: Any] }
             .first { $0["name"] as? String == "read_skill" }
         let skillProperties = (skillFunction?["parameters"] as? [String: Any])?["properties"] as? [String: Any]
@@ -182,7 +173,7 @@ struct ChatToolboxTests {
                 project: "project",
                 lane: "requires_action",
                 due: index == 45 ? "2026-09-30" : "",
-                source: "/vault/project/00-tasks.md"
+                source: "/memory/project/00-tasks.md"
             )
         }
         let memory = FakeMemory()
@@ -245,83 +236,6 @@ struct ChatToolboxTests {
         #expect(outcome.content.contains("timed out"))
     }
 
-    // MARK: - search_vault
-
-    @Test func vaultSearchReturnsResultsAndSources() async throws {
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(
-            text: "## Acme Launch\n\nAs of today",
-            resultCount: 6,
-            sources: [ChatSource(title: "Acme Launch status", day: "2026-08-24", path: "/Users/test/vault/kb/00-status.md")]
-        )))
-        let toolbox = ChatToolbox(enabled: [.vault], vault: vault)
-        let outcome = try #require(await toolbox.run(
-            "search_vault",
-            arguments: #"{"query":"acme launch status","mode":"history"}"#
-        ))
-        let calls = await vault.calls
-        #expect(calls.map(\.mode) == [.history])
-        #expect(calls.map(\.query) == ["acme launch status"])
-        #expect(outcome.record.summary == "Searched vault · history: 6 results")
-        #expect(outcome.record.sources.map(\.title) == ["Acme Launch status"])
-        #expect(outcome.content.contains("<vault_results>"))
-        #expect(outcome.content.contains("## Acme Launch"))
-    }
-
-    @Test func vaultSearchWithAnUnknownModeUsesCurrent() async throws {
-        let vault = FakeVault(outcome: .success(VaultSearchOutcome(text: "x", resultCount: 1, sources: [])))
-        let toolbox = ChatToolbox(enabled: [.vault], vault: vault)
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"everything"}"#))
-        #expect(await vault.calls.map(\.mode) == [.current])
-        #expect(outcome.record.summary == "Searched vault · current: 1 result")
-    }
-
-    @Test func vaultSearchTimeoutIsAShortToolResult() async throws {
-        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .failure(VaultSearchError.timedOut)))
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"current"}"#))
-        // The timeout keeps its reason on the record instead of a generic line.
-        #expect(outcome.record.summary == "Searched vault · current: unavailable — no response within the request deadline")
-        #expect(outcome.content.contains("no response within the request deadline"))
-        #expect(outcome.record.sources.isEmpty)
-    }
-
-    @Test func vaultSearchFailureSurfacesTheAdapterReason() async throws {
-        // A nested project path the backend refuses to resolve: the reason
-        // must reach the record, not collapse into "Vault search failed".
-        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .failure(
-            VaultSearchError.failed("slug validation rejected personal/stack")
-        )))
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"stack","mode":"current"}"#))
-        #expect(outcome.record.summary.contains("slug validation rejected personal/stack"))
-        #expect(outcome.content.contains("slug validation rejected personal/stack"))
-        #expect(!outcome.content.contains("Vault search failed:"))
-    }
-
-    @Test func vaultSearchDegradedKeepsTheDiagnostic() async throws {
-        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .success(VaultSearchOutcome(
-            text: "partial rows",
-            resultCount: 1,
-            sources: [],
-            status: .degraded(reason: "nested slug not resolved")
-        ))))
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"current"}"#))
-        #expect(outcome.record.summary == "Searched vault · current: partial — nested slug not resolved")
-        #expect(outcome.content.contains("partial rows"))
-    }
-
-    @Test func vaultSearchWithNoEvidenceSaysNoResults() async throws {
-        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .failure(VaultSearchError.empty)))
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"q","mode":"portfolio"}"#))
-        #expect(outcome.record.summary == "Searched vault · portfolio: no results")
-    }
-
-    @Test func vaultSearchThatNeedsAProjectSaysSo() async throws {
-        let toolbox = ChatToolbox(enabled: [.vault], vault: FakeVault(outcome: .success(VaultSearchOutcome(
-            text: "## Choose a project", resultCount: 2, sources: [], needsScope: true
-        ))))
-        let outcome = try #require(await toolbox.run("search_vault", arguments: #"{"query":"acme","mode":"current"}"#))
-        #expect(outcome.record.summary == "Searched vault · current: more than one project matches")
-    }
-
     // MARK: - read_skill
 
     @Test func readSkillReturnsTheSkillText() async throws {
@@ -372,13 +286,11 @@ struct ChatToolboxTests {
         let (skills, root) = try TemporarySkills.make()
         defer { try? FileManager.default.removeItem(at: root) }
         let toolbox = ChatToolbox(
-            enabled: [.memory, .tasks, .vault, .skills],
+            enabled: [.memory, .tasks, .skills],
             memory: FakeMemory(),
-            vault: FakeVault(outcome: .failure(VaultSearchError.empty)),
             skills: skills
         )
         #expect(toolbox.status(for: "recall_memory", arguments: "{}") == "Searching memory…")
-        #expect(toolbox.status(for: "search_vault", arguments: "{}") == "Searching the vault…")
         #expect(toolbox.status(for: "read_skill", arguments: #"{"name":"costing"}"#) == "Reading the costing skill…")
     }
 }

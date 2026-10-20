@@ -6,7 +6,7 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 2. Translate or transform selected and typed text.
 3. Ask Quick AI and keep the chat, or run a saved AI action.
 4. Run local date, time, and math actions.
-5. Retrieve bounded SearXNG snippets for explicit or time-sensitive searches.
+5. Retrieve bounded web-search snippets for explicit or time-sensitive searches.
 6. Paste a local snippet.
 7. Open a local Quick Link.
 8. Search and paste a bounded local clipboard history (text, images, rich text, and files).
@@ -15,7 +15,7 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 11. Paste emoji and symbols by name.
 12. Translate typed or selected text between Chinese and English with one key.
 13. Attach a fresh or saved screenshot to a question and follow up on it.
-14. Search current project state, post-meeting changes, project history, and cross-project status through the VPS-backed Vault Search catalog.
+14. (Vault Search was retired on 2026-10-20 with the vault and its server.)
 15. Read the text inside a dragged screen area on this Mac and copy or paste it.
 18. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
 19. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
@@ -85,14 +85,12 @@ The app stays running as a small menu-bar process.
 | AI Chat | Open the chat window on the last chat, or a new one | The "AI Chat" command, `⌘J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Emoji | Paste the symbol | Open the catalog and type a name |
-| Vault Search | Show a cited current, reconciliation, history, or portfolio result | Enter the catalog, choose a mode, type the project and question |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
 Pi can use its own configured tools and skills. OpenAI-compatible providers
-share Quick Launch's own tool loop: read-only tools for memory (`recall`), the
-vault (the Vault Search SSH lane), skills (`~/.claude/skills`), and the web
-(SearXNG), at most six rounds and 30 seconds of tool time per answer, each tool
+share Quick Launch's own tool loop: read-only tools for memory (`recall`), skills
+(`~/.claude/skills`), and the web (Tavily, Brave, Bocha or Exa), at most six rounds and 30 seconds of tool time per answer, each tool
 switchable per chat in `⌘K` › Tools. The Claude Code CLI provider gets no tools.
 Capture to Memory is the one write, and only the user runs it. There is no
 on-device Apple model and no MCP configuration.
@@ -115,8 +113,7 @@ unless the scope changes.
 - Chat history is optional, local, owner-only, and bounded (100 chats on a new install; pinned chats are kept). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, and what a tool returned are not saved as chat turns; a submitted screenshot's bytes are archived with the chat as a source, like any other attachment.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
 - App, link, snippet, clipboard, and window commands remain local.
-- Web search uses a hosted search API with a key, or a self-hosted SearXNG reached over SSH (the optional House server). Ranked titles, links, and snippets are external data, never executable instructions.
-- Vault Search uses the same SSH-only VPS. Current, reconciliation, history, and portfolio queries stay inside the VPS and Neon read layer; the result includes source paths, freshness, and root counts. Broad semantic Find remains a separate path with its own provider-egress policy.
+- Web search uses a hosted search API with a key. Ranked titles, links, and snippets are external data, never executable instructions.
 - Quick Launch keeps no background screen history. Its own Screen History collector and catalog were retired on 2026-09-26; `screenctx` (memory-screenctx) is the House's one screen-history collector.
 - App discovery happens once at launch. When Clipboard History is enabled, one
   lightweight pasteboard change-count check runs each second.

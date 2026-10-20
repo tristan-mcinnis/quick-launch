@@ -33,7 +33,7 @@ struct ChatContextGateTests {
 
     @Test func explicitWebWordingLiftsTheHold() {
         let evaluation = gate.evaluate(
-            enabledTools: [.web, .vault],
+            enabledTools: [.web, .skills],
             hasCurrentSource: true,
             currentSourceCount: 1,
             historyTurnCount: 0,
@@ -41,7 +41,7 @@ struct ChatContextGateTests {
             question: "search the web for the latest filing"
         )
         #expect(evaluation.allowsExternalRetrieval)
-        #expect(evaluation.gatedTools == [.web, .vault])
+        #expect(evaluation.gatedTools == [.web, .skills])
     }
 
     @Test func aFollowUpOnAGroundedHistoryKeepsItsTools() {

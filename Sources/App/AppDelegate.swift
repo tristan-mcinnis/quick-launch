@@ -208,12 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let launcherCatalog = LauncherCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = WebSearchRouter(
-        searxng: SearXNGSearchService(),
         tavily: TavilySearchService(
-            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) }
+            apiKey: { WebSearchKeys.tavily() }
         ),
         brave: BraveSearchService(
-            apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) }
+            apiKey: { WebSearchKeys.brave() }
         ),
         bocha: BochaSearchService(
             apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) }
@@ -221,12 +220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         exa: ExaSearchService(
             apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) }
         ),
-        hasTavilyKey: {
-            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? "").isEmpty
-        },
-        hasBraveKey: {
-            !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? "").isEmpty
-        },
+        hasTavilyKey: { !(WebSearchKeys.tavily() ?? "").isEmpty },
+        hasBraveKey: { !(WebSearchKeys.brave() ?? "").isEmpty },
         hasBochaKey: {
             !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) ?? "").isEmpty
         },
@@ -234,7 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             !(APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) ?? "").isEmpty
         }
     )
-    private let vaultSearchService = SSHVaultSearchService()
     /// The launch probe's answer: which optional tool backends this Mac has.
     private var chatBackends: ChatBackendStatus?
     /// The `recall` CLI over the memory notes: the model's memory tools and Capture to Memory.
@@ -270,7 +264,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launcherCatalog: launcherCatalog,
             clipboardHistory: clipboardHistory,
             webSearchService: webSearchService,
-            vaultSearchService: vaultSearchService,
             pageReader: pageReader,
             windowManager: windowManager,
             caffeinateManager: caffeinateManager,
@@ -301,10 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.attachmentFilePicker = SystemAttachmentFilePicker()
         vm.piHandoff = PiHandoffService()
         // Settings › General › Chat asks it whether tmux, pi, Ghostty,
-        // recall, and the vault host are there.
+        // and recall are there.
         vm.chatBackendProbe = ChatBackendProbe()
-        // The optional House tools (recall, the House server) leave the
-        // chat on a Mac that does not have them.
+        // The optional recall tool leaves the chat on a Mac that does not
+        // have it.
         Task { @MainActor [weak self] in
             let status = await ChatBackendProbe().probe()
             guard let self else { return }
@@ -1671,7 +1664,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             applicationCatalog: applicationCatalog,
             launcherCatalog: launcherCatalog,
             webSearchService: webSearchService,
-            vaultSearchService: vaultSearchService,
             pageReader: pageReader,
             launcherUsage: launcherUsage,
             interactionJournal: interactionJournal,

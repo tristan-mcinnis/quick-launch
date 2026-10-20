@@ -23,9 +23,9 @@ enum WebSearchIntentDetector {
         if directPrefixes.contains(where: query.hasPrefix) { return true }
 
         // A question about the user's own day, work, or plans ("what did I
-        // work on today", "what's on my schedule") is for memory and the
-        // vault, not the web. Only an explicit "search web" above sends it
-        // there; the model picks the memory or vault tool itself.
+        // work on today", "what's on my schedule") is for memory, not
+        // the web. Only an explicit "search web" above sends it
+        // there; the model picks the memory tool itself.
         if isAboutTheUser(query) { return false }
 
         let liveTerms = [

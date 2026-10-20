@@ -28,11 +28,11 @@ struct WebSearchProviderTests {
         await ai.setResponses([StreamDelta(text: "Found it", finishReason: "stop")])
         var settings = QuickSettings()
         settings.autoCopy = false
-        settings.webSearchProvider = .bing
+        settings.webSearchProvider = .tavily
         let vm = QuickViewModel(settings: settings, service: ai, webSearchService: search)
         vm.input = "/search release notes"
         await vm.submit()
-        #expect(await search.providers == [.bing])
+        #expect(await search.providers == [.tavily])
         #expect(vm.output == "Found it")
     }
 
@@ -40,76 +40,41 @@ struct WebSearchProviderTests {
         let search = ProviderRecordingSearch()
         let launcher = QuickViewModel(webSearchService: search)
         let chat = QuickViewModel(store: launcher.store, webSearchService: search)
-        launcher.settings.webSearchProvider = .google
+        launcher.settings.webSearchProvider = .brave
         for vm in [launcher, chat] {
             let provider = try #require(vm.settings.selectedProvider)
             let service = try #require(vm.makeService(provider: provider, model: "test") as? OpenAICompatibleService)
             let call = try #require(service.webSearch)
             _ = try await call("first query")
         }
-        chat.settings.webSearchProvider = .bing
+        chat.settings.webSearchProvider = .tavily
         launcher.apiKeyProvider = { _ in "test-key" }
         let translator = try #require(launcher.makeCurrentService() as? OpenAICompatibleService)
         let lookup = try #require(translator.webSearch)
         _ = try await lookup("translation lookup")
-        #expect(await search.providers == [.google, .google, .bing])
+        #expect(await search.providers == [.brave, .brave, .tavily])
     }
 
-    @Test func singleProviderRequestsDoNotMixInCategoryEngines() async throws {
-        for provider in [WebSearchProvider.automatic, .google, .bing, .duckduckgo, .news] {
-            let requests = SearchURLRecorder()
-            let service = SearXNGSearchService(transport: { url in
-                await requests.record(url)
-                return Data(#"{"results":[{"title":"Source","url":"https://example.com","content":"An answer"}]}"#.utf8)
-            })
-            _ = try await service.search("quoted ' query & symbols", provider: provider)
-            let url = try #require(await requests.url)
-            let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
-            let fields = Dictionary(uniqueKeysWithValues: query.map { ($0.name, $0.value ?? "") })
-            #expect(fields["q"]?.hasPrefix("quoted ' query & symbols") == true)
-            switch provider {
-            case .automatic:
-                #expect(fields["categories"] == "general")
-                #expect(fields["engines"] == nil)
-            case .google:
-                #expect(fields["engines"] == "google cse")
-                #expect(fields["categories"] == nil)
-            case .bing:
-                #expect(fields["engines"] == "bing")
-                #expect(fields["categories"] == nil)
-            case .duckduckgo:
-                #expect(fields["engines"] == "duckduckgo")
-                #expect(fields["categories"] == nil)
-            case .news:
-                #expect(fields["categories"] == "news")
-                #expect(fields["engines"] == nil)
-            default:
-                break
-            }
+    @Test func onlyTheKeyedBackendsNeedAKey() {
+        for provider in WebSearchProvider.allCases {
+            #expect(provider.requiresAPIKey == (provider != .automatic), "\(provider.title)")
         }
     }
 
-    @Test func apiBackendsDoNotRunThroughSearXNG() async {
-        for provider in [WebSearchProvider.tavily, .brave, .bocha, .exa] {
-            #expect(provider.searxngSelection == nil)
-            #expect(provider.requiresAPIKey)
-            await #expect(throws: WebSearchError.self) {
-                _ = try await SearXNGSearchService().search("anything", provider: provider)
-            }
-        }
-    }
-
-    @Test func backendAndSelectionMappingIsStable() {
+    @Test func backendMappingIsStable() {
         #expect(WebSearchProvider.automatic.backend == .chain)
-        for provider in [WebSearchProvider.google, .bing, .duckduckgo, .news] {
-            #expect(provider.backend == .searxng)
-        }
         #expect(WebSearchProvider.tavily.backend == .tavily)
         #expect(WebSearchProvider.brave.backend == .brave)
         #expect(WebSearchProvider.bocha.backend == .bocha)
         #expect(WebSearchProvider.exa.backend == .exa)
-        #expect(WebSearchProvider.google.searxngSelection == .engine("google cse"))
-        #expect(WebSearchProvider.news.searxngSelection == .category("news"))
+    }
+
+    @Test func aRetiredSearxngProviderFallsBackToAutomatic() throws {
+        for name in ["google", "bing", "duckduckgo", "news"] {
+            let json = #"{"autoCopy":false,"webSearchProvider":"\#(name)"}"#
+            let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))
+            #expect(settings.webSearchProvider == .automatic)
+        }
     }
 
     @Test func paletteChoiceIsFuzzySharedAndPersisted() throws {
@@ -120,17 +85,17 @@ struct WebSearchProviderTests {
         #expect(vm.paletteSurfaceActions.contains(.searchSettings))
         vm.performQuickAISurfaceAction(.searchSettings)
         #expect(vm.actionPaletteSubmenu == .searchProviders)
-        vm.actionQuery = "ggl"
-        #expect(vm.paletteSearchProviders == [.google])
+        vm.actionQuery = "brv"
+        #expect(vm.paletteSearchProviders == [.brave])
         #expect(vm.actionPaletteEntryCount == 1)
         let suite = "WebSearchProviderTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        vm.selectWebSearchProvider(.google, defaults: defaults)
-        #expect(chat.settings.webSearchProvider == .google)
+        vm.selectWebSearchProvider(.brave, defaults: defaults)
+        #expect(chat.settings.webSearchProvider == .brave)
         #expect(!vm.isActionPalettePresented)
         let saved = try #require(defaults.data(forKey: QuickSettings.defaultsKey))
-        #expect(try JSONDecoder().decode(QuickSettings.self, from: saved).webSearchProvider == .google)
+        #expect(try JSONDecoder().decode(QuickSettings.self, from: saved).webSearchProvider == .brave)
     }
 
     @Test func rendersSharedPickerAndPaletteInBothAppearances() throws {
@@ -142,7 +107,7 @@ struct WebSearchProviderTests {
         ] {
             var settings = QuickSettings()
             settings.appearance = preference
-            settings.webSearchProvider = .bing
+            settings.webSearchProvider = .tavily
             let vm = QuickViewModel(settings: settings, webSearchService: ProviderRecordingSearch())
             let card = SettingsCard("Web search") {
                 WebSearchProviderRow(viewModel: vm, isFirst: true)
@@ -183,9 +148,4 @@ private actor ProviderRecordingSearch: WebSearchServicing {
         providers.append(provider)
         return "## Source\nURL: https://example.com\nSnippet: A result."
     }
-}
-
-private actor SearchURLRecorder {
-    var url: URL?
-    func record(_ url: URL) { self.url = url }
 }

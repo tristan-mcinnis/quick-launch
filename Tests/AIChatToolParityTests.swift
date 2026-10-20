@@ -15,10 +15,9 @@ struct AIChatToolParityTests {
         let selections: [Set<ChatToolKind>?] = [nil, [.web], []]
         for selection in selections {
             let search = ParityWebSearch()
-            let vault = FakeVault(outcome: .failure(VaultSearchError.empty))
             let memory = FakeMemory()
-            let launcher = QuickViewModel(settings: settings, webSearchService: search, vaultSearchService: vault)
-            let chat = QuickViewModel(store: launcher.store, webSearchService: search, vaultSearchService: vault)
+            let launcher = QuickViewModel(settings: settings, webSearchService: search)
+            let chat = QuickViewModel(store: launcher.store, webSearchService: search)
             for view in [launcher, chat] {
                 view.memoryService = memory
                 view.skillLibrary = skills
@@ -39,7 +38,7 @@ struct AIChatToolParityTests {
             let expected: Set<String> = selection == nil
                 ? [
                     "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
-                    "search_vault", "read_skill", "search_web",
+                    "read_skill", "search_web",
                 ]
                 : (selection?.contains(.web) == true ? ["search_web"] : [])
             #expect(before == expected)

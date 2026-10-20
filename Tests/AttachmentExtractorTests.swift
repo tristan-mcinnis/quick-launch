@@ -48,7 +48,7 @@ struct AttachmentExtractorTests {
     ) -> AttachmentExtractor {
         AttachmentExtractor(
             gate: gate,
-            linkReader: LinkAttachmentReader(remoteRead: nil),
+            linkReader: LinkAttachmentReader(),
             recognizeText: recognizer.recognizer,
             timeout: timeout
         )
@@ -424,7 +424,7 @@ struct AttachmentExtractorTests {
     @Test("Real OCR reads a scanned page on this Mac")
     func realOCR() async throws {
         let url = file("real-scan.pdf", AttachmentFixtures.scannedPDF(pages: ["Quarterly revenue grew"]))
-        let result = try await AttachmentExtractor(linkReader: LinkAttachmentReader(remoteRead: nil))
+        let result = try await AttachmentExtractor(linkReader: LinkAttachmentReader())
             .extract(fileAt: url)
         #expect(result.text?.localizedCaseInsensitiveContains("revenue") == true)
         #expect(result.notes == [.ocr(pages: [1], totalPages: 1)])
@@ -757,7 +757,7 @@ struct AttachmentTimingTests {
     @Test("Timing table per fixture kind")
     func timingTable() async throws {
         let folder = AttachmentFixtures.folder("timing")
-        let extractor = AttachmentExtractor(linkReader: LinkAttachmentReader(remoteRead: nil))
+        let extractor = AttachmentExtractor(linkReader: LinkAttachmentReader())
         let text = "\(AttachmentFixtures.english)\n\(AttachmentFixtures.accents)\n\(AttachmentFixtures.chinese)"
         let html = "<html><head><title>T</title></head><body><nav>Menu</nav><article><p>\(text)</p><ul><li>Alpha</li></ul></article></body></html>"
         let slides = (1...12).map { AttachmentFixtures.Slide(lines: ["Slide \($0) \(text)"], notes: ["Note \($0)"], fileNumber: $0) }

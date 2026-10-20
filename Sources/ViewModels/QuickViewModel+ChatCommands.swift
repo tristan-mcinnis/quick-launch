@@ -36,7 +36,7 @@ extension QuickViewModel {
 
     /// The slash names this build recognizes: its own app commands plus every
     /// saved-prompt alias for the current prefix. Passing the aliases as
-    /// known commands keeps `/clean`, `/vault`, and the rest off the
+    /// known commands keeps `/clean` and the rest off the
     /// unknown-command path, so they still expand through
     /// `SavedPromptResolver` exactly as before. The built-ins still win.
     var knownChatCommandNames: Set<String> {

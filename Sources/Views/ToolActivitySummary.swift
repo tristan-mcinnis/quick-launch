@@ -16,7 +16,7 @@ enum ToolActivitySummary {
     struct Line: Equatable {
         var text: String
         var symbol: String
-        /// A short noun for the headline: "memory", "vault".
+        /// A short noun for the headline: "memory", "skills".
         var name: String
         var state: State = .done
     }

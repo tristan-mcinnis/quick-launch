@@ -358,10 +358,8 @@ struct ExaSearchService: WebSearchServicing {
 
 /// Sends every web search to the backend the chosen provider names. The
 /// Automatic provider prefers Bocha for a Chinese query when its key is
-/// stored, then Tavily, then SearXNG, then Brave, skipping any step whose key
-/// is missing.
+/// stored, then Tavily, then Brave, skipping any step whose key is missing.
 struct WebSearchRouter: WebSearchServicing {
-    let searxng: any WebSearchServicing
     let tavily: any WebSearchServicing
     let brave: any WebSearchServicing
     let bocha: any WebSearchServicing
@@ -377,8 +375,6 @@ struct WebSearchRouter: WebSearchServicing {
 
     func search(_ query: String, provider: WebSearchProvider) async throws -> String {
         switch provider.backend {
-        case .searxng:
-            return try await searxng.search(query, provider: provider)
         case .tavily:
             guard hasTavilyKey() else {
                 throw WebSearchError.failed(Self.missingKeyMessage(for: .tavily))
@@ -419,11 +415,6 @@ struct WebSearchRouter: WebSearchServicing {
             if let result = try await Self.attempt({ try await tavily.search(query) }) {
                 return result
             }
-        }
-
-        attempted.append("SearXNG")
-        if let result = try await Self.attempt({ try await searxng.search(query, provider: .automatic) }) {
-            return result
         }
 
         if hasBraveKey() {

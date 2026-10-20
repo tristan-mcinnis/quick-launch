@@ -66,7 +66,7 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         titleSource = try c.decodeIfPresent(String.self, forKey: .titleSource)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
-        enabledTools = try c.decodeIfPresent(Set<ChatToolKind>.self, forKey: .enabledTools)
+        enabledTools = try c.decodeToolKinds(forKey: .enabledTools)
         if try c.decodeIfPresent(Bool.self, forKey: .tasksEnabled) == true {
             enabledTools?.insert(.tasks)
         }

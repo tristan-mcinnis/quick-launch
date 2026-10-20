@@ -127,7 +127,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .application: "Open"
         case .snippet, .clipboard, .emoji: "Paste"
         case .quickLink: requiresInput ? "Enter Input" : "Open"
-        case .command: value.hasPrefix("vault.") ? "Search" : (value.hasPrefix(SettingsDestination.valuePrefix) ? "Open" : "Run")
+        case .command: value.hasPrefix(SettingsDestination.valuePrefix) ? "Open" : "Run"
         case .screenshot: "Paste"
         case .conversation: "Continue"
         case .askAI: "Ask"
@@ -145,7 +145,6 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         case .command:
             if value.hasPrefix(SettingsDestination.valuePrefix) { return "gearshape" }
             if let icon = Self.helperCommandIcons[value] { return icon }
-            if value.hasPrefix("vault.") { return "magnifyingglass" }
             if value.hasPrefix("settingspane."),
                let pane = SystemSettingsPaneCatalog.panes.first(where: {
                    $0.id == String(value.dropFirst("settingspane.".count))
@@ -212,7 +211,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
     case chats
     case commands
     case folders
-    case vaultSearch
 
     var id: String { rawValue }
     var title: String {
@@ -226,7 +224,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: "Chats"
         case .commands: "Commands"
         case .folders: "Folders"
-        case .vaultSearch: "Vault Search"
         }
     }
     var aliases: [String] {
@@ -240,7 +237,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: ["chats", "quick ai", "ai chats", "history", "conversations", "recent chats"]
         case .commands: ["commands", "window management", "windows", "toggles", "settings panes"]
         case .folders: ["folders", "folder", "places", "locations", "finder"]
-        case .vaultSearch: ["vault search", "vault", "projects", "project search"]
         }
     }
     var systemImage: String {
@@ -254,7 +250,6 @@ enum LauncherCatalogScope: String, CaseIterable, Identifiable, Sendable {
         case .chats: "bubble.left.and.text.bubble.right"
         case .commands: "command"
         case .folders: "folder"
-        case .vaultSearch: "magnifyingglass"
         }
     }
 }

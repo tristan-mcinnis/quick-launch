@@ -79,8 +79,8 @@ panel becomes a chat surface with a header, a thread, and a composer.
   in full.
 - The thread follows new text only while you are at the bottom. A **Latest**
   chip, or `Command+Down`, takes you back.
-- Command output and a Vault Search use the same surface, naming the command or
-  "Vault Search · mode" where the model would be, and never join a chat.
+- Command output uses the same surface, naming the command where the model
+  would be, and never joins a chat.
 
 ### Recent chats
 
@@ -126,8 +126,7 @@ The launcher closes, so one chat is open in one window.
   Quick AI chat to it and sends nothing. Its instructions and context skills
   lead the system message, its tools become the chat's tool set, and a pinned
   provider and model apply.
-- Two assistants ship by default: **Vault researcher** (vault, memory, and
-  tasks tools; cites sources) and **STE editor** (Simplified Technical English
+- One assistant ships by default: **STE editor** (Simplified Technical English
   rules, no tools).
 - **Settings › AI Commands** sets a command's name, fuzzy alias, prompt, output
   behavior, optional global hotkey, and optional provider and model. The
@@ -149,11 +148,10 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 | `recall_captures_today()` | today's captures |
 | `recall_tasks_today()` | due-today, overdue, and in-progress tasks |
 | `recall_open_tasks()` | the complete open backlog |
-| `search_vault(query, mode)` | the Vault Search lane: current, reconcile, history, or portfolio |
 | `read_skill(name)` | a `SKILL.md` from the skills folder, capped at 12,000 characters |
 | `search_web(query)` | the chosen web-search backend |
 
-- The model is told to use memory and the vault only when you ask about your own
+- The model is told to use memory only when you ask about your own
   notes, projects, clients, decisions, or files, and a skill when you name one
   or ask how you do something.
 - An answer may use six tool rounds and 30 seconds of tool time; after that the
@@ -309,15 +307,6 @@ Windows**.
   bundled `scripts/quick-launch-agent-event` helper; the old companion folder is
   watched too.
 
-## Vault Search
-
-An optional catalog backed by your own House server (an SSH host) and a read layer: Current Project, Reconcile
-Changes, Project History, and Across Projects.
-
-- Structured modes make one read-only call with no model-provider egress, show
-  freshness and source paths, refuse future evidence, and ask for project scope
-  when a name is ambiguous.
-
 ## Learning and the interaction journal
 
 The app keeps a bounded local review log of launcher and AI outcomes: choices,
@@ -374,7 +363,6 @@ failures or cancellations, successful command actions, and hotkey runs.
 | AI Chat | Open the chat window | The AI Chat command, `Command+J` on Quick AI, or the menu-bar menu |
 | Windows | Apply a window layout | Alias or assigned hotkey |
 | Emoji | Paste the symbol | Open the catalog and type a name |
-| Vault Search | Show a cited result | Enter the catalog, choose a mode, type the project and question |
 | Screenshots | Attach or act on a capture | Open the catalog and type a name |
 
 ## Models and providers
@@ -390,11 +378,12 @@ failures or cancellations, successful command actions, and hotkey runs.
 - API keys are stored in the macOS Keychain and are not synced through iCloud.
   Provider settings, model choices, and actions use local `UserDefaults`.
 - Web search has its own provider choice (Settings › Models › Web search), shared
-  by Quick AI, AI Chat, and the Translator: Google, Bing, DuckDuckGo, and News
-  through the self-hosted SearXNG; Tavily, Brave, Bocha (Chinese web), and Exa
-  (semantic) called directly; or Automatic preferring Bocha for a Chinese query
-  when that key is set, then Tavily, SearXNG, and Brave. The direct-backend keys
-  are stored in the same owner-only Keychain as provider keys.
+  by Quick AI, AI Chat, and the Translator: Tavily, Brave, Bocha
+  (Chinese web), and Exa (semantic), called directly; or Automatic preferring
+  Bocha for a Chinese query when that key is set, then Tavily and Brave. The
+  keys are stored in the same owner-only Keychain as provider keys; Tavily and
+  Brave fall back to `TAVILY_API_KEY` and `BRAVE_API_KEY` in
+  `~/.config/secrets.env`.
 - Local model discovery scans the local server's model folder without starting
   it.
 
@@ -404,12 +393,11 @@ failures or cancellations, successful command actions, and hotkey runs.
   question sends: the question, the allowed conversation context, the app's
   instruction, a saved command's or assistant's instructions, selected source
   passages and images, and any permitted tool results.
-- Source-only turns do not silently widen to unrelated history, memory, vault,
+- Source-only turns do not silently widen to unrelated history, memory,
   web, or skills.
-- The memory and skill tools read local files only. The vault tool sends its
-  query over SSH to the private VPS. SearXNG web search does the same. A
-  directly selected Tavily, Brave, Bocha, or Exa backend sends the query to
-  that third party. What a tool returns goes to the chat's model while it
+- The memory and skill tools read local files only. A web search sends the
+  query to the search API behind the chosen backend (Tavily, Brave, Bocha, or
+  Exa). What a tool returns goes to the chat's model while it
   writes that answer.
 - Chat history and source blobs are local and owner-only. Submitted material is
   saved before provider execution; a save failure keeps the draft and blocks

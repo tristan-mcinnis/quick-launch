@@ -38,12 +38,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
     /// Where the answer on screen came from. A model answer is a turn of the
     /// thread and the header names the model; a command action's output and
-    /// a Vault Search are not turns, and the header names them instead.
+    /// are not turns, and the header names them instead.
     enum AnswerSource: Equatable, Sendable {
         case model
         /// A command action or a system command, by its name.
         case command(String)
-        case vaultSearch(VaultSearchMode)
         /// Math, a conversion, a date, or a system fact asked from the
         /// Quick AI composer: answered here, never by the model.
         case local
@@ -455,10 +454,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var now: () -> Date = Date.init
     /// Typing-capture modes beyond Quick Link input.
     var inputMode: InputMode?
-    /// Keeps Vault Search follow-ups on the VPS retrieval path instead of
-    /// silently handing them to the selected AI provider.
-    var activeVaultSearchMode: VaultSearchMode?
-    var vaultSearchAnchor: String?
     private(set) var launcherSelectionAnnouncement = ""
     private(set) var launcherSelectionAnnouncementRevision = 0
 
@@ -467,7 +462,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case renameChat(UUID)
         /// A clipboard entry is asking for a new name; `itemID` identifies it.
         case renameClipboard(String)
-        case vaultSearch(VaultSearchMode)
         /// A snippet is asking for one `{argument}`; `pendingSnippetInsertion`
         /// holds which, and what to do once every slot is answered.
         case snippetArgument
@@ -764,7 +758,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var launcherCatalog: (any LauncherCatalogServicing)?
     var clipboardHistory: (any ClipboardHistoryServicing)?
     var webSearchService: (any WebSearchServicing)?
-    var vaultSearchService: (any VaultSearchServicing)?
     /// Memory and task reads through `recall`. Nil in tests that do not fake it.
     var memoryService: (any MemoryRecalling)?
     /// Capture to Memory (`recall capture`), a user action only.
@@ -773,8 +766,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var skillLibrary: SkillLibrary?
     /// Open Source: `/usr/bin/open` on a source's local path.
     var fileOpener: (any LocalFileOpening)?
-    /// The folders Open Source may open from (the memory store and the
-    /// vault clone); tests point it at a temporary folder.
+    /// The folders Open Source may open from (the memory repo, the skills repo
+    /// and the Work folder); tests point it at a temporary folder.
     @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots
     /// Continue in pi. The app sets `PiHandoffService`; nil (every test
     /// that does not set one) leaves the action out of `⌘K`, so no test
@@ -1010,7 +1003,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         launcherCatalog: (any LauncherCatalogServicing)? = nil,
         clipboardHistory: (any ClipboardHistoryServicing)? = nil,
         webSearchService: (any WebSearchServicing)? = nil,
-        vaultSearchService: (any VaultSearchServicing)? = nil,
         pageReader: (any WebPageReading)? = nil,
         windowManager: (any WindowManaging)? = nil,
         caffeinateManager: (any CaffeinateManaging)? = nil,
@@ -1045,7 +1037,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.launcherCatalog = launcherCatalog
         self.clipboardHistory = clipboardHistory
         self.webSearchService = webSearchService
-        self.vaultSearchService = vaultSearchService
         self.pageReader = pageReader
         self.windowManager = windowManager
         self.caffeinateManager = caffeinateManager
@@ -1258,19 +1249,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return toned
     }
     var configurableCatalogItems: [LauncherCatalogItem] { snippets + quickLinks }
-
-    var vaultSearchItems: [LauncherCatalogItem] {
-        VaultSearchMode.allCases.map { mode in
-            LauncherCatalogItem(
-                kind: .command,
-                itemID: mode.commandID,
-                title: mode.title,
-                detail: mode.detail,
-                value: mode.commandID,
-                keywords: mode.keywords
-            )
-        }
-    }
 
     func windowCommand(for layout: WindowLayout) -> LauncherCatalogItem {
         LauncherCatalogItem(
@@ -1659,7 +1637,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .chats: return conversationItems
         case .commands: return systemCommands
         case .folders: return folderItems
-        case .vaultSearch: return vaultSearchItems
         }
     }
 
@@ -2435,7 +2412,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .caffeinateUntil: return "Caffeinate Until"
         case .renameChat: return "Rename Chat"
         case .renameClipboard: return "Rename Entry"
-        case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
         case .snippetArgument:
             return pendingSnippetInsertion.map { "Snippet · \($0.item.title)" } ?? "Snippet"
         case .houseCommandArgument:
@@ -2495,11 +2471,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             case .renameChat, .renameClipboard:
                 return [
                     FooterHint(label: "Save", keys: ["↩"]),
-                    FooterHint(label: "Back", keys: ["⌫"]),
-                ]
-            case .vaultSearch:
-                return [
-                    FooterHint(label: "Search", keys: ["↩"]),
                     FooterHint(label: "Back", keys: ["⌫"]),
                 ]
             case .houseCommandArgument:
@@ -2821,7 +2792,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .caffeinateUntil: return "Until 17:30, 5:30pm, 90m, or 2h…"
         case .renameChat: return "New name for this chat…"
         case .renameClipboard: return "New name for this entry…"
-        case .vaultSearch(let mode): return mode.placeholder
         case .houseCommandArgument:
             guard let row = pendingHouseCommandText else { return "Value…" }
             return "\(row.command.title)…"
@@ -3013,14 +2983,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return model.isEmpty ? provider.name : ModelProfile.displayName(forModelID: model)
     }
 
-    /// The answer on screen (or running) came from a command action or a
-    /// Vault Search, not from the model: the header names that source.
+    /// The answer on screen (or running) came from a command action, not
+    /// from the model: the header names that source.
     var answerSourceTitle: String? {
         guard isStreaming || !output.isEmpty else { return nil }
         switch answerSource {
         case .model: return nil
         case .command(let name): return name
-        case .vaultSearch(let mode): return "Vault Search · \(mode.title)"
         case .local: return Self.localAnswerSourceTitle
         }
     }
@@ -3028,8 +2997,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The header's second line under a local answer asked in a chat.
     static let localAnswerSourceTitle = "Local answer"
 
-    /// The Quick AI header's second line: the source of a command or Vault
-    /// Search answer, otherwise the model that answers the next message.
+    /// The Quick AI header's second line: the source of a command
+    /// answer, otherwise the model that answers the next message.
     var quickAIHeaderSubtitle: String {
         answerSourceTitle ?? activeModelDisplay
     }
@@ -3042,8 +3011,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var conversationMessages: [QuickMessage] { currentConversation?.messages ?? [] }
 
     /// A finished answer that is not the thread's last assistant turn: a
-    /// local answer (math, a conversion), a command action's result, a Vault
-    /// Search, or the partial text a failed stream left behind. The surface
+    /// local answer (math, a conversion), a command action's result,
+    /// or the partial text a failed stream left behind. The surface
     /// draws it after the thread; a streaming answer is drawn live instead.
     var quickAIDetachedAnswer: String? {
         guard !isStreaming, !output.isEmpty else { return nil }
@@ -3084,8 +3053,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         /// An exact `/alias` that runs a local executable. Always wins, even
         /// over an active answer thread.
         case commandAlias
-        /// Typing while a Vault Search thread is active continues that search.
-        case vaultFollowUp(VaultSearchMode)
         /// Answer on screen, nothing typed: Return is a no-op.
         case answerIdle
         /// A local answer inline in root search, nothing typed: Return does
@@ -3115,7 +3082,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if pendingQuickLink == nil, exactCommandAlias() != nil { return .commandAlias }
         if isAnswerActive {
-            if let mode = activeVaultSearchMode, !trimmed.isEmpty { return .vaultFollowUp(mode) }
             if trimmed.isEmpty { return .answerIdle }
         }
         if rootAnswer != nil, trimmed.isEmpty { return .rootAnswerIdle }
@@ -3248,8 +3214,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             await submit()
         case .inputMode:
             _ = await submitInputMode()
-        case .vaultFollowUp(let mode):
-            await submitVaultSearch(mode: mode, followUp: true)
         case .answerIdle:
             // Return on a finished answer runs the Quick AI primary action:
             // paste into the app behind the overlay, or copy. ⌘↩ stays the
@@ -3415,8 +3379,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         isRecentChatsPresented = false
         rootAnswer = nil
         renameReturnsToRecentChats = false
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
         inputMode = mode
         catalogScope = nil
         pendingQuickLinkID = nil
@@ -3450,8 +3412,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     private func openQuickAIUntraced() {
         let preserved = input
         inputMode = nil
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
@@ -3574,8 +3534,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if renameReturnsToRecentChats, case .renameChat(let id) = inputMode { renamedChatID = id }
         renameReturnsToRecentChats = false
         inputMode = nil
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
         pendingSnippetInsertion = nil
         input = ""
         errorMessage = nil
@@ -3624,8 +3582,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 mode: finished.mode,
                 dismissingOverlay: finished.dismissesOverlay
             )
-        case .vaultSearch(let mode):
-            await submitVaultSearch(mode: mode, followUp: false)
         case .renameChat(let id):
             renameConversation(id: id, title: input)
             if !leaveInputMode() { enterCatalog(.chats) }
@@ -3655,64 +3611,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
         }
         return true
-    }
-
-    private func submitVaultSearch(mode: VaultSearchMode, followUp: Bool) async {
-        let question = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty else { return }
-        // A submitted Vault Search is an act, not an abandoned search.
-        noteActedQuery(question)
-        guard let vaultSearchService else {
-            errorMessage = "Vault Search is unavailable. It needs the optional House server in your SSH config."
-            requestInputFocus()
-            return
-        }
-
-        let effectiveQuery: String
-        if followUp, let anchor = vaultSearchAnchor {
-            effectiveQuery = anchor + "\nFollow-up: " + question
-        } else {
-            effectiveQuery = question
-        }
-        inputMode = nil
-        // The typed question is held for Escape exactly as a web search's is:
-        // a cancelled Vault Search puts it back in the composer.
-        if enrichmentSubmittedInput == nil { enrichmentSubmittedInput = input }
-        input = ""
-        // Not a turn of the chat and not the model: the question is its own
-        // pill, and the header names Vault Search and its mode.
-        lastQuestion = question
-        pendingQuestion = question
-        answerSource = .vaultSearch(mode)
-        threadError = nil
-        output = ""
-        errorMessage = nil
-        followThreadBottom()
-        isStreaming = true
-        var result: String?
-        do {
-            result = try await vaultSearchService.search(mode: mode, query: effectiveQuery)
-        } catch {
-            if !Task.isCancelled {
-                errorMessage = error.localizedDescription
-                pendingQuestion = nil
-                isFollowUpQueued = false
-            }
-        }
-        isStreaming = false
-        // Escape cancelled this task while the search ran: the question is
-        // already back in the composer and a late result is never published.
-        guard !Task.isCancelled else {
-            restoreEnrichmentInput()
-            return
-        }
-        if let result {
-            output = result
-            activeVaultSearchMode = mode
-            vaultSearchAnchor = effectiveQuery
-        }
-        requestInputFocus()
-        await sendQueuedFollowUp()
     }
 
     func enterCatalog(_ scope: LauncherCatalogScope) {
@@ -3805,7 +3703,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .chats: return chatCount(excluding: hidden)
         case .commands: return visible(systemCommands)
         case .folders: return visible(folderItems)
-        case .vaultSearch: return vaultSearchItems.count
         }
     }
 
@@ -4039,10 +3936,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         case .application:
             return
         case .command:
-            if let mode = VaultSearchMode(commandID: item.value) {
-                enterInputMode(.vaultSearch(mode))
-                return
-            }
             if let kind = ScreenshotKind(commandID: item.value) {
                 if await attachScreenshot(kind, clearingInput: true) {
                     overlayPresenter.presentOverlay()
@@ -4195,7 +4088,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// The app's own command catalogs, as the Fallback Commands card offers
     /// them.
-    var fallbackCommandItems: [LauncherCatalogItem] { systemCommands + vaultSearchItems }
+    var fallbackCommandItems: [LauncherCatalogItem] { systemCommands }
 
     /// One command the Fallback Commands card can add.
     struct FallbackCommandChoice: Identifiable, Equatable, Sendable {
@@ -8638,7 +8531,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         isStreaming && !Task.isCancelled
     }
 
-    /// Adds live context to the prompt: SearXNG results when the input asks
+    /// Adds live context to the prompt: web search results when the input asks
     /// for a web search, and the content of any http(s) URLs it names.
     /// Returns `false` when the search failed or the ask was stopped and
     /// the request must not reach the model.
@@ -8654,7 +8547,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             action: request.actionDefinition
         ) {
             guard let webSearchService else {
-                errorMessage = "SearXNG search is not available on this Mac."
+                errorMessage = "Web search is not available on this Mac."
                 requestInputFocus()
                 return false
             }
@@ -9456,7 +9349,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         isFollowUpQueued = true
     }
 
-    /// The stream (or command, or Vault Search) ended with an answer: send
+    /// The stream (or command) ended with an answer: send
     /// the queued follow-up as typed text. While a layer above the composer
     /// is open it keeps Return, so the follow-up stays queued and goes when
     /// that layer closes (`resumeQueuedFollowUp`).
@@ -9903,7 +9796,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return makeService(provider: provider, model: model, chatTools: false)
     }
 
-    /// `chatTools` offers the chat's memory, vault, and skill tools and lets
+    /// `chatTools` offers the chat's memory and skill tools and lets
     /// the chat's toggle decide web search. The Translator passes false: it
     /// gets web search per the setting and nothing else.
     func makeService(
@@ -9961,7 +9854,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     ? ChatToolbox(
                         enabled: tools,
                         memory: memoryService,
-                        vault: vaultSearchService,
                         skills: skillLibrary
                     )
                     : ChatToolbox(),
@@ -10439,7 +10331,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let rawValue: UInt8
         /// ⌘K pane, palette, sub-form, delete arming, action query.
         static let layers = ResetScope(rawValue: 1 << 0)
-        /// Catalog, Quick Link input, input mode, vault-search mode.
+        /// Catalog, Quick Link input, input mode.
         static let mode = ResetScope(rawValue: 1 << 1)
         /// Attachments and screen-awareness context.
         static let attachments = ResetScope(rawValue: 1 << 2)
@@ -10471,8 +10363,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             catalogScope = nil
             pendingQuickLinkID = nil
             inputMode = nil
-            activeVaultSearchMode = nil
-            vaultSearchAnchor = nil
             pendingSnippetInsertion = nil
             pendingHouseCommandText = nil
             pendingHouseChoice = nil
@@ -10525,8 +10415,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             clearTransformFlowState()
             currentConversation = nil
             reattachStates = [:]
-            activeVaultSearchMode = nil
-            vaultSearchAnchor = nil
         }
         if scope.contains(.input) {
             input = ""
@@ -11109,8 +10997,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
         output = ""
         errorMessage = nil
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
     }
 
     /// Everything the deletion removed, as the UI now shows it.
@@ -11123,8 +11009,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if let historyFileURL { QuickHistoryStore.clear(from: historyFileURL) }
         output = ""
         errorMessage = nil
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
     }
 
     /// After a partial failure: the list is exactly what the archive still
@@ -11179,8 +11063,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             threadAnchors.record(nil, for: conversation.id)
             followThreadBottom()
         }
-        activeVaultSearchMode = nil
-        vaultSearchAnchor = nil
         resumeRetainedAttachments(for: conversation)
     }
 

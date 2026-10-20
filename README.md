@@ -46,7 +46,7 @@ whose inner workings they can read and change.
   settings and history with the panel.
 - Saved actions and assistants add custom instructions, tools, and context,
   with fuzzy slash aliases (`/grammar`, `/tldr`, `/search`) and hotkeys.
-- Read-only tools: web search, plus skills, memory, tasks, and a project vault
+- Read-only tools: web search, plus skills, memory, and tasks
   when those optional integrations are present. Each tool turns on or off per
   chat.
 - Attachments: files, images, links, screenshots, and the current selection.
@@ -87,7 +87,6 @@ on them.
 |---|---|---|
 | Skills tool | Skill folders with a `SKILL.md` in `~/.claude/skills` | The tool is not offered. |
 | Memory and Tasks tools, Capture to Memory | A `recall` CLI on `PATH` | The tools are not offered; Capture says recall is not installed. |
-| Vault tool and Vault Search, SearXNG web search, page-reader fallback | An SSH host alias for your own server in `~/.ssh/config` (the "House server"; set its name with `defaults write com.tristanmcinnis.quick-launch HouseServerHost <alias>`) | The Vault tool is not offered, Vault Search says it is unavailable, Automatic web search uses the next backend, and pages are read directly. |
 | Continue in pi | `tmux` and `pi` on `PATH` | Settings shows what is missing. |
 
 **Settings › General › Chat** shows which of these it found.

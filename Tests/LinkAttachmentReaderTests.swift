@@ -53,23 +53,6 @@ private final class LinkStub: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Remembers what the VPS reader was asked for.
-private final class RemoteLog: Sendable {
-    private let urls = Mutex<[URL]>([])
-    let reply: String
-
-    init(reply: String) { self.reply = reply }
-
-    var asked: [URL] { urls.withLock { $0 } }
-
-    var reader: LinkAttachmentReader.RemoteReader {
-        { [self] url in
-            urls.withLock { $0.append(url) }
-            return reply
-        }
-    }
-}
-
 @Suite("Link attachment reader")
 struct LinkAttachmentReaderTests {
     private let host = "t-\(UUID().uuidString.lowercased()).example"
@@ -79,12 +62,11 @@ struct LinkAttachmentReaderTests {
     }
 
     private func reader(
-        totalTimeout: Duration = AttachmentLimits.linkTotalTimeout,
-        remote: LinkAttachmentReader.RemoteReader? = nil
+        totalTimeout: Duration = AttachmentLimits.linkTotalTimeout
     ) -> LinkAttachmentReader {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LinkStub.self]
-        return LinkAttachmentReader(configuration: configuration, totalTimeout: totalTimeout, remoteRead: remote)
+        return LinkAttachmentReader(configuration: configuration, totalTimeout: totalTimeout)
     }
 
     private func failure(_ url: URL, _ reader: LinkAttachmentReader) async -> AttachmentFailure? {
@@ -231,45 +213,11 @@ struct LinkAttachmentReaderTests {
         #expect(await failure(hops[0], reader()) == .tooManyRedirects)
     }
 
-    @Test("A thin page takes the one VPS retry, with the final URL")
-    func thinPageRetry() async throws {
-        let thin = url("/app")
-        LinkStub.serve(thin, .init(body: Data("<html><head><title>App</title></head><body><div id=root>Loading</div></body></html>".utf8)))
-        let remote = RemoteLog(reply: "Rendered by the reader on the VPS. " + Self.article)
-        let result = try await reader(remote: remote.reader).read(thin)
-        #expect(remote.asked == [thin])
-        #expect(result.text?.contains("Rendered by the reader on the VPS.") == true)
-        #expect(result.ref.name == "App")
-
-        let full = url("/full")
-        LinkStub.serve(full, .init(body: Data("<p>\(Self.article)</p>".utf8)))
-        let untouched = RemoteLog(reply: "never used")
-        _ = try await reader(remote: untouched.reader).read(full)
-        #expect(untouched.asked.isEmpty)
-
+    @Test("A page with no readable text says so")
+    func emptyPage() async {
         let empty = url("/empty")
         LinkStub.serve(empty, .init(body: Data("<html><body></body></html>".utf8)))
         #expect(await failure(empty, reader()) == .empty)
-    }
-
-    @Test("The VPS reader runs WebPageReader's remote command over SSH")
-    func vpsCommand() async throws {
-        let calls = Mutex<[(String, [String])]>([])
-        let page = url("/it's")
-        let reader = LinkAttachmentReader.vpsReader(host: "example-host") { host, command, timeout in
-            calls.withLock { $0.append((host, command)) }
-            #expect(timeout == 15)
-            return ProcessResult(stdout: Data("remote text".utf8), stderr: Data(), status: 0)
-        }
-        #expect(try await reader(page) == "remote text")
-        let call = try #require(calls.withLock { $0.first })
-        #expect(call.0 == "example-host")
-        #expect(call.1 == WebPageReader.remoteCommand(for: page))
-
-        let failing = LinkAttachmentReader.vpsReader(host: "example-host") { _, _, _ in
-            ProcessResult(stdout: Data(), stderr: Data("no route".utf8), status: 255)
-        }
-        await #expect(throws: AttachmentFailure.unreachable) { try await failing(page) }
     }
 
     @Test("An HTTP error and a file type that is not read each say so")

@@ -8,10 +8,9 @@
 # publishes what it scans for. This file is the one tracked file excluded
 # from the scan: review it by hand.
 #
-# The House integration names (the vault and memory folders, the House
-# server alias) are optional features, so exactly two files may name them:
-# HouseServer.swift, which holds the default alias, and the personal setup
-# notes. Everything else uses a placeholder.
+# The House integration names (the vault and memory folders, the retired
+# vault server aliases) may appear in one file only: the personal setup notes.
+# Everything else uses a placeholder.
 #
 # It lives in scripts/ rather than tests/ because Tests/ is the SwiftPM test
 # target, and macOS file systems treat the two names as one folder.
@@ -20,8 +19,8 @@ cd "$(dirname "$0")/.."
 
 SELF='scripts/scrub.sh'
 GENERIC='/Users/tristan|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|hf_[A-Za-z0-9]{30,}|ghp_[A-Za-z0-9]{30,}'
-HOUSE='~/vault|~/memory|vault-vps'
-HOUSE_ALLOWED='^(Sources/Services/HouseServer\.swift|docs/personal-setup\.md)$'
+HOUSE='~/vault|~/memory|vault-vps|vault-private'
+HOUSE_ALLOWED='^docs/personal-setup\.md$'
 PRIVATE=''
 if [ -f .scrub-private ]; then
   PRIVATE=$(grep -v -e '^[[:space:]]*$' -e '^#' .scrub-private | paste -sd'|' - || true)

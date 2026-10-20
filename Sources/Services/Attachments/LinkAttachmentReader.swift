@@ -11,17 +11,11 @@ import UniformTypeIdentifiers
 ///   Ephemeral session: no cookies, no cache.
 /// - 15 s in all (10 s a request); the body is read as a stream and stops
 ///   at 5 MB whatever the server claims.
-/// - A page with under 200 characters of text gets the one retry through
-///   the trafilatura reader on the House server, as `WebPageReader` does, inside
-///   the same 15 s.
 /// - The reference keeps the final URL after redirects, and the title.
 ///
 /// Separate from `WebPageReader`, which keeps serving the in-question page
 /// read and the tools.
 actor LinkAttachmentReader {
-    /// Reads a page elsewhere (the VPS) and returns its text.
-    typealias RemoteReader = @Sendable (URL) async throws -> String
-
     /// Same browser identity as `WebPageReader`, so a page that answers one
     /// answers the other.
     static let userAgent =
@@ -31,14 +25,12 @@ actor LinkAttachmentReader {
     private let totalTimeout: Duration
     private let requestTimeout: Duration
     private let bodyLimit: Int
-    private let remoteRead: RemoteReader?
 
     init(
         configuration: URLSessionConfiguration = .ephemeral,
         totalTimeout: Duration = AttachmentLimits.linkTotalTimeout,
         requestTimeout: Duration = AttachmentLimits.linkRequestTimeout,
-        bodyLimit: Int = AttachmentLimits.linkBodyBytes,
-        remoteRead: RemoteReader? = LinkAttachmentReader.vpsReader(host: HouseServer.host)
+        bodyLimit: Int = AttachmentLimits.linkBodyBytes
     ) {
         // A copy, so the caller's configuration is never changed.
         let configuration = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
@@ -55,26 +47,6 @@ actor LinkAttachmentReader {
         self.totalTimeout = totalTimeout
         self.requestTimeout = requestTimeout
         self.bodyLimit = bodyLimit
-        self.remoteRead = remoteRead
-    }
-
-    /// Runs one remote command on a host: `SSHRunner.run` in the app.
-    typealias SSHRunning = @Sendable (_ host: String, _ remoteCommand: [String], _ timeout: TimeInterval) async throws -> ProcessResult
-
-    /// The trafilatura reader on the House server over SSH: `WebPageReader`'s
-    /// remote command, direct argv, no local shell.
-    static func vpsReader(
-        host: String,
-        timeout: Duration = AttachmentLimits.linkTotalTimeout,
-        run: @escaping SSHRunning = { host, command, timeout in
-            try await SSHRunner.run(host: host, remoteCommand: command, timeout: timeout)
-        }
-    ) -> RemoteReader {
-        { url in
-            let result = try await run(host, WebPageReader.remoteCommand(for: url), seconds(timeout))
-            guard result.status == 0 else { throw AttachmentFailure.unreachable }
-            return result.stdoutText
-        }
     }
 
     // MARK: Read
@@ -91,8 +63,6 @@ actor LinkAttachmentReader {
         else { throw AttachmentFailure.invalidLink }
         progress?(.fetching(host: host))
 
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: totalTimeout)
         let session = self.session
         let requestTimeout = self.requestTimeout
         let bodyLimit = self.bodyLimit
@@ -148,21 +118,6 @@ actor LinkAttachmentReader {
             }
             body = body.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if body.count < AttachmentLimits.thinPageCharacters, let remoteRead {
-                let remaining = clock.now.duration(to: deadline)
-                if remaining > .zero {
-                    let finalURL = fetched.finalURL
-                    let remote = try? await AttachmentExtractor.withTimeout(remaining) {
-                        try await remoteRead(finalURL)
-                    }
-                    try Task.checkCancellation()
-                    let remoteText = (remote ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if remoteText.count > body.count {
-                        body = remoteText
-                        notes.removeAll { if case .linkBodyCut = $0 { true } else { false } }
-                    }
-                }
-            }
             guard !body.isEmpty else { throw AttachmentFailure.empty }
 
             let name = title ?? finalHost

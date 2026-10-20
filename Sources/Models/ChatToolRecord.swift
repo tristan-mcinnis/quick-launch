@@ -13,7 +13,8 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case memory
         /// A read of today's captures.
         case today
-        /// `search_vault`.
+        /// Vault search, retired 2026-10-20. Kept so an old chat that holds
+        /// one of these lines still opens.
         case vault
         /// `read_skill`.
         case skill
@@ -59,7 +60,7 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     var drawsAboveAnswer: Bool { kind != .capture }
 }
 
-/// One source a tool found: a memory file or a vault record.
+/// One source a tool found: a memory file or a task.
 struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// The record's title, or the file's store-relative path when it has none.
     var title: String
@@ -85,13 +86,14 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.path = path
     }
 
-    /// The folders a source may open from: the memory store and this Mac's
-    /// vault clone, the only places the tools read.
+    /// The folders a source may open from: the memory repo, the skills repo
+    /// and the Work folder, the only places the tools read.
     static let defaultRoots: [URL] = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [
             home.appending(path: "memory", directoryHint: .isDirectory),
-            home.appending(path: "vault", directoryHint: .isDirectory),
+            home.appending(path: "skills", directoryHint: .isDirectory),
+            home.appending(path: "Documents/Work", directoryHint: .isDirectory),
         ]
     }()
 
@@ -160,8 +162,8 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
 
 extension QuickSettings {
     /// The chat defaults: a chat's tools when it has not chosen its own, set
-    /// by the five switches in Settings › General › Chat. Memory, Tasks,
-    /// Vault, and Skills are on out of the box; Web search is the one
+    /// by the four switches in Settings › General › Chat. Memory, Tasks,
+    /// and Skills are on out of the box; Web search is the one
     /// `modelWebSearchEnabled` switch, shared with the Translator.
     var newChatTools: Set<ChatToolKind> {
         Set(ChatToolKind.allCases.filter(isNewChatToolOn))
@@ -171,7 +173,6 @@ extension QuickSettings {
         switch kind {
         case .memory: newChatMemoryEnabled
         case .tasks: newChatTasksEnabled
-        case .vault: newChatVaultEnabled
         case .skills: newChatSkillsEnabled
         case .web: modelWebSearchEnabled
         }
@@ -181,7 +182,6 @@ extension QuickSettings {
         switch kind {
         case .memory: newChatMemoryEnabled = on
         case .tasks: newChatTasksEnabled = on
-        case .vault: newChatVaultEnabled = on
         case .skills: newChatSkillsEnabled = on
         case .web: modelWebSearchEnabled = on
         }
@@ -194,7 +194,6 @@ extension ChatToolKind {
         switch self {
         case .memory: "brain.head.profile"
         case .tasks: "checklist"
-        case .vault: "archivebox"
         case .skills: "book"
         case .web: "globe"
         }
@@ -205,9 +204,8 @@ extension ChatToolKind {
         switch self {
         case .memory: "Search notes and today's captures with recall"
         case .tasks: "Read due, overdue, in-progress, and open tasks"
-        case .vault: "Search project state on the House server"
         case .skills: "Read a skill from ~/.claude/skills"
-        case .web: "Search the web with SearXNG"
+        case .web: "Search the web with Tavily, Brave or Bocha"
         }
     }
 }

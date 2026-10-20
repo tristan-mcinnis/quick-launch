@@ -826,7 +826,7 @@ struct QuickAIPolishTests {
 
 /// A web search that always fails with one known message.
 private struct FailingWebSearchService: WebSearchServicing {
-    static let message = "SearXNG did not answer."
+    static let message = "The search API did not answer."
 
     struct Failure: LocalizedError {
         var errorDescription: String? { FailingWebSearchService.message }

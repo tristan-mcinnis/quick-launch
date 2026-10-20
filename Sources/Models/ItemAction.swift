@@ -375,11 +375,10 @@ enum ItemActionCatalog {
             return [
                 ItemAction(
                     kind: .primary,
-                    title: item.caffeinateActionTitle
-                        ?? (item.value.hasPrefix("vault.") ? "Search" : "Run"),
+                    title: item.caffeinateActionTitle ?? "Run",
                     systemImage: caffeinateActive != nil
                         ? (caffeinateActive == true ? "moon.zzz" : "cup.and.saucer.fill")
-                        : (item.value.hasPrefix("vault.") ? "magnifyingglass" : "play"),
+                        : "play",
                     shortcut: .returnKey
                 ),
                 ItemAction(kind: .setAlias, title: "Set Alias…", systemImage: "textformat.abc", shortcut: .commandShift("a")),

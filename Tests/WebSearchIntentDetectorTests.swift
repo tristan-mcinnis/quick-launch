@@ -18,7 +18,7 @@ struct WebSearchIntentDetectorTests {
         #expect(!WebSearchIntentDetector.shouldSearch("what is the next step?"))
     }
 
-    @Test func leavesQuestionsAboutTheUserForMemoryAndTheVault() {
+    @Test func leavesQuestionsAboutTheUserForMemory() {
         #expect(!WebSearchIntentDetector.shouldSearch("what did I work on today"))
         #expect(!WebSearchIntentDetector.shouldSearch("what's on my schedule today"))
         #expect(!WebSearchIntentDetector.shouldSearch("what did we decide today"))

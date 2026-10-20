@@ -31,10 +31,10 @@ struct ChatToolsViewModelTests {
             ChatSource(title: "episodic/2026-09-06.md", day: "2026-09-06", path: "/Users/test/memory/episodic/2026-09-06.md"),
         ]
     )
-    private static let vaultLine = ChatToolRecord(
-        kind: .vault,
-        summary: "Searched vault · current: 6 results",
-        sources: [ChatSource(title: "Acme Launch status", day: "2026-08-24", path: "/Users/test/vault/kb/00-status.md")]
+    private static let tasksLine = ChatToolRecord(
+        kind: .today,
+        summary: "Read tasks: 6 results",
+        sources: [ChatSource(title: "Acme Launch status", day: "2026-08-24", path: "/Users/test/memory/kb/00-status.md")]
     )
 
     private func ask(_ vm: QuickViewModel, _ mock: MockQuickService, _ question: String, deltas: [StreamDelta]) async {
@@ -52,13 +52,13 @@ struct ChatToolsViewModelTests {
         await ask(vm, mock, "which deck did I pick", deltas: [
             StreamDelta(text: nil, finishReason: nil, status: "Searching memory…"),
             StreamDelta(text: nil, finishReason: nil, toolRecord: Self.memoryLine),
-            StreamDelta(text: nil, finishReason: nil, toolRecord: Self.vaultLine),
+            StreamDelta(text: nil, finishReason: nil, toolRecord: Self.tasksLine),
             StreamDelta(text: "The long deck.", finishReason: "stop"),
         ])
 
         let answer = try #require(vm.conversationMessages.last)
         #expect(answer.role == .assistant)
-        #expect(answer.tools == [Self.memoryLine, Self.vaultLine])
+        #expect(answer.tools == [Self.memoryLine, Self.tasksLine])
         #expect(answer.sources.map(\.title) == ["state/decisions/dec-01.md", "episodic/2026-09-06.md", "Acme Launch status"])
         #expect(vm.liveToolRecords.isEmpty, "the lines live on the answer now")
         #expect(vm.conversationMessages.first?.toolRecords == nil, "questions carry no lines")
@@ -68,7 +68,7 @@ struct ChatToolsViewModelTests {
         vm.startNewConversation()
         #expect(vm.conversationMessages.isEmpty)
         vm.loadConversation(id: id)
-        #expect(vm.conversationMessages.last?.tools == [Self.memoryLine, Self.vaultLine])
+        #expect(vm.conversationMessages.last?.tools == [Self.memoryLine, Self.tasksLine])
     }
 
     @Test func toolLinesSurviveTheHistoryFile() throws {
@@ -145,29 +145,29 @@ struct ChatToolsViewModelTests {
 
     // MARK: - The chat's tools
 
-    @Test func defaultsAreMemoryTasksVaultAndSkillsWithWebPerTheSetting() {
+    @Test func defaultsAreMemoryTasksAndSkillsWithWebPerTheSetting() {
         let on = make { $0.modelWebSearchEnabled = true }
-        #expect(on.chatTools == [.memory, .tasks, .vault, .skills, .web])
+        #expect(on.chatTools == [.memory, .tasks, .skills, .web])
         let off = make { $0.modelWebSearchEnabled = false }
-        #expect(off.chatTools == [.memory, .tasks, .vault, .skills])
+        #expect(off.chatTools == [.memory, .tasks, .skills])
     }
 
     @Test func toolsChosenBeforeTheFirstQuestionGoToTheChatItStarts() async {
         let mock = MockQuickService()
         let vm = make(service: mock) { $0.modelWebSearchEnabled = true }
         vm.openQuickAI()
-        vm.toggleChatTool(.vault)
+        vm.toggleChatTool(.skills)
         vm.toggleChatTool(.web)
         #expect(vm.currentConversation == nil)
-        #expect(vm.chatTools == [.memory, .tasks, .skills])
+        #expect(vm.chatTools == [.memory, .tasks])
 
         await ask(vm, mock, "hello", deltas: [StreamDelta(text: "Hi.", finishReason: "stop")])
-        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks, .skills])
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks])
         #expect(vm.pendingChatTools == nil)
 
         // A new chat starts on the defaults again.
         vm.startNewConversation()
-        #expect(vm.chatTools == [.memory, .tasks, .vault, .skills, .web])
+        #expect(vm.chatTools == [.memory, .tasks, .skills, .web])
     }
 
     @Test func toolsChosenOnTheOpenChatCarryIntoTheChatTheNextQuestionStarts() async throws {
@@ -200,8 +200,7 @@ struct ChatToolsViewModelTests {
         settings.modelWebSearchEnabled = true
         let vm = QuickViewModel(
             settings: settings,
-            webSearchService: GatedWebSearchService(result: ""),
-            vaultSearchService: FakeVault(outcome: .failure(VaultSearchError.empty))
+            webSearchService: GatedWebSearchService(result: "")
         )
         vm.memoryService = FakeMemory()
         vm.skillLibrary = skills
@@ -210,11 +209,10 @@ struct ChatToolsViewModelTests {
         let all = try #require(vm.makeService(provider: provider, model: "deepseek-flash") as? OpenAICompatibleService)
         #expect(all.offeredToolNames == [
             "recall_memory", "recall_captures_today", "recall_tasks_today", "recall_open_tasks",
-            "search_vault", "read_skill", "search_web",
+            "read_skill", "search_web",
         ])
         #expect(all.contextBudget == ContextBudget(contextWindow: ModelProfile.curated(forModelID: "deepseek-flash").contextWindow))
 
-        vm.toggleChatTool(.vault)
         vm.toggleChatTool(.web)
         let fewer = try #require(vm.makeService(provider: provider, model: "deepseek-flash") as? OpenAICompatibleService)
         #expect(fewer.offeredToolNames == [
@@ -238,8 +236,8 @@ struct ChatToolsViewModelTests {
         #expect(vm.actionPaletteSubmenu == .tools)
         #expect(vm.paletteToolRows == ChatToolKind.allCases)
         #expect(vm.actionPaletteEntryCount == ChatToolKind.allCases.count)
-        vm.actionQuery = "vau"
-        #expect(vm.paletteToolRows == [.vault])
+        vm.actionQuery = "skil"
+        #expect(vm.paletteToolRows == [.skills])
 
         // Escape goes back to the full list, then closes it.
         #expect(vm.handleEscapeKey())
@@ -256,7 +254,7 @@ struct ChatToolsViewModelTests {
         #expect(vm.performShortcut(characters: "k", keyCode: 40, modifiers: [.command, .option]))
         #expect(vm.isActionPalettePresented)
         #expect(vm.actionPaletteSubmenu == .tools)
-        #expect(vm.resultActionDetail(.tools) == "Memory, Tasks, Vault, Skills, Web search on")
+        #expect(vm.resultActionDetail(.tools) == "Memory, Tasks, Skills, Web search on")
     }
 
     @Test func answerActionKeysStayUniqueAndOffThePanelsOwnKeys() {
@@ -306,7 +304,7 @@ struct ChatToolsViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
-    @Test func aSourceOutsideMemoryAndTheVaultIsNotOpened() async throws {
+    @Test func aSourceOutsideTheSourceRootsIsNotOpened() async throws {
         let folder = FileManager.default.temporaryDirectory
             .appending(path: "open-source-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -319,8 +317,8 @@ struct ChatToolsViewModelTests {
         let vm = make()
         let opener = FakeFileOpener()
         vm.fileOpener = opener
-        // The default roots are the memory and vault folders in the home
-        // folder; a temp file is outside.
+        // The default roots are the memory, skills and Work folders in the
+        // home folder; a temp file is outside.
         await vm.openSource(ChatSource(title: "dec-01.md", path: note.path))
         #expect(vm.errorMessage == "dec-01.md is not a file on this Mac.")
         vm.sourceRoots = [folder]
@@ -335,7 +333,7 @@ struct ChatToolsViewModelTests {
         vm.fileOpener = FakeFileOpener()
         await ask(vm, mock, "which deck", deltas: [
             StreamDelta(text: nil, finishReason: nil, toolRecord: Self.memoryLine),
-            StreamDelta(text: nil, finishReason: nil, toolRecord: Self.vaultLine),
+            StreamDelta(text: nil, finishReason: nil, toolRecord: Self.tasksLine),
             StreamDelta(text: "The long deck.", finishReason: "stop"),
         ])
         #expect(vm.resultActionDetail(.openSource) == "3 sources")
@@ -371,7 +369,7 @@ struct ChatToolsViewModelTests {
         pathless.fileOpener = FakeFileOpener()
         await ask(pathless, mock, "portfolio", deltas: [
             StreamDelta(text: nil, finishReason: nil, toolRecord: ChatToolRecord(
-                kind: .vault, summary: "Searched vault · portfolio: 1 result",
+                kind: .today, summary: "Read tasks: 1 result",
                 sources: [ChatSource(title: "Acme Launch")]
             )),
             StreamDelta(text: "One project.", finishReason: "stop"),

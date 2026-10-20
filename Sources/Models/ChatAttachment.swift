@@ -286,8 +286,6 @@ enum AttachmentLimits {
     static let linkRequestTimeout: Duration = .seconds(10)
     static let linkRedirects = 5
     static let charactersPerLink = 100_000
-    /// A page with less readable text than this takes the one VPS retry.
-    static let thinPageCharacters = 200
 
     // MARK: Context budget
 

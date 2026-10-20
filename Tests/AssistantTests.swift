@@ -33,7 +33,7 @@ struct AssistantModelTests {
             providerID: InferenceProvider.deepSeekID,
             model: "deepseek-v4-pro",
             systemPrompt: "Cite sources.",
-            enabledTools: [.vault, .memory],
+            enabledTools: [.skills, .memory],
             contextRefs: ["costing", "email-ops"]
         )
         let data = try JSONEncoder().encode(assistant)
@@ -94,18 +94,14 @@ struct AssistantModelTests {
         #expect(back.enabledTools == [])
     }
 
-    @Test func aFreshInstallHasTheTwoDefaultAssistantsAndNoMore() {
+    @Test func aFreshInstallHasTheSteAssistantAndNoMore() {
         let assistants = QuickSettings().savedPrompts.filter(\.isAssistant)
-        #expect(assistants.map(\.name) == ["Vault researcher", "STE editor"])
-        let vault = assistants.first
-        #expect(vault?.alias == "vault")
-        #expect(vault?.enabledTools == [.vault, .memory, .tasks])
-        #expect(vault?.systemPrompt?.contains("Cite the source") == true)
-        let ste = assistants.last
+        #expect(assistants.map(\.name) == ["STE editor"])
+        let ste = assistants.first
         #expect(ste?.alias == "ste")
         #expect(ste?.enabledTools == [], "the STE editor offers no tools")
         #expect(ste?.systemPrompt?.contains("ASD-STE100") == true)
-        // Neither default pins a model or grabs a global hotkey.
+        // The default pins no model and grabs no global hotkey.
         #expect(assistants.allSatisfy { $0.providerID == nil && $0.model == nil && $0.hotkey == nil })
     }
 
@@ -122,32 +118,56 @@ struct AssistantModelTests {
     @Test func version25AddsTheAssistantsOnceAndNeverTwice() throws {
         let mine = [SavedPrompt(alias: "translate", prompt: "Translate:\n\n{selection}")]
         let upgraded = try JSONDecoder().decode(QuickSettings.self, from: v24Blob(prompts: mine))
-        #expect(upgraded.configurationVersion == 26)
-        #expect(upgraded.savedPrompts.map(\.alias).filter { ["vault", "ste"].contains($0) } == ["vault", "ste"])
+        #expect(upgraded.configurationVersion == 27)
+        #expect(upgraded.savedPrompts.map(\.alias).filter { $0 == "ste" } == ["ste"])
 
         // Decoding the upgraded blob again adds nothing.
         let again = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(upgraded))
         #expect(again.savedPrompts.count == upgraded.savedPrompts.count)
-        #expect(again.savedPrompts.filter { $0.alias == "vault" }.count == 1)
+        #expect(again.savedPrompts.filter { $0.alias == "ste" }.count == 1)
     }
 
-    @Test func version26GivesOnlyTheUntouchedVaultResearcherTheNewTasksTool() throws {
-        var stock = try #require(SavedPrompt.assistantDefaults.first { $0.alias == "vault" })
-        stock.enabledTools = [.vault, .memory]
+    @Test func version27DropsOnlyTheUntouchedVaultResearcher() throws {
+        let stock = SavedPrompt(
+            name: "Vault researcher",
+            alias: "vault",
+            prompt: "Find what my vault and memory say about the following.\n\n{selection}",
+            systemPrompt: "You research the user's own notes. Search the vault and memory.",
+            enabledTools: [.memory, .tasks]
+        )
         let upgraded = try JSONDecoder().decode(
             QuickSettings.self,
-            from: v24Blob(prompts: [stock], version: 25)
+            from: v24Blob(prompts: [stock], version: 26)
         )
-        #expect(upgraded.configurationVersion == 26)
-        #expect(upgraded.savedPrompts.first?.enabledTools == [.vault, .memory, .tasks])
+        #expect(upgraded.configurationVersion == 27)
+        #expect(!upgraded.savedPrompts.contains { $0.alias == "vault" })
 
         var customized = stock
         customized.setInstructions("My own research rules.")
         let kept = try JSONDecoder().decode(
             QuickSettings.self,
-            from: v24Blob(prompts: [customized], version: 25)
+            from: v24Blob(prompts: [customized], version: 26)
         )
-        #expect(kept.savedPrompts.first?.enabledTools == [.vault, .memory])
+        #expect(kept.savedPrompts.contains { $0.alias == "vault" })
+    }
+
+    @Test func aStoredVaultToolIsDroppedFromAnAssistantAndAChat() throws {
+        let assistant = SavedPrompt(alias: "res", prompt: "", systemPrompt: "Rules.", enabledTools: [.memory])
+        var json = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(assistant)) as? [String: Any]
+        )
+        json["enabledTools"] = ["vault", "memory"]
+        let decoded = try JSONDecoder().decode(SavedPrompt.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.enabledTools == [.memory])
+
+        var chat = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(QuickConversation(providerID: InferenceProvider.deepSeekID, model: "m"))
+            ) as? [String: Any]
+        )
+        chat["enabledTools"] = ["vault", "web"]
+        let back = try JSONDecoder().decode(QuickConversation.self, from: JSONSerialization.data(withJSONObject: chat))
+        #expect(back.enabledTools == [.web])
     }
 
     @Test func version25KeepsTheUsersOwnAliasAndADeletedAssistantStaysDeleted() throws {
@@ -194,20 +214,20 @@ struct AssistantModelTests {
 struct AssistantResolutionTests {
     private let prompts: [SavedPrompt] = [
         SavedPrompt(alias: "grammar", prompt: "Fix:\n\n{selection}"),
-        SavedPrompt(alias: "vault", prompt: "Find:\n\n{selection}", systemPrompt: "Cite."),
+        SavedPrompt(alias: "find", prompt: "Find:\n\n{selection}", systemPrompt: "Cite."),
         SavedPrompt(alias: "bare", prompt: "", systemPrompt: "Be brief."),
         SavedPrompt(alias: "run", prompt: "", commandExecutable: "recall", systemPrompt: "Ignored."),
     ]
 
     @Test func theAliasAloneNamesTheAssistant() {
-        #expect(SavedPromptResolver.assistant(input: "/vault", prefix: "/", savedPrompts: prompts)?.alias == "vault")
+        #expect(SavedPromptResolver.assistant(input: "/find", prefix: "/", savedPrompts: prompts)?.alias == "find")
         // Tab completion leaves a trailing space; it is still the alias alone.
-        #expect(SavedPromptResolver.assistant(input: "/vault ", prefix: "/", savedPrompts: prompts)?.alias == "vault")
+        #expect(SavedPromptResolver.assistant(input: "/find ", prefix: "/", savedPrompts: prompts)?.alias == "find")
     }
 
     @Test func textAfterTheAliasIsATransform() {
-        #expect(SavedPromptResolver.assistant(input: "/vault what is x", prefix: "/", savedPrompts: prompts) == nil)
-        let transform = SavedPromptResolver.resolveAction(input: "/vault what is x", prefix: "/", savedPrompts: prompts)
+        #expect(SavedPromptResolver.assistant(input: "/find what is x", prefix: "/", savedPrompts: prompts) == nil)
+        let transform = SavedPromptResolver.resolveAction(input: "/find what is x", prefix: "/", savedPrompts: prompts)
         #expect(transform?.prompt == "Find:\n\nwhat is x")
         // An assistant with an empty transform prompt sends the text alone.
         let bare = SavedPromptResolver.resolveAction(input: "/bare hello there", prefix: "/", savedPrompts: prompts)
@@ -218,8 +238,8 @@ struct AssistantResolutionTests {
         #expect(SavedPromptResolver.assistant(input: "/grammar", prefix: "/", savedPrompts: prompts) == nil)
         #expect(SavedPromptResolver.assistant(input: "/run", prefix: "/", savedPrompts: prompts) == nil)
         #expect(SavedPromptResolver.assistant(input: "/nope", prefix: "/", savedPrompts: prompts) == nil)
-        #expect(SavedPromptResolver.assistant(input: "vault", prefix: "/", savedPrompts: prompts) == nil)
-        #expect(SavedPromptResolver.assistant(input: "/vault", prefix: "", savedPrompts: prompts) == nil)
+        #expect(SavedPromptResolver.assistant(input: "find", prefix: "/", savedPrompts: prompts) == nil)
+        #expect(SavedPromptResolver.assistant(input: "/find", prefix: "", savedPrompts: prompts) == nil)
     }
 }
 
@@ -237,8 +257,19 @@ struct AssistantQuickAITests {
         settings.autoCopy = false
         settings.historyEnabled = false
         configure(&settings)
+        let index = settings.savedPrompts.firstIndex { $0.alias == "ste" } ?? settings.savedPrompts.endIndex
+        settings.savedPrompts.insert(Self.researcher, at: index)
         return QuickViewModel(settings: settings, service: service, pasteboard: FakePasteboard())
     }
+
+    /// An assistant with tools, standing in for the retired stock researcher.
+    static let researcher = SavedPrompt(
+        name: "Memory researcher",
+        alias: "researcher",
+        prompt: "Find what my memory says about the following. Cite the source of every fact.\n\n{selection}",
+        systemPrompt: "You research the user's own notes. Cite the source of every fact you use.",
+        enabledTools: [.memory, .tasks]
+    )
 
     private func ask(_ vm: QuickViewModel, _ mock: MockQuickService, _ question: String, reply: String = "Done.") async {
         await mock.setResponses([StreamDelta(text: reply, finishReason: "stop")])
@@ -246,8 +277,8 @@ struct AssistantQuickAITests {
         await vm.submit()
     }
 
-    private func vault(_ vm: QuickViewModel) throws -> SavedPrompt {
-        try #require(vm.settings.savedPrompts.first { $0.alias == "vault" })
+    private func researcher(_ vm: QuickViewModel) throws -> SavedPrompt {
+        try #require(vm.settings.savedPrompts.first { $0.alias == "researcher" })
     }
 
     private func ste(_ vm: QuickViewModel) throws -> SavedPrompt {
@@ -257,16 +288,16 @@ struct AssistantQuickAITests {
     @Test func theAliasAloneStartsAnAssistantChatAndSendsNothing() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        let vault = try vault(vm)
-        vm.input = "/vault"
+        let researcher = try researcher(vm)
+        vm.input = "/researcher"
         await vm.submitResolvingFuzzyAlias()
 
         #expect(await mock.sendCallCount == 0, "picking sends nothing")
         #expect(vm.isQuickAIPresented)
         #expect(vm.input.isEmpty)
-        #expect(vm.activeAssistant?.id == vault.id)
-        #expect(vm.currentConversation?.assistantID == vault.id)
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks], "its tools are the chat's toggles")
+        #expect(vm.activeAssistant?.id == researcher.id)
+        #expect(vm.currentConversation?.assistantID == researcher.id)
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks], "its tools are the chat's toggles")
         #expect(vm.currentConversation?.messages.isEmpty == true)
         #expect(vm.errorMessage == nil)
     }
@@ -274,30 +305,30 @@ struct AssistantQuickAITests {
     @Test func aFuzzyAliasCompletesToTheAssistant() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        vm.input = "/vau"
+        vm.input = "/resear"
         await vm.submitResolvingFuzzyAlias()
-        #expect(vm.activeAssistant?.alias == "vault")
+        #expect(vm.activeAssistant?.alias == "researcher")
         #expect(await mock.sendCallCount == 0)
     }
 
     @Test func theAssistantsInstructionsAreTheSystemMessageOfEveryRequest() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        let vault = try vault(vm)
-        vm.input = "/vault"
+        let researcher = try researcher(vm)
+        vm.input = "/researcher"
         await vm.submit()
         await ask(vm, mock, "What did we decide about pricing?")
 
         let messages = await mock.lastMessages
         #expect(messages.count == 2)
         #expect(messages.first?.role == .system)
-        #expect(messages.first?.content == vault.systemPrompt)
+        #expect(messages.first?.content == researcher.systemPrompt)
         #expect(messages.last?.role == .user)
         #expect(messages.last?.content == "What did we decide about pricing?")
 
         // The saved chat keeps the turns only.
         #expect(vm.currentConversation?.messages.map(\.role) == [.user, .assistant])
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks])
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks])
 
         // A follow-up carries it again, in front of the whole thread.
         await ask(vm, mock, "And for Q3?")
@@ -308,10 +339,10 @@ struct AssistantQuickAITests {
     @Test func textAfterTheAliasKeepsTheTransformAndNoAssistant() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        await ask(vm, mock, "/vault pricing")
+        await ask(vm, mock, "/researcher pricing")
         let messages = await mock.lastMessages
         #expect(messages.map(\.role) == [.user], "no system message on a transform")
-        #expect(messages.last?.content.hasPrefix("Find what my vault and memory say") == true)
+        #expect(messages.last?.content.hasPrefix("Find what my memory says") == true)
         #expect(messages.last?.content.hasSuffix("pricing") == true)
         #expect(vm.currentConversation?.assistantID == nil)
         #expect(vm.activeAssistant == nil)
@@ -393,7 +424,7 @@ struct AssistantQuickAITests {
         #expect(vm.isAssistantChooserPresented)
         #expect(vm.topLayer == .assistantChooser)
         #expect(vm.quickAIComposerAction.label == QuickViewModel.assistantChooserConfirmTitle)
-        #expect(vm.assistantChooserOptions.map(\.title) == ["No Assistant", "Vault researcher", "STE editor"])
+        #expect(vm.assistantChooserOptions.map(\.title) == ["No Assistant", "Memory researcher", "STE editor"])
         #expect(vm.assistantChooserIndex == 0, "a plain chat starts on No Assistant")
 
         vm.moveAssistantChooserSelection(2)
@@ -430,11 +461,11 @@ struct AssistantQuickAITests {
     @Test func theHotkeyAndPaletteRowPickWithoutASelection() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        let vault = try vault(vm)
+        let researcher = try researcher(vm)
         // `perform(action:)` is what the global hotkey and the ⌘K row run.
-        await vm.perform(action: vault)
+        await vm.perform(action: researcher)
         #expect(vm.errorMessage == nil, "an assistant needs no selected text")
-        #expect(vm.activeAssistant?.id == vault.id)
+        #expect(vm.activeAssistant?.id == researcher.id)
         #expect(vm.isQuickAIPresented)
         #expect(await mock.sendCallCount == 0)
     }
@@ -442,23 +473,23 @@ struct AssistantQuickAITests {
     @Test func aPickedAssistantSurvivesTheNewChatInterval() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock) { $0.newChatInterval = .always }
-        let vault = try vault(vm)
-        vm.input = "/vault"
+        let researcher = try researcher(vm)
+        vm.input = "/researcher"
         await vm.submit()
         await ask(vm, mock, "First question")
         let firstChat = try #require(vm.currentConversation?.id)
-        #expect(vm.currentConversation?.assistantID == vault.id)
+        #expect(vm.currentConversation?.assistantID == researcher.id)
         #expect(await mock.lastMessages.first?.role == .system)
         // With a new chat every time, the next question starts one, and the
         // assistant the header names goes along to it.
         await ask(vm, mock, "Second question")
         #expect(vm.currentConversation?.id != firstChat, "the interval started a new chat")
-        #expect(vm.currentConversation?.assistantID == vault.id)
-        #expect(vm.currentConversation?.enabledTools == [.vault, .memory, .tasks])
-        #expect(vm.activeAssistant?.id == vault.id)
+        #expect(vm.currentConversation?.assistantID == researcher.id)
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks])
+        #expect(vm.activeAssistant?.id == researcher.id)
         let messages = await mock.lastMessages
         #expect(messages.map(\.role) == [.system, .user])
-        #expect(messages.first?.content == vault.systemPrompt)
+        #expect(messages.first?.content == researcher.systemPrompt)
     }
 
     @Test func aStaleAssistantChatCarriesItsSkillsToTheNextChat() async throws {
@@ -498,11 +529,11 @@ struct AssistantQuickAITests {
     @Test func aTransformInAJustPickedAssistantChatStartsAPlainChat() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        let vault = try vault(vm)
-        vm.input = "/vault"
+        let researcher = try researcher(vm)
+        vm.input = "/researcher"
         await vm.submit()
         let pickedChat = try #require(vm.currentConversation?.id)
-        #expect(vm.currentConversation?.assistantID == vault.id)
+        #expect(vm.currentConversation?.assistantID == researcher.id)
 
         await ask(vm, mock, "/ste the valve should be opened")
         let messages = await mock.lastMessages
@@ -517,7 +548,7 @@ struct AssistantQuickAITests {
     @Test func aTransformAfterAnAssistantAnswerStartsAPlainChat() async throws {
         let mock = MockQuickService()
         let vm = make(service: mock)
-        vm.input = "/vault"
+        vm.input = "/researcher"
         await vm.submit()
         await ask(vm, mock, "What is x?")
         let assistantChat = try #require(vm.currentConversation?.id)
@@ -663,7 +694,6 @@ struct AssistantEditorTests {
         editor.bindingForToolsUseDefaults(id).wrappedValue = false
         #expect(editor.bindingForTool(.web, id).wrappedValue, "Choose starts with every tool on")
         editor.bindingForTool(.web, id).wrappedValue = false
-        editor.bindingForTool(.vault, id).wrappedValue = false
         editor.addContextRef("costing", to: id)
         editor.addContextRef("costing", to: id)
         editor.addContextRef("email-ops", to: id)

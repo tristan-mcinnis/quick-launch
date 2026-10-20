@@ -72,14 +72,14 @@ struct QuickAIThread: View {
     /// The question that is not yet a turn of the thread, drawn as its own
     /// pill: the one being asked while the web search runs (the user
     /// message joins the thread only when the model is called), the one a
-    /// detached answer (a local answer, a Vault Search) belongs to, and any
+    /// detached answer (a local answer) belongs to, and any
     /// question with no chat behind it.
     private var pendingQuestion: String? {
         if let question = viewModel.pendingQuestion, !question.isEmpty,
            viewModel.isStreaming || viewModel.quickAIDetachedAnswer != nil {
             return question
         }
-        // An answer with no chat behind it (a Vault Search, for one).
+        // An answer with no chat behind it (a command's output, for one).
         if viewModel.currentConversation == nil,
            let question = viewModel.lastQuestion, !question.isEmpty {
             return question
@@ -138,7 +138,7 @@ struct QuickAIThread: View {
                     }
                 }
                 // A question that is not a thread turn (the one being
-                // searched for, the one a command's output or a Vault Search
+                // searched for, the one a command's output
                 // belongs to, one with no chat behind it) still reads as a
                 // turn: an answer never draws without its question.
                 if let question = pendingQuestion {
@@ -160,7 +160,7 @@ struct QuickAIThread: View {
                         .id(Self.liveAnswerID)
                 }
                 // A finished answer that is not the thread's last turn (a
-                // command's output, a Vault Search, a failed stream's
+                // command's output, a failed stream's
                 // partial text) draws after the thread, whether or not a
                 // chat is kept.
                 if let answer = viewModel.quickAIDetachedAnswer {
@@ -666,7 +666,7 @@ struct QuickAIThread: View {
 
     /// The model is working and nothing has landed yet: the breathing dots,
     /// or the globe when the status is a web search, and the status text.
-    /// A memory, vault, or skill call keeps the dots while it runs; its
+    /// A memory or skill call keeps the dots while it runs; its
     /// line, with its own glyph, lands when it finishes.
     private var statusLine: some View {
         let status = viewModel.streamingStatus ?? "Thinking…"

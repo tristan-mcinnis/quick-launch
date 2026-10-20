@@ -170,25 +170,26 @@ struct WebSearchBackendsTests {
     }
 
     @Test func explicitBackendsRouteToTheirOwnService() async throws {
-        let searxng = RecordingStubSearch(.text("searxng result"))
+        let tavily = RecordingStubSearch(.text("tavily result"))
         let brave = RecordingStubSearch(.text("brave result"))
         let bocha = RecordingStubSearch(.text("bocha result"))
         let exa = RecordingStubSearch(.text("exa result"))
         let router = makeRouter(
-            searxng: searxng,
+            tavily: tavily,
             brave: brave,
             bocha: bocha,
             exa: exa,
+            hasTavilyKey: true,
             hasBraveKey: true,
             hasBochaKey: true,
             hasExaKey: true
         )
 
-        #expect(try await router.search("q", provider: .bing) == "searxng result")
+        #expect(try await router.search("q", provider: .tavily) == "tavily result")
         #expect(try await router.search("q", provider: .brave) == "brave result")
         #expect(try await router.search("q", provider: .bocha) == "bocha result")
         #expect(try await router.search("q", provider: .exa) == "exa result")
-        #expect(await searxng.callCount() == 1)
+        #expect(await tavily.callCount() == 1)
         #expect(await brave.callCount() == 1)
         #expect(await bocha.callCount() == 1)
         #expect(await exa.callCount() == 1)
@@ -196,16 +197,16 @@ struct WebSearchBackendsTests {
 
     @Test func chainPrefersTavilyWhenItsKeyExists() async throws {
         let tavily = RecordingStubSearch(.text("tavily result"))
-        let searxng = RecordingStubSearch(.text("searxng result"))
+        let brave = RecordingStubSearch(.text("brave result"))
         let router = makeRouter(
-            searxng: searxng,
             tavily: tavily,
+            brave: brave,
             hasTavilyKey: true,
             hasBraveKey: true
         )
 
         #expect(try await router.search("q", provider: .automatic) == "tavily result")
-        #expect(await searxng.callCount() == 0)
+        #expect(await brave.callCount() == 0)
     }
 
     @Test func chainPrefersBochaForAChineseQuery() async throws {
@@ -238,18 +239,16 @@ struct WebSearchBackendsTests {
 
     @Test func chainSkipsTavilyWithoutAKey() async throws {
         let tavily = RecordingStubSearch(.text("tavily result"))
-        let searxng = RecordingStubSearch(.text("searxng result"))
-        let router = makeRouter(searxng: searxng, tavily: tavily)
+        let brave = RecordingStubSearch(.text("brave result"))
+        let router = makeRouter(tavily: tavily, brave: brave, hasBraveKey: true)
 
-        #expect(try await router.search("q", provider: .automatic) == "searxng result")
+        #expect(try await router.search("q", provider: .automatic) == "brave result")
         #expect(await tavily.callCount() == 0)
     }
 
     @Test func chainFallsThroughAnEmptyOrFailingStepToBrave() async throws {
-        let searxng = RecordingStubSearch(.failure)
         let brave = RecordingStubSearch(.text("brave result"))
         let router = makeRouter(
-            searxng: searxng,
             tavily: RecordingStubSearch(.empty),
             brave: brave,
             hasTavilyKey: true,
@@ -257,7 +256,6 @@ struct WebSearchBackendsTests {
         )
 
         #expect(try await router.search("q", provider: .automatic) == "brave result")
-        #expect(await searxng.callCount() == 1)
         #expect(await brave.callCount() == 1)
     }
 
@@ -275,10 +273,8 @@ struct WebSearchBackendsTests {
     }
 
     @Test func aCancelledStepStopsTheChain() async {
-        let searxng = RecordingStubSearch(.text("searxng result"))
         let brave = RecordingStubSearch(.text("brave result"))
         let router = makeRouter(
-            searxng: searxng,
             tavily: RecordingStubSearch(.cancelled),
             brave: brave,
             hasTavilyKey: true,
@@ -288,15 +284,12 @@ struct WebSearchBackendsTests {
         await #expect(throws: CancellationError.self) {
             _ = try await router.search("q", provider: .automatic)
         }
-        #expect(await searxng.callCount() == 0)
         #expect(await brave.callCount() == 0)
     }
 
     @Test func aSearchCancelledMidRequestTriesNoLaterBackend() async {
-        let searxng = RecordingStubSearch(.text("searxng result"))
         let brave = RecordingStubSearch(.text("brave result"))
         let router = makeRouter(
-            searxng: searxng,
             tavily: RecordingStubSearch(.cancelsTheTask),
             brave: brave,
             hasTavilyKey: true,
@@ -307,7 +300,6 @@ struct WebSearchBackendsTests {
         await #expect(throws: CancellationError.self) {
             _ = try await search.value
         }
-        #expect(await searxng.callCount() == 0)
         #expect(await brave.callCount() == 0)
     }
 
@@ -336,7 +328,6 @@ struct WebSearchBackendsTests {
     /// A router with every backend stubbed, so each test states only the
     /// backends and keys it cares about. Unset steps are unavailable.
     private func makeRouter(
-        searxng: RecordingStubSearch = RecordingStubSearch(.failure),
         tavily: RecordingStubSearch = RecordingStubSearch(.failure),
         brave: RecordingStubSearch = RecordingStubSearch(.failure),
         bocha: RecordingStubSearch = RecordingStubSearch(.failure),
@@ -347,7 +338,6 @@ struct WebSearchBackendsTests {
         hasExaKey: Bool = false
     ) -> WebSearchRouter {
         WebSearchRouter(
-            searxng: searxng,
             tavily: tavily,
             brave: brave,
             bocha: bocha,

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — 2026-10-20
+
+- **Vault Search and the House server are removed.** The vault, its server and
+  SearXNG are retired, so the `search_vault` tool, the Vault Search catalog,
+  the stock Vault researcher assistant and every `ssh` lane are gone. Chat
+  tools are now Memory, Tasks, Skills and Web search. Pages are read with a
+  direct fetch only. Web search calls Tavily, Brave, Bocha or Exa directly;
+  Tavily and Brave fall back to the keys in `~/.config/secrets.env` when
+  Keychain has none. The Google, Bing, DuckDuckGo and News providers (SearXNG
+  engines) are gone; a saved choice of one falls back to Automatic. A saved
+  assistant or chat that names the Vault tool drops it on load. Open Source
+  now opens files from the memory repo, the skills repo and the Work folder.
+
 ## Unreleased — 2026-10-17
 
 - **Read Aloud is removed.** The Read Aloud and Stop Reading commands, the

@@ -133,16 +133,15 @@ struct CommandActionDispatchTests {
     }
 
     /// Regression: the Return path (`submitResolvingFuzzyAlias`) routed typed
-    /// input to the vault-search follow-up lane while an answer was on screen,
-    /// before any alias resolution, so `/remember buy milk` reached a model
-    /// instead of the command executable.
+    /// input to a follow-up lane while an answer was on screen, before any
+    /// alias resolution, so `/remember buy milk` reached a model instead of
+    /// the command executable.
     @Test func testCommandAliasWinsOverAnswerFollowUpMode() async throws {
         let service = MockQuickService()
         await service.setResponses([
             StreamDelta(text: "model output", finishReason: .some("stop")),
         ])
-        let vault = RecordingCommandDispatchVaultService()
-        let vm = QuickViewModel(service: service, vaultSearchService: vault)
+        let vm = QuickViewModel(service: service)
         vm.settings.autoCopy = false
         vm.settings.savedPromptPrefix = "/"
         vm.settings.savedPrompts = [
@@ -153,39 +152,14 @@ struct CommandActionDispatchTests {
                 commandArguments: ["remember", "{input}"]
             ),
         ]
-        // A vault answer owns the panel; typing is normally a follow-up.
-        vm.output = "Vault result"
-        vm.activeVaultSearchMode = .current
-        vm.vaultSearchAnchor = "old question"
+        // An answer owns the panel; typing is normally a follow-up.
+        vm.output = "Earlier answer"
 
         vm.input = "/remember buy milk"
         await vm.submitResolvingFuzzyAlias()
 
         #expect(vm.output == "remember buy milk")
         #expect(vm.errorMessage == nil)
-        #expect(await service.sendCallCount == 0)
-        #expect(await vault.callCount() == 0)
-    }
-
-    /// Prompt-type aliases keep the follow-up behavior: with a vault answer
-    /// active, typed input (alias or not) stays in the vault conversation.
-    @Test func testPromptAliasStillFollowsUpInVaultMode() async throws {
-        let service = MockQuickService()
-        let vault = RecordingCommandDispatchVaultService()
-        let vm = QuickViewModel(service: service, vaultSearchService: vault)
-        vm.settings.autoCopy = false
-        vm.settings.savedPromptPrefix = "/"
-        vm.settings.savedPrompts = [
-            SavedPrompt(alias: "note", prompt: "Take note of the following."),
-        ]
-        vm.output = "Vault result"
-        vm.activeVaultSearchMode = .current
-        vm.vaultSearchAnchor = "old question"
-
-        vm.input = "/note remember the milk"
-        await vm.submitResolvingFuzzyAlias()
-
-        #expect(await vault.callCount() == 1)
         #expect(await service.sendCallCount == 0)
     }
 
@@ -207,16 +181,5 @@ struct CommandActionDispatchTests {
         #expect(vm.output.isEmpty)
         #expect(vm.errorMessage?.contains("No such file") == true)
         #expect(await service.sendCallCount == 0)
-    }
-}
-
-private actor RecordingCommandDispatchVaultService: VaultSearchServicing {
-    private var calls = 0
-
-    func callCount() -> Int { calls }
-
-    func search(mode: VaultSearchMode, query: String) async throws -> String {
-        calls += 1
-        return "Vault result"
     }
 }

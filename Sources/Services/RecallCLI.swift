@@ -56,7 +56,7 @@ struct RecalledTask: Sendable, Equatable, Decodable {
         lane: String,
         due: String = "",
         source: String = "",
-        backend: String = "vault"
+        backend: String = "memory"
     ) {
         self.id = id
         self.title = title

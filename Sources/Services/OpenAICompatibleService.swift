@@ -84,7 +84,7 @@ struct ProviderRequestRound: Sendable, Equatable {
 /// it holds no connection state between calls.
 ///
 /// Function tools are offered only when their backend exists:
-/// `search_web` when `webSearch` is set, and the read-only memory, vault,
+/// `search_web` when `webSearch` is set, and the read-only memory
 /// and skill tools that `tools` (a `ChatToolbox`) carries for the chat. The
 /// service runs the tool loop itself: a `tool_calls` finish runs the calls,
 /// feeds the results back as `tool` messages, and streams the next round.
@@ -107,7 +107,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
     let apiKey: String?
     let systemPrompt: String
     let webSearch: (@Sendable (String) async throws -> String)?
-    /// Memory, vault, and skill tools for this chat.
+    /// Memory and skill tools for this chat.
     let tools: ChatToolbox
     /// How much of the chat one request may carry.
     let contextBudget: ContextBudget
@@ -133,7 +133,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
     private let session: URLSession
 
     static let systemPrompt = QuickSettings.defaultSystemPrompt
-    /// Enough for memory, the vault, and a skill in one answer, with room
+    /// Enough for memory and a skill in one answer, with room
     /// for a second try at each.
     static let maxToolRounds = 6
     static let defaultToolTimeBudget: Duration = .seconds(30)
@@ -502,7 +502,6 @@ struct OpenAICompatibleService: QuickService, Sendable {
         case "search_web": "web"
         case ChatToolbox.Name.recallMemory, ChatToolbox.Name.recallCapturesToday: "memory"
         case ChatToolbox.Name.recallTasksToday, ChatToolbox.Name.recallOpenTasks: "tasks"
-        case ChatToolbox.Name.searchVault: "vault"
         case ChatToolbox.Name.readSkill: "skills"
         default: "unavailable"
         }
@@ -604,7 +603,7 @@ struct OpenAICompatibleService: QuickService, Sendable {
         }
         if let outcome = await tools.run(call.name, arguments: call.arguments) {
             // The toolbox's own status, never a guess from the result's
-            // prose: a vault or memory failure is recorded as failed.
+            // prose: a memory failure is recorded as failed.
             return CallOutcome(content: outcome.content, record: outcome.record, status: outcome.status)
         }
         return CallOutcome(

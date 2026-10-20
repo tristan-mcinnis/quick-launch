@@ -234,7 +234,7 @@ struct ProviderSettingsView: View {
                 CardNote { CardText(searchKeyStatus) }
             }
             CardNote {
-                CardText("Automatic uses Bocha for a Chinese query when a Bocha key is set, then Tavily, then the self-hosted SearXNG, then Brave. Direct backends send the query to that provider; SearXNG stays on your own House server, an optional SSH host. Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
+                CardText("Automatic uses Bocha for a Chinese query when a Bocha key is set, then Tavily, then Brave. Tavily and Brave fall back to the keys in ~/.config/secrets.env. Each backend sends the query to that provider. Used by Quick AI, AI Chat, and the Translator. Turn web search on or off in General › Chat.")
             }
         }
     }

@@ -41,13 +41,12 @@ extension QuickViewModel {
     func isChatToolAvailable(_ kind: ChatToolKind) -> Bool {
         switch kind {
         case .memory, .tasks: memoryService != nil
-        case .vault: vaultSearchService != nil
         case .skills: skillLibrary != nil
         case .web: webSearchService != nil
         }
     }
 
-    /// "Memory, Tasks, Vault, Skills on", for the Tools row's detail.
+    /// "Memory, Tasks, Skills on", for the Tools row's detail.
     var chatToolsSummary: String {
         let on = ChatToolKind.allCases.filter { chatTools.contains($0) }
         return on.isEmpty ? "All off" : on.map(\.displayName).joined(separator: ", ") + " on"
@@ -120,7 +119,7 @@ extension QuickViewModel {
     }
 
     /// The answer on screen as a thread turn, or nil for a detached answer
-    /// (a local answer, a Vault Search, a command's output).
+    /// (a local answer, a command's output).
     private var answerMessageIndex: Int? {
         guard !output.isEmpty,
               let index = currentConversation?.messages.lastIndex(where: { $0.role == .assistant }),
@@ -148,8 +147,8 @@ extension QuickViewModel {
     // MARK: - Open Source
 
     /// Opens one source with `/usr/bin/open`, then gets out of the way the
-    /// way a Quick Link does. Only a document file inside the memory store
-    /// or the vault clone is opened; anything else says why in the error
+    /// way a Quick Link does. Only a document file inside the memory repo,
+    /// the skills repo or the Work folder is opened; anything else says why in the error
     /// line.
     func openSource(_ source: ChatSource) async {
         isActionPalettePresented = false

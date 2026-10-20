@@ -151,9 +151,8 @@ singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 
 Run `make test` after source changes: the publish scrub
 (`scripts/scrub.sh`; client names live in the untracked `.scrub-private`),
-`swift test`, and the HouseChatCore suite. The vault, memory and House server
-names may appear only in `Sources/Services/HouseServer.swift` and
-`docs/personal-setup.md`; Tristan's own wiring is described there. For packaging or identity changes, also
+`swift test`, and the HouseChatCore suite. The retired vault and server
+names may appear only in `docs/personal-setup.md`; Tristan's own wiring is described there. For packaging or identity changes, also
 run `SIGN_IDENTITY=- ./scripts/build-app.sh` and verify the resulting
 `build/Quick Launch.app` metadata.
 

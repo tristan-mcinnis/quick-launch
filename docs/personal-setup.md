@@ -4,19 +4,17 @@ This page records how Quick Launch is wired on Tristan's own Mac, where every
 optional integration is present. None of it is needed to build or use the
 app. The README lists the integrations in general terms.
 
-## The House server
+## Web search and page reading
 
-- SSH alias `vault-vps` in `~/.ssh/config`. It is the default for
-  `HouseServer.host` (`Sources/Services/HouseServer.swift`), so no setting is
-  needed here. Another Mac can point the lanes elsewhere with
-  `defaults write com.tristanmcinnis.quick-launch HouseServerHost <alias>`.
-- Vault Search and the `search_vault` tool run
-  `vault-search.py` from the vault checkout on the server
-  (`SSHVaultSearchService.remoteVaultRoot`), with an 8 second deadline and no
-  retry. Source paths map back to the local clone at `~/vault`.
-- SearXNG web search runs `curl` against `127.0.0.1:8888` on the server.
-- The page-reader fallback runs the trafilatura reader in
-  `~/search-tools` on the server for pages under 200 characters of text.
+- Nothing goes over SSH any more. The vault, its old server and
+  SearXNG are retired (2026-10-20); Vault Search and the `search_vault` tool
+  are removed.
+- Web search calls the Tavily or Brave API directly. The key is the one in
+  Keychain (Models › Web search), else `TAVILY_API_KEY` or `BRAVE_API_KEY`
+  in `~/.config/secrets.env`, read at call time and never stored or logged.
+- Pages are read with a direct fetch. There is no local extractor
+  (`trafilatura` is not installed on this Mac).
+- Source files open only from `~/memory`, `~/skills` and `~/Documents/Work`.
 
 ## Memory, tasks and skills
 
