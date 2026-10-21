@@ -130,7 +130,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 27
+    var configurationVersion: Int = 28
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -263,7 +263,13 @@ struct QuickSettings: Codable, Sendable {
     var visionProviderID: UUID = InferenceProvider.deepSeekID
     /// Model used with `visionProviderID`; empty means that provider's selected model.
     var visionModel: String = InferenceProvider.deepSeekVisionModel
+    /// Quick AI's instruction: the direct overlay rule, and the one saved
+    /// actions run under. AI Chat has its own field below.
     var systemPrompt: String = QuickSettings.defaultSystemPrompt
+    /// AI Chat's instruction. It has its own default, so an edit on one
+    /// surface never changes the other. A custom value is used as written;
+    /// nothing is appended to it except the grounding sentence.
+    var chatSystemPrompt: String = QuickSettings.defaultChatSystemPrompt
 
     // Chat history
     var historyEnabled: Bool = true
@@ -323,7 +329,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 27
+        configurationVersion = 28
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -476,6 +482,15 @@ struct QuickSettings: Codable, Sendable {
             ?? InferenceProvider.deepSeekID
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
             ?? Self.defaultSystemPrompt
+        // Absent in every blob written before 2026-10-21, when AI Chat
+        // shared the quick-action instruction. The migration below decides
+        // what an absent value means; a present one, empty included, is the
+        // user's own choice and is kept.
+        let storedChatSystemPrompt = try c.decodeIfPresent(
+            String.self,
+            forKey: .chatSystemPrompt
+        )
+        chatSystemPrompt = storedChatSystemPrompt ?? Self.defaultChatSystemPrompt
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
         historyLimit = try c.decodeIfPresent(Int.self, forKey: .historyLimit)
             ?? QuickHistoryStore.defaultLimit
@@ -745,6 +760,17 @@ struct QuickSettings: Codable, Sendable {
                     && $0.systemPrompt?.hasPrefix("You research the user's own notes.") == true
             }
         }
+        if decodedConfigurationVersion < 28, storedChatSystemPrompt == nil {
+            // 2026-10-21: AI Chat gets its own instruction. The old blob has
+            // one prompt for both surfaces, so an instruction the user
+            // actually changed carries into chat rather than being silently
+            // replaced by the new conversational default. The untouched
+            // stock prompt is not a customization: chat takes its own
+            // default, and Quick AI keeps the stock prompt it already had.
+            if !Self.isStockQuickAIPrompt(systemPrompt) {
+                chatSystemPrompt = systemPrompt
+            }
+        }
     }
 
     init() {}
@@ -784,11 +810,38 @@ extension QuickSettings {
         ),
     ]
 
+    /// Quick AI's default: one direct result, no conversation.
     static let defaultSystemPrompt: String = """
     You are a fast, direct assistant in a Spotlight-style action overlay. \
     Return only the result the user asked for. No preamble, no postamble, \
     no apologies, no disclaimers, and no invitation to continue. Be concise.
     """
+
+    /// AI Chat's default: a conversation can explain, so the answer takes
+    /// the length the question needs. This is a separate default, never a
+    /// layer on top of a custom instruction.
+    static let defaultChatSystemPrompt: String = """
+    You are a thoughtful assistant in a chat window. Answer the question in \
+    front of you at the length it needs: a simple request gets a short answer, \
+    and an explanation with its reasoning or steps when the user asks for one. \
+    Write plain sentences, stay on the user's material, and say when you are \
+    unsure. No preamble, no apology, and no invitation to continue.
+    """
+
+    /// Whether `prompt` is the stock quick-action instruction, written as
+    /// shipped or with different surrounding space. Used only to tell an
+    /// untouched default from a user's own words.
+    static func isStockQuickAIPrompt(_ prompt: String) -> Bool {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            == defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The instruction a request on one surface carries: Quick AI's direct
+    /// rule, or AI Chat's conversational one. Saved assistants still prepend
+    /// their own instructions in the wire transcript, unchanged.
+    func surfaceSystemPrompt(forChat: Bool) -> String {
+        forChat ? chatSystemPrompt : systemPrompt
+    }
 
     var selectedProvider: InferenceProvider? {
         providers.first(where: { $0.id == selectedProviderID }) ?? providers.first

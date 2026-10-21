@@ -23,7 +23,7 @@ struct QuickSettingsTests {
         #expect(settings.launchAtLogin == true)
         #expect(settings.showMenuBar == true)
         #expect(settings.checkForUpdatesOnLaunch == false)
-        #expect(settings.configurationVersion == 27)
+        #expect(settings.configurationVersion == 28)
         #expect(settings.caffeinateEnabled)
         #expect(settings.clipboardHistoryEnabled)
         #expect(settings.clipboardHistoryLimit == 50)

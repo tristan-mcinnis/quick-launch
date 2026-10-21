@@ -7912,6 +7912,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// turn again); the composer then keeps what is typed in it.
     private func submit(text: String?, reasksTurn: Bool = false) async {
         beginTurnTelemetry()
+        // A question asked on the surface supersedes any clear a dismissal
+        // left waiting for an earlier turn (a service or archive failure can
+        // end that turn before the clear runs). This turn owns the surface.
+        isTransientClearDeferred = false
         // Freeze the chat's chosen route before any async work: prepare,
         // enrich, and the model call all read this, so a model change while a
         // page fetch or a search is in flight cannot move this turn.
@@ -8828,10 +8832,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let availableImageIDs = routesToVision ? Set(requestMessages.flatMap(\.attachmentRefs)
             .filter { attachmentStore.storedImage(for: $0) != nil }.map(\.id)) : []
         let attachmentBudget = attachmentContextBudget(provider: provider, model: model)
+        // The reserve is the instruction this surface actually sends: AI
+        // Chat's longer conversational default must count in full, or the
+        // share is measured against a prompt that is not on the wire.
         let share = AttachmentRequestComposer.share(
             characterLimit: attachmentBudget.characterLimit,
             reserved: (requestMessages.last?.content.utf8.count ?? 0)
-                + settings.systemPrompt.utf8.count
+                + settings.surfaceSystemPrompt(forChat: isAIChatWindow).utf8.count
                 + (assistantSystem?.utf8.count ?? 0)
         )
         // Passage selection: a document-backed source contributes cited
@@ -9278,6 +9285,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // A finished stream leaves no handle behind, so `cancel()` can tell
         // a live model request from an ask still in its search phase.
         if streamTask == task { streamTask = nil }
+        // A dismissal that arrived while this turn streamed left its clear
+        // waiting. The answer is saved now, so the dismissed surface goes;
+        // the reset also drops a follow-up the dismissal abandoned.
+        runDeferredTransientClear()
         // A follow-up queued while this answer streamed goes now, unless the
         // stream was stopped or failed (both drop the queue).
         if generation == streamGeneration { await sendQueuedFollowUp() }
@@ -9822,6 +9833,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         roundRecorder: ChatRoundRecorder? = nil
     ) -> (any QuickService)? {
         if let service { return service }
+        // One engine, two surfaces: Quick AI carries the direct overlay
+        // instruction, AI Chat its conversational one. Providers, tools,
+        // history and attachments stay shared; only this default differs,
+        // and a custom instruction is used exactly as written.
+        let surfacePrompt = settings.surfaceSystemPrompt(forChat: isAIChatWindow)
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
@@ -9853,7 +9869,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 modelName: model,
                 apiKey: apiKeyProvider(provider.id),
                 systemPrompt: ChatContextGate.systemPrompt(
-                    settings.systemPrompt,
+                    surfacePrompt,
                     grounded: grounded
                 ),
                 webSearch: webSearch,
@@ -9875,7 +9891,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return CommandQuickService(
                 configuration: command,
                 model: model,
-                systemPrompt: settings.systemPrompt
+                systemPrompt: surfacePrompt
             )
         }
     }
@@ -10389,6 +10405,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // new-chat path in `stream`).
             streamGeneration &+= 1
             inFlightTurn = nil
+            // A clear waiting on this turn goes with the thread it described.
+            isTransientClearDeferred = false
             streamTask?.cancel()
             streamTask = nil
             commandTask?.cancel()
@@ -10435,7 +10453,39 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Back to the root surface, like a fresh open. The conversation is
     /// kept so a reopened overlay can still browse to it; only what was on
     /// screen goes.
+    ///
+    /// A model answer still streaming owns its text until the turn ends.
+    /// Clearing here would drop the prefix already shown while the stream
+    /// goes on appending, so the saved answer would be its tail alone; the
+    /// clear therefore waits for the turn (`runDeferredTransientClear`).
     func clearTransientDisplay() {
+        guard !isStreaming else {
+            isTransientClearDeferred = true
+            return
+        }
+        performTransientDisplayClear()
+    }
+
+    /// A dismissal asked for the surface to be cleared while a model answer
+    /// was still streaming. The request keeps the surface as it is until the
+    /// turn finishes, then this runs the clear the dismissal asked for.
+    private(set) var isTransientClearDeferred = false
+
+    /// The reader came back to the panel before the deferred clear ran (the
+    /// overlay reopens inside its retention window): the surface stays.
+    func cancelDeferredTransientClear() {
+        isTransientClearDeferred = false
+    }
+
+    /// The turn settled: run a clear a dismissal left waiting. Nothing else
+    /// is on screen by then, so this is the ordinary transient clear.
+    private func runDeferredTransientClear() {
+        guard isTransientClearDeferred else { return }
+        performTransientDisplayClear()
+    }
+
+    private func performTransientDisplayClear() {
+        isTransientClearDeferred = false
         reset([.layers, .mode, .attachments, .input])
         clearOutput()
         lastQuestion = nil

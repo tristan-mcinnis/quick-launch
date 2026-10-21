@@ -44,7 +44,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .general: "Hotkeys, launcher behaviour, chats, and learning."
         case .keyboard: "Rebind the in-app keys; see what stays fixed."
         case .items: "Aliases and hotkeys for apps, folders, and commands."
-        case .models: "Providers, models, and the quick-action instruction."
+        case .models: "Providers, models, and AI instructions."
         case .clipboard: "Clipboard history, emoji, and Quicklinks."
         case .prompts: "Saved AI commands, their aliases, and hotkeys."
         case .about: "Version, updates, and source."
@@ -244,9 +244,12 @@ enum SettingsDestinationIndex {
         group("models.webSearch", .models, "models.webSearch", "Web search",
               "The provider used by Quick AI, AI Chat, and the Translator",
               ["web search", "search provider", "tavily", "brave", "bocha"]),
-        group("models.instruction", .models, "models.instruction", "Quick-action instruction",
-              "The system instruction every provider shares",
-              ["instruction", "system prompt", "prompt", "persona"]),
+        group("models.instruction", .models, "models.instruction", "Quick AI instruction",
+              "The system instruction the Quick AI surface and saved actions share",
+              ["instruction", "system prompt", "quick ai", "prompt", "persona"]),
+        group("models.chatInstruction", .models, "models.chatInstruction", "AI Chat instruction",
+              "The system instruction the AI Chat window uses on every provider",
+              ["instruction", "system prompt", "ai chat", "chat", "conversation", "prompt"]),
 
         // Clipboard & Capture
         group("clipboard.history", .clipboard, "clipboard.history", "Clipboard History",

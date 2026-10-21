@@ -661,6 +661,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         overlayClearTask?.cancel()
         overlayClearTask = nil
         overlayRetentionID = nil
+        // A clear the last dismissal left waiting for its answer is moot: the
+        // reader is on the panel again and the answer stays where it is.
+        viewModel?.cancelDeferredTransientClear()
         if captureSelectionTarget {
             viewModel?.rememberSelectionTarget(selectedTextService.currentExternalTarget())
             // Capture the background selection before the panel becomes key

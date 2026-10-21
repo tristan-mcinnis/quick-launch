@@ -413,7 +413,7 @@ extension QuickViewModel {
         let budget = attachmentContextBudget(provider: provider, model: model)
         let share = AttachmentRequestComposer.share(
             characterLimit: budget.characterLimit,
-            reserved: input.utf8.count + settings.systemPrompt.utf8.count
+            reserved: input.utf8.count + settings.surfaceSystemPrompt(forChat: isAIChatWindow).utf8.count
         )
         let characters = attachmentTray.readyContents.compactMap(\.text).reduce(0) { $0 + $1.utf8.count }
         if characters > share { return "Will be cut to fit \(provider.name)" }

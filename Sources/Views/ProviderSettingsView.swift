@@ -52,7 +52,7 @@ struct ProviderSettingsView: View {
                 providerCard.settingsAnchor("models.provider")
                 visionCard.settingsAnchor("models.vision")
                 webSearchCard.settingsAnchor("models.webSearch")
-                instructionCard.settingsAnchor("models.instruction")
+                instructionCards
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, House.Spacing.md)
@@ -264,8 +264,17 @@ struct ProviderSettingsView: View {
         }
     }
 
+    /// The two instruction cards, in the order the Models pane stacks them.
+    /// Internal so a render proof can draw exactly these cards without
+    /// running the pane's `onAppear`, which reads provider keys from the
+    /// Keychain. Production composes it in the same place.
+    @ViewBuilder var instructionCards: some View {
+        instructionCard.settingsAnchor("models.instruction")
+        chatInstructionCard.settingsAnchor("models.chatInstruction")
+    }
+
     private var instructionCard: some View {
-        SettingsCard("Quick-action instruction") {
+        SettingsCard("Quick AI instruction") {
             CardNote(isFirst: true) {
                 TextEditor(text: viewModel.settingsBinding(\.systemPrompt))
                     .font(AQDesign.TypeToken.detail)
@@ -273,10 +282,30 @@ struct ProviderSettingsView: View {
                     .padding(AQDesign.Space.standard)
                     .frame(minHeight: 82)
                     .background(fieldBackground)
-                    .accessibilityLabel("Quick-action instruction")
+                    .accessibilityLabel("Quick AI instruction")
             }
             CardNote {
-                CardText("This instruction applies to every provider. Saved actions add their own prompt.")
+                CardText("This instruction applies to every provider on the Quick AI surface. Saved actions add their own prompt.")
+            }
+        }
+    }
+
+    /// AI Chat's own instruction. Separate from Quick AI's, so a
+    /// conversational default never changes an action result and a quick
+    /// action's direct rule never shortens a chat answer.
+    private var chatInstructionCard: some View {
+        SettingsCard("AI Chat instruction") {
+            CardNote(isFirst: true) {
+                TextEditor(text: viewModel.settingsBinding(\.chatSystemPrompt))
+                    .font(AQDesign.TypeToken.detail)
+                    .scrollContentBackground(.hidden)
+                    .padding(AQDesign.Space.standard)
+                    .frame(minHeight: 82)
+                    .background(fieldBackground)
+                    .accessibilityLabel("AI Chat instruction")
+            }
+            CardNote {
+                CardText("This instruction applies to the AI Chat window on every provider. Saved assistants add their own instructions.")
             }
         }
     }

@@ -118,7 +118,7 @@ struct AssistantModelTests {
     @Test func version25AddsTheAssistantsOnceAndNeverTwice() throws {
         let mine = [SavedPrompt(alias: "translate", prompt: "Translate:\n\n{selection}")]
         let upgraded = try JSONDecoder().decode(QuickSettings.self, from: v24Blob(prompts: mine))
-        #expect(upgraded.configurationVersion == 27)
+        #expect(upgraded.configurationVersion == 28)
         #expect(upgraded.savedPrompts.map(\.alias).filter { $0 == "ste" } == ["ste"])
 
         // Decoding the upgraded blob again adds nothing.
@@ -139,7 +139,7 @@ struct AssistantModelTests {
             QuickSettings.self,
             from: v24Blob(prompts: [stock], version: 26)
         )
-        #expect(upgraded.configurationVersion == 27)
+        #expect(upgraded.configurationVersion == 28)
         #expect(!upgraded.savedPrompts.contains { $0.alias == "vault" })
 
         var customized = stock
