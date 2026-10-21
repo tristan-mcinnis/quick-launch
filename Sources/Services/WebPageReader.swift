@@ -55,6 +55,8 @@ actor WebPageReader: WebPageReading {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch is CancellationError {
             throw PageReadError.timedOut
+        } catch let error as URLError where error.code == .timedOut {
+            throw PageReadError.timedOut
         }
         guard !text.isEmpty else { throw PageReadError.empty }
         return Self.bounded(text)
@@ -112,6 +114,8 @@ actor WebPageReader: WebPageReading {
             text = interpreted.text.trimmingCharacters(in: .whitespacesAndNewlines)
             body = interpreted.body
         } catch is CancellationError {
+            throw PageReadError.timedOut
+        } catch let error as URLError where error.code == .timedOut {
             throw PageReadError.timedOut
         }
         guard !text.isEmpty else { throw PageReadError.empty }

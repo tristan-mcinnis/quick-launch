@@ -856,7 +856,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
     /// Keychain lookup, replaceable in tests so they never touch the real Keychain.
-    @ObservationIgnored var apiKeyProvider: (UUID) -> String? = { APIKeyStore.load(providerID: $0) }
+    @ObservationIgnored var apiKeyProvider: (UUID) -> String? = { id in
+        // A test process never reads the real Keychain: a locked login keychain
+        // prompts and hangs the pre-push hook. Tests that need a key stub it.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return nil }
+        return APIKeyStore.load(providerID: id)
+    }
     /// Whether a provider has a key, remembered for this session. The route
     /// resolver runs several times per body pass (`chatDestinationLabel`,
     /// `attachmentRoutingLine`, the pre-send controls), and each check read

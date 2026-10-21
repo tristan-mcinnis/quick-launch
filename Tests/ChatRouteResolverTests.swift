@@ -286,6 +286,7 @@ struct ChatRouteResolverTests {
         settings.visionProviderID = InferenceProvider.mlxVisionID
         settings.visionModel = "qwen3-vl"
         let vm = QuickViewModel(settings: settings)
+        vm.apiKeyProvider = { _ in "test-key" }
 
         let route = vm.resolveChatRoute(hasImages: true, hasNewImages: true)
         #expect(route.effective.provider.id == InferenceProvider.deepSeekID)
