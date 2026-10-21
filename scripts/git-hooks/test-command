@@ -1,0 +1,8 @@
+#!/bin/bash
+# The unchanged global pre-push discovers this through .test-command.
+# Keep the full Swift gate, but do not leak this repo into dependency clones.
+set -euo pipefail
+git_environment="$(git rev-parse --local-env-vars)"
+for variable in $git_environment; do unset "$variable"; done
+cd "$(git rev-parse --show-toplevel)"
+exec swift test

@@ -1,6 +1,9 @@
 #!/bin/bash
 # Main-only publish guard, chained by the unchanged global pre-push hook.
 set -euo pipefail
+# Keep all repository inspection, scrub and dependency builds in this checkout.
+git_environment="$(git rev-parse --local-env-vars)"
+for variable in $git_environment; do unset "$variable"; done
 cd "$(git rev-parse --show-toplevel)"
 zero=0000000000000000000000000000000000000000
 expected=""
