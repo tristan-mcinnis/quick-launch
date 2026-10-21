@@ -856,12 +856,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored var recoverFromExternalActionFailure: (() -> Void)?
     @ObservationIgnored var persistSettings: (QuickSettings) -> Void = { $0.save() }
     /// Keychain lookup, replaceable in tests so they never touch the real Keychain.
-    @ObservationIgnored var apiKeyProvider: (UUID) -> String? = { id in
-        // A test process never reads the real Keychain: a locked login keychain
-        // prompts and hangs the pre-push hook. Tests that need a key stub it.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return nil }
-        return APIKeyStore.load(providerID: id)
-    }
+    /// Defaults to no key; the app injects `QuickViewModel.keychainAPIKey`.
+    /// A locked login keychain prompts and hangs `swift test`, so nothing but
+    /// the app's own launch path reaches the real Keychain.
+    @ObservationIgnored var apiKeyProvider: (UUID) -> String?
+    /// The production lookup, passed in by `AppDelegate`.
+    static let keychainAPIKey: (UUID) -> String? = { APIKeyStore.load(providerID: $0) }
     /// Whether a provider has a key, remembered for this session. The route
     /// resolver runs several times per body pass (`chatDestinationLabel`,
     /// `attachmentRoutingLine`, the pre-send controls), and each check read
@@ -1024,8 +1024,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         screenGeometry: (any ScreenGeometryProviding)? = nil,
         attachmentExtractor: (any AttachmentExtracting)? = nil,
         houseCommandCatalog: HouseCommandCatalog? = nil,
+        apiKeyProvider: ((UUID) -> String?)? = nil,
         currentVersion: String = "1.0.0"
     ) {
+        self.apiKeyProvider = apiKeyProvider ?? { _ in nil }
         // The non-injected path matches production: the shared reader, so a
         // document is extracted by HouseChatDocuments and not the app-side
         // OOXML copy that has drifted from the package's.
@@ -9743,7 +9745,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         do {
             let models = try await ModelCatalogService().models(
                 for: provider,
-                apiKey: APIKeyStore.load(providerID: provider.id)
+                apiKey: apiKeyProvider(provider.id)
             )
             // A provider removed while the request was in flight shifts the
             // indices; find it by id again rather than writing the wrong one.

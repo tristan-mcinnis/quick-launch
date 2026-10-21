@@ -281,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // path returns at its `guard let`, and no row can ever appear —
             // while the tests all pass, because they inject their own.
             houseCommandCatalog: HouseCommandCatalog(),
+            apiKeyProvider: QuickViewModel.keychainAPIKey,
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
@@ -1673,6 +1674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             historyFileURL: QuickHistoryStore.defaultFileURL(),
             archiveRootURL: AppPaths.applicationSupportDirectory,
             attachmentExtractor: SharedDocumentExtractor(),
+            apiKeyProvider: QuickViewModel.keychainAPIKey,
             currentVersion: Bundle.main.shortVersion
         )
         chat.memoryService = recall
