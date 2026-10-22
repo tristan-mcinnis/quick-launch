@@ -341,7 +341,10 @@ extension QuickViewModel {
     /// pre-Send label and the request path both read this, so the label
     /// cannot disagree with what is actually sent.
     struct NextChatRoute: Equatable, Sendable {
-        var providerName: String
+        /// The endpoint the next request takes: the provider and model that
+        /// will answer it, so a reader of this route measures the same window
+        /// and the same instruction the request will.
+        var provider: InferenceProvider
         var model: String
         var isCloud: Bool
         var hasImages: Bool
@@ -373,7 +376,7 @@ extension QuickViewModel {
         let hasImages = hasNewImages || !threadImages.isEmpty
         let route = resolveChatRoute(hasImages: hasImages, hasNewImages: hasNewImages)
         return NextChatRoute(
-            providerName: route.effective.provider.name,
+            provider: route.effective.provider,
             model: route.effective.model,
             isCloud: route.effective.provider.location == .cloud,
             hasImages: hasImages,
@@ -405,21 +408,33 @@ extension QuickViewModel {
     var nextRouteIsUsable: Bool { resolvedNextRoute().isUsable }
 
     var attachmentRoutingLine: String? {
+        // One route, resolved once: its provider and model are the ones the
+        // next request takes, so this estimate reads them rather than
+        // deriving a second pair that could disagree with the send path.
         let route = resolvedNextRoute()
         if route.hasImages { return route.label }
         let live = attachmentTray.items.filter { !$0.isFailed }
-        guard !live.isEmpty, let provider = activeProvider else { return nil }
-        let model = resolvedModel(for: provider, override: chatModelOverride(for: provider)) ?? ""
-        let budget = attachmentContextBudget(provider: provider, model: model)
+        guard !live.isEmpty, activeProvider != nil else { return nil }
+        let budget = attachmentContextBudget(provider: route.provider, model: route.model)
+        // The same instruction the send path reserves, from the same
+        // function. Two things this estimate cannot see, so the line may be
+        // optimistic and only Send decides the actual cut: the assistant's
+        // message (this path is synchronous, and the send path counts it),
+        // and a question the send path expands or enriches (a saved prompt,
+        // a skill, a page read) before it is sent.
         let share = AttachmentRequestComposer.share(
             characterLimit: budget.characterLimit,
-            reserved: input.utf8.count + settings.surfaceSystemPrompt(forChat: isAIChatWindow).utf8.count
+            reserved: input.utf8.count
+                + systemInstruction(
+                    for: route.provider,
+                    grounded: composerContextEvaluation.grounded
+                ).utf8.count
         )
         let characters = attachmentTray.readyContents.compactMap(\.text).reduce(0) { $0 + $1.utf8.count }
-        if characters > share { return "Will be cut to fit \(provider.name)" }
+        if characters > share { return "Will be cut to fit \(route.provider.name)" }
         // A cloud document to the provider the user already chose is routine:
         // the answer's own record names where it went.
-        return provider.location == .local ? "Only on this Mac" : nil
+        return route.provider.location == .local ? "Only on this Mac" : nil
     }
 
     static let pendingImageAsTextLine = "Will send as text (read on this Mac)"

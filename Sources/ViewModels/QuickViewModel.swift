@@ -8832,14 +8832,21 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let availableImageIDs = routesToVision ? Set(requestMessages.flatMap(\.attachmentRefs)
             .filter { attachmentStore.storedImage(for: $0) != nil }.map(\.id)) : []
         let attachmentBudget = attachmentContextBudget(provider: provider, model: model)
-        // The reserve is the instruction this surface actually sends: AI
-        // Chat's longer conversational default must count in full, or the
-        // share is measured against a prompt that is not on the wire.
+        // The reserve is the instruction this surface actually sends: the
+        // grounding sentence and the assistant's message count in full, with
+        // their separators, or the share is measured against a prompt that is
+        // not on the wire. `makeService` composes the provider body from the
+        // same function. This path inserts at most one system message, the
+        // assistant's, and the wire joins every system message it is handed;
+        // a second one would have to be counted here as well.
+        let instruction = systemInstruction(
+            for: provider,
+            grounded: request.contextEvaluation?.grounded == true,
+            assistantInstruction: assistantSystem
+        )
         let share = AttachmentRequestComposer.share(
             characterLimit: attachmentBudget.characterLimit,
-            reserved: (requestMessages.last?.content.utf8.count ?? 0)
-                + settings.surfaceSystemPrompt(forChat: isAIChatWindow).utf8.count
-                + (assistantSystem?.utf8.count ?? 0)
+            reserved: (requestMessages.last?.content.utf8.count ?? 0) + instruction.utf8.count
         )
         // Passage selection: a document-backed source contributes cited
         // chunks (or an honest no-match/partial line) inside the per-file,
@@ -9814,6 +9821,29 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         return makeService(provider: provider, model: model, chatTools: false)
     }
 
+    /// The system instruction this surface's request carries on `provider`:
+    /// the surface prompt, the grounding sentence when the turn carries a
+    /// source, and the assistant's message, composed the way the provider
+    /// joins them. The attachment budget and the provider body both read this
+    /// one function, so the reserve is the instruction the model reads.
+    ///
+    /// `assistantInstruction` is the chat's assistant message, which the
+    /// provider joins in front of the surface instruction. Pass nil when only
+    /// the instruction the service itself carries is wanted, since the
+    /// assistant travels on the request's own system message.
+    func systemInstruction(
+        for provider: InferenceProvider,
+        grounded: Bool,
+        assistantInstruction: String? = nil
+    ) -> String {
+        ChatContextGate.systemInstruction(
+            surfacePrompt: settings.surfaceSystemPrompt(forChat: isAIChatWindow),
+            grounded: grounded,
+            lane: provider.kind == .commandLine ? .commandLine : .model,
+            assistantInstruction: assistantInstruction
+        )
+    }
+
     /// `chatTools` offers the chat's memory and skill tools and lets
     /// the chat's toggle decide web search. The Translator passes false: it
     /// gets web search per the setting and nothing else.
@@ -9836,8 +9866,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // One engine, two surfaces: Quick AI carries the direct overlay
         // instruction, AI Chat its conversational one. Providers, tools,
         // history and attachments stay shared; only this default differs,
-        // and a custom instruction is used exactly as written.
-        let surfacePrompt = settings.surfaceSystemPrompt(forChat: isAIChatWindow)
+        // and a custom instruction is used exactly as written. Both lanes
+        // compose their instruction through `systemInstruction(for:grounded:)`
+        // so the attachment budget measures the same string.
         switch provider.kind {
         case .openAICompatible:
             guard let url = URL(string: provider.baseURL) else { return nil }
@@ -9868,10 +9899,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 baseURL: url,
                 modelName: model,
                 apiKey: apiKeyProvider(provider.id),
-                systemPrompt: ChatContextGate.systemPrompt(
-                    surfacePrompt,
-                    grounded: grounded
-                ),
+                systemPrompt: systemInstruction(for: provider, grounded: grounded),
                 webSearch: webSearch,
                 tools: chatTools && !textOnly
                     ? ChatToolbox(
@@ -9891,7 +9919,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return CommandQuickService(
                 configuration: command,
                 model: model,
-                systemPrompt: surfacePrompt
+                systemPrompt: systemInstruction(for: provider, grounded: grounded)
             )
         }
     }

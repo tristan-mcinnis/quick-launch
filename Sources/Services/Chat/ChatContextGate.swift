@@ -132,6 +132,59 @@ struct ChatContextGate: Sendable {
         return prompt + "\n\n" + groundingDirective
     }
 
+    /// Which provider lane reads a request's instruction. The model lane
+    /// carries the grounding sentence; a command-line provider has never
+    /// carried it, and does not start now.
+    enum InstructionLane: Sendable {
+        case model
+        case commandLine
+    }
+
+    /// The instruction a lane's own prompt contributes: the surface prompt,
+    /// plus the grounding sentence when the turn carries a source and the
+    /// lane carries one.
+    static func instruction(
+        surfacePrompt: String,
+        grounded: Bool,
+        lane: InstructionLane
+    ) -> String {
+        switch lane {
+        case .model: systemPrompt(surfacePrompt, grounded: grounded)
+        case .commandLine: surfacePrompt
+        }
+    }
+
+    /// The instruction a request carries, composed the way the model lane's
+    /// provider body composes it: the assistant's instructions, then the
+    /// lane's instruction, a blank line between them, empty parts left out.
+    /// That is exact for the OpenAI-compatible body, which joins every system
+    /// message it is given in front of this service prompt.
+    ///
+    /// The command-line lane is exact only when the command's argv holds
+    /// `{{systemPrompt}}`: then the same join reaches the process. A command
+    /// without that placeholder gets only the assistant part prepended to
+    /// stdin, so this composition is then wider than the process sees. The
+    /// CLI attachment budget is unlimited, so no share is measured against
+    /// it either way.
+    ///
+    /// The attachment budget measures this same string, so the reserve counts
+    /// the separators and the grounding sentence the model actually reads.
+    static func systemInstruction(
+        surfacePrompt: String,
+        grounded: Bool,
+        lane: InstructionLane,
+        assistantInstruction: String? = nil
+    ) -> String {
+        let laneInstruction = instruction(
+            surfacePrompt: surfacePrompt,
+            grounded: grounded,
+            lane: lane
+        )
+        return [assistantInstruction ?? "", laneInstruction]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+    }
+
     /// The sanitized receipt persisted with the turn.
     func receipt(for evaluation: ChatContextEvaluation, budgetCharacters: Int) -> ContextReceipt {
         ContextReceipt(
