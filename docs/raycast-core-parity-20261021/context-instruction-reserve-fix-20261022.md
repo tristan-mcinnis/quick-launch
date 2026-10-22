@@ -1,7 +1,7 @@
 # Grounded-instruction reserve correction
 
 ## Status
-Independently reviewed and tested. Not installed during this checkpoint. This is an internal correctness fix, not evidence that Quick Launch is better than Raycast.
+Independently reviewed and tested. Installed in build 27bd421; see [installation verification](installation-20261022.md). This is an internal correctness fix, not evidence that Quick Launch is better than Raycast.
 
 ## Defect and change
 The attachment budget counted the surface instruction, but the model request also carried the grounding directive and its separator. In the reproduced custom-instruction case, the request instruction was 184 UTF-8 bytes and the reserve counted 15. The 169-byte difference allowed 101 extra attachment characters under the existing budget formula. An empty surface instruction also omitted the 167-byte grounding directive.
@@ -28,4 +28,4 @@ Raw red/green and independent gate logs remain in the local comparison evidence 
 - The three opt-in performance/native-focus suites (eight tests) were not run at this checkpoint. No native UX, speed or competitive verdict follows.
 
 ## Rollback
-Revert the dedicated instruction-reserve fix commit with `git revert d419052d87dfe11699fde78ef75a3b220700a5c0`. This checkpoint changes no settings schema or stored chat data. The installed app remains the measured baseline until a separately checked installation.
+Revert the dedicated instruction-reserve fix commit with `git revert d419052d87dfe11699fde78ef75a3b220700a5c0`. The fix introduces no settings-schema or archive-format migration. The prior baseline app is preserved as a verified rollback copy outside Git. The subsequent installation is recorded separately.
