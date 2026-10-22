@@ -274,7 +274,7 @@ struct AIChatWindowLifecycleTests {
         let submit = await streaming(rig, gated)
         rig.controller.windowWillClose(closeNotification(window))
 
-        rig.controller.prepareForTermination()
+        rig.controller.stopForTermination()
         await submit.value
 
         #expect(!rig.chat.isStreaming)

@@ -294,6 +294,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the conversation with two `fsync` calls, so waiting for it between
     /// deltas puts disk latency straight into token rendering.
     @ObservationIgnored private var archiveCheckpointTask: Task<Void, Never>?
+    /// Which checkpoint owns the slot. An older task that finishes late must
+    /// not clear a newer checkpoint's handle.
+    @ObservationIgnored private var archiveCheckpointGeneration = 0
+    /// The archive writes the quit path starts, owned so a quit can wait for
+    /// them and learn whether they landed.
+    @ObservationIgnored private var durability: AnswerDurability?
     /// The archived assistant turn id for the stream in flight, so every
     /// path that persists the answer (completion, stop, error, resume) uses
     /// one record.
@@ -315,8 +321,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the provider reported. Both empty for a turn that used neither.
     @ObservationIgnored private var streamToolRounds: [ToolRound] = []
     @ObservationIgnored private var streamUsage: TokenUsage?
-    /// Model requests the in-flight turn sent, from the snapshot recorder.
-    @ObservationIgnored private var streamRequestRounds = 0
+    /// True while an accepted submit has not yet reached its model request.
+    /// A quit that freezes in that window refuses instead of exiting over
+    /// question-persistence or provider-start work it does not own.
+    @ObservationIgnored private var isPreStreamSubmit = false
     /// The store's copy of the open chat as this view last read or wrote
     /// it. The other view's writes since then are what a save merges in.
     @ObservationIgnored var openChatBase: StoredChatStamp?
@@ -1058,6 +1066,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.pasteboard = pasteboard ?? InMemoryPasteboard()
         self.historyFileURL = historyFileURL
         self.chatArchive = archiveRootURL.flatMap { try? ChatArchive.shared(root: $0) }
+        if let chatArchive {
+            self.durability = AnswerDurability(
+                writer: ChatArchiveAnswerWriter(archive: chatArchive)
+            )
+        }
         self.workspace = workspace ?? SystemWorkspace()
         self.runningApplications = runningApplications ?? SystemRunningApplications()
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
@@ -1070,6 +1083,18 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             self?.invalidateLauncherRanking()
         }
         self.store.register(self)
+        durability?.onFailure = { [weak self] failure in
+            guard let self else { return }
+            switch failure.kind {
+            case .terminal:
+                AppLog.persistence.error("Chat archive answer write failed: \(failure.message)")
+            case .projection:
+                AppLog.persistence.error("Chat archive answer sync failed: \(failure.message)")
+            case .deletion:
+                AppLog.persistence.error("Chat archive delete failed: \(failure.message)")
+                self.errorMessage = "Could not delete this chat from the archive: \(failure.message)"
+            }
+        }
         attachmentTray.onChooseFiles = { [weak self] in
             self?.runAddContextRow(.file)
         }
@@ -7112,15 +7137,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         invalidateLauncherRanking()
         applicationSelectionIndex = 0
         // Delete the canonical record: the tombstone stops a late write from
-        // recreating the chat, and a failure is surfaced, never hidden.
-        if let chatArchive {
-            Task {
-                do {
-                    _ = try await chatArchive.delete(id: id.uuidString)
-                } catch {
-                    self.errorMessage = "Could not delete this chat from the archive: \(error.localizedDescription)"
-                }
-            }
+        // recreating the chat. The delete is owed until it lands, so a quit
+        // waits for it and a failure is retried; a chat the user deleted must
+        // not survive a quit just because a write failed.
+        if chatArchive != nil {
+            durability?.registerDeletion(id)
         }
     }
 
@@ -7912,6 +7933,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// turn again); the composer then keeps what is typed in it.
     private func submit(text: String?, reasksTurn: Bool = false) async {
         beginTurnTelemetry()
+        // A send the user started is activity from here on, even before the
+        // question is durable and long before an answer exists. Bumped before
+        // the first suspension so a quit that freezes in the middle of this
+        // submit cannot later approve an exit over a turn it never saw.
+        durability?.noteActivity()
+        isPreStreamSubmit = true
+        defer { isPreStreamSubmit = false }
         // A question asked on the surface supersedes any clear a dismissal
         // left waiting for an earlier turn (a service or archive failure can
         // end that turn before the clear runs). This turn owns the surface.
@@ -7946,6 +7974,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let durable = await submitDurableMaterial(request, startsNewChat: startsNewChat)
         turnPersistFinishedAt = Date()
         guard durable else { return }
+        // The question is on disk now. Bump again so a quit frozen before this
+        // point cannot approve the exit over a submit it never saw finish.
+        durability?.noteActivity()
         turnEnrichStartedAt = Date()
         let enriched = await enrich(&request)
         turnEnrichFinishedAt = Date()
@@ -7968,7 +7999,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         turnEnrichFinishedAt = nil
         streamToolRounds = []
         streamUsage = nil
-        streamRequestRounds = 0
     }
 
     /// The timings this turn actually measured. A value that was never
@@ -7996,9 +8026,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if let start = turnPersistStartedAt, let end = turnPersistFinishedAt {
             timings.extra["persistenceSeconds"] = .number(end.timeIntervalSince(start))
         }
-        if streamRequestRounds > 0 {
-            timings.extra["modelRounds"] = .number(Double(streamRequestRounds))
-        }
+        // `modelRounds` is filled by the terminal write from the turn's own
+        // round recorder, so it is exact for the turn that was archived.
         return timings
     }
 
@@ -8244,6 +8273,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // source came via pendingActionSource or the launchText branch):
             // clear the chip so it cannot ride a later request.
             if launchSelection != nil { launchSelection = nil }
+            // The command lane writes no archive answer and is stopped by
+            // `cancel()` like any stream, so it is not unowned pre-stream work.
+            isPreStreamSubmit = false
             await runCommandAction(
                 definition: definition,
                 executable: executable,
@@ -8913,6 +8945,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         output = ""
         // A new question brings the reader back to the newest text.
         followThreadBottom()
+        // The model request is about to start: from here the stream is owned
+        // by `streamTask`, so a quit stops it like any other stream.
+        isPreStreamSubmit = false
+        durability?.noteActivity()
         isStreaming = true
         // The send path's per-round snapshot writer. Round 0's body is the
         // submission's own snapshot; every later tool round's exact body is
@@ -9018,6 +9054,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let assistantTurnID = UUID()
         currentAssistantTurnID = assistantTurnID
         let archivedConversationID = currentConversation?.id.uuidString
+        let archivedConversationUUID = currentConversation?.id
         archiveCheckpointCharacters = 0
         streamStartedAt = submissionStartedAt ?? Date()
         streamFirstTokenAt = nil
@@ -9068,6 +9105,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                         let partial = output
                         let rounds = streamToolRounds
                         let turnID = assistantTurnID.uuidString
+                        archiveCheckpointGeneration &+= 1
+                        let checkpointGeneration = archiveCheckpointGeneration
                         archiveCheckpointTask = Task { [weak self] in
                             do {
                                 _ = try await chatArchive.checkpoint(
@@ -9083,17 +9122,22 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                                     "Chat archive checkpoint failed: \(error.localizedDescription)"
                                 )
                             }
-                            self?.archiveCheckpointTask = nil
+                            if self?.archiveCheckpointGeneration == checkpointGeneration {
+                                self?.archiveCheckpointTask = nil
+                            }
                         }
                     }
                 }
                 // Stopped: `cancel()` kept the turn and the text that arrived.
                 guard generation == streamGeneration else { return }
                 flushStreamBuffer()
-                // Stream completed normally
-                streamingStatus = nil
-                isStreaming = false
-                inFlightTurn = nil
+                // Stream completed normally. The final answer is frozen as a
+                // mandatory archive write before the first suspension, so a
+                // quit here waits for it instead of reading `isStreaming`.
+                // The answer is terminal in the archive first, with the frozen
+                // route and the receipt the turn actually ran, before the
+                // projection can rewrite the record.
+                var terminalWrite: Task<Bool, Never>?
                 if !output.isEmpty {
                     let records = answerToolRecords(usedWebSearch: usedWebSearch)
                     currentConversation?.messages.append(
@@ -9105,13 +9149,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                         )
                     )
                     currentConversation?.updatedAt = Date()
-                    // The answer is terminal in the archive first, with the
-                    // frozen route and the receipt the turn actually ran,
-                    // before the projection sync can rewrite the record.
-                    if let chatArchive, let archivedConversationID {
+                    if let archivedConversationUUID {
                         let finishedAt = Date()
-                        let startedAt = streamStartedAt
-                        streamRequestRounds = await roundRecorder?.requestedRounds ?? 0
                         let timings = requestTimings(finishedAt: finishedAt)
                         let rounds = streamToolRounds.isEmpty ? nil : streamToolRounds
                         let receipt = RequestReceipt(
@@ -9122,27 +9161,32 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                             timings: timings,
                             usage: streamUsage,
                             endpoint: frozenModel.endpoint,
-                            startedAt: startedAt,
+                            startedAt: streamStartedAt,
                             finishedAt: finishedAt
                         )
-                        do {
-                            _ = try await chatArchive.completeTurn(
-                                conversationID: archivedConversationID,
-                                turnID: assistantTurnID.uuidString,
-                                text: output,
-                                receipt: receipt,
-                                selection: turnSelection,
-                                timings: timings,
-                                usage: streamUsage,
-                                toolRounds: rounds
-                            )
-                        } catch {
-                            AppLog.persistence.error(
-                                "Chat archive completion write failed: \(error.localizedDescription)"
-                            )
-                        }
+                        terminalWrite = registerTerminalAnswer(
+                            conversationID: archivedConversationUUID,
+                            turnID: assistantTurnID,
+                            status: .completed,
+                            text: output,
+                            receipt: receipt,
+                            selection: turnSelection,
+                            timings: timings,
+                            usage: streamUsage,
+                            toolRounds: rounds,
+                            rounds: roundRecorder
+                        )
                     }
+                }
+                streamingStatus = nil
+                isStreaming = false
+                inFlightTurn = nil
+                if !output.isEmpty {
                     persistAnsweredConversation()
+                    // The write was owed before `isStreaming` changed; waiting
+                    // for it keeps `submit` returning a durable answer, as the
+                    // inline write did. A refusal stays owed for the next quit.
+                    _ = await terminalWrite?.value
                     // The lines live on the answer now.
                     liveToolRecords = []
                     if usedWebSearch { webSearchNote = nil }
@@ -9211,27 +9255,22 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 // Cancelled by the web answer's time limit instead: the turn
                 // stays with the text that arrived, as Stop leaves it, and
                 // `waitForWebAnswer` shows the search results if none did.
-                keepStoppedAnswer()
+                let keptAnswer = keepStoppedAnswer()
                 // An interrupted answer is recorded as such, never left
                 // looking like it is still streaming.
-                if let chatArchive, let archivedConversationID {
-                    let finishedAt = Date()
-                    do {
-                        _ = try await chatArchive.failTurn(
-                            conversationID: archivedConversationID,
-                            turnID: assistantTurnID.uuidString,
-                            error: "Interrupted",
-                            status: .cancelled,
-                            text: output.isEmpty ? nil : output,
-                            timings: requestTimings(finishedAt: finishedAt),
-                            usage: streamUsage,
-                            toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
-                        )
-                    } catch {
-                        AppLog.persistence.error(
-                            "Chat archive interrupt write failed: \(error.localizedDescription)"
-                        )
-                    }
+                if let archivedConversationUUID {
+                    let terminalWrite = registerTerminalAnswer(
+                        conversationID: archivedConversationUUID,
+                        turnID: assistantTurnID,
+                        status: .cancelled,
+                        error: "Interrupted",
+                        text: output.isEmpty ? nil : output,
+                        timings: requestTimings(finishedAt: Date()),
+                        usage: streamUsage,
+                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                    )
+                    if keptAnswer { persistAnsweredConversation() }
+                    _ = await terminalWrite?.value
                 }
                 liveToolRecords = []
                 streamingStatus = nil
@@ -9251,24 +9290,18 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 inFlightTurn = nil
                 threadError = ThreadError(messageID: submittedMessage.id, message: error.localizedDescription)
                 // The failure is durable with the text that arrived.
-                if let chatArchive, let archivedConversationID {
-                    let finishedAt = Date()
-                    do {
-                        _ = try await chatArchive.failTurn(
-                            conversationID: archivedConversationID,
-                            turnID: assistantTurnID.uuidString,
-                            error: error.localizedDescription,
-                            status: .failed,
-                            text: output.isEmpty ? nil : output,
-                            timings: requestTimings(finishedAt: finishedAt),
-                            usage: streamUsage,
-                            toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
-                        )
-                    } catch {
-                        AppLog.persistence.error(
-                            "Chat archive failure write failed: \(error.localizedDescription)"
-                        )
-                    }
+                if let archivedConversationUUID {
+                    let terminalWrite = registerTerminalAnswer(
+                        conversationID: archivedConversationUUID,
+                        turnID: assistantTurnID,
+                        status: .failed,
+                        error: error.localizedDescription,
+                        text: output.isEmpty ? nil : output,
+                        timings: requestTimings(finishedAt: Date()),
+                        usage: streamUsage,
+                        toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                    )
+                    _ = await terminalWrite?.value
                 }
                 isFollowUpQueued = false
                 recordJournal(kind: .aiFailed, scope: learningScope, detail: "provider-error")
@@ -9338,15 +9371,16 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// question stays a turn and the text that arrived becomes its answer,
     /// so `⌘R` asks that same turn again. Written to history only when some
     /// text arrived. Only for the chat the request belongs to; a chat opened
-    /// since is left alone.
-    private func keepStoppedAnswer() {
+    /// since is left alone. Returns whether it saved the stopped answer.
+    @discardableResult
+    private func keepStoppedAnswer() -> Bool {
         flushStreamBuffer()
-        guard let turn = inFlightTurn else { return }
+        guard let turn = inFlightTurn else { return false }
         inFlightTurn = nil
         guard currentConversation?.id == turn.conversationID,
               currentConversation?.messages.contains(where: { $0.id == turn.messageID }) == true,
               !output.isEmpty
-        else { return }
+        else { return false }
         let records = answerToolRecords(usedWebSearch: webSearchNote != nil)
         currentConversation?.messages.append(
             QuickMessage(
@@ -9357,8 +9391,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             )
         )
         currentConversation?.updatedAt = Date()
-        persistAnsweredConversation()
         liveToolRecords = []
+        return true
     }
 
     /// What VoiceOver says when an answer finishes in AI Chat.
@@ -9926,7 +9960,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     // MARK: - Cancel
 
-    func cancel() {
+    /// Stops a stream as Escape does. Returns whether it kept and saved the
+    /// stopped answer; a no-text stop returns false and saves nothing.
+    @discardableResult
+    func cancel() -> Bool {
+        var keptStoppedAnswer = false
         // A running command action has no `streamTask`; a model request does.
         // Only claim a cancellation that really happened: the model lane
         // records here, and the command lane records from `runCommandAction`
@@ -9943,27 +9981,24 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         if cancelledModelRequest {
             // Stop keeps the question and what the model said so far, as the
             // turn's answer; `⌘R` asks the same turn again.
-            keepStoppedAnswer()
+            keptStoppedAnswer = keepStoppedAnswer()
             // A stopped answer is terminal in the archive, never left looking
-            // like it is still streaming.
-            if let chatArchive, let conversationID = currentConversation?.id.uuidString,
+            // like it is still streaming. Registering here, before this
+            // method returns, freezes the write and its own retry payload
+            // before any quit can await.
+            if let conversation = currentConversation,
                let assistantTurnID = currentAssistantTurnID {
-                let text = output.isEmpty ? nil : output
-                Task {
-                    do {
-                        _ = try await chatArchive.failTurn(
-                            conversationID: conversationID,
-                            turnID: assistantTurnID.uuidString,
-                            error: "Stopped by the user",
-                            status: .cancelled,
-                            text: text
-                        )
-                    } catch {
-                        AppLog.persistence.error(
-                            "Chat archive stop write failed: \(error.localizedDescription)"
-                        )
-                    }
-                }
+                registerTerminalAnswer(
+                    conversationID: conversation.id,
+                    turnID: assistantTurnID,
+                    status: .cancelled,
+                    error: "Stopped by the user",
+                    text: output.isEmpty ? nil : output,
+                    timings: requestTimings(finishedAt: Date()),
+                    usage: streamUsage,
+                    toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                )
+                if keptStoppedAnswer { persistAnsweredConversation() }
             }
         } else {
             discardStreamBuffer()
@@ -9999,9 +10034,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // it), not when the cancelled search returns later.
             restoreEnrichmentInput()
         }
-        guard cancelledModelRequest else { return }
+        guard cancelledModelRequest else { return keptStoppedAnswer }
         recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
         requestInputFocus()
+        return keptStoppedAnswer
     }
 
     // MARK: - Stream buffering
@@ -11265,20 +11301,78 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         syncConversationToArchive(conversation)
     }
 
-    /// Best-effort durability for the latest turn in the structured archive.
-    /// The question was already committed before Send; this captures the
-    /// answer. It never blocks the UI, never changes the frozen model, and
-    /// never removes anything: a failure is logged and the legacy projection
-    /// still holds the chat.
+    /// The projection of the latest turn into the structured archive. The
+    /// question was already committed before Send; this carries the answer and
+    /// the chat's current shape. The write is owed until it lands, so a quit
+    /// waits for it and a failure is retried instead of logged and forgotten.
     func syncConversationToArchive(_ conversation: QuickConversation) {
-        guard let chatArchive, conversation.messages.contains(where: { $0.role == .assistant }) else { return }
-        Task {
-            do {
-                try await chatArchive.syncConversation(conversation)
-            } catch {
-                AppLog.persistence.error("Chat archive answer sync failed: \(error.localizedDescription)")
-            }
-        }
+        guard chatArchive != nil,
+              conversation.messages.contains(where: { $0.role == .assistant })
+        else { return }
+        durability?.record(conversation, after: archiveCheckpointTask)
+    }
+
+    /// Registers the final answer of one turn as a mandatory archive write.
+    /// Synchronous on purpose: the caller runs it where the text became final
+    /// and before its first suspension, so a quit cannot observe a finished
+    /// answer with no debt behind it. A chat the user deleted gets no write.
+    @discardableResult
+    private func registerTerminalAnswer(
+        conversationID: UUID,
+        turnID: UUID,
+        status: RequestStatus,
+        error: String? = nil,
+        text: String?,
+        receipt: RequestReceipt? = nil,
+        selection: ModelSelection? = nil,
+        timings: RequestTimings,
+        usage: TokenUsage?,
+        toolRounds: [ToolRound]?,
+        rounds: ChatRoundRecorder? = nil
+    ) -> Task<Bool, Never>? {
+        guard let durability, !store.deletedChatIDs.contains(conversationID) else { return nil }
+        return durability.register(
+            AnswerTerminalWrite(
+                conversationID: conversationID,
+                turnID: turnID,
+                status: status,
+                error: error,
+                text: text,
+                receipt: receipt,
+                selection: selection,
+                timings: timings,
+                usage: usage,
+                toolRounds: toolRounds,
+                rounds: rounds,
+                checkpointFence: archiveCheckpointTask
+            )
+        )
+    }
+
+    /// The activity revision a quit compares against after its awaits. A
+    /// change means work was accepted after the freeze, so the attempt is stale.
+    var answerDurabilityRevision: Int { durability?.revision ?? 0 }
+
+    /// An accepted submit that has not reached its model request yet.
+    var isSubmitBeforeStream: Bool { isPreStreamSubmit }
+
+    /// Freezes the archive writes this quit owns. Call it after the stop and
+    /// before the first await: a late completion can only finish frozen
+    /// persistence, never stop a request that started after a refusal.
+    func freezeAnswerDurability() -> AnswerDurability.Snapshot {
+        durability?.freeze() ?? .empty
+    }
+
+    /// Awaits one quit's frozen archive work and reports what is still owed.
+    func settleAnswerDurability(_ snapshot: AnswerDurability.Snapshot) async -> AnswerDurability.Verdict {
+        guard let durability else { return .durable }
+        return await durability.settle(snapshot)
+    }
+
+    /// Convenience for callers that freeze and settle in one step.
+    @discardableResult
+    func flushArchiveForQuit() async -> Bool {
+        await settleAnswerDurability(freezeAnswerDurability()) == .durable
     }
 
     /// Clears the local slash-command refusal (the composer's Send as Text,

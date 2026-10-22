@@ -192,6 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var mouseMonitor: Any?
     private var statusItem: NSStatusItem?
     private var overlayClearTask: Task<Void, Never>?
+    /// The one quit attempt in flight, or the finished one on its way out.
+    private var quitAttempts = QuitAttempts()
     /// Pending delayed shrink of the overlay panel; growth cancels it.
     private var panelShrinkTask: Task<Void, Never>?
     /// The launcher's top edge, its horizontal centre, and the display it
@@ -318,11 +320,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// How long a quit waits for the chats' archive writes. The installer's
+    /// polite quit allows five seconds, so this deadline lands first to leave
+    /// room for the refusal to reach the user.
+    private static let quitSaveTimeout: Duration = .seconds(2)
+
+    /// A quit stops the chats and lets every owed archive write finish before
+    /// the process ends. The archive is what a relaunch reads, so the final
+    /// answer, its terminal status and a chat the user deleted must be on
+    /// disk. A failed write, a missed deadline, a chat surface that appeared
+    /// during the wait, or activity accepted after the freeze refuses the
+    /// quit; the app stays open and says why. It never quits on unsaved work.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // A repeated ⌘Q coalesces into the running attempt: one reply ends the
+        // one pending termination.
+        guard let attempt = quitAttempts.begin() else { return .terminateLater }
+        // Stop and freeze every chat before the first await. A deadline that
+        // fires later can only finish frozen writes, never stop a request
+        // started after a refusal.
+        let session = QuitSession(controller: aiChatController, launcher: viewModel)
+        let frozenController = aiChatController.map(ObjectIdentifier.init)
+        let frozenLauncher = viewModel.map(ObjectIdentifier.init)
+        Task { @MainActor [weak self] in
+            let outcome = await withQuitDeadline(Self.quitSaveTimeout) {
+                await session.finish(isStillCurrent: {
+                    guard let self else { return false }
+                    return self.aiChatController.map(ObjectIdentifier.init) == frozenController
+                        && self.viewModel.map(ObjectIdentifier.init) == frozenLauncher
+                })
+            // A missed deadline is unsaved activity, not a diagnosis.
+            } ?? .unsavedActivity
+            let saved = outcome.allowsExit
+            guard let self, self.quitAttempts.resolve(attempt, saved: saved) else { return }
+            NSApp.reply(toApplicationShouldTerminate: saved)
+            guard !saved else { return }
+            self.reportQuitRefused(outcome)
+        }
+        return .terminateLater
+    }
+
+    /// A quit that could not prove its archive work stays open and says which
+    /// kind of work is unfinished, so a retry is possible and nothing is lost
+    /// silently. The copy names no cause it cannot see.
+    private func reportQuitRefused(_ outcome: QuitOutcome) {
+        AppLog.persistence.error("Quit was refused: \(outcome.logDescription).")
+        let alert = NSAlert()
+        alert.messageText = "Quick Launch did not quit"
+        switch outcome {
+        case .incompleteDeletion:
+            alert.informativeText = "A chat you deleted is not removed from disk yet. Try again before quitting."
+        case .activityAfterFreeze:
+            alert.informativeText = "Chat activity is still arriving, so it is not saved yet. Try again before quitting."
+        case .unsavedActivity, .durable:
+            alert.informativeText = "The latest chat activity is not saved yet. Try again before quitting."
+        }
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        // A stream in either view stops and keeps its question and what
-        // arrived; the history file is on disk before the process ends.
-        aiChatController?.prepareForTermination()
-        if let viewModel { AIChatWindowController.keepStreamForQuit(viewModel) }
+        // The chats stopped and their archive writes finished in
+        // `applicationShouldTerminate`. A termination that skipped it (a
+        // signal, for example) still stops the streams here; after a normal
+        // quit this fallback is not needed and starts no new writes.
+        if !quitAttempts.isActive {
+            if let aiChatController {
+                AIChatWindowController.keepStreamForQuit(aiChatController.model.chat)
+            }
+            if let viewModel { AIChatWindowController.keepStreamForQuit(viewModel) }
+        }
         QuickHistoryStore.waitForPendingWrites()
         overlayClearTask?.cancel()
         globalHotKey?.invalidate()

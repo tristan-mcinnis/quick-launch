@@ -378,10 +378,31 @@ actor ChatArchive {
     /// every archive-only fact already on disk. A deleted chat is never
     /// recreated, and a corrupt record is never replaced with a fresh one.
     func syncConversation(_ conversation: QuickConversation) async throws {
+        try await applyProjection(conversation, replay: false)
+    }
+
+    /// Applies a whole-conversation projection.
+    ///
+    /// `replay` marks a snapshot the caller knows is older than a write that
+    /// already landed for this chat: another window's history, a reload, or a
+    /// projection retried after a newer one landed. A replay may only add
+    /// data. It never rewrites turn text, never replaces a shorter attachment
+    /// or tool-record list, and never changes a title, a pin or the chosen
+    /// assistant, so an older copy cannot erase a newer landed field. A
+    /// current snapshot (the same write order, newest first) keeps the normal
+    /// merge, so an intentional rewrite still lands.
+    func applyProjection(_ conversation: QuickConversation, replay: Bool) async throws {
         try await serialized {
             let id = conversation.id.uuidString
             try self.ensureNotDeleted(id)
-            let merged = try await self.mergingStoredState(into: Self.record(for: conversation))
+            let live = Self.record(for: conversation)
+            guard let stored = try await self.storedRecord(id: id) else {
+                try await self.conversations.save(live)
+                return
+            }
+            let merged = replay
+                ? Self.mergeReplay(live: live, into: stored)
+                : Self.merge(live: live, into: stored)
             try await self.conversations.save(merged)
         }
     }
@@ -469,11 +490,35 @@ actor ChatArchive {
     }
 
     static func merge(liveTurn live: TurnRecord, into stored: TurnRecord) -> TurnRecord {
+        // A projection can carry an older copy of the same turn: the other
+        // window's history, a reload, or a retry of a write that failed before
+        // a newer one landed. A stream only appends to its turn's text, and a
+        // regenerated answer is a new turn id, so a live text that is a strict
+        // prefix of a terminal stored text is older, never a replacement.
+        // Preserve the answer and receipt, but still add ancillary data only
+        // this older copy carries. Matching attachments keep their stored values.
+        if live.text.count < stored.text.count,
+           stored.text.hasPrefix(live.text),
+           let status = stored.request?.status,
+           status != .pending, status != .streaming, status != .unknown {
+            return mergeReplay(liveTurn: live, into: stored)
+        }
         var merged = stored
         merged.role = live.role
         merged.text = live.text
         merged.attachments = mergeAttachments(live: live.attachments, stored: stored.attachments)
-        merged.appPayload = mergingAppPayload(live: live.appPayload, stored: stored.appPayload, owned: turnOwnedKeys)
+        var payload = mergingAppPayload(live: live.appPayload, stored: stored.appPayload, owned: turnOwnedKeys)
+        // Tool lines accumulate; list length cannot prove that one copy
+        // contains the other's records. Keep stored values and add missing ones.
+        if let status = stored.request?.status,
+           status != .pending, status != .streaming, status != .unknown,
+           let records = mergingToolRecordPayload(
+               live: live.appPayload?["toolRecords"], stored: stored.appPayload?["toolRecords"]
+           ) {
+            if payload == nil { payload = AppPayload(namespace: namespace) }
+            payload?["toolRecords"] = records
+        }
+        merged.appPayload = payload
         if merged.createdAt == nil { merged.createdAt = live.createdAt }
         // Links only accumulate: a link the stored record lacks is added.
         merged.sessionLinks += live.sessionLinks.filter { !stored.sessionLinks.contains($0) }
@@ -515,6 +560,83 @@ actor ChatArchive {
             merged.extra = stored.extra
         }
         return merged
+    }
+
+    /// The replay of an older snapshot: additive only. Every stored value
+    /// stays; live values fill gaps. Used by `applyProjection(_:replay:)`.
+    static func mergeReplay(live: ConversationRecord, into stored: ConversationRecord) -> ConversationRecord {
+        var merged = stored
+        var payload = stored.appPayload ?? AppPayload(namespace: namespace)
+        let livePayload = live.appPayload ?? AppPayload(namespace: namespace)
+        for key in conversationOwnedKeys where payload[key] == nil {
+            if let value = livePayload[key] { payload[key] = value }
+        }
+        merged.appPayload = payload.isEmpty ? nil : payload
+        if merged.title == nil, let title = live.title { merged.title = title }
+        if merged.createdAt == nil { merged.createdAt = live.createdAt }
+        merged.sessionLinks += live.sessionLinks.filter { !stored.sessionLinks.contains($0) }
+        merged.updatedAt = later(merged.updatedAt, live.updatedAt)
+        merged.turns = mergeReplayTurns(live: live.turns, stored: stored.turns)
+        return merged
+    }
+
+    /// One turn of a replay: fill gaps, extend a stored text that the live copy
+    /// continues, and never replace a divergent or shorter text.
+    static func mergeReplay(liveTurn live: TurnRecord, into stored: TurnRecord) -> TurnRecord {
+        var merged = stored
+        if stored.text.isEmpty, !live.text.isEmpty {
+            merged.text = live.text
+        } else if live.text.count > stored.text.count, live.text.hasPrefix(stored.text) {
+            merged.text = live.text
+        }
+        let storedAttachmentIDs = Set(stored.attachments.map(\.id))
+        merged.attachments = stored.attachments + live.attachments.filter { !storedAttachmentIDs.contains($0.id) }
+        if let livePayload = live.appPayload {
+            var payload = stored.appPayload ?? AppPayload(namespace: namespace)
+            for key in livePayload.values.keys where payload[key] == nil {
+                payload[key] = livePayload[key]
+            }
+            payload["toolRecords"] = mergingToolRecordPayload(
+                live: livePayload["toolRecords"], stored: stored.appPayload?["toolRecords"]
+            )
+            merged.appPayload = payload.isEmpty ? nil : payload
+        }
+        if merged.createdAt == nil { merged.createdAt = live.createdAt }
+        merged.sessionLinks += live.sessionLinks.filter { !stored.sessionLinks.contains($0) }
+        return merged
+    }
+
+    /// Tool records have value identity, not an event ID. Preserve stored
+    /// order and values, then append distinct missing records. Unknown or
+    /// malformed payloads stay untouched rather than being replaced by a guess.
+    private static func mergingToolRecordPayload(live: JSONValue?, stored: JSONValue?) -> JSONValue? {
+        guard let stored else { return live }
+        guard let live,
+              let kept = decodeValue(stored, as: [ChatToolRecord].self),
+              let incoming = decodeValue(live, as: [ChatToolRecord].self)
+        else { return stored }
+        var seen = Set(kept)
+        let missing = incoming.filter { seen.insert($0).inserted }
+        guard !missing.isEmpty else { return stored }
+        return jsonValue(kept + missing) ?? stored
+    }
+
+    /// The replay's turn union: stored order and stored content, plus live-only
+    /// turns at their stored-relative position. It never drops a stored turn.
+    static func mergeReplayTurns(live: [TurnRecord], stored: [TurnRecord]) -> [TurnRecord] {
+        var byID: [String: TurnRecord] = [:]
+        for turn in stored { byID[turn.id] = turn }
+        var storedIndex: [String: Int] = [:]
+        for (index, turn) in stored.enumerated() { storedIndex[turn.id] = index }
+        var result = live.map { turn in
+            guard let existing = byID[turn.id] else { return turn }
+            return mergeReplay(liveTurn: turn, into: existing)
+        }
+        let liveIDs = Set(live.map(\.id))
+        for (index, turn) in stored.enumerated() where !liveIDs.contains(turn.id) {
+            result.insert(turn, at: Self.insertionPoint(forStoredIndex: index, in: result, storedIndex: storedIndex))
+        }
+        return result
     }
 
     /// Every turn survives. `merge` only enriches turns present on both sides,

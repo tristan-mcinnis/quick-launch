@@ -554,8 +554,10 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
 
     /// The app is quitting: the watch stops (a quit is not an answer to
     /// announce), and a stream in either view stops, keeping its question
-    /// and what arrived. The caller then waits for the history file.
-    func prepareForTermination() {
+    /// and what arrived. Synchronous on purpose: the caller freezes the
+    /// archive work before its first await, so a late deadline cannot stop a
+    /// request started after the quit was refused.
+    func stopForTermination() {
         streamWatch?.cancel()
         streamWatch = nil
         Self.keepStreamForQuit(model.chat)
@@ -564,12 +566,13 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     /// Stops `chat`'s stream as Escape does (the text that arrived becomes
     /// the answer) and saves the chat, so the question is kept even when no
     /// text had arrived. A chat with no turn yet (a web search still running
-    /// before the question became one) is not saved empty.
+    /// before the question became one) is not saved empty. A stop that kept
+    /// text already saved the chat; this saves only the no-text case.
     static func keepStreamForQuit(_ chat: QuickViewModel) {
         guard chat.isStreaming else { return }
-        chat.cancel()
+        let keptAnswer = chat.cancel()
         guard chat.currentConversation?.messages.isEmpty == false else { return }
-        chat.persistCurrentConversation()
+        if !keptAnswer { chat.persistCurrentConversation() }
     }
 
     // MARK: - Answer notices
