@@ -1,0 +1,22 @@
+{
+  "installed_version": "1.6.0",
+  "installed_commit": "d827bd9dbb9de9ddeffd099046b96558f756e68d",
+  "repo_head": "202a7365f68be05f23c898b778f41473442dddfe",
+  "changes_since_installed_commit": [
+    ".test-command",
+    "scripts/git-hooks/README.md",
+    "scripts/git-hooks/post-commit",
+    "scripts/git-hooks/pre-push",
+    "scripts/git-hooks/test-command"
+  ],
+  "application_inputs_unchanged": true,
+  "executable_sha256": "6e87425e16a0a55f25c1c2813a07e01975e67fa5ecb9be8c3f3c8cabd0356bfe",
+  "signature_verified": true,
+  "signature_metadata": {
+    "Identifier": "com.tristanmcinnis.quick-launch",
+    "CodeDirectory v": "20500 size=45195 flags=0x10000(runtime) hashes=1401+7 location=embedded",
+    "TeamIdentifier": "QHCFP5472F"
+  },
+  "house_chat_core_revision": "e9ebb6ab22442bce6c407a386712b0a2ecf4f9c6",
+  "house_design_revision": "03dc7dfdf369641f19107478fae62dee9f904878"
+}

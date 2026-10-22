@@ -1,0 +1,31 @@
+{
+  "saved_prompt_id": "sp-supplier-brief",
+  "title": "Supplier brief",
+  "synthetic_notice": "Synthetic fixture prompt. No real client, brand or person.",
+  "surface": "quick-ai",
+  "body": "Draft a supplier status brief for {{supplier}} covering {{window}} as {{format}}.",
+  "arguments": [
+    {
+      "name": "supplier",
+      "required": true,
+      "default": null,
+      "hint": "supplier label, for example Supplier C"
+    },
+    {
+      "name": "window",
+      "required": false,
+      "default": "the current planning window",
+      "hint": "time window"
+    },
+    {
+      "name": "format",
+      "required": false,
+      "default": "three bullets",
+      "hint": "output shape"
+    }
+  ],
+  "argument_count": 3,
+  "expected_blocked_state": "Submit with supplier empty: the app must block the request and show that supplier is required. No AI request may be submitted.",
+  "expected_after_fill": "Fill supplier with 'Supplier C' and submit: exactly one AI request, using the two defaults unchanged.",
+  "expected_expansion_after_fill": "Draft a supplier status brief for Supplier C covering the current planning window as three bullets."
+}

@@ -1,0 +1,6 @@
+SYNTHETIC RICH-TEXT SAMPLE
+Draft note for the pilot steering group. This file is not a real record.
+The pilot covers 1,240 units across four suppliers. Supplier C holds no committed delivery date, and the dock plan assumes a buffer that nobody has agreed yet. The tracker still shows the old volume.
+Escalation route: sourcing desk, weekly tracker, then the steering group.
+Cost note: the blended cost sits 18 percent above the frozen estimate.
+End of synthetic sample.

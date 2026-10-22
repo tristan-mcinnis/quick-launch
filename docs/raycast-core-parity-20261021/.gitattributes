@@ -1,0 +1,4 @@
+# Generated containers retain their bytes, including PDF cross-reference spacing.
+fixtures/documents/*.pdf binary
+fixtures/documents/*.docx binary
+fixtures/images/*.png binary

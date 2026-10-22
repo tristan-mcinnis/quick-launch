@@ -1,0 +1,29 @@
+{
+  "synthetic_notice": "Logical route slots only. No vendor model identifiers, keys or URLs.",
+  "route_slots": [
+    {
+      "slot": "route-default",
+      "class": "routine",
+      "description": "the model and destination already selected and displayed by the app when the task starts; no change is made",
+      "evidence_required": "app label at submit time"
+    },
+    {
+      "slot": "route-alt",
+      "class": "non-routine",
+      "description": "a second configured model, if the app exposes a chooser; the operator records the chosen label before submit",
+      "evidence_required": "app label, request metadata and any receipt shown after the answer"
+    },
+    {
+      "slot": "route-unreachable",
+      "class": "declared failure",
+      "endpoint": "http://127.0.0.1:9/v1",
+      "description": "declared unreachable endpoint on the discard port. No listener exists, so a request fails immediately without touching any network host.",
+      "evidence_required": "error state text, no partial answer presented as complete"
+    }
+  ],
+  "rules": [
+    "Never place an API key, token or account identifier in a fixture or a run log.",
+    "A route change is recorded before the affected turn, never reconstructed afterwards.",
+    "An unobserved route is unknown, not a win."
+  ]
+}

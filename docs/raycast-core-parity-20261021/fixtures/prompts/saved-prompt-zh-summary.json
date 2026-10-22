@@ -1,0 +1,26 @@
+{
+  "saved_prompt_id": "sp-summary-zh",
+  "title": "中文摘要",
+  "synthetic_notice": "Synthetic fixture prompt. No real client, brand or person.",
+  "surface": "quick-ai",
+  "body": "请把选中的内容总结为 {{length}} 的摘要，语气{{tone}}，保留所有日期和数字。",
+  "arguments": [
+    {
+      "name": "tone",
+      "required": false,
+      "default": "正式",
+      "hint": "语气"
+    },
+    {
+      "name": "length",
+      "required": false,
+      "default": "80字",
+      "hint": "摘要长度"
+    }
+  ],
+  "argument_count": 2,
+  "requires_selection": true,
+  "selection_required_message_any_language": true,
+  "expected_expansion_no_override": "请把选中的内容总结为 80字 的摘要，语气正式，保留所有日期和数字。",
+  "notes": "T14 invokes this prompt with no selection. The app must show a clear missing-input state: no empty submission, and no silent substitution of clipboard contents. Error wording may be English or Chinese; the missing-input state is what is scored."
+}

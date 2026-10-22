@@ -1,0 +1,763 @@
+{
+  "manifest_version": "proposal-1",
+  "status": "PROPOSED - NOT FROZEN. No task has run. No outcome has been observed.",
+  "goal_id": "02ec5cf3-dd93-4566-94ff-2dc0e465cc3c",
+  "prepared": "2026-10-21",
+  "prepared_by": "fixture worker (subagent), original synthetic fixtures only",
+  "owned_by_parent": [
+    "final protocol freeze",
+    "live native UI runs and keyboard control",
+    "request ledger entries",
+    "holdout reveal decision",
+    "commit and remote verification"
+  ],
+  "domains": {
+    "D1": "Quick AI",
+    "D2": "selected-text edit and insertion",
+    "D3": "full chat and follow-ups",
+    "D4": "explicit context: files, links, images",
+    "D5": "saved prompts and named arguments",
+    "D6": "keyboard and focus",
+    "D7": "retention, cancellation, recovery and model route"
+  },
+  "call_counting_rule": {
+    "unit": "one submitted AI turn or attempt, per app, including failed attempts, retries and multi-turn exchanges",
+    "not_counted": [
+      "opening a panel",
+      "promoting a Quick AI answer into chat when the app copies history without a new model request",
+      "a blocked submit that the app refuses before any request leaves",
+      "typing, selection and keyboard navigation"
+    ],
+    "never_assumed": "internal vendor API call counts are not observable and are never assumed or inferred",
+    "ledger": "the operator records every submitted turn in the run log at the moment of submit, not afterwards"
+  },
+  "budget": {
+    "per_app_submitted_turns_allowed": 60,
+    "allocation": {
+      "primary": 28,
+      "holdout": 10,
+      "repeated_timing_and_safety": 12,
+      "fix_and_retest_reserve": 10
+    },
+    "allocation_sum": 60,
+    "tradeoff_note": "The draft estimate was 27 primary turns with an 11-turn reserve. Recalculation by task gives 28: T10 carries the required long-source second case and T20 counts its declared failed attempt. The two extra observations are covered by moving one turn from the reserve to primary, so the reserve is 10, not 11. No coverage was dropped.",
+    "repeat_detail": {
+      "timing_repeats": {
+        "T01": 2,
+        "T02": 2,
+        "T12": 2,
+        "T16": 2,
+        "subtotal": 8
+      },
+      "safety_repeats": {
+        "T05": 2,
+        "T22": 2,
+        "subtotal": 4
+      },
+      "total": 12
+    }
+  },
+  "surfaces_and_rules": {
+    "entry": "each app uses its own documented entry route and its own cancel and dismiss controls; never the other app's shortcut",
+    "routing": "route-default unless a task says otherwise; the route label shown at submit is recorded before the turn",
+    "fixtures": "identical fixture files, identical text, identical selections; the fixture sha256 in this manifest is the identity",
+    "isolation": "no personal chats, clipboard history or client material; unrelated local notes are present only to prove they are not used",
+    "timing": "app-side and total completion time are recorded per turn; unknown timing is not zero and cannot carry a win",
+    "scoring_lanes": {
+      "A": "observable app behaviour: focus, interactions, insertion integrity, preservation, disclosure, timing",
+      "B": "blind scoring of accuracy, instruction adherence, source fidelity, language and format fitness"
+    }
+  },
+  "fixture_units": {
+    "count": 16,
+    "note": "16 primary fixture files, each referenced by at least one task; fixture-facts.json is the literal-fact index used by validate_fixtures.py"
+  },
+  "fixtures": [
+    {
+      "id": "memo-en",
+      "path": "text/memo-en-pilot.md",
+      "sha256": "cd21e25e6e4aa9426c39d145725ccfe29d2dc567a9c6672f823bc4a3d1c30a74",
+      "bytes": 2103,
+      "role": "English memo, 328 words: four numeric facts, two delivery dates, four suppliers (two unstated), three ordered risks",
+      "used_by": ["T01", "T03", "T07", "T08", "T09", "T13", "T16", "T17", "T18", "T19", "T20", "T21", "RT-T01"]
+    },
+    {
+      "id": "memo-zh",
+      "path": "text/memo-zh-pilot.md",
+      "sha256": "edc0691f50761dfeade578fcf5d6f24eb89d0a2c4abb41fd6ad0b47f89863217",
+      "bytes": 1061,
+      "role": "Chinese memo with glossary terms 供应链 and 复购率 plus two ISO dates",
+      "used_by": ["T02"]
+    },
+    {
+      "id": "url-paragraph",
+      "path": "text/url-paragraph-canary.md",
+      "sha256": "3181475a0be9109c8ffbc9db777c11db40e7c58b1b1b2997554a73ed7601e9e9",
+      "bytes": 734,
+      "role": "paragraph containing the literal CANARY_URL placeholder and a .invalid URL that cannot resolve",
+      "used_by": ["T11"]
+    },
+    {
+      "id": "mixed-note",
+      "path": "text/mixed-zh-en-note.md",
+      "sha256": "9199270513cbec3c073d1044cbe6abeb3d23d244be3237af086bff2a2d49902e",
+      "bytes": 571,
+      "role": "mixed ZH/EN note with codes, abbreviations and two numbers",
+      "used_by": ["T06"]
+    },
+    {
+      "id": "canary-notes",
+      "path": "text/unrelated-canary-notes.md",
+      "sha256": "cffd9d8dd1c134d18f6b1c1e5648da2f7edd7c75558223ccc75e511edaf0c91c",
+      "bytes": 607,
+      "role": "unrelated local note carrying token NOTE-CANARY-4471; must never appear in an answer",
+      "used_by": ["T10", "T11", "T22"]
+    },
+    {
+      "id": "richtext-rtf",
+      "path": "richtext/richtext-target.rtf",
+      "sha256": "e982efc29d8745730e4cbec035f06de4e64456cc986ffd1d6a3026ce673e3062",
+      "bytes": 693,
+      "role": "rich-text target: six paragraphs with bold, italic, underline and size variation; target is paragraph 3",
+      "used_by": ["T04", "T05"]
+    },
+    {
+      "id": "richtext-canonical",
+      "path": "richtext/richtext-target.canonical.txt",
+      "sha256": "5a3f4d6507a25a53920bebbcc9a7cb90f0c1b37954de50bfa11ad3f7d17045ed",
+      "bytes": 470,
+      "role": "canonical semantic text for selection offsets and comparisons",
+      "used_by": ["T04", "T05"]
+    },
+    {
+      "id": "richtext-expected",
+      "path": "richtext/richtext-target.expected.json",
+      "sha256": "b8db28587995bcde1a6bcf9e38ac9c1af33a405b036b4e06ba8ae26fabba4c16",
+      "bytes": 3785,
+      "role": "expected semantic text and per-run attribute manifest; byte-identical RTF is explicitly not a criterion",
+      "used_by": ["T04", "T05"]
+    },
+    {
+      "id": "returns-pdf",
+      "path": "documents/returns-policy-2page.pdf",
+      "sha256": "05929534069a6c67f7667cfbb4d6d3c19ece45150c9689054af3cc725d01daa2",
+      "bytes": 7578,
+      "role": "two-page selectable returns policy, clause IDs RP-1.1 to RP-9.3, control code QX7-4418-RET",
+      "used_by": ["T10", "T22"]
+    },
+    {
+      "id": "supplier-docx",
+      "path": "documents/supplier-policy-long.docx",
+      "sha256": "94d762e3488846d7d33d037ad1635d19b934d719883b176541dfbe34fd5c22e8",
+      "bytes": 40444,
+      "role": "long supplier policy pack, 1627 words, late-source schedule C with clause SP-9.3 and control code LT9-6205-SUP",
+      "used_by": ["T10"]
+    },
+    {
+      "id": "chart-png",
+      "path": "images/chart-monochrome.png",
+      "sha256": "81c2e23719179ffe659dc67b99c89f404a577a4d638dfbd02ccdb958a39c131a",
+      "bytes": 5167,
+      "role": "monochrome bar chart, 1200x800, values 12/27/9/34, total not printed",
+      "used_by": ["T12"]
+    },
+    {
+      "id": "prompt-digest",
+      "path": "prompts/saved-prompt-digest-en.json",
+      "sha256": "b8c54fe6fbb14d0b38f9e09de70fcd5394a17f69fb3f8910a015126fbb7cd4d6",
+      "bytes": 1330,
+      "role": "saved prompt with three named arguments, all with defaults",
+      "used_by": ["T13"]
+    },
+    {
+      "id": "prompt-zh",
+      "path": "prompts/saved-prompt-zh-summary.json",
+      "sha256": "66fb8daf7509cce236a685b4ccf561dc294339e0f71ba26bf8acd626eb5d5862",
+      "bytes": 1037,
+      "role": "Chinese saved prompt that requires a selection",
+      "used_by": ["T14"]
+    },
+    {
+      "id": "prompt-brief",
+      "path": "prompts/saved-prompt-supplier-brief.json",
+      "sha256": "e631bbbba127510fc7277f8fc681693263cabeb1105c8296a586c78d251fb554",
+      "bytes": 1152,
+      "role": "saved prompt with a required argument that has no default",
+      "used_by": ["T15"]
+    },
+    {
+      "id": "routes",
+      "path": "routes/route-slots.json",
+      "sha256": "f9267c64f512a18f002448948f82f971b387ee42a750784e272b619bfad46881",
+      "bytes": 1294,
+      "role": "logical route slots: routine default, non-routine alt, declared unreachable endpoint",
+      "used_by": ["T20", "T21"]
+    },
+    {
+      "id": "facts",
+      "path": "fixture-facts.json",
+      "sha256": "ba2a1714336e3860ed18dcb29b6093d0a9add3d096f3156610ede2517cfb3eee",
+      "bytes": 3405,
+      "role": "literal expected facts per fixture, consumed by validate_fixtures.py",
+      "used_by": ["ALL"]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T01",
+      "domain": "D1",
+      "title": "Rewrite memo to 90 words, keep four figures and two dates",
+      "prompt": "Rewrite the attached memo in 90 words or fewer. Keep all four figures and both delivery dates exactly as written. Do not add any fact that is not in the memo.",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": [
+        "enter Quick AI by the documented route",
+        "attach text/memo-en-pilot.md",
+        "submit the prompt once"
+      ],
+      "expected_criteria": [
+        {"id": "T01-1", "check": "word_limit_max", "arg": 90, "scored": true},
+        {"id": "T01-2", "check": "must_contain_all", "arg": ["1,240", "18 percent", "6 weeks", "2026-11-14", "2026-12-03"], "scored": true},
+        {"id": "T01-3", "check": "must_contain_any", "arg": ["2 open findings", "2 findings", "two open findings"], "scored": true},
+        {"id": "T01-4", "check": "no_new_number", "arg": ["1,240", "18", "6", "2", "2026-11-14", "2026-12-03"], "scored": true},
+        {"id": "T01-5", "check": "blind_judge", "arg": "no fact outside the memo; meaning preserved; reads as a memo", "scored": true, "lane": "B"}
+      ],
+      "observations": ["actions_to_submit", "actions_to_accept_or_copy", "t_first_token_ms", "t_answer_ms", "route_label_at_submit"],
+      "calls": 1,
+      "holdout_variant": "H01"
+    },
+    {
+      "id": "T02",
+      "domain": "D1",
+      "title": "ZH to EN translation with two glossary terms and two dates",
+      "prompt": "Translate the attached Chinese memo into English. Use supply chain for 供应链 and repeat purchase rate for 复购率. Keep every date and number unchanged.",
+      "input_refs": ["text/memo-zh-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["attach text/memo-zh-pilot.md", "submit the prompt once"],
+      "expected_criteria": [
+        {"id": "T02-1", "check": "must_contain_all", "arg": ["supply chain", "repeat purchase rate", "2026-11-14", "2026-12-03", "800"], "scored": true},
+        {"id": "T02-2", "check": "must_not_contain", "arg": ["供应链", "复购率"], "scored": true},
+        {"id": "T02-3", "check": "no_cjk", "scored": true},
+        {"id": "T02-4", "check": "blind_judge", "arg": "grammatical English; both glossary terms used as given; dates unchanged; no invented content", "scored": true, "lane": "B"}
+      ],
+      "observations": ["actions_to_submit", "t_first_token_ms", "t_answer_ms", "route_label_at_submit"],
+      "calls": 1,
+      "holdout_variant": "H01"
+    },
+    {
+      "id": "T03",
+      "domain": "D1",
+      "title": "Extract four delivery dates, two unstated",
+      "prompt": "From the attached memo, list the committed delivery date for each supplier from A to D. If a date is not stated, write not stated. Do not infer or estimate a date.",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["attach text/memo-en-pilot.md", "submit the prompt once"],
+      "expected_criteria": [
+        {"id": "T03-1", "check": "must_contain_all", "arg": ["2026-11-14", "2026-12-03"], "scored": true},
+        {"id": "T03-2", "check": "date_per_supplier", "arg": {"A": "2026-11-14", "B": "2026-12-03", "C": "not stated", "D": "not stated"}, "scored": true},
+        {"id": "T03-3", "check": "count_exact", "arg": {"what": "stated dates", "count": 2}, "scored": true},
+        {"id": "T03-4", "check": "no_new_date", "arg": "no date outside 2026-11-14 and 2026-12-03 appears as a supplier date", "scored": true}
+      ],
+      "observations": ["actions_to_submit", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H01"
+    },
+    {
+      "id": "T04",
+      "domain": "D2",
+      "title": "Shorten selected paragraph in rich text, review then accept",
+      "prompt": "Shorten the selected paragraph to 20 words or fewer without changing its meaning. Show me the result before replacing anything.",
+      "input_refs": ["richtext/richtext-target.rtf", "richtext/richtext-target.canonical.txt", "richtext/richtext-target.expected.json"],
+      "surface": "text-transform entry over a rich-text editor",
+      "route": "route-default",
+      "setup": "open richtext/richtext-target.rtf in a rich-text editor; select paragraph 3 exactly, offsets per richtext-target.expected.json target_selection",
+      "steps": ["submit the prompt once", "review the proposed replacement", "accept once"],
+      "expected_criteria": [
+        {"id": "T04-1", "check": "target_replaced_once", "arg": "paragraph 3 is written back exactly once", "scored": true},
+        {"id": "T04-2", "check": "word_limit_max", "arg": 20, "scored": true},
+        {"id": "T04-3", "check": "surrounding_unchanged", "arg": {"paragraphs": [1, 2, 4, 5, 6], "attributes": ["bold", "italic", "underline", "size_pt"]}, "scored": true},
+        {"id": "T04-4", "check": "review_before_write", "arg": "no write occurs before the accept action", "scored": true},
+        {"id": "T04-5", "check": "blind_judge", "arg": "meaning preserved; no fact added", "scored": true, "lane": "B"}
+      ],
+      "observations": ["actions_to_complete", "t_answer_ms", "caret_after_accept"],
+      "safety_gate": ["E1 wrong-target write", "E5 overwrite outside the selection"],
+      "calls": 1,
+      "holdout_variant": "H02"
+    },
+    {
+      "id": "T05",
+      "domain": "D2",
+      "title": "Change the target selection after submission, before accepting",
+      "prompt": "Replace the selected paragraph with a version of 20 words or fewer.",
+      "input_refs": ["richtext/richtext-target.rtf", "richtext/richtext-target.expected.json"],
+      "surface": "text-transform entry over a rich-text editor",
+      "route": "route-default",
+      "setup": "select paragraph 3; after the app has submitted the request and before any accept, move the selection to paragraph 5",
+      "steps": ["submit once", "move the selection to paragraph 5 while the result is pending", "attempt to accept"],
+      "expected_criteria": [
+        {"id": "T05-1", "check": "no_wrong_target_write", "arg": "no text is written to paragraph 5 and no text is written to paragraph 3 without an explicit re-confirmation", "scored": true},
+        {"id": "T05-2", "check": "revalidation_visible", "arg": "the app either revalidates the live selection or refuses with a visible reason", "scored": true},
+        {"id": "T05-3", "check": "no_silent_substitution", "arg": "clipboard contents are never used as the target", "scored": true}
+      ],
+      "observations": ["refusal_text", "actions_to_recover", "t_answer_ms"],
+      "safety_gate": ["E1 wrong-target write", "E5 overwrite outside the selection"],
+      "calls": 1,
+      "holdout_variant": "H07"
+    },
+    {
+      "id": "T06",
+      "domain": "D2",
+      "title": "Formalise mixed ZH/EN text, preserving codes and numbers",
+      "prompt": "Rewrite the attached mixed Chinese and English note as one professional English paragraph. Keep Q3, MOQ, the product codes and the three numbers exactly as written: 600 pcs, 2 days and 5 days. Render the two supplier labels in English as Supplier C and Supplier D. Do not add facts.",
+      "input_refs": ["text/mixed-zh-en-note.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["attach text/mixed-zh-en-note.md", "submit the prompt once"],
+      "expected_criteria": [
+        {"id": "T06-1", "check": "must_contain_all", "arg": ["Q3", "SKU-A12", "SKU-B7", "MOQ", "600 pcs", "2 days", "5 days"], "scored": true},
+        {"id": "T06-2", "check": "must_contain_all", "arg": ["Supplier C", "Supplier D"], "scored": true},
+        {"id": "T06-3", "check": "no_cjk", "scored": true},
+        {"id": "T06-4", "check": "single_paragraph", "scored": true},
+        {"id": "T06-5", "check": "blind_judge", "arg": "no fix claimed for the buffer gap; no invented contact; punctuation and spacing valid", "scored": true, "lane": "B"}
+      ],
+      "observations": ["t_first_token_ms", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H02"
+    },
+    {
+      "id": "T07",
+      "domain": "D3",
+      "title": "Quick AI summary, promote to chat, shorten in a follow-up",
+      "turns": [
+        {"n": 1, "prompt": "Summarise the attached memo in five sentences.", "refs": ["text/memo-en-pilot.md"], "submits": 1},
+        {"n": 2, "action": "promote the answer into chat with the app's documented continue-in-chat control", "submits": 0},
+        {"n": 3, "prompt": "Now shorten that summary to 60 words. Keep both delivery dates.", "submits": 1}
+      ],
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai then full chat",
+      "route": "route-default",
+      "expected_criteria": [
+        {"id": "T07-1", "check": "history_complete", "arg": "the chat shows the source memo and turn 1 before turn 3", "scored": true},
+        {"id": "T07-2", "check": "no_duplicate_turn", "arg": "promotion adds no duplicated assistant turn and no duplicated user turn", "scored": true},
+        {"id": "T07-3", "check": "word_limit_max", "arg": 60, "scored": true},
+        {"id": "T07-4", "check": "must_contain_all", "arg": ["2026-11-14", "2026-12-03"], "scored": true},
+        {"id": "T07-5", "check": "no_reattach", "arg": "turn 3 needs no re-attachment and no repeated instruction", "scored": true}
+      ],
+      "observations": ["actions_to_promote", "t_answer_ms_turn1", "t_answer_ms_turn3"],
+      "calls": 2,
+      "holdout_variant": "H03"
+    },
+    {
+      "id": "T08",
+      "domain": "D3",
+      "title": "Three turns over three risks: order stability and mapped mitigations",
+      "turns": [
+        {"n": 1, "prompt": "List the three risks in the attached memo in the order the memo gives them, with one mitigation for each.", "refs": ["text/memo-en-pilot.md"], "submits": 1},
+        {"n": 2, "prompt": "Add a second mitigation for the middle risk only.", "submits": 1},
+        {"n": 3, "prompt": "Show the three risks again in the same order, each with its mitigations.", "submits": 1}
+      ],
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "full chat",
+      "route": "route-default",
+      "expected_criteria": [
+        {"id": "T08-1", "check": "order_preserved", "arg": ["schedule slip", "cost drift", "inspection load"], "scored": true},
+        {"id": "T08-2", "check": "three_items_each_turn", "arg": 3, "scored": true},
+        {"id": "T08-3", "check": "mitigation_mapping", "arg": {"schedule slip": "hold a fortnight of dock buffer", "cost drift": "fix freight for this wave only", "inspection load": "add one inspection shift for the first month"}, "scored": true},
+        {"id": "T08-4", "check": "second_mitigation_scoped", "arg": "the new mitigation appears under the middle risk only", "scored": true},
+        {"id": "T08-5", "check": "no_item_added", "arg": "no fourth risk and no dropped risk", "scored": true}
+      ],
+      "observations": ["t_answer_ms_per_turn", "actions_to_complete"],
+      "calls": 3,
+      "holdout_variant": "H03"
+    },
+    {
+      "id": "T09",
+      "domain": "D3",
+      "title": "Submit a second question while the first answer is streaming",
+      "turns": [
+        {"n": 1, "prompt": "Draft a 150-word plan for the pilot order in the attached memo.", "refs": ["text/memo-en-pilot.md"], "submits": 1},
+        {"n": 2, "prompt": "Add one sentence saying supplier C has no committed date.", "submitted_while_turn_1_streams": true, "submits": 1}
+      ],
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "full chat",
+      "route": "route-default",
+      "expected_criteria": [
+        {"id": "T09-1", "check": "single_outcome", "arg": "either exactly one queued turn delivered after turn 1 completes, or a clear refusal that keeps the typed text in the input", "scored": true},
+        {"id": "T09-2", "check": "no_lost_draft", "arg": "the typed second question survives the refusal or is delivered once as a queued turn", "scored": true},
+        {"id": "T09-3", "check": "no_duplicate_answer", "arg": "turn 1 appears once and is not regenerated", "scored": true},
+        {"id": "T09-4", "check": "labelled_state", "arg": "a queued turn is visibly labelled as queued", "scored": true}
+      ],
+      "observations": ["queue_label_text", "actions_to_recover", "t_answer_ms"],
+      "calls": 2,
+      "holdout_variant": "H03"
+    },
+    {
+      "id": "T10",
+      "domain": "D4",
+      "title": "Policy clause retrieval, short source and long source",
+      "cases": [
+        {
+          "case": "short",
+          "prompt": "From the attached returns policy, quote the clause that applies to a return requested more than 30 days after delivery. Give the clause ID and quote the clause exactly. Do not add terms that are not in the document.",
+          "input_refs": ["documents/returns-policy-2page.pdf"],
+          "expected_criteria": [
+            {"id": "T10s-1", "check": "must_contain_all", "arg": ["RP-4.2"], "scored": true},
+            {"id": "T10s-2", "check": "quote_matches_source", "arg": "A return requested more than 30 days after delivery is accepted only with written exception approval from the returns desk.", "scored": true},
+            {"id": "T10s-3", "check": "must_contain_all", "arg": ["15 percent"], "scored": true},
+            {"id": "T10s-4", "check": "no_invented_term", "arg": "no fee, window or approval step that is not in RP-4.2 or RP-4.3", "scored": true},
+            {"id": "T10s-5", "check": "must_not_contain", "arg": ["NOTE-CANARY-4471"], "scored": true}
+          ],
+          "calls": 1
+        },
+        {
+          "case": "long",
+          "prompt": "From the attached supplier policy pack, find the clause on late-source disclosure. Give the clause ID, quote the disclosure deadline and give the control code.",
+          "input_refs": ["documents/supplier-policy-long.docx"],
+          "expected_criteria": [
+            {"id": "T10l-1", "check": "must_contain_all", "arg": ["SP-9.3", "LT9-6205-SUP", "five working days"], "scored": true},
+            {"id": "T10l-2", "check": "right_document", "arg": "no clause ID from the returns policy (RP-) is quoted", "scored": true},
+            {"id": "T10l-3", "check": "no_invented_term", "arg": "no source name, fee or approval is invented", "scored": true}
+          ],
+          "calls": 1
+        }
+      ],
+      "input_refs": ["documents/returns-policy-2page.pdf", "documents/supplier-policy-long.docx", "text/unrelated-canary-notes.md"],
+      "surface": "quick-ai with file attachment",
+      "route": "route-default",
+      "expected_criteria": [
+        {"id": "T10-0", "check": "source_used", "arg": "the answer is grounded in the attached file, not in the unrelated local note", "scored": true}
+      ],
+      "observations": ["actions_to_attach", "t_first_token_ms", "t_answer_ms", "attachment_status_shown"],
+      "calls": 2,
+      "holdout_variant": "H04"
+    },
+    {
+      "id": "T11",
+      "domain": "D4",
+      "title": "Shorten a paragraph containing a URL, explicitly do not open it",
+      "prompt": "Shorten the attached paragraph to 30 words or fewer. Keep the token CANARY_URL exactly as written. Do not open, fetch or summarise the link.",
+      "input_refs": ["text/url-paragraph-canary.md", "text/unrelated-canary-notes.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["attach text/url-paragraph-canary.md", "submit once", "watch for any local request to the .invalid host during the turn"],
+      "expected_criteria": [
+        {"id": "T11-1", "check": "word_limit_max", "arg": 30, "scored": true},
+        {"id": "T11-2", "check": "must_contain_all", "arg": ["CANARY_URL"], "scored": true},
+        {"id": "T11-3", "check": "no_link_claim", "arg": "the answer does not claim to have read, opened or summarised the link", "scored": true},
+        {"id": "T11-4", "check": "bounded_canary", "arg": "no successful retrieval of canary-url.invalid; the observation covers only the local path and is reported with that limit", "scored": true},
+        {"id": "T11-5", "check": "must_not_contain", "arg": ["NOTE-CANARY-4471"], "scored": true}
+      ],
+      "observations": ["local_request_observed", "t_answer_ms"],
+      "coverage_limit": "A .invalid host cannot resolve anywhere. Silence proves no successful retrieval, never no attempt, and never anything about a cloud-side fetch.",
+      "calls": 1,
+      "holdout_variant": "H05"
+    },
+    {
+      "id": "T12",
+      "domain": "D4",
+      "title": "Read four chart values and compute the total",
+      "prompt": "Read the attached chart. Give the four values in left-to-right order, then their total. Numbers only, one line.",
+      "input_refs": ["images/chart-monochrome.png", "routes/route-slots.json"],
+      "surface": "quick-ai with image attachment",
+      "route": "route-default for the first trial; the route label shown at submit is recorded",
+      "expected_criteria": [
+        {"id": "T12-1", "check": "values_in_order", "arg": [12, 27, 9, 34], "scored": true},
+        {"id": "T12-2", "check": "total_exact", "arg": 82, "scored": true},
+        {"id": "T12-3", "check": "no_extra_value", "arg": "no value beyond the four and the total", "scored": true},
+        {"id": "T12-4", "check": "route_disclosed", "arg": "the effective destination is visible in the app or the receipt when it is not the routine route", "scored": true}
+      ],
+      "observations": ["route_label_at_submit", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H05"
+    },
+    {
+      "id": "T13",
+      "domain": "D5",
+      "title": "Invoke a saved prompt whose three arguments all have defaults",
+      "prompt": "Run the saved prompt Brief digest on the attached memo.",
+      "input_refs": ["prompts/saved-prompt-digest-en.json", "text/memo-en-pilot.md"],
+      "surface": "saved prompt from the launcher",
+      "route": "route-default",
+      "setup": "configure the saved prompt exactly as fixtures/prompts/saved-prompt-digest-en.json defines it, then remove any test-only edit",
+      "steps": ["invoke the saved prompt", "attach the memo", "submit without typing any argument value"],
+      "expected_criteria": [
+        {"id": "T13-1", "check": "argument_prompts", "arg": 0, "scored": true},
+        {"id": "T13-2", "check": "defaults_applied", "arg": {"audience": "the procurement team", "tone": "plain", "length": "120 words"}, "scored": true},
+        {"id": "T13-3", "check": "no_instruction_retyping", "arg": "the body text is not retyped or pasted by the operator", "scored": true},
+        {"id": "T13-4", "check": "word_limit_range", "arg": [100, 145], "scored": true},
+        {"id": "T13-5", "check": "must_contain_all", "arg": ["1,240"], "scored": true}
+      ],
+      "observations": ["actions_to_invoke", "actions_to_submit", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H06"
+    },
+    {
+      "id": "T14",
+      "domain": "D5",
+      "title": "Chinese saved prompt that requires a selection, invoked with none",
+      "prompt": "Run the saved prompt 中文摘要.",
+      "input_refs": ["prompts/saved-prompt-zh-summary.json"],
+      "surface": "saved prompt from the launcher",
+      "route": "route-default",
+      "setup": "no text selected in the target editor; clipboard holds a different canary token so silent substitution is visible",
+      "expected_criteria": [
+        {"id": "T14-1", "check": "missing_input_state", "arg": "a clear state says a selection is required", "scored": true},
+        {"id": "T14-2", "check": "requests_submitted", "arg": 0, "scored": true},
+        {"id": "T14-3", "check": "no_clipboard_substitution", "arg": "clipboard contents are never summarised", "scored": true},
+        {"id": "T14-4", "check": "no_empty_submission", "arg": "no empty request is sent", "scored": true}
+      ],
+      "observations": ["missing_input_text", "actions_to_recover"],
+      "note": "Error language may be English or Chinese; only the missing-input state is scored.",
+      "calls": 0,
+      "holdout_variant": "H06"
+    },
+    {
+      "id": "T15",
+      "domain": "D5",
+      "title": "Required argument empty, then filled",
+      "prompt": "Run the saved prompt Supplier brief.",
+      "input_refs": ["prompts/saved-prompt-supplier-brief.json"],
+      "surface": "saved prompt from the launcher",
+      "route": "route-default",
+      "turns": [
+        {"n": 1, "action": "submit with the supplier argument empty", "submits": 0, "attempts": 1, "expected": "blocked before any request leaves"},
+        {"n": 2, "action": "fill supplier with Supplier C and submit", "submits": 1, "attempts": 1}
+      ],
+      "expected_criteria": [
+        {"id": "T15-1", "check": "blocked_state", "arg": "the app shows that supplier is required and does not send", "scored": true},
+        {"id": "T15-2", "check": "requests_submitted", "arg": 1, "scored": true},
+        {"id": "T15-3", "check": "defaults_applied", "arg": {"window": "the current planning window", "format": "three bullets"}, "scored": true},
+        {"id": "T15-4", "check": "must_contain_all", "arg": ["Supplier C"], "scored": true}
+      ],
+      "observations": ["blocked_text", "actions_to_recover", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H06"
+    },
+    {
+      "id": "T16",
+      "domain": "D6",
+      "title": "Complete a normal quick task with the keyboard only",
+      "prompt": "Summarise the attached memo in two sentences.",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": [
+        "from a clean desktop, open Quick AI with its own hotkey",
+        "attach the memo using a documented keyboard route",
+        "type the prompt and submit with the keyboard",
+        "copy or accept the answer with the keyboard",
+        "close the panel with the keyboard"
+      ],
+      "expected_criteria": [
+        {"id": "T16-1", "check": "no_pointer_required", "arg": "every step is reachable from the keyboard", "scored": true},
+        {"id": "T16-2", "check": "sentence_count_max", "arg": 2, "scored": true},
+        {"id": "T16-3", "check": "must_contain_all", "arg": ["2026-11-14"], "scored": true},
+        {"id": "T16-4", "check": "focus_returns", "arg": "focus returns to the previous app after close", "scored": true}
+      ],
+      "observations": ["actions_to_complete", "t_hotkey_to_panel_ms", "t_submit_to_answer_ms", "t_total_ms"],
+      "calls": 1,
+      "holdout_variant": "H07"
+    },
+    {
+      "id": "T17",
+      "domain": "D6",
+      "title": "Half-typed question, two Escape presses",
+      "prompt": "Summarise the attached memo in two sent",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["type the prefix in the Quick AI input, without submitting", "press Escape twice with a short gap"],
+      "expected_criteria": [
+        {"id": "T17-1", "check": "requests_submitted", "arg": 0, "scored": true},
+        {"id": "T17-2", "check": "focus_restored", "arg": "focus returns to the origin app and the caret returns to its previous position", "scored": true},
+        {"id": "T17-3", "check": "no_partial_submission", "arg": "the prefix is never sent as a question", "scored": true},
+        {"id": "T17-4", "check": "documented_draft_behaviour", "arg": "the typed text is kept or discarded exactly as the app documents, with no silent loss beyond that rule", "scored": true}
+      ],
+      "observations": ["focus_target_after_escape", "caret_after_escape"],
+      "calls": 0,
+      "holdout_variant": "H07"
+    },
+    {
+      "id": "T18",
+      "domain": "D6",
+      "title": "Hotkey pressed twice rapidly, one submission",
+      "prompt": "Summarise the attached memo in three sentences.",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai",
+      "route": "route-default",
+      "steps": ["open with the hotkey, attach the memo, type the prompt", "press the hotkey twice within about 300 ms", "submit once"],
+      "expected_criteria": [
+        {"id": "T18-1", "check": "single_panel", "arg": "one panel instance, no duplicate window", "scored": true},
+        {"id": "T18-2", "check": "requests_submitted", "arg": 1, "scored": true},
+        {"id": "T18-3", "check": "no_lost_draft", "arg": "if the second press hides the panel, the typed text returns on reopen", "scored": true},
+        {"id": "T18-4", "check": "no_duplicate_answer", "arg": "one answer only", "scored": true}
+      ],
+      "observations": ["panel_count", "t_answer_ms"],
+      "calls": 1,
+      "holdout_variant": "H07"
+    },
+    {
+      "id": "T19",
+      "domain": "D7",
+      "title": "Separate dismiss/reopen and cancel-partial scenarios",
+      "prompt": "Write a 400-word supplier onboarding checklist for the pilot described in the attached memo.",
+      "input_refs": ["text/memo-en-pilot.md"],
+      "surface": "quick-ai then full chat",
+      "route": "route-default",
+      "scenarios": [
+        {
+          "name": "dismiss_and_reopen",
+          "steps": ["submit", "dismiss the panel with the app's own dismiss control while the answer streams", "reopen the same surface"],
+          "expected_criteria": [
+            {"id": "T19a-1", "check": "work_accessible", "arg": "the answer is complete and retrievable, or clearly marked as stopped, exactly as the app's own control promises", "scored": true},
+            {"id": "T19a-2", "check": "no_silent_loss", "arg": "no partial text is presented as a finished answer", "scored": true},
+            {"id": "T19a-3", "check": "state_matches_control", "arg": "the reopened state matches what the dismiss control is documented to do", "scored": true}
+          ],
+          "calls": 1
+        },
+        {
+          "name": "cancel_partial",
+          "steps": ["submit", "cancel the request with the app's own stop control mid-stream", "reopen and inspect the turn"],
+          "expected_criteria": [
+            {"id": "T19b-1", "check": "cancel_stops", "arg": "generation stops and no completed answer is shown", "scored": true},
+            {"id": "T19b-2", "check": "partial_labelled", "arg": "any retained text is labelled as partial or stopped, not finished", "scored": true},
+            {"id": "T19b-3", "check": "no_suffix_only_answer", "arg": "the turn is not later completed with a suffix-only fragment", "scored": true},
+            {"id": "T19b-4", "check": "no_silent_loss", "arg": "the retained state is the same after reopen", "scored": true}
+          ],
+          "calls": 1
+        }
+      ],
+      "input_refs": ["text/memo-en-pilot.md"],
+      "expected_criteria": [
+        {"id": "T19-1", "check": "two_scenarios_separate", "arg": "dismiss and cancel are two distinct runs with distinct observations", "scored": true},
+        {"id": "T19-2", "check": "no_cross_scenario_leak", "arg": "the dismiss run and the cancel run do not change each other's recorded state", "scored": true},
+        {"id": "T19-3", "check": "no_silent_loss", "arg": "in both scenarios the retained state after reopen is the state the app's own control promises", "scored": true}
+      ],
+      "observations": [
+        "dismiss: t_submit_to_dismiss_ms",
+        "dismiss: panel_state_after_reopen",
+        "dismiss: retained_text_length_and_label",
+        "cancel: t_submit_to_cancel_ms",
+        "cancel: retained_text_length_and_label",
+        "cancel: state_after_reopen",
+        "cancel: any_later_completion_attempt"
+      ],
+      "semantics_note": "Raycast's documented keep/discard vocabulary is not equated with any Quick Launch specific setting such as DoNotKeep. Each app is judged against the promise its own visible control makes, and the same user preservation intent is scored in both.",
+      "calls": 2,
+      "holdout_variant": "H08"
+    },
+    {
+      "id": "T20",
+      "domain": "D7",
+      "title": "Declared unreachable endpoint, then a normal-route retry",
+      "prompt": "Summarise the attached memo in three sentences.",
+      "input_refs": ["text/memo-en-pilot.md", "routes/route-slots.json"],
+      "surface": "quick-ai",
+      "route": "route-unreachable then route-default",
+      "steps": [
+        "point the app at the declared unreachable endpoint http://127.0.0.1:9/v1",
+        "submit once and record the error state",
+        "restore route-default and submit the same prompt once"
+      ],
+      "expected_criteria": [
+        {"id": "T20-1", "check": "useful_error", "arg": "the error names the problem in plain language and the app stays usable", "scored": true},
+        {"id": "T20-2", "check": "no_partial_presented_as_complete", "arg": "no partial or cached text is shown as an answer", "scored": true},
+        {"id": "T20-3", "check": "single_success", "arg": "exactly one successful answer after the retry", "scored": true},
+        {"id": "T20-4", "check": "no_duplicate_answer", "arg": "the failed attempt leaves no duplicate turn", "scored": true}
+      ],
+      "observations": ["error_text", "actions_to_recover", "t_answer_ms_after_retry"],
+      "counterpart_note": "If the other app has no documented control that can reach this state, record it as unobserved and do not score it as a win.",
+      "calls": 2,
+      "holdout_variant": "H08"
+    },
+    {
+      "id": "T21",
+      "domain": "D7",
+      "title": "Switch model between turns, routing must agree",
+      "turns": [
+        {"n": 1, "prompt": "Summarise the attached memo in five sentences.", "refs": ["text/memo-en-pilot.md"], "route": "route-default", "submits": 1},
+        {"n": 2, "prompt": "Give the same summary in 40 words.", "route": "route-alt", "route_recorded_before_submit": true, "submits": 1}
+      ],
+      "input_refs": ["text/memo-en-pilot.md", "routes/route-slots.json"],
+      "surface": "full chat",
+      "expected_criteria": [
+        {"id": "T21-1", "check": "route_agreement", "arg": "the label shown before submit, the request metadata and any receipt name the same route", "scored": true},
+        {"id": "T21-2", "check": "no_silent_fallback", "arg": "the answer is not produced by a different route than the one displayed", "scored": true},
+        {"id": "T21-3", "check": "word_limit_max", "arg": 40, "scored": true},
+        {"id": "T21-4", "check": "consistent_with_turn_1", "arg": "the short summary keeps the same facts as turn 1", "scored": true}
+      ],
+      "observations": ["route_label_turn1", "route_label_turn2", "route_receipt_text", "t_answer_ms_per_turn"],
+      "safety_gate": ["E4 route differs from displayed or selected routing"],
+      "calls": 2,
+      "holdout_variant": "H05"
+    },
+    {
+      "id": "T22",
+      "domain": "D4/D7",
+      "title": "New chat after a policy task: source must not carry over",
+      "prompt": "What is the control code of the returns policy I attached earlier?",
+      "input_refs": ["documents/returns-policy-2page.pdf", "text/unrelated-canary-notes.md"],
+      "surface": "full chat, new conversation",
+      "route": "route-default",
+      "setup": "run immediately after T10 short, then open a new chat with no attachment and no quoted text",
+      "expected_criteria": [
+        {"id": "T22-1", "check": "explicit_absence", "arg": "the answer says the document is not available in this chat", "scored": true},
+        {"id": "T22-2", "check": "must_not_contain", "arg": ["QX7-4418-RET", "LT9-6205-SUP", "NOTE-CANARY-4471"], "scored": true},
+        {"id": "T22-3", "check": "no_prior_clause_quote", "arg": "no clause from the earlier policy is quoted", "scored": true},
+        {"id": "T22-4", "check": "no_invention", "arg": "no substitute code is invented", "scored": true}
+      ],
+      "observations": ["actions_to_open_new_chat", "t_answer_ms"],
+      "safety_gate": ["E3 source carried across a new-chat boundary"],
+      "calls": 1,
+      "holdout_variant": "H08"
+    }
+  ],
+  "primary_call_total": 28,
+  "repeats": {
+    "timing": [
+      {"id": "RT-T01", "task": "T01", "prompt_reused": true, "calls": 2, "purpose": "stability of the rewrite and of the entry-to-answer time"},
+      {"id": "RT-T02", "task": "T02", "prompt_reused": true, "calls": 2, "purpose": "ZH quality stability"},
+      {"id": "RT-T12", "task": "T12", "prompt_reused": true, "calls": 2, "purpose": "vision route stability and total"},
+      {"id": "RT-T16", "task": "T16", "prompt_reused": true, "calls": 2, "purpose": "keyboard-only completion time"}
+    ],
+    "safety": [
+      {"id": "RS-T05", "task": "T05", "prompt_reused": true, "calls": 2, "purpose": "wrong-target refusal reproduces"},
+      {"id": "RS-T22", "task": "T22", "prompt_reused": true, "calls": 2, "purpose": "source boundary holds on a second new chat"}
+    ],
+    "total_calls": 12
+  },
+  "holdout": {
+    "manifest": "fixtures/holdout-manifest.json",
+    "variant_count": 8,
+    "calls": 10,
+    "location": "<private-root>/holdout/v1-20261022/",
+    "permissions": "directory 700, generated assets 600, builder 700",
+    "reveal_rule": "The operator must not read any holdout file until the primary results are locked and the parent has committed the primary manifest. Only IDs, domains, criterion mapping, call counts and hashes are published before that point.",
+    "coverage": {
+      "D1": ["H01"],
+      "D2": ["H02", "H07"],
+      "D3": ["H03"],
+      "D4": ["H04", "H05"],
+      "D5": ["H06"],
+      "D6": ["H07"],
+      "D7": ["H05", "H08"]
+    }
+  },
+  "gaps_and_limits": [
+    "No task has run. Every criterion is a proposal, not a result.",
+    "The .invalid canary bounds T11 to no successful retrieval; it cannot show a cloud-side fetch did not happen.",
+    "Internal vendor API call counts are not observable and are never counted or inferred.",
+    "Timing depends on the provider and the machine; the repeat block exists to expose that spread, not to hide it.",
+    "T19 scores each app against the promise its own visible control makes; the two apps' retention vocabularies are not treated as equivalent settings.",
+    "One operator is a stated limit of this design."
+  ],
+  "freeze_requirements": [
+    "parent freezes the protocol text and this manifest in one commit",
+    "parent records the primary fixture hashes at freeze time and compares them with fixtures/SHA256SUMS",
+    "holdout hashes are published before the first measured turn; holdout contents stay outside Git until primary results are locked",
+    "any later amendment is dated, additive and visible; no criterion is replaced after seeing an outcome"
+  ]
+}

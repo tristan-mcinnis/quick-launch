@@ -1,0 +1,143 @@
+{
+  "holdout_version": "v1-20261022",
+  "status": "BUILT-PENDING-PARENT-HASH-COMMIT: not frozen, not revealed, not run",
+  "location": "<private-root>/holdout/v1-20261022",
+  "permissions": "directory 700, generated assets 600, builder 700",
+  "contents_public": false,
+  "contents_note": "Only IDs, domains, criterion focus, call counts and hashes are published. No prompt, text, expected answer or asset is in Git.",
+  "reveal_rule": "Do not read or run until the primary results are locked and the parent has committed the primary manifest.",
+  "variant_count": 8,
+  "call_total": 10,
+  "coverage": {
+    "D1": [
+      "H01"
+    ],
+    "D2": [
+      "H02",
+      "H07"
+    ],
+    "D3": [
+      "H03"
+    ],
+    "D4": [
+      "H04",
+      "H05"
+    ],
+    "D5": [
+      "H06"
+    ],
+    "D6": [
+      "H07"
+    ],
+    "D7": [
+      "H05",
+      "H08"
+    ]
+  },
+  "variants": [
+    {
+      "id": "H01",
+      "domain": "D1",
+      "family": "T01/T02/T03",
+      "criterion_focus": [
+        "reverse-direction translation with two fixed glossary terms",
+        "dates and counts unchanged",
+        "no invented fact"
+      ],
+      "calls": 1,
+      "file_count": 1,
+      "artifact_sha256": "e328dcdc9267d493f05bb3faa37cbea617c8f5053ecebb188ca29f00283bb756"
+    },
+    {
+      "id": "H02",
+      "domain": "D2",
+      "family": "T04",
+      "criterion_focus": [
+        "different rich-text target paragraph",
+        "different surrounding attributes",
+        "shorter replacement limit"
+      ],
+      "calls": 1,
+      "file_count": 3,
+      "artifact_sha256": "1131a6db3e5029c33efd7c61f6e5148589d0d0694da9abb02441f9a5d5b3a585"
+    },
+    {
+      "id": "H03",
+      "domain": "D3",
+      "family": "T07/T08",
+      "criterion_focus": [
+        "two-turn follow-up with a changed constraint",
+        "one figure retained",
+        "no turn duplicated"
+      ],
+      "calls": 2,
+      "file_count": 1,
+      "artifact_sha256": "4f881a957856392001b38e06dee1f790e4600544842239a0e941063b226dca13"
+    },
+    {
+      "id": "H04",
+      "domain": "D4",
+      "family": "T10",
+      "criterion_focus": [
+        "new policy domain",
+        "long source with a late clause",
+        "clause ID and control code exact"
+      ],
+      "calls": 1,
+      "file_count": 1,
+      "artifact_sha256": "ca7a4bf2ad2ff0f4e9e6ad8d89a4f42bc9871e4b0c2561573885b322d7970316"
+    },
+    {
+      "id": "H05",
+      "domain": "D4/D7",
+      "family": "T12/T21",
+      "criterion_focus": [
+        "different chart values on a non-routine route",
+        "total computed correctly",
+        "routing agrees across label, request and receipt"
+      ],
+      "calls": 1,
+      "file_count": 1,
+      "artifact_sha256": "c7396477d35848d26731d7fc5b855bfbc7f52701c88ae110c480a10dc4132023"
+    },
+    {
+      "id": "H06",
+      "domain": "D5",
+      "family": "T13/T14/T15",
+      "criterion_focus": [
+        "different named-input defaults",
+        "one explicit override",
+        "zero argument prompts"
+      ],
+      "calls": 1,
+      "file_count": 2,
+      "artifact_sha256": "407d3303d8a40705421db01101efb4985574afc3f20dd6acc2760425eff9af1d"
+    },
+    {
+      "id": "H07",
+      "domain": "D2/D6",
+      "family": "T05/T16",
+      "criterion_focus": [
+        "selection changed after submit",
+        "keyboard-only run",
+        "no wrong-target write"
+      ],
+      "calls": 1,
+      "file_count": 3,
+      "artifact_sha256": "29676220da72a7b6d8550d2c2cb3e4cb54aecd68deb1a30621deb39f343745f9"
+    },
+    {
+      "id": "H08",
+      "domain": "D7",
+      "family": "T19/T22",
+      "criterion_focus": [
+        "cancel partial with a labelled retained state",
+        "new-chat source question",
+        "control code absent from the new chat"
+      ],
+      "calls": 2,
+      "file_count": 2,
+      "artifact_sha256": "6350a35e79e074579b57623d74f1716744cc16af3d2578fe3401db8d9f30c4be"
+    }
+  ]
+}

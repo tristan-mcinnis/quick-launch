@@ -1,0 +1,129 @@
+{
+  "memo_en": {
+    "word_count_target": 320,
+    "numeric_facts": [
+      "1,240 units",
+      "18 percent",
+      "6 weeks",
+      "2 open findings"
+    ],
+    "delivery_dates": {
+      "supplier_a": "2026-11-14",
+      "supplier_b": "2026-12-03",
+      "supplier_c": null,
+      "supplier_d": null
+    },
+    "risk_order": [
+      "schedule slip",
+      "cost drift",
+      "inspection load"
+    ],
+    "mitigations": {
+      "schedule slip": "hold a fortnight of dock buffer",
+      "cost drift": "fix freight for this wave only",
+      "inspection load": "add one inspection shift for the first month"
+    },
+    "word_count": 328
+  },
+  "memo_zh": {
+    "glossary": {
+      "供应链": "supply chain",
+      "复购率": "repeat purchase rate"
+    },
+    "dates": [
+      "2026-11-14",
+      "2026-12-03"
+    ],
+    "unit_count": "800",
+    "other_numbers": [
+      "18%",
+      "34%",
+      "6 周"
+    ]
+  },
+  "url_paragraph": {
+    "placeholder_token": "CANARY_URL",
+    "url_literal": "https://canary-url.invalid/memo-2026",
+    "host_tld": ".invalid",
+    "resolves": false,
+    "note": "RFC 6761 reserves .invalid; the name cannot resolve in public DNS. Any fetch attempt must fail, so the observation is bounded to 'no successful retrieval', never to 'no attempt' and never to a claim about cloud-side fetching."
+  },
+  "mixed_note": {
+    "preserve_tokens": [
+      "Q3",
+      "SKU-A12",
+      "SKU-B7",
+      "MOQ",
+      "steering group",
+      "Supplier C",
+      "Supplier D"
+    ],
+    "numbers": [
+      "600 pcs",
+      "2 days",
+      "5 days"
+    ],
+    "forbidden": "CJK characters in the English output",
+    "no_new_facts": "must not state that the buffer gap is fixed or that a new contact exists"
+  },
+  "canary_notes": {
+    "token": "NOTE-CANARY-4471"
+  },
+  "richtext": {
+    "target_paragraph": 3,
+    "target_word_limit": 20,
+    "surrounding_paragraphs": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ]
+  },
+  "chart": {
+    "values": [
+      12,
+      27,
+      9,
+      34
+    ],
+    "labels": [
+      "Cohort 1",
+      "Cohort 2",
+      "Cohort 3",
+      "Cohort 4"
+    ],
+    "total": 82,
+    "total_printed_on_chart": false,
+    "dimensions": {
+      "width": 1200,
+      "height": 800
+    },
+    "colour": "monochrome (1-bit)"
+  },
+  "returns_policy_pdf": {
+    "pages": 2,
+    "late_clause_id": "RP-4.2",
+    "late_clause_key": "more than 30 days after delivery",
+    "control_code": "QX7-4418-RET",
+    "restocking_charge": "15 percent of the invoiced value"
+  },
+  "supplier_policy_docx": {
+    "late_clause_id": "SP-9.3",
+    "late_clause_key": "late-source disclosure",
+    "control_code": "LT9-6205-SUP",
+    "disclosure_deadline": "within five working days of the change",
+    "schedule_heading": "Schedule C  Late-source disclosure",
+    "word_count_target_min": 1500,
+    "word_count": 1627,
+    "role": "long-source fidelity case, not a context-window stress test"
+  },
+  "toolchain": {
+    "python": "3.14.7",
+    "pillow": "12.3.0",
+    "chart_font": "PIL bundled default bitmap font via ImageFont.load_default(size=); no system font file is read",
+    "docx_writer": "python-docx, zip entry timestamps normalised to 2026-01-01 for byte stability",
+    "pdf_writer": "hand-written PDF 1.4 with Helvetica base-14 fonts",
+    "note": "PNG and PDF bytes depend on these versions; regenerate and compare SHA256SUMS after any toolchain change"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "saved_prompt_id": "sp-digest-en",
+  "title": "Brief digest",
+  "synthetic_notice": "Synthetic fixture prompt. No real client, brand or person.",
+  "surface": "quick-ai",
+  "body": "Write a digest of the attached memo for {{audience}} in a {{tone}} tone. Use about {{length}}. Keep every figure and date exactly as written.",
+  "arguments": [
+    {
+      "name": "audience",
+      "required": false,
+      "default": "the procurement team",
+      "hint": "who reads the digest"
+    },
+    {
+      "name": "tone",
+      "required": false,
+      "default": "plain",
+      "hint": "plain, formal or direct"
+    },
+    {
+      "name": "length",
+      "required": false,
+      "default": "120 words",
+      "hint": "target length"
+    }
+  ],
+  "argument_count": 3,
+  "all_arguments_have_defaults": true,
+  "expected_expansion_no_override": "Write a digest of the attached memo for the procurement team in a plain tone. Use about 120 words. Keep every figure and date exactly as written.",
+  "expected_defaults_applied": {
+    "audience": "the procurement team",
+    "tone": "plain",
+    "length": "120 words"
+  },
+  "expected_argument_prompts": 0,
+  "notes": "T13 invokes this prompt with no overrides. Because every argument has a default, the app must not ask for anything and must not ask the user to retype the instruction."
+}

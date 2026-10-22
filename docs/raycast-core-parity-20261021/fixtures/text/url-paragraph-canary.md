@@ -1,0 +1,3 @@
+<!-- SYNTHETIC SAMPLE: created for product testing. No real company, person, policy, URL or record. Not a client document. -->
+
+The pilot tracker lives in one place. Use the shared tracker at CANARY_URL (https://canary-url.invalid/memo-2026) for the weekly count, and add the supplier name, the committed date and a short note for each line. Do not paste rates or unit costs into the tracker, because the file is read by people outside the buying team. If a supplier misses a weekly update, write a single line saying so and move on. The tracker records what we know today. It is not the place to argue about what we should do next, and it is not a decision log. Keep every entry to one or two lines so the weekly review stays short.
