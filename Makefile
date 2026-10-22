@@ -45,31 +45,20 @@ check-clean:
 		exit 1; \
 	fi
 
-# Quitting is two attempts, not one. The AppleScript quit is polite but
-# unreliable here: Quick Launch is an LSUIElement app with no scripting
-# definition, so the quit event can go unanswered and osascript then sits
-# on it until its own timeout (seen 2026-09-20, where every install refused
-# and had to be unblocked by hand). It is bounded to five seconds, and a
-# process still up after that gets SIGTERM, which AppKit delivers as an
-# ordinary termination: `applicationWillTerminate` still stops the streams
-# and still waits for the history file. Only a process that survives both
-# refuses the install.
+# Quitting is one polite request and a bounded wait. The app waits for its
+# archive writes before it quits and refuses the quit if they fail. The
+# installer never escalates to SIGTERM or SIGKILL: if the app is still running
+# after the bounded wait, the replacement is refused so no unsaved answer is
+# lost. `scripts/wait-for-exit.sh` owns the wait and is tested with fake
+# predicates, never against the real app.
 install: check-clean build-app
 	-@osascript -e 'with timeout of 5 seconds' \
 		-e 'tell application "Quick Launch" to quit' \
 		-e 'end timeout' >/dev/null 2>&1
-	@for attempt in $$(seq 1 20); do \
-		pgrep -x quick-launch >/dev/null || break; sleep 0.5; \
-	done
-	@if pgrep -x quick-launch >/dev/null; then \
-		echo "Quick Launch did not answer the quit event; sending SIGTERM." >&2; \
-		pkill -TERM -x quick-launch || true; \
-		for attempt in $$(seq 1 20); do \
-			pgrep -x quick-launch >/dev/null || break; sleep 0.5; \
-		done; \
-	fi
-	@if pgrep -x quick-launch >/dev/null; then \
-		echo "Quick Launch did not quit; refusing to replace the running app." >&2; exit 1; \
+	@if ! QUIT_WAIT_POLL_SECONDS=0.5 sh scripts/wait-for-exit.sh 10 pgrep -x quick-launch; then \
+		echo "Quick Launch is still running; refusing to replace it." >&2; \
+		echo "Quit it (and fix any save error it reports), then re-run make install." >&2; \
+		exit 1; \
 	fi
 	rm -rf "/Applications/Quick Launch.app"
 	/usr/bin/ditto "build/Quick Launch.app" "/Applications/Quick Launch.app"
