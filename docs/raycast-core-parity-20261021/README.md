@@ -1,11 +1,12 @@
 # Quick Launch / Raycast core comparison
 
-Status on 2026-10-22: **no parity or superiority verdict yet**. No matched native task or comparative AI request has run. The internal fix is installed; comparative product quality remains unproven.
+Status on 2026-10-22: **no parity or superiority verdict yet**. No matched native task or comparative AI request has run. The instruction-budget fix is installed in build `27bd421`. The quit-preservation and safer-installer changes are committed but **not installed**.
 
 ## Verified so far
 - Current Raycast 2.8.2.0: installed identity/signature checked; 36 module/binary digests and 17 selected REA graph-node locators independently verified. [Shipped evidence](raycast-shipped-evidence.md) separates semantic-graph support, direct source reads and unknown runtime behaviour.
-- [Quick Launch baseline](baseline-verification.md):installed d827bd9, with hook-only changes to the starting repository revision 202a736. [Identity](baseline-installed.json) records the measured binary.
+- [Quick Launch baseline](baseline-verification.md): installed d827bd9, with hook-only changes to the starting repository revision 202a736. [Identity](baseline-installed.json) records the measured binary.
 - One [instruction-budget defect](context-instruction-reserve-fix-20261022.md) reproduced and fixed in commit `d419052`. Final independent gate: 2,433 Swift Testing cases, 23 XCTest cases, 182 pinned shared-package cases; scrub and design ratchet pass. The fix is [installed in build 27bd421](installation-20261022.md); bundle identity and restart were checked by an independent verifier. Live UI behaviour remains unverified.
+- The [quit-preservation fix](quit-preservation-fix-20261022.md), including its overlapping-submission correction, passed independent review, 2,502 Swift Testing tests and 23 XCTest tests. Commits: `24441c1` and `07f0428`; the safer installer is separate commit `e6b669b`. Native quit/relaunch behavior remains unverified.
 - Original synthetic fixtures reproduce on the recorded toolchain and pass 546 structural checks. The eight held-out variants remain private; their hashes and mappings are recorded. They reuse templates and test unseen values, not new task structures.
 
 ## What is still required
