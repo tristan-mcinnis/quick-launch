@@ -1,6 +1,6 @@
 # Quit preservation: verified source, runtime checks pending
 
-The installer and quit-preservation source changes are committed. **They are not installed.** The installed bundle remains build `27bd421`, which includes the earlier instruction-budget fix. No Raycast comparison has run.
+The quit-preservation changes are **installed in build `798c121`**, along with the earlier instruction-budget fix. The [deployment receipt](quit-fix-installation-20261022.md) records the safer installer's use, verified artifact and preserved rollback. Native behavior remains unverified. No Raycast comparison has run.
 
 | Change | Commit |
 | --- | --- |

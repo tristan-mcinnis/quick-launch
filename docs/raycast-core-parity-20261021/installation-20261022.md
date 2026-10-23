@@ -1,6 +1,8 @@
 # Quick Launch installation, 22 October 2026
 
-The instruction-reserve fix is installed and the app has restarted. This verifies installation only. The Raycast comparison remains unrun.
+Historical receipt for build `27bd421`. The later [quit-fix deployment](quit-fix-installation-20261022.md) installed build `798c121` and preserved `27bd421` for rollback.
+
+The instruction-reserve fix was installed in build `27bd421`, and the app was restarted. This verifies installation only. The Raycast comparison remains unrun.
 
 ## Installed artifact
 
