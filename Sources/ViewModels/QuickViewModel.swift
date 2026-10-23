@@ -321,10 +321,17 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the provider reported. Both empty for a turn that used neither.
     @ObservationIgnored private var streamToolRounds: [ToolRound] = []
     @ObservationIgnored private var streamUsage: TokenUsage?
-    /// True while an accepted submit has not yet reached its model request.
-    /// A quit that freezes in that window refuses instead of exiting over
+    /// Tokens of the accepted submits that have not reached their model
+    /// request yet. One token per submit, removed only by that submit's own
+    /// completion, command lane, model start or defer: an older submit
+    /// finishing can never clear a newer submit's claim. A quit that freezes
+    /// while the set is non-empty refuses instead of exiting over
     /// question-persistence or provider-start work it does not own.
-    @ObservationIgnored private var isPreStreamSubmit = false
+    @ObservationIgnored private var preStreamSubmitTokens: Set<UUID> = []
+    /// Test seam, nil in the app: an accepted submit waits here immediately
+    /// before its durable question write, so a test can hold the exact
+    /// pre-stream window deterministically with no provider and no sleep.
+    @ObservationIgnored var beforeDurableSubmitWrite: (@MainActor () async -> Void)?
     /// The store's copy of the open chat as this view last read or wrote
     /// it. The other view's writes since then are what a save merges in.
     @ObservationIgnored var openChatBase: StoredChatStamp?
@@ -7938,8 +7945,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // the first suspension so a quit that freezes in the middle of this
         // submit cannot later approve an exit over a turn it never saw.
         durability?.noteActivity()
-        isPreStreamSubmit = true
-        defer { isPreStreamSubmit = false }
+        let preStreamToken = UUID()
+        preStreamSubmitTokens.insert(preStreamToken)
+        defer { preStreamSubmitTokens.remove(preStreamToken) }
         // A question asked on the surface supersedes any clear a dismissal
         // left waiting for an earlier turn (a service or archive failure can
         // end that turn before the clear runs). This turn owns the surface.
@@ -7961,7 +7969,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // being retried. A retry never waits on or consumes that draft.
         if !reasksTurn, !(await waitForReadingAttachments()) { return }
         turnPrepareStartedAt = Date()
-        guard var request = await prepareRequest(text: text, reasksTurn: reasksTurn) else { return }
+        guard var request = await prepareRequest(
+            text: text,
+            reasksTurn: reasksTurn,
+            preStreamToken: preStreamToken
+        ) else { return }
         turnPrepareFinishedAt = Date()
         // The submitted material is durable before any external network: the
         // page fetch and web search in enrich, and the model call, all come
@@ -7971,6 +7983,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // carry that decision through persist, enrich and stream: the archived
         // chat and the live chat must be the same chat.
         let startsNewChat = willStartNewChat(for: request)
+        // Test seam: holds the exact pre-stream window (after the accept, before
+        // the question write). Nil in the app, so no extra suspension.
+        await beforeDurableSubmitWrite?()
         let durable = await submitDurableMaterial(request, startsNewChat: startsNewChat)
         turnPersistFinishedAt = Date()
         guard durable else { return }
@@ -7984,7 +7999,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             pendingSubmission = nil
             return
         }
-        await stream(request, startsNewChat: startsNewChat)
+        await stream(request, startsNewChat: startsNewChat, preStreamToken: preStreamToken)
     }
 
     /// Starts a fresh turn's measurements. Every phase timestamp is cleared, so
@@ -8095,7 +8110,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Resolves saved-prompt aliases, runs command actions, expands
     /// `{selection}`, and answers locally (math, conversions, facts). Returns
     /// `nil` when the request was handled here or could not proceed.
-    func prepareRequest(text: String? = nil, reasksTurn: Bool = false) async -> PreparedRequest? {
+    func prepareRequest(
+        text: String? = nil,
+        reasksTurn: Bool = false,
+        preStreamToken: UUID? = nil
+    ) async -> PreparedRequest? {
         let takesComposerText = text == nil
         var submittedInput = text ?? input
         /// Set when the draft named a skill, so the thread can say so
@@ -8275,7 +8294,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             if launchSelection != nil { launchSelection = nil }
             // The command lane writes no archive answer and is stopped by
             // `cancel()` like any stream, so it is not unowned pre-stream work.
-            isPreStreamSubmit = false
+            // It retires only its own submit's claim.
+            if let preStreamToken { preStreamSubmitTokens.remove(preStreamToken) }
             await runCommandAction(
                 definition: definition,
                 executable: executable,
@@ -8685,7 +8705,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Picks the provider and model, records the turn in the conversation,
     /// and streams the answer into `output`.
-    func stream(_ request: PreparedRequest, startsNewChat: Bool) async {
+    func stream(
+        _ request: PreparedRequest,
+        startsNewChat: Bool,
+        preStreamToken: UUID? = nil
+    ) async {
         let submittedInput = request.submittedInput
         // The user submitted this text, whatever happens next: a failure or a
         // cancellation must not later read as an abandoned search.
@@ -8946,8 +8970,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // A new question brings the reader back to the newest text.
         followThreadBottom()
         // The model request is about to start: from here the stream is owned
-        // by `streamTask`, so a quit stops it like any other stream.
-        isPreStreamSubmit = false
+        // by `streamTask`, so a quit stops it like any other stream. Only this
+        // submit's claim retires.
+        if let preStreamToken { preStreamSubmitTokens.remove(preStreamToken) }
         durability?.noteActivity()
         isStreaming = true
         // The send path's per-round snapshot writer. Round 0's body is the
@@ -11353,8 +11378,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// change means work was accepted after the freeze, so the attempt is stale.
     var answerDurabilityRevision: Int { durability?.revision ?? 0 }
 
-    /// An accepted submit that has not reached its model request yet.
-    var isSubmitBeforeStream: Bool { isPreStreamSubmit }
+    /// True while any accepted submit has not reached its model request yet.
+    var isSubmitBeforeStream: Bool { !preStreamSubmitTokens.isEmpty }
 
     /// Freezes the archive writes this quit owns. Call it after the stop and
     /// before the first await: a late completion can only finish frozen
