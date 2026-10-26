@@ -21,10 +21,10 @@ A single-user, native Swift, macOS-only AI action overlay. ~33.6k lines across ~
 | Snippets / quicklinks | Yes, background expansion | Yes (Tuna catalog, preview pane) |
 | Window layouts | 17 presets + saved layouts + undo | WindowLayout / WindowManager, deterministic previous-window layouts |
 | Markdown/LaTeX/code render of AI output | Yes | Markdown yes (MarkdownRenderer); no LaTeX/Mermaid |
-| Web search from the bar | Portals / context modes | Model-driven web search tool + SearXNG service |
+| Web search from the bar | Portals / context modes | Model-driven web search tool (Tavily, then Brave) |
 | Emoji | Not called out | EmojiCatalog with tones |
 | Screen capture history | No | ScreenHistory* pipeline (capture, OCR index, vault save, retirement) |
-| Vault search | No | VaultSearchService |
+| Vault search | No | Removed |
 | Caffeinate control | No | Native CaffeinateManager |
 | Extensions / MCP / agents | Core feature | Deliberately excluded |
 

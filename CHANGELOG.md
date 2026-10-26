@@ -2,15 +2,16 @@
 
 ## Unreleased — 2026-10-20
 
-- **Vault Search and the House server are removed.** The vault, its server and
-  SearXNG are retired, so the `search_vault` tool, the Vault Search catalog,
+- **Vault Search and the House server are removed.** The vault and its server
+  are retired, so the `search_vault` tool, the Vault Search catalog,
   the stock Vault researcher assistant and every `ssh` lane are gone. Chat
   tools are now Memory, Tasks, Skills and Web search. Pages are read with a
-  direct fetch only. Web search calls Tavily, Brave, Bocha or Exa directly;
-  Tavily and Brave fall back to the keys in `~/.config/secrets.env` when
-  Keychain has none. The Google, Bing, DuckDuckGo and News providers (SearXNG
-  engines) are gone; a saved choice of one falls back to Automatic. A saved
-  assistant or chat that names the Vault tool drops it on load. Open Source
+  direct fetch only. Web search calls Tavily, then Brave when Tavily fails or
+  has no key; Bocha still leads a Chinese query when that key is set, and Exa
+  stays an explicit choice. Tavily and Brave fall back to the keys in
+  `~/.config/secrets.env` when Keychain has none. The Google, Bing, DuckDuckGo
+  and News providers are gone; a saved choice of one falls back to Automatic. A
+  saved assistant or chat that names the Vault tool drops it on load. Open Source
   now opens files from the memory repo, the skills repo and the Work folder.
 
 ## Unreleased — 2026-10-17
@@ -229,30 +230,30 @@
 
   **Automatic** now prefers Bocha when the query contains Chinese characters
   and a Bocha key is stored, then falls back to Tavily, the self-hosted
-  SearXNG, and Brave. Detection is by CJK ideographs only: kana or Hangul
+  search service, and Brave. Detection is by CJK ideographs only: kana or Hangul
   alone do not trigger it, so a Japanese or Korean query keeps the English
   order. Exa stays an explicit choice rather than a fallback step.
 
 ## Unreleased — 2026-09-21 (searchable web backends)
 
 - **The web-search provider is now a real choice, not four names for one
-  service.** Automatic / Google / Bing were all the self-hosted SearXNG on
+  service.** Automatic / Google / Bing were all the self-hosted search service on
   the House server, only with a different engine set. The picker in **Settings ›
   Models › Web search** and `⌘K` › **Search providers** now offers Google,
   Bing, DuckDuckGo, and News through that stack, plus **Tavily** and **Brave**
   called directly from the app with a Keychain key.
 
   **Automatic** is the Pi lane order: Tavily when a Tavily key is stored, then
-  the self-hosted SearXNG, then Brave when a Brave key is stored. A backend is
+  the self-hosted search service, then Brave when a Brave key is stored. A backend is
   skipped when its key is missing and fallen through when it throws or returns
-  nothing, so a SearchXNG outage no longer loses the answer to a dead free
+  nothing, so an outage of that service no longer loses the answer to a dead free
   stack. Explicit Tavily or Brave without a key says so instead of failing
   quietly.
 
   The two keys sit in the same owner-only Keychain as provider keys, under
   stable feature names rather than a fabricated provider UUID. They are never
   written to settings, logs, or the repository. Tavily and Brave send the query
-  to that provider; SearXNG stays on the private VPS.
+  to that provider; the self-hosted service stays on the private VPS.
 
 ## Unreleased — 2026-09-20 (the `/` palette)
 
@@ -556,7 +557,7 @@ Attachment extraction and cache, package WP-A (`docs/attachments-and-search-spec
 - **One line when a file cannot be read.** "Password-protected; not read", "The file is damaged", "No text found (scanned, OCR empty)", "Larger than 50 MB", "Too large once unpacked; not read", "Not a Word document", "No readable text", "Folders cannot be attached; drop the files.", "Keynote files cannot be read. Export to PowerPoint or PDF.", "Reading took too long", and "macOS blocked access. Drop the file or use File…".
 - **The file gate.** `AttachmentFileGate` resolves Finder aliases and symbolic links once, reads only a regular file, refuses folders and packages (a `.rtfd` excepted), checks the size from the file's metadata, and waits up to 20 seconds for an iCloud file to download ("Downloading from iCloud…", then "Not downloaded"). Files are read into memory, never mapped.
 - **Images go to the vision model smaller.** An attached picture is scaled to 2,048 px on its long side and re-encoded (PNG, or JPEG over 2 MB), which also drops its location and camera data. Its reference keeps no path and no hash.
-- **Links are fetched once.** `LinkAttachmentReader` does one GET over http or https, at most 5 redirects and never to another scheme, no cookies, 15 seconds in all, and stops reading at 5 MB. A page gives its title, its final URL, and its text (100,000 characters at most); a PDF link reads as a PDF; an image link goes to the vision model. A page with almost no text gets the one retry through the reader on the House server, inside the same 15 seconds.
+- **Links are fetched once.** `LinkAttachmentReader` does one GET over http or https, at most 5 redirects and never to another scheme, no cookies, 15 seconds in all, and stops reading at 5 MB. A page gives its title, its final URL, and its text (100,000 characters at most); a PDF link reads as a PDF; an image link goes to the vision model.
 - **An owner-only text cache.** `AttachmentTextCache` (an actor) keeps extracted text in `Application Support/Quick Launch/attachment-cache/`: folder `0700`, one `<sha256>-v1.json` file per text at `0600`, out of Time Machine backups. An entry expires 7 days after its last use, the cache holds 100 MB and drops the least recently used first, a deleted chat's entries go unless another chat still uses them, and Clear empties the folder. Images never enter it, and a key from a history file must be a real SHA-256, so it can never name a path.
 - **Tests.** `OOXMLArchiveTests`, `AttachmentExtractorTests`, `LinkAttachmentReaderTests` (a `URLProtocol` stub and a fake SSH runner), and `AttachmentTextCacheTests` (an injected clock), 76 in all, with every fixture built in the test: docx, pptx, and xlsx through a test ZIP writer, doc, rtf, and odt through AppKit, text, locked, 305-page, and scanned PDFs, two zip bombs, a GB18030 file, and a noisy image. A timing test prints one extraction per kind next to the spec's measurements and fails if any is ten times slower (a 300-page PDF about 30 ms, OCR of one page about 140 ms).
 AI Chat behaviour, package W2 (`docs/ai-chat-walkthrough-20260911.md` items 1, 2, 4, 5, 6, 7, 10, 15, 18, 22).
@@ -653,7 +654,7 @@ Attachments, switched on: package WP-D (`docs/attachments-and-search-spec-202609
 - Snippets and Quicklinks get the Clipboard History preview: the selected row opens the two-pane layout and shows what the item actually holds. A snippet shows its full text (scrolling when long) with Characters, Words, Lines, and Source; a quick link shows its title and target URL with Type (Link or Smart Link), Site, Characters, and whether it needs input. Pinned items say so. Nothing new is stored: the pane reads the live catalog value.
 - Screen History is one local catalog with debounced FTS search across the owned SQLite store and the closed Coast database. Rows keep a stable order and show the matched text, time, application, context, and an Owned or Coast source cue. The selected row uses the standard two-pane preview. Return opens the moment; Command-Y opens its local timeline; Command-Return copies the recognized text; Command-K offers Open moment, Show timeline, Copy text, Show in Finder when a local file exists, and Save to Vault. Search parses `app:`, `site:`, `after:`, `before:`, today, and yesterday. Future-screen questions refuse and current-project questions point to Vault Search without calling it. Legacy search is independent of capture. This search-only beta hard-locks owned capture in Settings, bootstrap, configuration, and commands. The latent capture path requires FileVault and visible consent, refuses all browsers plus protected apps and sessions before pixels, and forces a stateful menu-bar control while active. Editable application and domain exclusions also filter local search and legacy migration.
 - Vault Search is a first-class catalog beside web search and Ask AI. Its four items are Current Project, Reconcile Changes, Project History, and Across Projects. Every mode calls the VPS over the existing SSH connection, sends the query on stdin, and renders a compact cited answer in the normal answer surface. Current and reconciliation combine project state, tasks, decisions, email, meetings, Slack, and project files; history retrieves explicit archived versions; portfolio searches current project state. Ambiguous scope shows project choices, future questions refuse before retrieval, and typed follow-ups stay on Vault Search instead of switching to the selected AI model. The structured route makes one product call and no model-provider request.
-- Quick AI reads web pages: a prompt that contains an http(s) URL fetches the page (direct URLSession first, the House server trafilatura reader as fallback for thin or blocked pages), extracts readable text (up to 12k characters), and attaches it to the question as bounded untrusted context, so asking about a link gets an answer from the live page instead of "I cannot access external websites". Up to two URLs per prompt; a page that fails to read submits with a visible note instead of aborting.
+- Quick AI reads web pages: a prompt that contains an http(s) URL fetches the page with a direct URLSession and extracts readable text locally (up to 12k characters), and attaches it to the question as bounded untrusted context, so asking about a link gets an answer from the live page instead of "I cannot access external websites". Up to two URLs per prompt; a page that fails to read submits with a visible note instead of aborting.
 - Chat browsing direction fixed: `⌘[` (Previous Chat) now steps backwards in time from the newest chat and `⌘]` (Next Chat) steps forward again; with no chat open either direction lands on the most recent chat instead of wrapping to the oldest.
 - Folders open instantly: Return on Desktop (`dk`), Downloads, or any folder used to run an osascript that fronts a matching Finder window, and that Apple Event exchange could hang for a very long time (measured at 107 seconds once). It now uses the native `NSWorkspace` open directly, so the folder appears in Finder immediately; the front-the-existing-window nicety is gone.
 - The Screenshots catalog is a pure file list, newest first with pins floated, so the latest capture is the first row. The capture and Screen Awareness commands (Send Focused Window / Screen / Screen Area to AI, Attach Latest Screenshot, Paste Latest Screenshot) are no longer inline rows; they appear in every ⌘K pane inside the catalog as searchable rows without shortcuts, stay searchable from the root, and keep their overlay shortcuts (`⌘⇧S`, `⌘⇧D`). Attach Latest Screenshot now fills in the Screen Awareness attachment card like its sibling captures.
@@ -746,7 +747,7 @@ Attachments, switched on: package WP-D (`docs/attachments-and-search-spec-202609
 - Stopped automatic model discovery from running `lms`, which could launch a roughly 500 MB LM Studio service. Discovery now scans the model folder directly.
 - Main launcher hotkey conflicts now show a settings error instead of failing silently.
 - Added a cached fuzzy application launcher. Typing narrows visible app rows; arrow keys move selection and Return opens the selected app without an AI call.
-- Added direct SearXNG retrieval for `/search` and common time-sensitive questions. The selected model receives five bounded, explicitly untrusted result snippets and writes the cited answer.
+- Added direct web retrieval for `/search` and common time-sensitive questions. The selected model receives five bounded, explicitly untrusted result snippets and writes the cited answer.
 - Added performance gates for cached app matching. Quick search no longer fetches full pages, and slow search answers fall back to linked results.
 - Reduced the input toolbar to Send and one menu for Quick Actions, model choice, history, and settings.
 - Answer common date, time, day, and time-zone questions locally without an AI provider.

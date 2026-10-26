@@ -2,6 +2,39 @@ import Foundation
 import Testing
 @testable import QuickLaunch
 
+@Suite("Local page reading")
+struct WebPageReaderLocalTests {
+    private func response(status: Int, type: String) throws -> HTTPURLResponse {
+        try #require(HTTPURLResponse(
+            url: URL(string: "https://example.com/page")!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": type]
+        ))
+    }
+
+    @Test func htmlIsExtractedFromTheResponseBody() throws {
+        let html = Data("""
+        <html><head><title>Example</title><script>track()</script></head>
+        <body><article><p>Readable body.</p></article></body></html>
+        """.utf8)
+        let interpreted = try WebPageReader.interpret(
+            data: html,
+            response: response(status: 200, type: "text/html; charset=utf-8")
+        )
+        #expect(interpreted.text.contains("Readable body."))
+        #expect(!interpreted.text.contains("track()"))
+        #expect(interpreted.body == html)
+    }
+
+    @Test func aNonSuccessStatusIsRefused() throws {
+        let http = try response(status: 404, type: "text/html")
+        #expect(throws: PageReadError.self) {
+            _ = try WebPageReader.interpret(data: Data("missing".utf8), response: http)
+        }
+    }
+}
+
 @Suite("HTML text extraction")
 struct HTMLTextExtractorTests {
     @Test func stripsScriptsStylesAndTags() {

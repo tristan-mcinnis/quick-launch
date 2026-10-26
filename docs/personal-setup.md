@@ -6,14 +6,13 @@ app. The README lists the integrations in general terms.
 
 ## Web search and page reading
 
-- Nothing goes over SSH any more. The vault, its old server and
-  SearXNG are retired (2026-10-20); Vault Search and the `search_vault` tool
-  are removed.
-- Web search calls the Tavily or Brave API directly. The key is the one in
-  Keychain (Models › Web search), else `TAVILY_API_KEY` or `BRAVE_API_KEY`
-  in `~/.config/secrets.env`, read at call time and never stored or logged.
-- Pages are read with a direct fetch. There is no local extractor
-  (`trafilatura` is not installed on this Mac).
+- Vault Search and the `search_vault` tool are removed (2026-10-20).
+- Web search calls the Tavily API directly, then Brave when Tavily fails or
+  has no key. The key is the one in Keychain (Models › Web search), else
+  `TAVILY_API_KEY` or `BRAVE_API_KEY` in `~/.config/secrets.env`, read at
+  call time and never stored or logged. A Chinese query still prefers Bocha
+  when that key is set.
+- Pages are read with a direct fetch in the app. There is no remote reader.
 - Source files open only from `~/memory`, `~/skills` and `~/Documents/Work`.
 
 ## Memory, tasks and skills

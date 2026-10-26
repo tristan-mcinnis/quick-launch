@@ -247,15 +247,22 @@ struct WebSearchBackendsTests {
     }
 
     @Test func chainFallsThroughAnEmptyOrFailingStepToBrave() async throws {
-        let brave = RecordingStubSearch(.text("brave result"))
-        let router = makeRouter(
+        let emptyRouter = makeRouter(
             tavily: RecordingStubSearch(.empty),
+            brave: RecordingStubSearch(.text("brave after empty")),
+            hasTavilyKey: true,
+            hasBraveKey: true
+        )
+        #expect(try await emptyRouter.search("q", provider: .automatic) == "brave after empty")
+
+        let brave = RecordingStubSearch(.text("brave after failure"))
+        let failingRouter = makeRouter(
+            tavily: RecordingStubSearch(.failure),
             brave: brave,
             hasTavilyKey: true,
             hasBraveKey: true
         )
-
-        #expect(try await router.search("q", provider: .automatic) == "brave result")
+        #expect(try await failingRouter.search("q", provider: .automatic) == "brave after failure")
         #expect(await brave.callCount() == 1)
     }
 
