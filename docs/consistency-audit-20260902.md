@@ -99,7 +99,7 @@ Fix: one `reset(to: OverlaySurface)` primitive. Low effort, high payoff.
 - 32 protocols; 17 in `Sources/Protocols`, 8 declared inside service files, 13 services concrete-only or static enums. Three coexisting styles (protocol+injected, `@MainActor final class`, stateless enum).
 - `QuickViewModel.init` injects 8 services but builds `LauncherUsageStore` (`:236`), `ModelCatalogService` (`:5398`), and the brew updater (`:5732`) inline.
 - `QuickServiceError` lives in `OpenAICompatibleService.swift:291`, not with the protocol.
-- Process: 13 `Process()` sites. One shell violation: `QuickViewModel.swift:5734` runs `/bin/sh -c "brew upgrade quick-launch"`. Constant string, but the only shell in the tree and against AGENTS.md. `ModelCatalogService:80-83` waits before reading stderr (deadlock risk). Three near-identical ssh builders (`VaultSearchService:111`, `WebPageReader:129`, `SearXNGSearchService:110`).
+- Process: 13 `Process()` sites. One shell violation: `QuickViewModel.swift:5734` runs `/bin/sh -c "brew upgrade quick-launch"`. Constant string, but the only shell in the tree and against AGENTS.md. `ModelCatalogService:80-83` waits before reading stderr (deadlock risk). Three near-identical ssh builders (`VaultSearchService:111`, `WebPageReader:129`, and the hosted search service at line 110).
 - `QuickToggleService.readFinderBool` (`:165-180`) runs Process synchronously with no actor hop.
 - Errors: 162 `try?`, every JSON store load/save silent on failure. `os.Logger` in exactly 2 files; everything else silent. Fail-silent is the de facto policy.
 - Concurrency: 15 actors vs 14 `@MainActor` classes with no rule for which is which.

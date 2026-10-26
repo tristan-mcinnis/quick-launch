@@ -382,8 +382,8 @@ failures or cancellations, successful command actions, and hotkey runs.
   (Chinese web), and Exa (semantic), called directly; or Automatic preferring
   Bocha for a Chinese query when that key is set, then Tavily and Brave. The
   keys are stored in the same owner-only Keychain as provider keys; Tavily and
-  Brave fall back to `TAVILY_API_KEY` and `BRAVE_API_KEY` in
-  `~/.config/secrets.env`.
+  Brave fall back to `TAVILY_API_KEY` and `BRAVE_SEARCH_API_KEY` in
+  `~/.config/secrets.env`. `BRAVE_API_KEY` is accepted when the Brave name is absent.
 - Local model discovery scans the local server's model folder without starting
   it.
 
