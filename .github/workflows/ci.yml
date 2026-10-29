@@ -41,13 +41,5 @@ jobs:
       - name: Publish scrub
         run: sh scripts/scrub.sh
 
-      - name: Cache SwiftPM build
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            spm-${{ runner.os }}-
-
       - name: Test
         run: swift test
