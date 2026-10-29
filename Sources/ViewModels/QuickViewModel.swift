@@ -669,6 +669,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func runHouseCommand(_ row: HouseCommandRow, argument: String?) async {
         guard let houseCommandCatalog else { return }
         errorMessage = nil
+        noteFeatureUse(.houseCommandRun, itemID: "command:\(row.id)")
         do {
             let outcome = try await houseCommandCatalog.run(row, argument: argument)
             input = ""
@@ -2636,6 +2637,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         scope: String = LauncherUsageStore.rootScope
     ) {
         recordJournal(kind: .directHotkeyUse, scope: scope, itemID: itemID)
+    }
+
+    /// Journal row for a feature that has no launcher row: kind and a stable
+    /// id only (`feature:<name>`, `action:<uuid>`, `command:<id>`), never
+    /// the text, selection, answer or prompt it worked on.
+    func noteFeatureUse(_ kind: InteractionJournalEventKind, itemID: String) {
+        recordJournal(kind: kind, itemID: itemID)
     }
 
     func forgetLearnedRanking() {
@@ -8278,6 +8286,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return nil
         }
 
+        if let action { noteFeatureUse(.savedActionRun, itemID: "action:\(action.actionID.uuidString)") }
+
         // Command actions run a local executable directly and never reach a
         // model provider.
         if let action,
@@ -10190,6 +10200,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         )
         do {
             let result = try await piHandoff.handOff(request)
+            noteFeatureUse(.piHandoffWritten, itemID: "feature:pi-handoff")
             // The line belongs to the chat that was handed off.
             if currentConversation?.id == conversation.id {
                 let stopped = stoppedAnswer ? Self.piStoppedAnswerPrefix : ""

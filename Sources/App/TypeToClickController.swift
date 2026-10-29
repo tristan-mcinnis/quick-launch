@@ -250,6 +250,8 @@ final class TypeToClickController {
     private var notice: TypeToClickNotice?
 
     private let clock: TypeToClickClock
+    /// Called each time an action is dispatched on a target. Carries no label.
+    var onTargetUsed: (() -> Void)?
 
     init(service: TypeToClickServicing = TypeToClickService(), clock: TypeToClickClock = .system) {
         self.service = service
@@ -878,6 +880,7 @@ final class TypeToClickController {
                 service.perform(effectiveAction, on: target)
             }
             let succeeded = await task.value
+            self.onTargetUsed?()
             // AX focus and coordinate-click attempts can activate the target
             // app even when they fail. Reclaim the key panel immediately so
             // typing never leaks out of Type to Click.

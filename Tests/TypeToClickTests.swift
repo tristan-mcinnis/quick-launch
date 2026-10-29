@@ -456,6 +456,36 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
+    func testActingOnATargetReportsOneUseWithoutItsLabel() async throws {
+        _ = NSApplication.shared
+        let performed = expectation(description: "buffered action performed")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let frame = CGRect(
+            x: screen.frame.minX + 100,
+            y: screen.frame.maxY - screen.frame.minY - 130,
+            width: 120,
+            height: 30
+        )
+        let service = BufferedTypeToClickService(frame: frame, performed: performed)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        var uses = 0
+        controller.onTargetUsed = { uses += 1 }
+        controller.start(in: 123)
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
+        for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
+            panel.sendEvent(try keyEvent(panel: panel, keyCode: UInt16(keyCode), characters: character))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+
+        await fulfillment(of: [performed], timeout: hangGuard)
+        // The use is reported right after dispatch returns.
+        for _ in 0..<200 where uses == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(uses, 1)
+        controller.dismiss()
+    }
+
+    @MainActor
     func testQueryAndEnterAreBufferedWhileAccessibilityScanFinishes() async throws {
         _ = NSApplication.shared
         let performed = expectation(description: "buffered action performed")

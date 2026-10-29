@@ -1129,6 +1129,29 @@ struct HouseCommandLauncherTests {
         #expect(presenter.dismissals == 1, "a plain ok closes the launcher")
     }
 
+    @Test func runningACommandJournalsOnlyItsStableID() async {
+        let folder = FixtureFolder()
+        folder.write("rti.json", rtiManifest)
+        let dispatcher = FakeDispatcher(statuses: ["rti": status(["recording": false])])
+        let journal = InteractionJournalStore(fileURL: nil)
+        let vm = QuickViewModel(
+            service: MockQuickService(),
+            interactionJournal: journal,
+            houseCommandCatalog: HouseCommandCatalog(directory: folder.directory, dispatcher: dispatcher)
+        )
+        vm.overlayPresenter = RecordingPresenter()
+        vm.refreshHouseCommands()
+        await vm.waitForHouseCommandRefreshForTesting()
+
+        await vm.performHouseCommand(vm.houseCommandItems[0])
+
+        let events = journal.recentEvents().filter { $0.kind == .houseCommandRun }
+        #expect(events.count == 1)
+        #expect(events.first?.itemID == "command:house.rti.record.start")
+        #expect(events.first?.queryFingerprint == nil)
+        #expect(events.first?.detail == nil)
+    }
+
     @Test func aTextCommandAsksForItsArgumentWithTheExistingPrompt() async {
         let folder = FixtureFolder()
         folder.write("memory.json", plainMemoryManifest)

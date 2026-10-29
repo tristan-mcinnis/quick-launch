@@ -1114,6 +1114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if panel?.isVisible == true { hideOverlay() }
         let controller = typeToClickController ?? TypeToClickController()
+        controller.onTargetUsed = { [weak self] in
+            self?.viewModel?.noteFeatureUse(.typeToClickUsed, itemID: "feature:type-to-click")
+        }
         let exitHotkey = viewModel?.settings.typeToClickHotkeyEnabled == true
             ? viewModel?.settings.typeToClickHotkey
             : nil
@@ -1142,6 +1145,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             selectedTextService: selectedTextService,
             pasteboard: vm.pasteboard
         )
+        model.onTranslationRun = { [weak vm] in
+            vm?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
+        }
         model.onLanguagesChange = { [weak vm, weak model] in
             guard let vm, let model else { return }
             vm.settings.lastTranslationTarget = model.target.code
