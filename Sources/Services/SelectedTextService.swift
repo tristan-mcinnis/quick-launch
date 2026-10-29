@@ -22,6 +22,7 @@ final class SelectedTextService: SelectedTextServicing {
     var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
     private var lastTarget: SelectionTarget?
     private var activationObserver: NSObjectProtocol?
+    private let pasteGuard = PasteGuard()
 
     /// Bounded AX messaging wait, in seconds, so an unresponsive target app
     /// cannot hang the panel while Quick Launch reads or replaces a selection.
@@ -168,6 +169,8 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     func pastePasteboard(to target: SelectionTarget) async -> Bool {
+        // The caller wrote the clipboard just before this call.
+        let expectedChangeCount = pasteGuard.changeCount()
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options),
               let app = NSRunningApplication(processIdentifier: target.processIdentifier)
@@ -187,18 +190,10 @@ final class SelectedTextService: SelectedTextServicing {
             if held.isEmpty { break }
             try? await Task.sleep(for: .milliseconds(20))
         }
-        return postCommandV()
-    }
-
-    private func postCommandV() -> Bool {
-        let source = CGEventSource(stateID: .privateState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
-        else { return false }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        guard pasteGuard.sendCommandV(expectingChangeCount: expectedChangeCount) else {
+            logger.error("Paste skipped: the clipboard changed or Command-V failed")
+            return false
+        }
         return true
     }
 
@@ -243,6 +238,7 @@ final class SelectedTextService: SelectedTextServicing {
             owner: nil
         )
         pasteboard.setString(text, forType: .string)
+        let expectedChangeCount = pasteGuard.changeCount()
 
         for _ in 0..<40 {
             let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
@@ -253,8 +249,8 @@ final class SelectedTextService: SelectedTextServicing {
         // Fast path: accessibility insertion at the caret, no keystrokes.
         if insertAtCaret(text, processIdentifier: target.processIdentifier) { return true }
         // Fallback: a synthesised Command-V into the now-frontmost app.
-        guard postCommandV() else {
-            logger.error("Could not synthesise Command-V")
+        guard pasteGuard.sendCommandV(expectingChangeCount: expectedChangeCount) else {
+            logger.error("Paste skipped: the clipboard changed or Command-V failed")
             return false
         }
         logger.info("Paste completed by Command-V fallback")
