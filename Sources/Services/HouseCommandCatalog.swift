@@ -65,15 +65,16 @@ actor HouseCommandCatalog {
     /// Re-reads the manifests and the statuses they gate rows on, then
     /// returns the rows worth showing. Every status is read concurrently and
     /// each carries its own timeout, so the slowest app sets the cost, not
-    /// the sum of them.
-    func refresh() async -> [HouseCommandRow] {
+    /// the sum of them. `force` ignores the freshness cache, for a refresh
+    /// that follows a change the cache cannot know about.
+    func refresh(force: Bool = false) async -> [HouseCommandRow] {
         manifests = directory.manifests()
         missingSocketApps = Set(manifests.filter { directory.isSocketMissing($0) }.map(\.app))
         let needing = manifests.filter {
             !missingSocketApps.contains($0.app) && ($0.needsStatus || $0.isLivenessChecked)
         }
         await withTaskGroup(of: (String, HouseCommandStatus?, Bool).self) { group in
-            for manifest in needing where !isFresh(manifest.app) {
+            for manifest in needing where force || !isFresh(manifest.app) {
                 group.addTask { [dispatcher] in
                     // A timeout or an unreadable reply is no status, nothing
                     // more. Only a socket nobody answers on is a dead app.

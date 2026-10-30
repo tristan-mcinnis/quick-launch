@@ -542,21 +542,41 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored private var houseCommandWaitTask: Task<Void, Never>?
 
     @ObservationIgnored private var houseCommandRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var houseCommandRefreshPending = false
+    @ObservationIgnored private var houseCommandRefreshForce = false
 
     /// Re-reads every manifest and the statuses that gate rows, off the main
     /// thread, and applies the result. Never throws and never blocks: an app
     /// that is missing, dead, or slow simply offers nothing this time round.
-    func refreshHouseCommands() {
-        guard let houseCommandCatalog, houseCommandRefreshTask == nil else { return }
+    ///
+    /// A request made while a refresh is in flight is not dropped: it marks
+    /// one more refresh pending, run after the current one, so the newest
+    /// state wins and two refreshes never overlap.
+    ///
+    /// `force` skips the catalog's status cache. A follow-up always forces,
+    /// and so does a refresh that follows a command run: both exist because
+    /// the app's state just changed, so a status read moments ago is stale.
+    func refreshHouseCommands(force: Bool = false) {
+        guard let houseCommandCatalog else { return }
+        if houseCommandRefreshTask != nil {
+            houseCommandRefreshPending = true
+            return
+        }
+        houseCommandRefreshForce = force
         houseCommandRefreshTask = Task { @MainActor [weak self] in
-            let rows = await houseCommandCatalog.refresh()
-            guard let self else { return }
-            self.applyHouseCommands(rows)
-            self.houseCommandRefreshTask = nil
+            repeat {
+                let forced = self?.houseCommandRefreshForce ?? false
+                self?.houseCommandRefreshPending = false
+                self?.houseCommandRefreshForce = true  // any follow-up forces
+                let rows = await houseCommandCatalog.refresh(force: forced)
+                guard let self else { return }
+                self.applyHouseCommands(rows)
+            } while self?.houseCommandRefreshPending == true
+            self?.houseCommandRefreshTask = nil
         }
     }
 
-    /// Waits out a running refresh, for tests.
+    /// Waits out a running refresh and its follow-up, for tests.
     func waitForHouseCommandRefreshForTesting() async {
         await houseCommandRefreshTask?.value
         houseCommandRefreshTask = nil
@@ -699,7 +719,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             requestInputFocus()
         }
         // What the app is doing has changed, so the rows must catch up.
-        refreshHouseCommands()
+        refreshHouseCommands(force: true)
     }
 
     /// Follows work that started, off the launcher's path, and reports how
@@ -723,7 +743,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 self.errorMessage = "\(row.manifest.name) did not finish in time."
             }
             self.houseCommandWaitTask = nil
-            self.refreshHouseCommands()
+            self.refreshHouseCommands(force: true)
         }
     }
 
@@ -10726,6 +10746,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             await self?.runInlineTranslation(query)
         }
     }
+
+    /// The running translation task, so a test can wait on one request that
+    /// a newer query has since replaced.
+    var inlineTranslationTaskForTesting: Task<Void, Never>? { inlineTranslationTask }
 
     /// What a caller (or a test) waits on: the typing pause and the request.
     func inlineTranslationSettled() async {
