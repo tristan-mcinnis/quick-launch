@@ -10,6 +10,13 @@
   1.5 s for Brave and 2.8 s for Tavily. Queries over 128 characters are cut
   to the API's limit.
 
+- **Paste works in every field.** While the launcher, Settings or the
+  Translator is key there is no Edit menu, so ⌘V, ⌘Z and ⇧⌘Z did nothing in
+  a Quicklink, snippet or settings field. Each of these windows now sends
+  Cut, Copy, Paste, Select All, Undo and Redo to the focused field itself
+  when nothing else claimed the key; the Quick AI composer's image paste
+  still comes first.
+
 ## Unreleased — 2026-10-20
 
 - **Vault Search and the House server are removed.** The vault and its server

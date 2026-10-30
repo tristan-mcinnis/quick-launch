@@ -314,18 +314,7 @@ final class TranslatorPanel: NSPanel {
         }
         // Accessory apps do not always have an Edit menu installed. Route
         // native editing directly so selection and paste work on every reopen.
-        if event.type == .keyDown, modifiers == [.command],
-           let editor = firstResponder as? NSTextView {
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "a": editor.selectAll(nil)
-            case "c": editor.copy(nil)
-            case "v" where editor.isEditable: editor.paste(nil)
-            case "x" where editor.isEditable: editor.cut(nil)
-            case "z" where editor.isEditable: editor.undoManager?.undo()
-            default: return super.performKeyEquivalent(with: event)
-            }
-            return true
-        }
+        if StandardEditKeys.perform(event, in: self) { return true }
         return super.performKeyEquivalent(with: event)
     }
 
