@@ -9555,8 +9555,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             streamingStatus = nil
             isStreaming = false
             output = result
-            recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
             noteFeatureUse(.savedActionRun, itemID: "action:\(definition.id.uuidString)")
+            recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
             var didAutoWrite = false
             if definition.outputBehavior == .reviewChanges, !output.isEmpty {
                 if !isAIChatWindow { openQuickAI() }
