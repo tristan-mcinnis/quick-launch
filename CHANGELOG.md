@@ -17,6 +17,19 @@
   when nothing else claimed the key; the Quick AI composer's image paste
   still comes first.
 
+- **A copied image is no longer attached when Quick Launch opens.** Opening
+  the launcher used to attach any image copied since the last open, so a
+  screenshot copied for somewhere else rode the next question. That is now
+  General › Launcher Behaviour › Attach a copied image when Quick Launch
+  opens, off by default. Paste (⌘V), the capture keys and double-tap right ⌘
+  attach on request as before, and every chip keeps its ×.
+
+- **Double-tap right ⌘ no longer fires by accident.** Two quick right-⌘
+  shortcuts whose key the system took (⌘Tab, ⌘Space) or that ran under
+  Secure Keyboard Entry looked like a double tap and attached a window
+  screenshot. A click or an app switch between taps now cancels it, only
+  the right ⌘ key itself counts, and nothing fires while secure input is on.
+
 ## Unreleased — 2026-10-20
 
 - **Vault Search and the House server are removed.** The vault and its server

@@ -3332,10 +3332,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         lastQuestion = nil
     }
 
-    /// Overlay open: offer a clipboard image once per copy. A clipboard the
-    /// user already saw (or dismissed) is not re-attached, and a non-image
-    /// clipboard never clears an attachment retained for follow-ups.
+    /// Overlay open: offer a clipboard image once per copy, only when the
+    /// user turned that on. A clipboard the user already saw (or dismissed)
+    /// is not re-attached, and a non-image clipboard never clears an
+    /// attachment retained for follow-ups.
     func captureImageFromClipboard(from pasteboard: NSPasteboard = .general) {
+        guard settings.attachClipboardImageOnOpen else { return }
         // A fresh image belongs in history while browsing a catalog. Offering
         // it as an AI attachment here discarded the retained history panel.
         guard catalogScope == nil else { return }

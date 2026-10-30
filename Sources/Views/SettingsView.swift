@@ -689,6 +689,20 @@ private struct GeneralTab: View {
                 .toggleStyle(InkToggleStyle())
             }
 
+            SettingsRow(
+                title: "Attach a copied image when Quick Launch opens",
+                detail: "Off: an image is attached only when you paste, drop or capture one."
+            ) {
+                Toggle(
+                    "Attach a copied image when Quick Launch opens",
+                    isOn: viewModel.settingsBinding(\.attachClipboardImageOnOpen) { isOn in
+                        // Turning it on offers the next copy, not an old one.
+                        if isOn { ClipboardImageReader.suppressAutoOffer() }
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+
             SettingsRow(title: "Search text inside screenshots (on-device OCR)") {
                 Toggle(
                     "Search text inside screenshots (on-device OCR)",

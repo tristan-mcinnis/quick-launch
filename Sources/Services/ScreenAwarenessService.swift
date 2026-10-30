@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import Foundation
 
 /// Everything Quick Launch can read about the window behind it, gathered
@@ -231,8 +232,10 @@ struct ModifierDoubleTapDetector {
         return false
     }
 
-    /// Any ordinary key press cancels a pending tap.
-    mutating func handleKeyDown() {
+    /// Anything that shows ⌘ was part of a shortcut cancels a pending tap:
+    /// an ordinary key press, a click, or another app coming forward (⌘Tab,
+    /// whose Tab never reaches a global key monitor).
+    mutating func handleInterruption() {
         otherKeyDuringPress = true
         lastRelease = nil
     }
@@ -240,30 +243,54 @@ struct ModifierDoubleTapDetector {
 
 /// Watches modifier keys system-wide for the double tap. Needs Accessibility,
 /// which Quick Launch already asks for.
+///
+/// A global monitor misses keys a hotkey consumed and every key under Secure
+/// Keyboard Entry, so two quick right-⌘ shortcuts there looked like a double
+/// tap and attached a screenshot uninvited. Clicks and app switches cancel
+/// a tap too, and nothing fires while secure input is on.
 @MainActor
 final class ModifierDoubleTapMonitor {
     private var detector = ModifierDoubleTapDetector()
     private var monitors: [Any] = []
+    private var activationObserver: (any NSObjectProtocol)?
     var onDoubleTap: (() -> Void)?
+
+    /// `NX_DEVICERCMDKEYMASK`: the right ⌘ key itself, not either ⌘.
+    static let rightCommandDeviceMask: UInt = 0x10
 
     func start() {
         stop()
         let flags: (NSEvent) -> Void = { [weak self] event in
             guard let self else { return }
-            let isDown = event.modifierFlags.contains(.command)
-            if self.detector.handleFlagsChanged(keyCode: event.keyCode, isDown: isDown, at: event.timestamp) {
+            let isDown = event.modifierFlags.rawValue & Self.rightCommandDeviceMask != 0
+            if self.detector.handleFlagsChanged(keyCode: event.keyCode, isDown: isDown, at: event.timestamp),
+               !IsSecureEventInputEnabled() {
                 self.onDoubleTap?()
             }
         }
-        let keys: (NSEvent) -> Void = { [weak self] _ in self?.detector.handleKeyDown() }
+        let interrupt: (NSEvent) -> Void = { [weak self] _ in self?.detector.handleInterruption() }
+        let interruptions: NSEvent.EventTypeMask = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: flags) { monitors.append(global) }
-        if let globalKeys = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: keys) { monitors.append(globalKeys) }
+        if let globalKeys = NSEvent.addGlobalMonitorForEvents(matching: interruptions, handler: interrupt) {
+            monitors.append(globalKeys)
+        }
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in flags(event); return event } as Any)
-        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in keys(event); return event } as Any)
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: interruptions) { event in interrupt(event); return event } as Any)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.detector.handleInterruption() }
+        }
     }
 
     func stop() {
         for monitor in monitors { NSEvent.removeMonitor(monitor) }
         monitors.removeAll()
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+        activationObserver = nil
     }
 }

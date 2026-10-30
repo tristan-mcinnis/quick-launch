@@ -85,6 +85,7 @@ struct HistoryContinuityTests {
         board.declareTypes([.png], owner: nil)
         board.setData(png, forType: .png)
         let vm = QuickViewModel()
+        vm.settings.attachClipboardImageOnOpen = true
         vm.enterCatalog(.clipboard)
         vm.captureImageFromClipboard(from: board)
         #expect(vm.catalogScope == .clipboard)

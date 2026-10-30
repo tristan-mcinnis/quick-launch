@@ -151,6 +151,11 @@ struct QuickSettings: Codable, Sendable {
     var screenAwarenessDoubleTap: Bool = true
     /// Read text inside screenshots with on-device OCR for search.
     var screenshotTextSearch: Bool = true
+    /// Opening the launcher attaches an image copied since the last open.
+    /// Off by default (2026-10-30): a screenshot copied for somewhere else
+    /// rode the next question uninvited. Paste and the capture keys attach
+    /// on request either way.
+    var attachClipboardImageOnOpen: Bool = false
 
     // Updates
     var checkForUpdatesOnLaunch: Bool = false
@@ -397,6 +402,7 @@ struct QuickSettings: Codable, Sendable {
             ?? (lastTranslationTarget == "en" ? "zh-Hans" : "en")
         translationSourceSelection = try c.decodeIfPresent(String.self, forKey: .translationSourceSelection) ?? "auto"
         screenshotTextSearch = try c.decodeIfPresent(Bool.self, forKey: .screenshotTextSearch) ?? true
+        attachClipboardImageOnOpen = try c.decodeIfPresent(Bool.self, forKey: .attachClipboardImageOnOpen) ?? false
         clipboardHistoryEnabled = try c.decodeIfPresent(
             Bool.self,
             forKey: .clipboardHistoryEnabled

@@ -166,7 +166,7 @@ struct ScreenAwarenessTests {
         func tap(_ key: UInt16, _ down: Bool, _ time: TimeInterval) -> Bool {
             detector.handleFlagsChanged(keyCode: key, isDown: down, at: time)
         }
-        func keyDown() { detector.handleKeyDown() }
+        func keyDown() { detector.handleInterruption() }
 
         let first = [tap(54, true, 0), tap(54, false, 0.1), tap(54, true, 0.2)]
         #expect(first == [false, false, false])
@@ -185,6 +185,13 @@ struct ScreenAwarenessTests {
         // The left ⌘ key does not count.
         let left = [tap(55, true, 3), tap(55, false, 3.1)]
         #expect(left == [false, false])
+
+        // A click or an app switch (⌘Tab: the Tab is never seen) between
+        // the taps means ⌘ was part of a shortcut.
+        let first2 = [tap(54, true, 4), tap(54, false, 4.1)]
+        keyDown()
+        let switched = first2 + [tap(54, true, 4.2), tap(54, false, 4.3)]
+        #expect(switched == [false, false, false, false])
     }
 
     // MARK: Paste latest screenshot

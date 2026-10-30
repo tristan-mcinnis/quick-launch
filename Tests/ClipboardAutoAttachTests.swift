@@ -50,13 +50,33 @@ struct ClipboardAutoAttachTests {
 
     @Test func nonImageClipboardKeepsARetainedAttachment() {
         let vm = QuickViewModel()
+        vm.settings.attachClipboardImageOnOpen = true
         let retained = QuickImageAttachment(data: Data([1]), mimeType: "image/png", pixelWidth: 1, pixelHeight: 1)
         vm.pendingImage = retained
-        // General pasteboard contents are unknown in CI; whatever they are,
-        // a stale (already offered) or non-image clipboard must not clear
+        let text = NSPasteboard(name: NSPasteboard.Name("quick-launch-test-\(UUID().uuidString)"))
+        text.clearContents()
+        text.setString("not an image", forType: .string)
+        // A stale (already offered) or non-image clipboard must not clear
         // the attachment retained for follow-ups.
-        vm.captureImageFromClipboard()
-        vm.captureImageFromClipboard()
+        vm.captureImageFromClipboard(from: text)
+        vm.captureImageFromClipboard(from: text)
+        #expect(vm.pendingImage == retained)
+    }
+
+    /// The reported bug: a screenshot copied for somewhere else rode the
+    /// next question. Opening never attaches unless the user turned it on.
+    @Test func openingAttachesACopiedImageOnlyWhenTurnedOn() throws {
+        #expect(!QuickSettings().attachClipboardImageOnOpen)
+        let legacy = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(QuickSettings()))
+        #expect(!legacy.attachClipboardImageOnOpen)
+
+        let vm = QuickViewModel()
+        let pasteboard = makePasteboardWithImage()
+        vm.captureImageFromClipboard(from: pasteboard)
+        #expect(vm.pendingImage == nil, "an image on the clipboard is not context unless asked for")
+
+        vm.settings.attachClipboardImageOnOpen = true
+        vm.captureImageFromClipboard(from: pasteboard)
         #expect(vm.pendingImage != nil)
     }
 }
