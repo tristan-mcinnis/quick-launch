@@ -542,21 +542,33 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored private var houseCommandWaitTask: Task<Void, Never>?
 
     @ObservationIgnored private var houseCommandRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var houseCommandRefreshPending = false
 
     /// Re-reads every manifest and the statuses that gate rows, off the main
     /// thread, and applies the result. Never throws and never blocks: an app
     /// that is missing, dead, or slow simply offers nothing this time round.
+    ///
+    /// A request made while a refresh is in flight is not dropped: it marks
+    /// one more refresh pending, run after the current one, so the newest
+    /// state wins and two refreshes never overlap.
     func refreshHouseCommands() {
-        guard let houseCommandCatalog, houseCommandRefreshTask == nil else { return }
+        guard let houseCommandCatalog else { return }
+        if houseCommandRefreshTask != nil {
+            houseCommandRefreshPending = true
+            return
+        }
         houseCommandRefreshTask = Task { @MainActor [weak self] in
-            let rows = await houseCommandCatalog.refresh()
-            guard let self else { return }
-            self.applyHouseCommands(rows)
-            self.houseCommandRefreshTask = nil
+            repeat {
+                self?.houseCommandRefreshPending = false
+                let rows = await houseCommandCatalog.refresh()
+                guard let self else { return }
+                self.applyHouseCommands(rows)
+            } while self?.houseCommandRefreshPending == true
+            self?.houseCommandRefreshTask = nil
         }
     }
 
-    /// Waits out a running refresh, for tests.
+    /// Waits out a running refresh and its follow-up, for tests.
     func waitForHouseCommandRefreshForTesting() async {
         await houseCommandRefreshTask?.value
         houseCommandRefreshTask = nil
