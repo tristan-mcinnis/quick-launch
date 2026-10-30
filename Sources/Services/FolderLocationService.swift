@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 /// A folder the launcher can open: built-in user folders plus folders the user adds in Settings.
@@ -52,19 +51,5 @@ enum FolderLocationService {
             systemImage: "folder",
             isBuiltIn: false
         )
-    }
-
-    /// Opens the folder in Finder right away. This used to front an existing
-    /// Finder window through an osascript AppleScript, but that Apple Event
-    /// exchange could hang for minutes on a busy system (measured at 107 s),
-    /// so Return now takes the fast native route every time.
-    @MainActor
-    static func open(_ location: FolderLocation) async -> Bool {
-        NSWorkspace.shared.open(location.expandedURL)
-    }
-
-    @MainActor
-    static func reveal(_ location: FolderLocation) {
-        NSWorkspace.shared.activateFileViewerSelecting([location.expandedURL])
     }
 }

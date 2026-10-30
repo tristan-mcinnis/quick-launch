@@ -277,6 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
             archiveRootURL: AppPaths.applicationSupportDirectory,
+            workspace: SystemWorkspace(),
+            runningApplications: SystemRunningApplications(),
             attachmentExtractor: SharedDocumentExtractor(),
             // What every other house app can do, read from the manifests they
             // publish. Without this the catalog is nil, every house-command
@@ -1743,6 +1745,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
             archiveRootURL: AppPaths.applicationSupportDirectory,
+            workspace: SystemWorkspace(),
+            runningApplications: SystemRunningApplications(),
             attachmentExtractor: SharedDocumentExtractor(),
             apiKeyProvider: QuickViewModel.keychainAPIKey,
             currentVersion: Bundle.main.shortVersion
