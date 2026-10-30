@@ -30,10 +30,12 @@ private final class HeldTailQuickService: QuickService {
     let followUp: String
     let holdsEveryCall: Bool
 
+    /// Per call: ending one stream must not release a later one. A shared
+    /// flag let the first stream's termination end the second stream at once.
     private struct State {
         var calls = 0
-        var gate: CheckedContinuation<Void, Never>?
-        var isTerminated = false
+        var gates: [Int: CheckedContinuation<Void, Never>] = [:]
+        var terminated: Set<Int> = []
     }
 
     private let state = Mutex(State())
@@ -69,12 +71,12 @@ private final class HeldTailQuickService: QuickService {
                 } else {
                     continuation.yield(StreamDelta(text: followUp, finishReason: nil))
                 }
-                await self.hold()
+                await self.hold(call)
                 continuation.yield(StreamDelta(text: "", finishReason: "stop"))
                 continuation.finish()
             }
             continuation.onTermination = { [weak self] _ in
-                self?.release()
+                self?.release(call)
                 producer.cancel()
             }
         }
@@ -82,23 +84,21 @@ private final class HeldTailQuickService: QuickService {
 
     func healthCheck() async throws -> Bool { true }
 
-    private func hold() async {
+    private func hold(_ call: Int) async {
         await withCheckedContinuation { (gate: CheckedContinuation<Void, Never>) in
             let terminated = state.withLock { state -> Bool in
-                if state.isTerminated { return true }
-                state.gate = gate
+                if state.terminated.contains(call) { return true }
+                state.gates[call] = gate
                 return false
             }
             if terminated { gate.resume() }
         }
     }
 
-    private func release() {
+    private func release(_ call: Int) {
         let gate = state.withLock { state -> CheckedContinuation<Void, Never>? in
-            state.isTerminated = true
-            let gate = state.gate
-            state.gate = nil
-            return gate
+            state.terminated.insert(call)
+            return state.gates.removeValue(forKey: call)
         }
         gate?.resume()
     }

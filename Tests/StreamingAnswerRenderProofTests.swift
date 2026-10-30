@@ -12,7 +12,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Streaming answer render proof", .serialized)
+@Suite("Streaming answer render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct StreamingAnswerRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

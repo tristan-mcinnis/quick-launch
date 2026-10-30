@@ -11,7 +11,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("Continue in pi render proof", .serialized)
+@Suite("Continue in pi render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct PiHandoffRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

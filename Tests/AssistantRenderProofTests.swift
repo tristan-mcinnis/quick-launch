@@ -10,7 +10,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Assistant render proofs", .serialized)
+@Suite("Assistant render proofs", .mainActorRenderLane, .serialized)
 @MainActor
 struct AssistantRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

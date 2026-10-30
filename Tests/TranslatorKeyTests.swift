@@ -12,7 +12,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("Translator keys", .serialized)
+@Suite("Translator keys", .mainActorRenderLane, .serialized)
 @MainActor
 struct TranslatorKeyTests {
     // Key codes: Return 36, keypad Enter 76, S 1, F 3, T 17, P 35, V 9, W 13.

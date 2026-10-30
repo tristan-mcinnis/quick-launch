@@ -14,7 +14,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Quick AI resize render proof", .serialized)
+@Suite("Quick AI resize render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct QuickAIResizeRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

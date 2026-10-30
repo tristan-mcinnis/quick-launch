@@ -6,7 +6,7 @@ import Testing
 /// The incremental split and render of a streaming answer must equal the
 /// whole-answer split and render at every point of the stream, however the
 /// text was chunked.
-@Suite("StreamingAnswer")
+@Suite("StreamingAnswer", .mainActorRenderLane)
 @MainActor
 struct StreamingAnswerTests {
     nonisolated static let corpus: [String: String] = [

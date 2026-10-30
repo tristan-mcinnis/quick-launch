@@ -11,7 +11,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Keyboard shortcuts render proofs", .serialized)
+@Suite("Keyboard shortcuts render proofs", .mainActorRenderLane, .serialized)
 @MainActor
 struct KeyboardShortcutsRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

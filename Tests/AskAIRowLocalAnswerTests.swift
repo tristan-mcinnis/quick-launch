@@ -9,7 +9,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("Ask AI row on a local answer", .serialized)
+@Suite("Ask AI row on a local answer", .mainActorRenderLane, .serialized)
 @MainActor
 struct AskAIRowLocalAnswerTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

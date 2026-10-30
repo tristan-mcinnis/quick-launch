@@ -14,7 +14,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Launcher hidden items", .serialized)
+@Suite("Launcher hidden items", .mainActorRenderLane, .serialized)
 @MainActor
 struct LauncherHiddenItemsTests {
     // Real identity, so the ranking path is exercised exactly as production.

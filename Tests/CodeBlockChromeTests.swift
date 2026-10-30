@@ -12,7 +12,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Code block chrome", .serialized)
+@Suite("Code block chrome", .mainActorRenderLane, .serialized)
 @MainActor
 struct CodeBlockChromeTests {
 

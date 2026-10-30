@@ -10,7 +10,7 @@ import Testing
 /// defaults, the migration from the one-prompt era, independent edits, the
 /// wire text each surface sends, and that a saved assistant and a grounding
 /// directive are still composed as before.
-@Suite("Prompt surface instructions", .serialized)
+@Suite("Prompt surface instructions", .mainActorRenderLane, .serialized)
 @MainActor
 struct PromptSurfaceInstructionTests {
 

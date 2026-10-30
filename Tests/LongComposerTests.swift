@@ -4,7 +4,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Long composer drafts", .serialized)
+@Suite("Long composer drafts", .mainActorRenderLane, .serialized)
 @MainActor
 struct LongComposerTests {
     private func model(_ text: String) -> QuickViewModel {
