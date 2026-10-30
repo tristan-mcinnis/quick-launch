@@ -202,8 +202,10 @@ final class TranslatorModel {
     /// Called when the target, the source language or the source choice
     /// changes, so the app can remember the pair.
     @ObservationIgnored var onLanguagesChange: (() -> Void)?
-    /// Called once per translation request started. Carries no text.
+    /// Called once per Translator window session, on its first translation
+    /// request. Carries no text. `prepare` starts a new session.
     @ObservationIgnored var onTranslationRun: (() -> Void)?
+    @ObservationIgnored private var reportedRunThisSession = false
     @ObservationIgnored var onCommit: ((TranslationRecord) -> Void)?
     @ObservationIgnored var debounce: Duration = TranslatorModel.debounce
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
@@ -257,6 +259,7 @@ final class TranslatorModel {
         retainedSelection: String? = nil
     ) {
         clear()
+        reportedRunThisSession = false
         message = nil
         languagePicker = nil
         pickerQuery = ""
@@ -492,7 +495,10 @@ final class TranslatorModel {
         }
         requestTask?.cancel()
         isTranslating = true
-        onTranslationRun?()
+        if !reportedRunThisSession {
+            reportedRunThisSession = true
+            onTranslationRun?()
+        }
         let requestTarget = target
         let knownSource = knownSourceOfSwappedText
         let prompt = Self.prompt(for: text, target: requestTarget, source: chosenSource)

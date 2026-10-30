@@ -675,9 +675,7 @@ struct InteractionJournalTests {
         let (vm, journal) = makeViewModel()
         let model = TranslatorModel(lastTarget: .english, serviceFactory: { mock })
         model.debounce = .milliseconds(1)
-        model.onTranslationRun = { [weak vm] in
-            vm?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
-        }
+        vm.journalFeatureUse(of: model)
         model.sourceInput = "SECRET-SOURCE"
         await model.settled()
 
@@ -685,6 +683,58 @@ struct InteractionJournalTests {
         expectContentFree(journal.recentEvents().first, kind: .translatorRun, itemID: "feature:translator")
         let blob = String(decoding: (try? JSONEncoder().encode(journal.events)) ?? Data(), as: UTF8.self)
         #expect(!blob.contains("SECRET"))
+    }
+
+    @Test func severalTranslationsInOneSessionAreOneEventAndReopeningIsAnother() async {
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "ok", finishReason: "stop")])
+        let model = TranslatorModel(lastTarget: .english, serviceFactory: { mock })
+        model.debounce = .milliseconds(1)
+        var runs = 0
+        model.onTranslationRun = { runs += 1 }
+
+        model.prepare(target: nil, selectedText: nil)
+        model.sourceInput = "one"
+        await model.settled()
+        model.sourceInput = "one two"
+        await model.settled()
+        model.swap()
+        await model.settled()
+        model.setTarget(.simplifiedChinese)
+        await model.settled()
+        #expect(runs == 1)
+
+        model.prepare(target: nil, selectedText: nil)
+        model.sourceInput = "again"
+        await model.settled()
+        #expect(runs == 2)
+    }
+
+    @Test func aSavedActionThatNeverSendsIsNotJournalledAsARun() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.savedPrompts = [SavedPrompt(alias: "polish", prompt: "Polish {input}")]
+        let (vm, journal) = makeViewModel(settings: settings, service: nil)
+        vm.apiKeyProvider = { _ in "" }
+        vm.input = "/polish hello"
+        await vm.submit()
+        #expect(journal.count(of: .aiFailed) == 1)
+        #expect(journal.count(of: .savedActionRun) == 0)
+    }
+
+    @Test func aCommandSavedActionIsJournalledWhenItStarts() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let action = SavedPrompt(
+            alias: "run-echo", prompt: "{input}",
+            commandExecutable: "/bin/echo", commandArguments: ["{input}"]
+        )
+        settings.savedPrompts = [action]
+        let (vm, journal) = makeViewModel(settings: settings)
+        vm.input = "/run-echo hi"
+        await vm.submit()
+        #expect(journal.recentEvents().filter { $0.kind == .savedActionRun }.map(\.itemID)
+            == ["action:\(action.id.uuidString)"])
     }
 
     @Test func featureKindsAreDistinctAndTheirItemIDsSurviveSanitizing() {

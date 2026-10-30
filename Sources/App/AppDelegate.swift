@@ -1114,9 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if panel?.isVisible == true { hideOverlay() }
         let controller = typeToClickController ?? TypeToClickController()
-        controller.onTargetUsed = { [weak self] in
-            self?.viewModel?.noteFeatureUse(.typeToClickUsed, itemID: "feature:type-to-click")
-        }
+        viewModel?.journalFeatureUse(of: controller)
         let exitHotkey = viewModel?.settings.typeToClickHotkeyEnabled == true
             ? viewModel?.settings.typeToClickHotkey
             : nil
@@ -1145,9 +1143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             selectedTextService: selectedTextService,
             pasteboard: vm.pasteboard
         )
-        model.onTranslationRun = { [weak vm] in
-            vm?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
-        }
+        vm.journalFeatureUse(of: model)
         model.onLanguagesChange = { [weak vm, weak model] in
             guard let vm, let model else { return }
             vm.settings.lastTranslationTarget = model.target.code
@@ -1260,7 +1256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.captureLaunchSelection()
         // A hotkey run is a direct use; the journal keeps its own row and
         // ranking is left alone because a saved action is not a launcher item.
-        vm.noteDirectHotkeyUse(itemID: "action:\(action.alias)")
+        vm.noteDirectHotkeyUse(itemID: "action:\(action.id.uuidString)")
         showOverlay(captureSelectionTarget: false)
         Task { await vm.perform(action: action) }
     }

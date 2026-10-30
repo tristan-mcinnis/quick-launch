@@ -29,6 +29,10 @@ enum InteractionJournalEventKind: String, Codable, Sendable, CaseIterable {
     case aiSucceeded
     /// A hotkey ran an item without the launcher being used.
     case directHotkeyUse
+    // The kinds below are newer than file format version 2, which is not
+    // bumped. A build that predates them decodes their rows as `.unknown`
+    // and writes them back as `.unknown`, so downgrading and then using the
+    // older build loses these rows' kinds. Accepted: counts only, no content.
     /// Type to Click acted on a target. Item: `feature:type-to-click`.
     case typeToClickUsed
     /// The Translator window started a translation. Item: `feature:translator`.

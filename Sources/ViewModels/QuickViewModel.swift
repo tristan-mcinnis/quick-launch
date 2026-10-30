@@ -669,9 +669,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     func runHouseCommand(_ row: HouseCommandRow, argument: String?) async {
         guard let houseCommandCatalog else { return }
         errorMessage = nil
-        noteFeatureUse(.houseCommandRun, itemID: "command:\(row.id)")
         do {
             let outcome = try await houseCommandCatalog.run(row, argument: argument)
+            noteFeatureUse(.houseCommandRun, itemID: "command:\(row.id)")
             input = ""
             switch outcome {
             case .completed(let reply):
@@ -2644,6 +2644,21 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the text, selection, answer or prompt it worked on.
     func noteFeatureUse(_ kind: InteractionJournalEventKind, itemID: String) {
         recordJournal(kind: kind, itemID: itemID)
+    }
+
+    /// The app's wiring from Type to Click to the journal. AppDelegate and the
+    /// tests both call this, so a test exercises the real path.
+    func journalFeatureUse(of controller: TypeToClickController) {
+        controller.onTargetUsed = { [weak self] in
+            self?.noteFeatureUse(.typeToClickUsed, itemID: "feature:type-to-click")
+        }
+    }
+
+    /// The app's wiring from the Translator window to the journal.
+    func journalFeatureUse(of model: TranslatorModel) {
+        model.onTranslationRun = { [weak self] in
+            self?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
+        }
     }
 
     func forgetLearnedRanking() {
@@ -8286,8 +8301,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return nil
         }
 
-        if let action { noteFeatureUse(.savedActionRun, itemID: "action:\(action.actionID.uuidString)") }
-
         // Command actions run a local executable directly and never reach a
         // model provider.
         if let action,
@@ -9021,6 +9034,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             requestInputFocus()
             return
         }
+        // The request really starts from here, so this is a run.
+        if let action = request.action {
+            noteFeatureUse(.savedActionRun, itemID: "action:\(action.actionID.uuidString)")
+        }
 
         // One model request at a time: a request still live is stopped here,
         // and text it buffered but never drew is dropped, so none of it
@@ -9497,6 +9514,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         submittedInput: String,
         takesComposerText: Bool
     ) async {
+        noteFeatureUse(.savedActionRun, itemID: "action:\(definition.id.uuidString)")
         let chatHadAnswer = chatShowsAnswer
         errorMessage = nil
         output = ""

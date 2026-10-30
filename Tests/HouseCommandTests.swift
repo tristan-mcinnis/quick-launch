@@ -1152,6 +1152,29 @@ struct HouseCommandLauncherTests {
         #expect(events.first?.detail == nil)
     }
 
+    @Test func aCommandThatThrowsIsNotJournalledAsARun() async {
+        let folder = FixtureFolder()
+        folder.write("rti.json", rtiManifest)
+        let dispatcher = FakeDispatcher(
+            statuses: ["rti": status(["recording": false])],
+            failure: .refused(app: "RTI", message: "no input device")
+        )
+        let journal = InteractionJournalStore(fileURL: nil)
+        let vm = QuickViewModel(
+            service: MockQuickService(),
+            interactionJournal: journal,
+            houseCommandCatalog: HouseCommandCatalog(directory: folder.directory, dispatcher: dispatcher)
+        )
+        vm.overlayPresenter = RecordingPresenter()
+        vm.refreshHouseCommands()
+        await vm.waitForHouseCommandRefreshForTesting()
+
+        await vm.performHouseCommand(vm.houseCommandItems[0])
+
+        #expect(vm.errorMessage != nil)
+        #expect(journal.count(of: .houseCommandRun) == 0)
+    }
+
     @Test func aTextCommandAsksForItsArgumentWithTheExistingPrompt() async {
         let folder = FixtureFolder()
         folder.write("memory.json", plainMemoryManifest)
