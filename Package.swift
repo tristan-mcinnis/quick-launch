@@ -7,7 +7,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.5.0"),
         .package(url: "https://github.com/tristan-mcinnis/house-chat-core", from: "1.0.0"),
-        .package(url: "https://github.com/tristan-mcinnis/design-system", from: "1.0.0"),
+        .package(url: "https://github.com/tristan-mcinnis/design-system", from: "1.1.0"),
     ],
     targets: [
         .executableTarget(

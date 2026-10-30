@@ -55,7 +55,7 @@ struct ProviderSettingsView: View {
                 instructionCards
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
@@ -91,7 +91,7 @@ struct ProviderSettingsView: View {
             }
 
             CardNote {
-                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                VStack(alignment: .leading, spacing: House.Spacing.xxs) {
                     Button("Manage models") { showingManageModels = true }
                         .accessibilityLabel("Manage models")
                     CardText("Every model from every provider, with the switch that hides it from the pickers and its reasoning effort.")

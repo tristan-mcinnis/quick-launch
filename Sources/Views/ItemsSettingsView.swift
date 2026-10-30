@@ -140,30 +140,32 @@ struct ItemsSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: House.Spacing.sm) {
+        VStack(alignment: .leading, spacing: House.Spacing.xl) {
             toolbar
 
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                HouseDivider()
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                            if index > 0 { HouseDivider() }
-                            rowView(row)
+            VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    HouseDivider()
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                if index > 0 { HouseDivider() }
+                                rowView(row)
+                            }
                         }
                     }
                 }
-            }
-            .raisedCard()
-            .settingsAnchor("items.list")
+                .raisedCard()
+                .settingsAnchor("items.list")
 
-            Text(footerText)
-                .font(AQDesign.TypeToken.caption)
-                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                Text(footerText)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            }
         }
         .padding(.horizontal, SettingsMetrics.paneInset)
-        .padding(.bottom, House.Spacing.md)
+        .padding(.bottom, SettingsMetrics.paneBottom)
         .confirmationDialog(
             pendingRemoval.map { removeHelp(for: $0) } ?? "Remove",
             isPresented: Binding(
@@ -194,7 +196,7 @@ struct ItemsSettingsView: View {
     }
 
     private var toolbar: some View {
-        VStack(alignment: .leading, spacing: House.Spacing.sm) {
+        VStack(alignment: .leading, spacing: House.Spacing.lg) {
             // The whole filter strip gets its own row: eight segments with
             // their labels need the pane width, and sharing the row with Add
             // and Search truncated every title.

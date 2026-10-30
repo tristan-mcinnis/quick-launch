@@ -22,7 +22,7 @@ struct ClipboardLinksSettingsView: View {
                 catalogCard.settingsAnchor("clipboard.catalog")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { browsers = QuickViewModel.installedBrowsers }

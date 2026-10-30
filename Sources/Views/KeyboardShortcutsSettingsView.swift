@@ -25,7 +25,7 @@ struct KeyboardShortcutsSettingsView: View {
                 globalCard.settingsAnchor("keyboard.global")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

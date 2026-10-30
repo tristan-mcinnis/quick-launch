@@ -354,14 +354,17 @@ struct SettingsCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // The section label is the card's own header row: sm above it, the
+        // xs gap below it set once on this stack. Rows keep their own rhythm.
+        VStack(alignment: .leading, spacing: House.Spacing.xs) {
             if let title {
                 SectionLabel(text: title)
-                    .padding(.top, House.Spacing.sm)
-                    .padding(.bottom, AQDesign.Space.compact)
             }
-            content
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
         }
+        .padding(.top, title == nil ? 0 : House.Spacing.sm)
         .padding(.horizontal, House.Spacing.md)
         .padding(.bottom, AQDesign.Space.compact)
         .frame(maxWidth: .infinity, alignment: .leading)

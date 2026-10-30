@@ -5,13 +5,19 @@ import HouseDesign
 
 /// Measures the Settings shell and its panes share.
 ///
-/// Every value here is a house token except `paneInset`: the mockup's 22 pt
-/// pane gutter is the one Settings measure that is not on the spacing scale.
+/// Every value here is a house token except `railGap`. The pane measures
+/// follow the house form spacing rule (design-system/docs/form-spacing.md).
 enum SettingsMetrics {
     /// Horizontal gutter of the pane header, the cards, and the notes.
-    static let paneInset: CGFloat = 22
+    static let paneInset = House.Spacing.xxl
     /// Gap between the cards stacked down a pane.
-    static let cardGap = House.Spacing.sm
+    static let cardGap = House.Spacing.xl
+    /// Space above the pane title.
+    static let paneTop = House.Spacing.xxxl
+    /// Gap from the pane header to the first group.
+    static let headerGap = House.Spacing.xl
+    /// Space below the last group of a pane.
+    static let paneBottom = House.Spacing.xxxl
     /// Gap between two rail rows.
     static let railGap: CGFloat = 3
 }
@@ -210,26 +216,28 @@ struct SettingsView: View {
 
     private var pane: some View {
         VStack(spacing: 0) {
-            paneHeader
-            Group {
-                switch tab {
-                case .general: GeneralTab(viewModel: viewModel)
-                case .keyboard: KeyboardShortcutsSettingsView(viewModel: viewModel)
-                case .items: ItemsSettingsView(viewModel: viewModel)
-                case .models: ProviderSettingsView(viewModel: viewModel)
-                case .clipboard: ClipboardLinksSettingsView(viewModel: viewModel)
-                case .prompts: SavedPromptsTab(viewModel: viewModel)
-                case .about: AboutTab(viewModel: viewModel)
+            VStack(spacing: SettingsMetrics.headerGap) {
+                paneHeader
+                Group {
+                    switch tab {
+                    case .general: GeneralTab(viewModel: viewModel)
+                    case .keyboard: KeyboardShortcutsSettingsView(viewModel: viewModel)
+                    case .items: ItemsSettingsView(viewModel: viewModel)
+                    case .models: ProviderSettingsView(viewModel: viewModel)
+                    case .clipboard: ClipboardLinksSettingsView(viewModel: viewModel)
+                    case .prompts: SavedPromptsTab(viewModel: viewModel)
+                    case .about: AboutTab(viewModel: viewModel)
+                    }
                 }
+                .environment(\.settingsFocus, focus)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .environment(\.settingsFocus, focus)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             paneFooter
         }
     }
 
     private var paneHeader: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: House.Spacing.xs) {
             Text(tab.title)
                 .font(AQDesign.TypeToken.title)
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
@@ -239,7 +247,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, SettingsMetrics.paneInset)
-        .padding(.vertical, House.Spacing.md)
+        .padding(.top, SettingsMetrics.paneTop)
     }
 
     private var paneFooter: some View {
@@ -534,7 +542,7 @@ private struct GeneralTab: View {
                 appearanceCard.settingsAnchor("general.appearance")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -1139,7 +1147,7 @@ private struct AboutTab: View {
                 .settingsAnchor("about.source")
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

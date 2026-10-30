@@ -44,7 +44,7 @@ struct SavedPromptsEditor: View {
                 }
             }
             .padding(.horizontal, SettingsMetrics.paneInset)
-            .padding(.bottom, House.Spacing.md)
+            .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task {
@@ -136,24 +136,26 @@ struct SavedPromptsEditor: View {
     private func detailCard(_ prompt: SavedPrompt) -> some View {
         SettingsCard("Selected command") {
             CardNote(isFirst: true) {
-                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                VStack(alignment: .leading, spacing: House.Spacing.xs) {
                     Text("Prompt")
                         .font(AQDesign.TypeToken.label)
                         .foregroundStyle(AQDesign.ColorToken.textPrimary)
-                    TextEditor(text: bindingForPrompt(prompt.id))
-                        .font(AQDesign.TypeToken.detail)
-                        .scrollContentBackground(.hidden)
-                        .padding(AQDesign.Space.standard)
-                        .frame(minHeight: 76, maxHeight: 100)
-                        .background(fieldBackground)
-                        .accessibilityLabel("Prompt")
-                    CardText("Use {selection} where the selected or typed text should appear. If omitted, the text is appended.")
+                    VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                        TextEditor(text: bindingForPrompt(prompt.id))
+                            .font(AQDesign.TypeToken.detail)
+                            .scrollContentBackground(.hidden)
+                            .padding(AQDesign.Space.standard)
+                            .frame(minHeight: 76, maxHeight: 100)
+                            .background(fieldBackground)
+                            .accessibilityLabel("Prompt")
+                        CardText("Use {selection} where the selected or typed text should appear. If omitted, the text is appended.")
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             CardNote {
-                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                VStack(alignment: .leading, spacing: House.Spacing.xxs) {
                     HStack(spacing: AQDesign.Space.standard) {
                         Text("Command:")
                             .font(AQDesign.TypeToken.label)
@@ -275,19 +277,21 @@ struct SavedPromptsEditor: View {
         let isCommand = prompt.commandExecutable?.isEmpty == false
         SettingsCard("Assistant") {
             CardNote(isFirst: true) {
-                VStack(alignment: .leading, spacing: AQDesign.Space.standard) {
+                VStack(alignment: .leading, spacing: House.Spacing.xs) {
                     Text("Instructions")
                         .font(AQDesign.TypeToken.label)
                         .foregroundStyle(isCommand ? AQDesign.ColorToken.textSecondary : AQDesign.ColorToken.textPrimary)
-                    TextEditor(text: bindingForInstructions(prompt.id))
-                        .font(AQDesign.TypeToken.detail)
-                        .scrollContentBackground(.hidden)
-                        .padding(AQDesign.Space.standard)
-                        .frame(minHeight: Self.instructionsMinHeight, maxHeight: Self.instructionsMaxHeight)
-                        .background(fieldBackground)
-                        .disabled(isCommand)
-                        .accessibilityLabel("Instructions")
-                    CardText(instructionsNote(prompt))
+                    VStack(alignment: .leading, spacing: House.Spacing.xxs) {
+                        TextEditor(text: bindingForInstructions(prompt.id))
+                            .font(AQDesign.TypeToken.detail)
+                            .scrollContentBackground(.hidden)
+                            .padding(AQDesign.Space.standard)
+                            .frame(minHeight: Self.instructionsMinHeight, maxHeight: Self.instructionsMaxHeight)
+                            .background(fieldBackground)
+                            .disabled(isCommand)
+                            .accessibilityLabel("Instructions")
+                        CardText(instructionsNote(prompt))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
