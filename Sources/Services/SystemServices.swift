@@ -2,9 +2,10 @@ import AppKit
 import Foundation
 
 // AppKit implementations of the seams in `Sources/Protocols/SystemServicing.swift`.
-// `QuickViewModel.init` installs these by default, except the pasteboard (the
-// app injects `SystemPasteboard`; the default is `InMemoryPasteboard`); tests
-// inject fakes.
+// `QuickViewModel.init` installs these by default, except the seams that change
+// the system: the app injects `SystemPasteboard`, `SystemWorkspace` and
+// `SystemRunningApplications`, and the defaults are `InMemoryPasteboard`,
+// `InMemoryWorkspace` and `NoRunningApplications`; tests inject fakes.
 
 @MainActor
 final class SystemPasteboard: PasteboardWriting {
@@ -99,7 +100,7 @@ final class InMemoryPasteboard: PasteboardWriting {
 final class SystemWorkspace: WorkspaceOpening {
     init() {}
 
-    func open(_ url: URL) {
+    @discardableResult func open(_ url: URL) -> Bool {
         NSWorkspace.shared.open(url)
     }
 
@@ -127,6 +128,39 @@ final class SystemWorkspace: WorkspaceOpening {
     }
 }
 
+/// A workspace that only records what it was asked to open: `QuickViewModel`'s
+/// default when none is injected, so a view model built without one (a test)
+/// never opens a browser tab, a Finder window, or an app. Lookups still read
+/// the system, which opens nothing.
+@MainActor
+final class InMemoryWorkspace: WorkspaceOpening {
+    private(set) var openedURLs: [URL] = []
+    private(set) var revealedURLs: [URL] = []
+
+    init() {}
+
+    @discardableResult func open(_ url: URL) -> Bool {
+        openedURLs.append(url)
+        return true
+    }
+
+    func open(_ url: URL, withApplicationAt applicationURL: URL, activating: Bool) {
+        openedURLs.append(url)
+    }
+
+    func revealInFileViewer(_ urls: [URL]) {
+        revealedURLs.append(contentsOf: urls)
+    }
+
+    func applicationURL(forBundleIdentifier bundleIdentifier: String) -> URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+    }
+
+    func applicationURLs(toOpen url: URL) -> [URL] {
+        NSWorkspace.shared.urlsForApplications(toOpen: url)
+    }
+}
+
 extension NSRunningApplication: RunningApplicationControlling {}
 
 @MainActor
@@ -143,6 +177,19 @@ final class SystemRunningApplications: RunningApplicationsQuerying {
             return running
         }
         return NSWorkspace.shared.runningApplications.first { $0.bundleURL == bundleURL }
+    }
+}
+
+/// Reports no running application: `QuickViewModel`'s default when none is
+/// injected, so a test can never hide, quit or relaunch a real app.
+@MainActor
+final class NoRunningApplications: RunningApplicationsQuerying {
+    init() {}
+
+    func isTerminated(processIdentifier: pid_t) -> Bool? { nil }
+
+    func runningApplication(bundleIdentifier: String?, bundleURL: URL) -> (any RunningApplicationControlling)? {
+        nil
     }
 }
 

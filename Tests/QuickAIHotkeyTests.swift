@@ -133,7 +133,7 @@ struct QuickAIHotkeyTests {
 
     @Test func launcherSavedActionAndTypeToClickKeysAreUnchangedByDefault() {
         // Turning the direct hotkey on and off touches nothing else.
-        var settings = QuickSettings()
+        let settings = QuickSettings()
         #expect(!settings.quickAIHotkeyEnabled)
         #expect(settings.launcherHotkeyConflict() == nil)
         #expect(settings.translatorHotkeyConflict() == nil)

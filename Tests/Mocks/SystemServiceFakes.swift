@@ -57,8 +57,9 @@ final class FakeWorkspace: WorkspaceOpening {
 
     init() {}
 
-    func open(_ url: URL) {
+    @discardableResult func open(_ url: URL) -> Bool {
         openedURLs.append(url)
+        return true
     }
 
     func open(_ url: URL, withApplicationAt applicationURL: URL, activating: Bool) {

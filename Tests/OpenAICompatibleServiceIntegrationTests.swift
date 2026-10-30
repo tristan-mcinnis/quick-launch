@@ -229,17 +229,21 @@ private actor LocalHTTPServer {
         responseBody: String,
         statusCode: Int,
         bodyValidator: (@Sendable (Data) -> Bool)?,
-        onValid: @escaping (Bool) -> Void
+        onValid: @escaping @Sendable (Bool) -> Void
     ) {
-        var received = Data()
-        func readMore() {
+        // Each receive callback asks for the next read only at its end, so
+        // callbacks run one after another (even on the concurrent `.global()`
+        // queue) and this buffer is never touched concurrently.
+        final class Buffer: @unchecked Sendable { var data = Data() }
+        let received = Buffer()
+        @Sendable func readMore() {
             conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
-                if let d = data { received.append(d) }
+                if let d = data { received.data.append(d) }
                 // Check if we've read the full HTTP request (headers + body)
                 // Minimal check: if we see \r\n\r\n and there's content-length bytes after, or the connection is complete
-                if let headerEnd = received.range(of: Data("\r\n\r\n".utf8)) {
-                    let headers = String(data: received[..<headerEnd.lowerBound], encoding: .utf8) ?? ""
-                    let body = received[headerEnd.upperBound...]
+                if let headerEnd = received.data.range(of: Data("\r\n\r\n".utf8)) {
+                    let headers = String(data: received.data[..<headerEnd.lowerBound], encoding: .utf8) ?? ""
+                    let body = received.data[headerEnd.upperBound...]
                     let contentLength = Self.parseContentLength(headers)
                     if body.count >= contentLength {
                         // Full request received

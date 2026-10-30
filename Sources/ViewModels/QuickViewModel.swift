@@ -822,10 +822,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var screenshotService: (any ScreenshotCapturing)?
     var screenAwareness: (any ScreenAwarenessReading)?
     /// AppKit seams (pasteboard, Finder/URL opening, running apps, displays).
-    /// The app keeps the system defaults; tests inject fakes. The pasteboard
-    /// is the exception: with none injected it is in memory
-    /// (`InMemoryPasteboard`), and the app passes `SystemPasteboard`, so a
-    /// test that copies never replaces the user's clipboard.
+    /// The app keeps the system defaults; tests inject fakes. The seams that
+    /// change the system are the exceptions: with none injected they are
+    /// inert (`InMemoryPasteboard`, `InMemoryWorkspace`,
+    /// `NoRunningApplications`), and the app passes the system ones, so a test
+    /// never replaces the user's clipboard, opens a real browser tab or Finder
+    /// window, or quits a real app.
     @ObservationIgnored var pasteboard: any PasteboardWriting
     @ObservationIgnored var workspace: any WorkspaceOpening
     @ObservationIgnored var runningApplications: any RunningApplicationsQuerying
@@ -1078,8 +1080,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 writer: ChatArchiveAnswerWriter(archive: chatArchive)
             )
         }
-        self.workspace = workspace ?? SystemWorkspace()
-        self.runningApplications = runningApplications ?? SystemRunningApplications()
+        self.workspace = workspace ?? InMemoryWorkspace()
+        self.runningApplications = runningApplications ?? NoRunningApplications()
         self.screenGeometry = screenGeometry ?? SystemScreenGeometry()
         self.houseCommandCatalog = houseCommandCatalog
         self.currentVersion = currentVersion
@@ -3939,7 +3941,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
             input = ""
             prepareForExternalAction?()
-            if await FolderLocationService.open(location) {
+            // Native open, not an AppleScript that fronts an existing Finder
+            // window: that Apple Event could hang for minutes (measured 107 s).
+            if workspace.open(location.expandedURL) {
                 overlayPresenter.dismissOverlay()
             } else {
                 recoverFromExternalActionFailure?()
@@ -6906,7 +6910,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 closeItemActionPane()
                 input = ""
                 overlayPresenter.dismissOverlay()
-                FolderLocationService.reveal(location)
+                workspace.revealInFileViewer([location.expandedURL])
             case .item(let item) where item.kind == .answer:
                 closeItemActionPane()
                 Task { _ = await pasteLauncherItem(item) }

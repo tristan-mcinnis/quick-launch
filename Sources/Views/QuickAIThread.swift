@@ -768,7 +768,7 @@ struct QuickAIThread: View {
 
     /// A chat with a few turns, opened from elsewhere, is held back until it
     /// has landed; a new chat or its first turns never are.
-    fileprivate static let heldMinimumMessages = 3
+    fileprivate nonisolated static let heldMinimumMessages = 3
 
     private var isHoldingChat: Bool {
         ThreadReveal.isHolding(current: viewModel.currentConversation?.id, revealed: revealedChatID, messageCount: viewModel.conversationMessages.count)
@@ -784,7 +784,7 @@ struct QuickAIThread: View {
         let savedSpot = knownConversationID.flatMap { viewModel.takeOpeningAnchor(for: $0) }
         revealTask?.cancel()
         turnGeometry.restoring = nil
-        guard isHoldingChat, let id = knownConversationID else {
+        guard isHoldingChat, knownConversationID != nil else {
             // Not held: this chat is already shown, so its later turns must
             // not be taken for a chat being opened. A short chat with a saved
             // spot still opens there: the model has stopped following the end.

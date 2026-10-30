@@ -72,7 +72,7 @@ actor LinkAttachmentReader {
         progress?(.reading)
         let hash = AttachmentExtractor.sha256(fetched.data)
         let finalHost = fetched.finalURL.host() ?? host
-        var notes: [AttachmentNote] = fetched.bodyCut ? [.linkBodyCut(limitBytes: bodyLimit)] : []
+        let notes: [AttachmentNote] = fetched.bodyCut ? [.linkBodyCut(limitBytes: bodyLimit)] : []
 
         switch Self.category(of: fetched) {
         case .image:

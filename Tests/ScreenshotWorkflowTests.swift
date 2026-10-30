@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Synchronization
 import Testing
 @testable import QuickLaunch
 
@@ -26,10 +27,10 @@ struct ScreenshotWorkflowTests {
         let vm = QuickViewModel(screenshotService: capture)
         vm.rememberSelectionTarget(Self.safari)
 
-        var presented = 0
+        let presented = Mutex(0)
         let token = NotificationCenter.default.addObserver(
             forName: .presentOverlay, object: nil, queue: nil
-        ) { _ in presented += 1 }
+        ) { _ in presented.withLock { $0 += 1 } }
         defer { NotificationCenter.default.removeObserver(token) }
 
         vm.settings.screenshotTextSearch = false
@@ -49,7 +50,7 @@ struct ScreenshotWorkflowTests {
         #expect(vm.pendingImage == Self.sampleAttachment)
         #expect(vm.input.isEmpty)
         #expect(vm.errorMessage == nil)
-        #expect(presented == 1)
+        #expect(presented.withLock { $0 } == 1)
         #expect(vm.launcherMatches.isEmpty)
     }
 

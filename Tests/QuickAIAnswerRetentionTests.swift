@@ -69,7 +69,7 @@ struct QuickAIAnswerRetentionTests {
         #expect(vm.output == "Head. ", "a live answer keeps the text already shown")
         #expect(vm.lastQuestion == "Q", "the live turn keeps its question")
 
-        await gated.release()
+        gated.release()
         await submit.value
 
         #expect(vm.conversationMessages.map(\.content) == ["Q", "Head. Tail."],
@@ -91,7 +91,7 @@ struct QuickAIAnswerRetentionTests {
         // What `overlayClearTask` runs when the retention window ends.
         vm.clearTransientDisplay()
 
-        await gated.release()
+        gated.release()
         await submit.value
 
         #expect(vm.conversationMessages.map(\.content) == ["Q", "Head. Tail."])
@@ -115,7 +115,7 @@ struct QuickAIAnswerRetentionTests {
         vm.cancelDeferredTransientClear()
         vm.openQuickAI()
 
-        await gated.release()
+        gated.release()
         await submit.value
 
         #expect(vm.output == "Head. Tail.", "a reopened surface keeps its answer")
@@ -197,7 +197,7 @@ struct QuickAIAnswerRetentionTests {
         // A question asked on the surface (the submit seam every ask uses).
         vm.input = "Second"
         await vm.submit()
-        await gated.release()
+        gated.release()
         await first.value
 
         #expect(vm.isTransientClearDeferred == false)
@@ -224,7 +224,7 @@ struct QuickAIAnswerRetentionTests {
         vm.openQuickAI()
         vm.input = "Second"
         await vm.submit()
-        await gated.release()
+        gated.release()
         await first.value
 
         #expect(vm.output == gated.followUp, "the settled old turn cleared nothing")

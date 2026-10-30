@@ -50,7 +50,8 @@ extension PasteboardWriting {
 /// Opens URLs, reveals files, and finds applications.
 @MainActor
 protocol WorkspaceOpening: AnyObject {
-    func open(_ url: URL)
+    /// Returns false when the system could not open `url`.
+    @discardableResult func open(_ url: URL) -> Bool
     /// Opens `url` with the application at `applicationURL`, bringing it
     /// forward when `activating` is true.
     func open(_ url: URL, withApplicationAt applicationURL: URL, activating: Bool)
