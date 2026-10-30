@@ -181,6 +181,58 @@ struct PasteOutcomeTests {
         #expect(!vm.justCopied)
     }
 
+    private static func richItem() -> LauncherCatalogItem {
+        var item = LauncherCatalogItem(
+            kind: .clipboard, itemID: "rich", title: "Rich", detail: "Test", value: "Pic"
+        )
+        item.clipboardPayload = ClipboardPayload(
+            kind: .image,
+            text: "Pic",
+            items: [[ClipboardRawItem(type: "public.png", data: Data([1, 2, 3]))]]
+        )
+        return item
+    }
+
+    @Test func copyingARichItemWritesTheInjectedPasteboard() async {
+        let pasteboard = FakePasteboard(string: "user's copy")
+        let vm = QuickViewModel(selectedTextService: OutcomeSelection(outcome: .pasted), pasteboard: pasteboard)
+        let item = Self.richItem()
+
+        #expect(await vm.copyLauncherItem(item))
+        #expect(pasteboard.payloadWriteCount == 1)
+        #expect(pasteboard.lastPayload == item.clipboardPayload)
+    }
+
+    @Test func pastingARichItemWritesTheInjectedPasteboardBeforeTheGuardBaseline() async {
+        let selection = OutcomeSelection(outcome: .pasted)
+        let pasteboard = FakePasteboard()
+        selection.onPastePasteboard = { selection.payloadWritesAtKeystroke = pasteboard.payloadWriteCount }
+        let vm = QuickViewModel(selectedTextService: selection, pasteboard: pasteboard)
+        vm.rememberSelectionTarget(selection.target)
+
+        #expect(await vm.pasteLauncherItem(Self.richItem()))
+        #expect(pasteboard.payloadWriteCount == 1)
+        // The write lands before the service takes its change-count baseline.
+        #expect(selection.payloadWritesAtKeystroke == 1)
+    }
+
+    @Test func richRestorePasteLeavesTheClipboardAloneWhenItChanged() async {
+        let selection = OutcomeSelection(outcome: .clipboardChanged)
+        let pasteboard = FakePasteboard()
+        let vm = QuickViewModel(selectedTextService: selection, pasteboard: pasteboard)
+        vm.rememberSelectionTarget(selection.target)
+        var recovered = 0
+        vm.recoverFromExternalActionFailure = { recovered += 1 }
+
+        #expect(await vm.pasteLauncherItem(Self.richItem()) == false)
+        // Only the restore before the keystroke; no copy-instead after it.
+        #expect(pasteboard.payloadWriteCount == 1)
+        #expect(pasteboard.writeCount == 1)
+        #expect(vm.errorMessage == Self.skipped)
+        #expect(!vm.justCopied)
+        #expect(recovered == 1)
+    }
+
     @Test func translatorLeavesTheClipboardAloneWhenItChanged() async {
         let selection = OutcomeSelection(outcome: .clipboardChanged)
         let pasteboard = FakePasteboard(string: "user's newer copy")
@@ -201,6 +253,8 @@ private final class OutcomeSelection: SelectedTextServicing {
     let target = SelectionTarget(processIdentifier: 321, applicationName: "Editor")
     let outcome: PasteOutcome
     let selectedText: String?
+    var onPastePasteboard: (() -> Void)?
+    var payloadWritesAtKeystroke = -1
     init(outcome: PasteOutcome, selectedText: String? = nil) {
         self.outcome = outcome
         self.selectedText = selectedText
@@ -215,6 +269,9 @@ private final class OutcomeSelection: SelectedTextServicing {
     func paste(_ text: String, to target: SelectionTarget) async -> Bool { outcome == .pasted }
     func replaceOutcome(_ text: String, in context: SelectedTextContext) async -> PasteOutcome { outcome }
     func pasteOutcome(_ text: String, to target: SelectionTarget) async -> PasteOutcome { outcome }
-    func pastePasteboardOutcome(to target: SelectionTarget) async -> PasteOutcome { outcome }
+    func pastePasteboardOutcome(to target: SelectionTarget) async -> PasteOutcome {
+        onPastePasteboard?()
+        return outcome
+    }
     func openAccessibilitySettings() {}
 }

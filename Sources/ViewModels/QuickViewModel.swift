@@ -3798,7 +3798,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // async (cache-first, disk off-main); a missing blob reports as
             // unavailable instead of clearing the user's clipboard.
             let full = await clipboardHistory?.payload(for: item) ?? payload
-            guard full.write(to: .general) else {
+            guard pasteboard.writePayload(full) else {
                 errorMessage = "That clipboard item is no longer available on this Mac."
                 requestInputFocus()
                 return false
@@ -3855,7 +3855,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             // representation onto the pasteboard, then Command-V it in. Loads are
             // async (cache-first, disk off-main).
             let full = await clipboardHistory?.payload(for: item) ?? payload
-            guard full.write(to: .general) else {
+            guard pasteboard.writePayload(full) else {
                 recoverFromExternalActionFailure?()
                 errorMessage = "That clipboard item is no longer available on this Mac."
                 return false

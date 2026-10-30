@@ -73,6 +73,34 @@ struct RealWorkspaceGuardTests {
         #expect(offenders.isEmpty, "Inject `FakeWorkspace` instead: \(offenders)")
     }
 
+    /// Every write to the system clipboard goes through `PasteboardWriting`,
+    /// so a test with the fake or in-memory pasteboard cannot overwrite the
+    /// user's clipboard. Reads of `.general` are fine.
+    @Test func onlySeamFilesWriteTheGeneralPasteboard() throws {
+        let allowed: Set<String> = [
+            "Sources/Services/SystemServices.swift",
+            // The paste service writes the answer, then guards Command-V on it.
+            "Sources/Services/SelectedTextService.swift",
+        ]
+        let offenders = try Self.files(under: "Sources").filter { path in
+            try !allowed.contains(path) && Self.writesGeneralPasteboard(Self.source(path))
+        }
+        #expect(offenders.isEmpty, "Route these through `PasteboardWriting`: \(offenders)")
+    }
+
+    @Test func noTestWritesTheGeneralPasteboard() throws {
+        let offenders = try Self.files(under: "Tests").filter { path in
+            guard path != "Tests/RealWorkspaceGuardTests.swift" else { return false }
+            return try Self.writesGeneralPasteboard(Self.source(path))
+        }
+        #expect(offenders.isEmpty, "Use `FakePasteboard`, never `.general`: \(offenders)")
+    }
+
+    private static func writesGeneralPasteboard(_ source: String) -> Bool {
+        source.contains(/write\(to:\s*(NSPasteboard)?\.general\)/)
+            || source.contains(/NSPasteboard\s*\.\s*general\s*\.\s*(clearContents|setString|setData|setPropertyList|writeObjects|declareTypes)/)
+    }
+
     private static func callsRealOpener(_ source: String) -> Bool {
         source.contains(/NSWorkspace\s*\.\s*shared\s*\.\s*(open|activateFileViewerSelecting)/)
     }
