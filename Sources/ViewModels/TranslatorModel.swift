@@ -584,7 +584,12 @@ final class TranslatorModel {
             return false
         }
         record()
-        guard await selectedTextService.paste(translation, to: pasteTarget) else {
+        let outcome = await selectedTextService.pasteOutcome(translation, to: pasteTarget)
+        if outcome == .clipboardChanged {
+            message = "Clipboard changed, so the paste was skipped. The translation is still here."
+            return false
+        }
+        guard outcome == .pasted else {
             pasteboard.writeString(translation)
             message = "Could not paste into \(pasteTarget.applicationName). Copied instead."
             return false

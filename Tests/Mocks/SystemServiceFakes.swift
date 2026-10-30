@@ -31,6 +31,19 @@ final class FakePasteboard: PasteboardWriting {
         isTransient = true
     }
 
+    /// Full-representation restores (an image, rich text, files).
+    private(set) var payloadWriteCount = 0
+    private(set) var lastPayload: ClipboardPayload?
+
+    func writePayload(_ payload: ClipboardPayload) -> Bool {
+        string = payload.text
+        writeCount += 1
+        payloadWriteCount += 1
+        lastPayload = payload
+        isTransient = false
+        return true
+    }
+
     /// The last formatted representation a transient write published, and how
     /// many there were: what a formatted-paste test reads back.
     private(set) var formattedWriteCount = 0

@@ -31,6 +31,11 @@ protocol PasteboardWriting: AnyObject {
     /// clipboard; fakes record the call, so tests never overwrite the user's
     /// clipboard (found 2026-09-12: one test run replaced it with a fixture).
     @MainActor func writeImageFile(at url: URL) -> Bool
+    /// Restores a Clipboard History entry's full representation (image, rich
+    /// text, files, custom types). Returns false when there is nothing to
+    /// write, leaving the pasteboard untouched. Only the system pasteboard
+    /// touches the real clipboard.
+    @MainActor @discardableResult func writePayload(_ payload: ClipboardPayload) -> Bool
 }
 
 extension PasteboardWriting {
@@ -39,6 +44,10 @@ extension PasteboardWriting {
     @MainActor func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
         writeTransientString(representation.plainText)
     }
+
+    /// A conformer without a payload path records nothing and never writes
+    /// the real clipboard.
+    @MainActor @discardableResult func writePayload(_ payload: ClipboardPayload) -> Bool { true }
 
     /// A conformer without an image path records nothing and never writes
     /// the real clipboard.

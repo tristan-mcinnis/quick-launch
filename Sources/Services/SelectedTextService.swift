@@ -22,6 +22,7 @@ final class SelectedTextService: SelectedTextServicing {
     var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
     private var lastTarget: SelectionTarget?
     private var activationObserver: NSObjectProtocol?
+    private let pasteGuard: PasteGuard
 
     /// Bounded AX messaging wait, in seconds, so an unresponsive target app
     /// cannot hang the panel while Quick Launch reads or replaces a selection.
@@ -32,7 +33,8 @@ final class SelectedTextService: SelectedTextServicing {
     /// read the wrong (or no) selection.
     nonisolated static let axMessagingTimeout: Float = 0.15
 
-    init() {
+    init(pasteGuard: PasteGuard = PasteGuard()) {
+        self.pasteGuard = pasteGuard
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
         rememberIfExternal(NSWorkspace.shared.frontmostApplication)
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -117,7 +119,11 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     func replace(_ text: String, in context: SelectedTextContext) async -> Bool {
-        guard !text.isEmpty, AXIsProcessTrusted() else { return false }
+        await replaceOutcome(text, in: context) == .pasted
+    }
+
+    func replaceOutcome(_ text: String, in context: SelectedTextContext) async -> PasteOutcome {
+        guard !text.isEmpty, AXIsProcessTrusted() else { return .failed }
         let application = AXUIElementCreateApplication(context.target.processIdentifier)
 
         if let focused = focusedElement(in: application) {
@@ -135,11 +141,11 @@ final class SelectedTextService: SelectedTextServicing {
                    text as CFString
                ) == .success {
                 activate(context.target)
-                return true
+                return .pasted
             }
         }
 
-        return await paste(text, to: context.target)
+        return await pasteOutcome(text, to: context.target)
     }
 
     func openAccessibilitySettings() {
@@ -168,10 +174,16 @@ final class SelectedTextService: SelectedTextServicing {
     }
 
     func pastePasteboard(to target: SelectionTarget) async -> Bool {
+        await pastePasteboardOutcome(to: target) == .pasted
+    }
+
+    func pastePasteboardOutcome(to target: SelectionTarget) async -> PasteOutcome {
+        // The caller wrote the clipboard just before this call.
+        let expectedChangeCount = pasteGuard.changeCount()
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options),
               let app = NSRunningApplication(processIdentifier: target.processIdentifier)
-        else { return false }
+        else { return .failed }
         app.activate(from: .current, options: [.activateAllWindows])
         var becameFrontmost = false
         for _ in 0..<20 {
@@ -181,36 +193,44 @@ final class SelectedTextService: SelectedTextServicing {
             }
             try? await Task.sleep(for: .milliseconds(25))
         }
-        guard becameFrontmost else { return false }
-        for _ in 0..<40 {
-            let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
-            if held.isEmpty { break }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        return postCommandV()
+        guard becameFrontmost else { return .failed }
+        return await commandVAfterSettling(expectingChangeCount: expectedChangeCount)
     }
 
-    private func postCommandV() -> Bool {
-        let source = CGEventSource(stateID: .privateState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
-        else { return false }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-        return true
+    /// Waits for modifier keys to lift, then sends Command-V unless the
+    /// clipboard changed meanwhile.
+    func commandVAfterSettling(expectingChangeCount expected: Int) async -> PasteOutcome {
+        await pasteGuard.waitForModifierRelease()
+        return commandVOutcome(expectingChangeCount: expected)
+    }
+
+    /// The guarded keystroke, with one log line per way it can not happen
+    /// (never the clipboard text).
+    func commandVOutcome(expectingChangeCount expected: Int) -> PasteOutcome {
+        let outcome = pasteGuard.sendCommandV(expectingChangeCount: expected)
+        switch outcome {
+        case .pasted: break
+        case .clipboardChanged:
+            logger.error("Paste skipped: the clipboard changed after Quick Launch wrote it")
+        case .failed:
+            logger.error("Could not synthesise Command-V")
+        }
+        return outcome
     }
 
     func paste(_ text: String, to target: SelectionTarget) async -> Bool {
+        await pasteOutcome(text, to: target) == .pasted
+    }
+
+    func pasteOutcome(_ text: String, to target: SelectionTarget) async -> PasteOutcome {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else {
             logger.error("Paste blocked: Accessibility permission is not granted")
-            return false
+            return .failed
         }
         guard let app = NSRunningApplication(processIdentifier: target.processIdentifier) else {
             logger.error("Paste target is no longer running: \(target.applicationName, privacy: .public)")
-            return false
+            return .failed
         }
         logger.info("Paste requested for \(target.applicationName, privacy: .public)")
         app.activate(from: .current, options: [.activateAllWindows])
@@ -228,7 +248,7 @@ final class SelectedTextService: SelectedTextServicing {
             logger.error(
                 "Paste target did not become frontmost; frontmost is \(actual, privacy: .public)"
             )
-            return false
+            return .failed
         }
 
         // The text lands on the clipboard first, so whatever happens next the
@@ -243,22 +263,16 @@ final class SelectedTextService: SelectedTextServicing {
             owner: nil
         )
         pasteboard.setString(text, forType: .string)
+        let expectedChangeCount = pasteGuard.changeCount()
 
-        for _ in 0..<40 {
-            let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
-            if held.isEmpty { break }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await pasteGuard.waitForModifierRelease()
 
         // Fast path: accessibility insertion at the caret, no keystrokes.
-        if insertAtCaret(text, processIdentifier: target.processIdentifier) { return true }
+        if insertAtCaret(text, processIdentifier: target.processIdentifier) { return .pasted }
         // Fallback: a synthesised Command-V into the now-frontmost app.
-        guard postCommandV() else {
-            logger.error("Could not synthesise Command-V")
-            return false
-        }
-        logger.info("Paste completed by Command-V fallback")
-        return true
+        let outcome = commandVOutcome(expectingChangeCount: expectedChangeCount)
+        if outcome == .pasted { logger.info("Paste completed by Command-V fallback") }
+        return outcome
     }
 
     /// Sets the caret text through Accessibility and verifies the write took:

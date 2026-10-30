@@ -28,6 +28,11 @@ final class SystemPasteboard: PasteboardWriting {
         Self.writeTransient(text, to: pasteboard)
     }
 
+    @discardableResult
+    func writePayload(_ payload: ClipboardPayload) -> Bool {
+        payload.write(to: pasteboard)
+    }
+
     func writeTransientFormatted(_ representation: FormattedPasteRepresentation) {
         var types: [NSPasteboard.PasteboardType] = [.string]
         if !representation.html.isEmpty { types.append(.html) }
@@ -86,6 +91,16 @@ final class InMemoryPasteboard: PasteboardWriting {
     func writeString(_ text: String) { string = text }
 
     func writeTransientString(_ text: String) { string = text }
+
+    /// The last payload restored, for a test to read back.
+    private(set) var lastPayload: ClipboardPayload?
+
+    @discardableResult
+    func writePayload(_ payload: ClipboardPayload) -> Bool {
+        lastPayload = payload
+        string = payload.text
+        return true
+    }
 
     /// The last formatted representation written, for a test to read back.
     private(set) var lastFormattedRepresentation: FormattedPasteRepresentation?
