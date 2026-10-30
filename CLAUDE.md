@@ -156,6 +156,8 @@ names may appear only in `docs/personal-setup.md`; Tristan's own wiring is descr
 run `SIGN_IDENTITY=- ./scripts/build-app.sh` and verify the resulting
 `build/Quick Launch.app` metadata.
 
+CI runs the scrub and `swift test` on every push (`.github/workflows/ci.yml`).
+
 `swift test` is the pre-push gate and must pass on a busy machine: a test
 waits on the work itself (an injected clock such as `TypeToClickClock`, an
 `AttachmentDeadline`, or a model's own tasks, as `TranslatorModel.settled()`),
