@@ -33,7 +33,7 @@ import Testing
 
 @testable import QuickLaunch
 
-@Suite("Quick AI keyboard routing", .serialized)
+@Suite("Quick AI keyboard routing", .mainActorRenderLane, .serialized)
 @MainActor
 struct QuickAIKeyboardTests {
 

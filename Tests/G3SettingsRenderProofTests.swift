@@ -10,7 +10,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("G3 render proofs", .serialized)
+@Suite("G3 render proofs", .mainActorRenderLane, .serialized)
 @MainActor
 struct G3SettingsRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

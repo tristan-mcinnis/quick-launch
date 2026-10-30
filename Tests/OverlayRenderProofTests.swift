@@ -12,7 +12,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("OverlayRenderProof", .serialized)
+@Suite("OverlayRenderProof", .mainActorRenderLane, .serialized)
 @MainActor
 struct OverlayRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

@@ -12,7 +12,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("SnippetEditorRenderProof", .serialized)
+@Suite("SnippetEditorRenderProof", .mainActorRenderLane, .serialized)
 @MainActor
 struct SnippetEditorRenderProofTests {
     private enum ProofFailure: Error { case noBitmap }

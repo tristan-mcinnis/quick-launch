@@ -465,7 +465,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var caffeinateEndsAt: Date?
     var caffeinateReason: String?
     private var caffeinateCountdownTask: Task<Void, Never>?
-    /// Clock for anything time-derived in the launcher rows; tests pin it.
+    /// Clock for anything time-derived in the launcher rows and the new-chat
+    /// window; tests pin it.
     var now: () -> Date = Date.init
     /// Typing-capture modes beyond Quick Link input.
     var inputMode: InputMode?
@@ -11113,7 +11114,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             return false
         case let option:
             guard let minutes = option.minutes else { return false }
-            return Date().timeIntervalSince(updatedAt) > Double(minutes) * 60
+            return now().timeIntervalSince(updatedAt) > Double(minutes) * 60
         }
     }
 

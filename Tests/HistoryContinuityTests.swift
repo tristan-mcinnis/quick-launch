@@ -6,7 +6,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("History continuity", .serialized)
+@Suite("History continuity", .mainActorRenderLane, .serialized)
 @MainActor
 struct HistoryContinuityTests {
     private func folder() throws -> URL {

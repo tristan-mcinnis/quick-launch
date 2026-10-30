@@ -35,7 +35,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Chat context render proof", .serialized)
+@Suite("Chat context render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct ChatContextRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

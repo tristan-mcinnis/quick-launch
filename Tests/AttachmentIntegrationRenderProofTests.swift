@@ -13,7 +13,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Attachment integration render proof", .serialized)
+@Suite("Attachment integration render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct AttachmentIntegrationRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

@@ -166,8 +166,12 @@ struct QuickAISettingsTests {
             inside.newChatInterval = option
             let insideMock = MockQuickService()
             let insideVM = make(settings: inside, service: insideMock)
+            // The window is judged against the pinned clock, so no delay
+            // between the backdate and the next ask can cross it.
+            let pinned = Date()
+            insideVM.now = { pinned }
             await ask(insideVM, insideMock, "first", reply: "one")
-            insideVM.currentConversation?.updatedAt = Date().addingTimeInterval(-(window - 5))
+            insideVM.currentConversation?.updatedAt = pinned.addingTimeInterval(-(window - 5))
             await ask(insideVM, insideMock, "second", reply: "two")
             #expect(insideVM.currentConversation?.messages.count == 4, "\(option.displayName) inside")
 
@@ -176,8 +180,9 @@ struct QuickAISettingsTests {
             outside.newChatInterval = option
             let outsideMock = MockQuickService()
             let outsideVM = make(settings: outside, service: outsideMock)
+            outsideVM.now = { pinned }
             await ask(outsideVM, outsideMock, "first", reply: "one")
-            outsideVM.currentConversation?.updatedAt = Date().addingTimeInterval(-(window + 5))
+            outsideVM.currentConversation?.updatedAt = pinned.addingTimeInterval(-(window + 5))
             await ask(outsideVM, outsideMock, "second", reply: "two")
             #expect(outsideVM.currentConversation?.messages.count == 2, "\(option.displayName) outside")
             #expect(outsideVM.history.count == 2)

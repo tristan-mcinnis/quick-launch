@@ -13,7 +13,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Thread rendering", .serialized)
+@Suite("Thread rendering", .mainActorRenderLane, .serialized)
 @MainActor
 struct ThreadRenderingTests {
     private let codeMessage = """

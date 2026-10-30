@@ -17,7 +17,7 @@ import SwiftUI
 import Testing
 @testable import QuickLaunch
 
-@Suite("Chat tools render proof", .serialized)
+@Suite("Chat tools render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct ChatToolsRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

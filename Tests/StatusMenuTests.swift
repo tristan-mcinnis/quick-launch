@@ -10,7 +10,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Status menu and Keep on Top glyph")
+@Suite("Status menu and Keep on Top glyph", .mainActorRenderLane)
 @MainActor
 struct StatusMenuTests {
 

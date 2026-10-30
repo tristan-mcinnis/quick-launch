@@ -5,7 +5,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Web search provider", .serialized)
+@Suite("Web search provider", .mainActorRenderLane, .serialized)
 @MainActor
 struct WebSearchProviderTests {
     @Test func providerChoiceRoundTripsAndOlderSettingsKeepAutomatic() throws {

@@ -7,7 +7,7 @@ import HouseDesign
 
 // This proof takes native keyboard focus. Run alone so other suites' windows
 // cannot steal it: QUICK_LAUNCH_NATIVE_FOCUS_PROOF=1 swift test --filter PaletteRailFocusProofTests
-@Suite("Palette rail focus proof", .serialized,
+@Suite("Palette rail focus proof", .mainActorRenderLane, .serialized,
        .enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_NATIVE_FOCUS_PROOF"] == "1"))
 @MainActor
 struct PaletteRailFocusProofTests {

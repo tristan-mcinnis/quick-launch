@@ -5,7 +5,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("Attachment usability render proof", .serialized)
+@Suite("Attachment usability render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct AttachmentUsabilityRenderProofTests {
     private static let text = (1...18).map {

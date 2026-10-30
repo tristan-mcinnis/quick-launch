@@ -10,7 +10,7 @@ import Testing
 @testable import QuickLaunch
 import HouseDesign
 
-@Suite("AI Chat lifecycle render proof", .serialized)
+@Suite("AI Chat lifecycle render proof", .mainActorRenderLane, .serialized)
 @MainActor
 struct AIChatLifecycleRenderProofTests {
     private static let outputDir = URL(fileURLWithPath: "/tmp/quick-launch-render-proof")

@@ -16,7 +16,7 @@ import AppKit
 import SwiftUI
 @testable import QuickLaunch
 
-@Suite("ManageModelsRenderProof")
+@Suite("ManageModelsRenderProof", .mainActorRenderLane)
 // AppKit view hosting is not thread-safe; keep these on the main actor.
 @MainActor
 struct ManageModelsRenderProofTests {
