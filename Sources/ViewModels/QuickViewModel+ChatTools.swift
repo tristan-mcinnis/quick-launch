@@ -268,6 +268,7 @@ extension QuickViewModel {
             return
         }
         errorMessage = nil
+        noteFeatureUse(.memoryCaptureRun, itemID: "feature:memory-capture")
         if let answerID,
            let index = currentConversation?.messages.firstIndex(where: { $0.id == answerID }),
            currentConversation?.messages[index].tools.contains(where: { $0.kind == .capture }) == false {

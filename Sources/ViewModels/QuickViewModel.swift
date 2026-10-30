@@ -691,6 +691,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         errorMessage = nil
         do {
             let outcome = try await houseCommandCatalog.run(row, argument: argument)
+            noteFeatureUse(.houseCommandRun, itemID: "command:\(row.id)")
             input = ""
             switch outcome {
             case .completed(let reply):
@@ -2651,11 +2652,39 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Journal row for a hotkey run with no launcher item to learn against,
     /// such as a saved AI action. Ranking is left untouched.
+    /// The hotkey row for a saved action: `action:<uuid>`, the same id a
+    /// `savedActionRun` row carries.
+    func noteDirectHotkeyUse(ofAction action: SavedPrompt) {
+        noteDirectHotkeyUse(itemID: "action:\(action.id.uuidString)")
+    }
+
     func noteDirectHotkeyUse(
         itemID: String,
         scope: String = LauncherUsageStore.rootScope
     ) {
         recordJournal(kind: .directHotkeyUse, scope: scope, itemID: itemID)
+    }
+
+    /// Journal row for a feature that has no launcher row: kind and a stable
+    /// id only (`feature:<name>`, `action:<uuid>`, `command:<id>`), never
+    /// the text, selection, answer or prompt it worked on.
+    func noteFeatureUse(_ kind: InteractionJournalEventKind, itemID: String) {
+        recordJournal(kind: kind, itemID: itemID)
+    }
+
+    /// The app's wiring from Type to Click to the journal. AppDelegate and the
+    /// tests both call this, so a test exercises the real path.
+    func journalFeatureUse(of controller: TypeToClickController) {
+        controller.onTargetUsed = { [weak self] in
+            self?.noteFeatureUse(.typeToClickUsed, itemID: "feature:type-to-click")
+        }
+    }
+
+    /// The app's wiring from the Translator window to the journal.
+    func journalFeatureUse(of model: TranslatorModel) {
+        model.onTranslationRun = { [weak self] in
+            self?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
+        }
     }
 
     func forgetLearnedRanking() {
@@ -9031,6 +9060,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             requestInputFocus()
             return
         }
+        // The request really starts from here, so this is a run.
+        if let action = request.action {
+            noteFeatureUse(.savedActionRun, itemID: "action:\(action.actionID.uuidString)")
+        }
 
         // One model request at a time: a request still live is stopped here,
         // and text it buffered but never drew is dropped, so none of it
@@ -9542,6 +9575,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             streamingStatus = nil
             isStreaming = false
             output = result
+            noteFeatureUse(.savedActionRun, itemID: "action:\(definition.id.uuidString)")
             recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
             var didAutoWrite = false
             if definition.outputBehavior == .reviewChanges, !output.isEmpty {
@@ -10210,6 +10244,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         )
         do {
             let result = try await piHandoff.handOff(request)
+            noteFeatureUse(.piHandoffWritten, itemID: "feature:pi-handoff")
             // The line belongs to the chat that was handed off.
             if currentConversation?.id == conversation.id {
                 let stopped = stoppedAnswer ? Self.piStoppedAnswerPrefix : ""

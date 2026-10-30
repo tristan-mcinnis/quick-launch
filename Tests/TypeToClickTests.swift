@@ -456,6 +456,69 @@ final class TypeToClickTests: XCTestCase {
     }
 
     @MainActor
+    private func runBufferedSave(
+        succeeds: Bool,
+        wire: (TypeToClickController) -> Void
+    ) async throws {
+        _ = NSApplication.shared
+        let performed = expectation(description: "action performed")
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let frame = CGRect(
+            x: screen.frame.minX + 100,
+            y: screen.frame.maxY - screen.frame.minY - 130,
+            width: 120,
+            height: 30
+        )
+        let service = BufferedTypeToClickService(frame: frame, performed: performed, succeeds: succeeds)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        wire(controller)
+        controller.start(in: 123)
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        let panel = try XCTUnwrap(controller.inputPanel)
+        for (keyCode, character) in [(1, "s"), (0, "a"), (9, "v"), (14, "e")] {
+            panel.sendEvent(try keyEvent(panel: panel, keyCode: UInt16(keyCode), characters: character))
+        }
+        panel.sendEvent(try keyEvent(panel: panel, keyCode: 36, characters: "\r"))
+        await fulfillment(of: [performed], timeout: hangGuard)
+    }
+
+    @MainActor
+    func testASuccessfulClickReportsOneUse() async throws {
+        let used = expectation(description: "use reported")
+        used.assertForOverFulfill = true
+        try await runBufferedSave(succeeds: true) { $0.onTargetUsed = { used.fulfill() } }
+        await fulfillment(of: [used], timeout: hangGuard)
+    }
+
+    /// The app's own wiring (`journalFeatureUse(of:)`) writes the journal row.
+    /// The journal revision is the signal, so nothing polls.
+    @MainActor
+    func testTheAppWiringJournalsOneContentFreeRowForASuccessfulClick() async throws {
+        let journal = InteractionJournalStore(fileURL: nil)
+        let vm = QuickViewModel(service: MockQuickService(), interactionJournal: journal)
+        let journalled = expectation(description: "journal row written")
+        withObservationTracking {
+            _ = vm.interactionJournalRevision
+        } onChange: {
+            journalled.fulfill()
+        }
+        try await runBufferedSave(succeeds: true) { vm.journalFeatureUse(of: $0) }
+        await fulfillment(of: [journalled], timeout: hangGuard)
+        let events = journal.recentEvents().filter { $0.kind == .typeToClickUsed }
+        XCTAssertEqual(events.map(\.itemID), ["feature:type-to-click"])
+        XCTAssertNil(events.first?.detail)
+        XCTAssertNil(events.first?.queryFingerprint)
+    }
+
+    @MainActor
+    func testAFailedClickReportsNoUse() async throws {
+        let used = expectation(description: "no use reported")
+        used.isInverted = true
+        try await runBufferedSave(succeeds: false) { $0.onTargetUsed = { used.fulfill() } }
+        await fulfillment(of: [used], timeout: 0.5)
+    }
+
+    @MainActor
     func testQueryAndEnterAreBufferedWhileAccessibilityScanFinishes() async throws {
         _ = NSApplication.shared
         let performed = expectation(description: "buffered action performed")
@@ -752,12 +815,14 @@ private final class UntrustedTypeToClickService: TypeToClickServicing, @unchecke
 private final class BufferedTypeToClickService: TypeToClickServicing, @unchecked Sendable {
     private let frame: CGRect
     private let performed: XCTestExpectation
+    private let succeeds: Bool
     private let lock = NSLock()
     private var storedAction: TypeToClickAction?
 
-    init(frame: CGRect, performed: XCTestExpectation) {
+    init(frame: CGRect, performed: XCTestExpectation, succeeds: Bool = true) {
         self.frame = frame
         self.performed = performed
+        self.succeeds = succeeds
     }
 
     var performedAction: TypeToClickAction? {
@@ -783,7 +848,7 @@ private final class BufferedTypeToClickService: TypeToClickServicing, @unchecked
     func perform(_ action: TypeToClickAction, on target: TypeToClickTarget) -> Bool {
         lock.withLock { storedAction = action }
         performed.fulfill()
-        return true
+        return succeeds
     }
 }
 

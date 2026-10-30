@@ -250,6 +250,8 @@ final class TypeToClickController {
     private var notice: TypeToClickNotice?
 
     private let clock: TypeToClickClock
+    /// Called each time an action succeeds on a target. Carries no label.
+    var onTargetUsed: (() -> Void)?
 
     init(service: TypeToClickServicing = TypeToClickService(), clock: TypeToClickClock = .system) {
         self.service = service
@@ -892,6 +894,8 @@ final class TypeToClickController {
             self.actionTask = nil
             self.pulsingTarget = nil
             if succeeded {
+                // Only a click that landed and is still current counts as a use.
+                self.onTargetUsed?()
                 if self.continuation == .continuous {
                     self.continueAfterSuccessfulAction(
                         openedMenuLabel: target.kind == .menuBarItem ? target.label : nil

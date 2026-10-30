@@ -602,6 +602,211 @@ struct InteractionJournalTests {
         #expect(vm.launcherUsage.frecency(itemID: "action:translate") == 0)
     }
 
+    // MARK: - Feature use rows
+
+    /// Every feature row is a kind plus a stable id: no query digest, no
+    /// length band, no detail, so nothing typed or answered can ride along.
+    private func expectContentFree(_ event: InteractionJournalEvent?, kind: InteractionJournalEventKind, itemID: String) {
+        #expect(event?.kind == kind)
+        #expect(event?.itemID == itemID)
+        #expect(event?.queryFingerprint == nil)
+        #expect(event?.queryLengthBucket == nil)
+        #expect(event?.detail == nil)
+    }
+
+    @Test func aSavedActionRunIsJournalledByIdWithoutItsPrompt() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let action = SavedPrompt(alias: "polish", prompt: "SECRET-PROMPT-TEXT {input}")
+        settings.savedPrompts = [action]
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "SECRET-ANSWER", finishReason: "stop")])
+        let (vm, journal) = makeViewModel(settings: settings, service: mock)
+        vm.input = "/polish SECRET-TYPED"
+        await vm.submit()
+
+        let events = journal.recentEvents().filter { $0.kind == .savedActionRun }
+        #expect(events.count == 1)
+        expectContentFree(events.first, kind: .savedActionRun, itemID: "action:\(action.id.uuidString)")
+        let blob = String(decoding: (try? JSONEncoder().encode(journal.events)) ?? Data(), as: UTF8.self)
+        #expect(!blob.contains("SECRET"))
+    }
+
+    @Test func memoryCaptureAndPiHandoffAreJournalledWithoutTheirContent() async {
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "SECRET-ANSWER", finishReason: "stop")])
+        let (vm, journal) = makeViewModel(service: mock)
+        vm.settings.autoCopy = false
+        vm.memoryCapture = JournalFakeMemory()
+        vm.piHandoff = JournalFakePiHandoff()
+        vm.input = "SECRET-QUESTION"
+        await vm.submit()
+
+        await vm.captureAnswerToMemory()
+        expectContentFree(
+            journal.recentEvents().first { $0.kind == .memoryCaptureRun },
+            kind: .memoryCaptureRun, itemID: "feature:memory-capture"
+        )
+
+        await vm.continueInPi()
+        expectContentFree(
+            journal.recentEvents().first { $0.kind == .piHandoffWritten },
+            kind: .piHandoffWritten, itemID: "feature:pi-handoff"
+        )
+        let blob = String(decoding: (try? JSONEncoder().encode(journal.events)) ?? Data(), as: UTF8.self)
+        #expect(!blob.contains("SECRET"))
+    }
+
+    @Test func aFailedMemoryCaptureIsNotJournalledAsARun() async {
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "answer", finishReason: "stop")])
+        let (vm, journal) = makeViewModel(service: mock)
+        vm.settings.autoCopy = false
+        vm.memoryCapture = JournalFakeMemory(fails: true)
+        vm.input = "hello"
+        await vm.submit()
+        await vm.captureAnswerToMemory()
+        #expect(journal.count(of: .memoryCaptureRun) == 0)
+    }
+
+    @Test func aTranslationRunIsJournalledWithoutTheText() async throws {
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "SECRET-TRANSLATION", finishReason: "stop")])
+        let (vm, journal) = makeViewModel()
+        let model = TranslatorModel(lastTarget: .english, serviceFactory: { mock })
+        model.debounce = .milliseconds(1)
+        vm.journalFeatureUse(of: model)
+        model.sourceInput = "SECRET-SOURCE"
+        await model.settled()
+
+        #expect(journal.count(of: .translatorRun) == 1)
+        expectContentFree(journal.recentEvents().first, kind: .translatorRun, itemID: "feature:translator")
+        let blob = String(decoding: (try? JSONEncoder().encode(journal.events)) ?? Data(), as: UTF8.self)
+        #expect(!blob.contains("SECRET"))
+    }
+
+    @Test func severalTranslationsInOneSessionAreOneEventAndReopeningIsAnother() async {
+        let mock = MockQuickService()
+        await mock.setResponses([StreamDelta(text: "ok", finishReason: "stop")])
+        let model = TranslatorModel(lastTarget: .english, serviceFactory: { mock })
+        model.debounce = .milliseconds(1)
+        var runs = 0
+        model.onTranslationRun = { runs += 1 }
+
+        model.prepare(target: nil, selectedText: nil)
+        model.sourceInput = "one"
+        await model.settled()
+        model.sourceInput = "one two"
+        await model.settled()
+        model.swap()
+        await model.settled()
+        model.setTarget(.simplifiedChinese)
+        await model.settled()
+        #expect(runs == 1)
+
+        model.prepare(target: nil, selectedText: nil)
+        model.sourceInput = "again"
+        await model.settled()
+        #expect(runs == 2)
+    }
+
+    @Test func aSavedActionThatNeverSendsIsNotJournalledAsARun() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.savedPrompts = [SavedPrompt(alias: "polish", prompt: "Polish {input}")]
+        let (vm, journal) = makeViewModel(settings: settings, service: nil)
+        vm.apiKeyProvider = { _ in "" }
+        vm.input = "/polish hello"
+        await vm.submit()
+        #expect(journal.count(of: .aiFailed) == 1)
+        #expect(journal.count(of: .savedActionRun) == 0)
+    }
+
+    @Test func aSuccessfulCommandSavedActionIsJournalledAsARun() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let action = SavedPrompt(
+            alias: "run-echo", prompt: "{input}",
+            commandExecutable: "/bin/echo", commandArguments: ["{input}"]
+        )
+        settings.savedPrompts = [action]
+        let (vm, journal) = makeViewModel(settings: settings)
+        vm.input = "/run-echo hi"
+        await vm.submit()
+        #expect(journal.count(of: .actionSucceeded) == 1)
+        #expect(journal.recentEvents().filter { $0.kind == .savedActionRun }.map(\.itemID)
+            == ["action:\(action.id.uuidString)"])
+    }
+
+    @Test func aFailingCommandSavedActionIsNotJournalledAsARun() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let action = SavedPrompt(
+            alias: "run-false", prompt: "{input}",
+            commandExecutable: "/usr/bin/false", commandArguments: []
+        )
+        settings.savedPrompts = [action]
+        let (vm, journal) = makeViewModel(settings: settings)
+        vm.input = "/run-false hi"
+        await vm.submit()
+        #expect(journal.count(of: .actionFailed) == 1)
+        #expect(journal.count(of: .savedActionRun) == 0)
+    }
+
+    @Test func aHotkeyRunOfASavedActionUsesItsUUIDNotItsAlias() {
+        let action = SavedPrompt(alias: "polish", prompt: "Polish {input}")
+        let (vm, journal) = makeViewModel()
+        vm.noteDirectHotkeyUse(ofAction: action)
+        let events = journal.recentEvents().filter { $0.kind == .directHotkeyUse }
+        #expect(events.map(\.itemID) == ["action:\(action.id.uuidString)"])
+    }
+
+    @Test func featureKindsAreDistinctAndTheirItemIDsSurviveSanitizing() {
+        let journal = InteractionJournalStore(fileURL: nil)
+        let rows: [(InteractionJournalEventKind, String)] = [
+            (.typeToClickUsed, "feature:type-to-click"),
+            (.translatorRun, "feature:translator"),
+            (.piHandoffWritten, "feature:pi-handoff"),
+            (.memoryCaptureRun, "feature:memory-capture"),
+            (.savedActionRun, "action:6F9619FF-8B86-D011-B42D-00C04FC964FF"),
+            (.houseCommandRun, "command:house.rti.record.start"),
+        ]
+        for (kind, id) in rows {
+            let event = journal.record(kind: kind, itemID: id)
+            #expect(event?.itemID == id, "\(kind.rawValue) keeps its stable id")
+        }
+        #expect(Set(rows.map(\.0.rawValue)).count == rows.count)
+    }
+
+    @Test func aJournalFileFromBeforeTheFeatureKindsStillDecodes() throws {
+        // Synthetic file in the shape earlier builds wrote, plus a row of a
+        // kind this build has never heard of.
+        let json = """
+        {"version":2,"events":[
+          {"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","date":1000,"kind":"selectionAccepted",
+           "scope":"root","itemID":"application:com.example.app","markedAccidental":false,"fingerprintVersion":2},
+          {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","date":2000,"kind":"directHotkeyUse",
+           "scope":"root","itemID":"action:translate","markedAccidental":false,"fingerprintVersion":2},
+          {"id":"8F9619FF-8B86-D011-B42D-00C04FC964FF","date":3000,"kind":"someFutureKind",
+           "scope":"root","markedAccidental":false,"fingerprintVersion":2}
+        ]}
+        """
+        let paths = temporaryFile()
+        try FileManager.default.createDirectory(at: paths.folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: paths.folder) }
+        try Data(json.utf8).write(to: paths.file)
+        let journal = InteractionJournalStore(
+            fileURL: paths.file,
+            now: { Date(timeIntervalSinceReferenceDate: 4000) },
+            retentionDays: 365,
+            keyURL: paths.key
+        )
+        #expect(journal.count(of: .selectionAccepted) == 1)
+        #expect(journal.count(of: .directHotkeyUse) == 1)
+        #expect(journal.count(of: .unknown) == 1)
+        #expect(journal.count == 3)
+    }
+
     @Test func anAbandonedSearchAndItsRetryAreJournalledAtSessionEnd() async {
         let (vm, journal) = makeViewModel()
         vm.input = "flurble"
@@ -1147,4 +1352,20 @@ private func waitForStreaming(_ vm: QuickViewModel, timeout: Duration = .seconds
     if vm.isStreaming { return true }
     Issue.record("the stream never started")
     return false
+}
+
+private struct JournalFakeMemory: MemoryCapturing {
+    var fails = false
+    struct Failure: Error {}
+    func capture(_ text: String) async throws { if fails { throw Failure() } }
+}
+
+private final class JournalFakePiHandoff: PiHandoffServicing {
+    func handOff(_ request: PiHandoffRequest) async throws -> PiHandoffResult {
+        PiHandoffResult(
+            sessionName: "ql-test",
+            threadFile: URL(fileURLWithPath: "/tmp/ql-test.md"),
+            openedGhostty: true
+        )
+    }
 }

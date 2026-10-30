@@ -29,6 +29,22 @@ enum InteractionJournalEventKind: String, Codable, Sendable, CaseIterable {
     case aiSucceeded
     /// A hotkey ran an item without the launcher being used.
     case directHotkeyUse
+    // The kinds below are newer than file format version 2, which is not
+    // bumped. A build that predates them decodes their rows as `.unknown`
+    // and writes them back as `.unknown`, so downgrading and then using the
+    // older build loses these rows' kinds. Accepted: counts only, no content.
+    /// Type to Click acted on a target. Item: `feature:type-to-click`.
+    case typeToClickUsed
+    /// The Translator window started a translation. Item: `feature:translator`.
+    case translatorRun
+    /// A thread was written to a new pi session. Item: `feature:pi-handoff`.
+    case piHandoffWritten
+    /// `recall capture` ran from Capture to Memory. Item: `feature:memory-capture`.
+    case memoryCaptureRun
+    /// A saved action ran. Item: `action:<saved action UUID>`.
+    case savedActionRun
+    /// A house command ran. Item: `command:house.<app>.<command id>`.
+    case houseCommandRun
     /// A row this build does not know about, kept so an older journal file
     /// still loads. Never written by this build.
     case unknown
@@ -46,6 +62,12 @@ enum InteractionJournalEventKind: String, Codable, Sendable, CaseIterable {
         case .aiCancelled: "AI cancellations"
         case .aiSucceeded: "AI answers"
         case .directHotkeyUse: "Direct hotkey uses"
+        case .typeToClickUsed: "Type to Click uses"
+        case .translatorRun: "Translations"
+        case .piHandoffWritten: "Pi hand-offs"
+        case .memoryCaptureRun: "Memory captures"
+        case .savedActionRun: "Saved action runs"
+        case .houseCommandRun: "House command runs"
         case .unknown: "Other"
         }
     }
@@ -63,6 +85,12 @@ enum InteractionJournalEventKind: String, Codable, Sendable, CaseIterable {
         case .aiCancelled: "AI stopped"
         case .aiSucceeded: "AI answered"
         case .directHotkeyUse: "Hotkey"
+        case .typeToClickUsed: "Type to Click"
+        case .translatorRun: "Translated"
+        case .piHandoffWritten: "Pi hand-off"
+        case .memoryCaptureRun: "Captured"
+        case .savedActionRun: "Action ran"
+        case .houseCommandRun: "House command"
         case .unknown: "Other"
         }
     }
@@ -239,7 +267,7 @@ final class InteractionJournalStore {
     nonisolated static let safeItemIDPrefixes = [
         "application:", "catalog:", "command:", "folder:", "snippet:",
         "quickLink:", "clipboard:", "emoji:", "screenshot:", "conversation:",
-        "answer:", "askAI:", "action:",
+        "answer:", "askAI:", "action:", "feature:",
     ]
 
     /// Identifier shapes the journal always re-keys, whatever their kind
