@@ -210,6 +210,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let launcherCatalog = LauncherCatalogService()
     private let clipboardHistory = ClipboardHistoryStore()
     private let webSearchService = WebSearchRouter(
+        deepseek: DeepSeekSearchService(
+            apiKey: { WebSearchKeys.deepSeek() }
+        ),
         tavily: TavilySearchService(
             apiKey: { WebSearchKeys.tavily() }
         ),
@@ -222,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         exa: ExaSearchService(
             apiKey: { APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) }
         ),
+        hasDeepSeekKey: { !(WebSearchKeys.deepSeek() ?? "").isEmpty },
         hasTavilyKey: { !(WebSearchKeys.tavily() ?? "").isEmpty },
         hasBraveKey: { !(WebSearchKeys.brave() ?? "").isEmpty },
         hasBochaKey: {

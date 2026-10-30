@@ -3,8 +3,11 @@ import Foundation
 /// Where a web search is answered. The user picks a `WebSearchProvider`; the
 /// router reads this to decide which service runs the query.
 enum WebSearchBackend: String, Sendable {
-    /// Bocha for a Chinese query when its key is stored, then Tavily and Brave.
+    /// DeepSeek first, then Bocha for a Chinese query, then Tavily and Brave,
+    /// each only when its key is stored.
     case chain
+    /// DeepSeek's search API, called with the DeepSeek provider key.
+    case deepseek
     /// The Tavily search API, called directly with a Keychain key.
     case tavily
     /// The Brave Search API, called directly with a Keychain key.
@@ -18,9 +21,10 @@ enum WebSearchBackend: String, Sendable {
 /// Search sources offered by the shared web-search setting. Every AI surface
 /// (Quick AI, AI Chat, the Translator) reads the same choice.
 enum WebSearchProvider: String, Codable, CaseIterable, Identifiable, Sendable {
-    /// A Chinese query prefers Bocha when that key exists; otherwise Tavily,
-    /// then Brave.
+    /// DeepSeek when its key exists, then Bocha for a Chinese query, then
+    /// Tavily, then Brave.
     case automatic
+    case deepseek
     case tavily
     case brave
     case bocha
@@ -31,6 +35,7 @@ enum WebSearchProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .automatic: "Automatic"
+        case .deepseek: "DeepSeek"
         case .tavily: "Tavily"
         case .brave: "Brave"
         case .bocha: "Bocha"
@@ -41,7 +46,8 @@ enum WebSearchProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .automatic:
-            "Bocha for Chinese, then Tavily and Brave."
+            "DeepSeek, then Bocha for Chinese, then Tavily and Brave."
+        case .deepseek: "DeepSeek search API. Uses the DeepSeek API key."
         case .tavily: "Tavily API. Needs a Tavily key."
         case .brave: "Brave Search API. Needs a Brave key."
         case .bocha: "Bocha Chinese-web API. Needs a Bocha key."
@@ -52,6 +58,7 @@ enum WebSearchProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     var backend: WebSearchBackend {
         switch self {
         case .automatic: .chain
+        case .deepseek: .deepseek
         case .tavily: .tavily
         case .brave: .brave
         case .bocha: .bocha
@@ -62,7 +69,7 @@ enum WebSearchProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Whether choosing this provider directly needs a stored API key.
     var requiresAPIKey: Bool {
         switch self {
-        case .tavily, .brave, .bocha, .exa: true
+        case .deepseek, .tavily, .brave, .bocha, .exa: true
         case .automatic: false
         }
     }

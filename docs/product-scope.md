@@ -90,7 +90,7 @@ Catalogs share one item and action model. Each action owns its title, aliases, o
 
 Pi can use its own configured tools and skills. OpenAI-compatible providers
 share Quick Launch's own tool loop: read-only tools for memory (`recall`), skills
-(`~/.claude/skills`), and the web (Tavily, Brave, Bocha or Exa), at most six rounds and 30 seconds of tool time per answer, each tool
+(`~/.claude/skills`), and the web (DeepSeek, Tavily, Brave, Bocha or Exa), at most six rounds and 30 seconds of tool time per answer, each tool
 switchable per chat in `⌘K` › Tools. The Claude Code CLI provider gets no tools.
 Capture to Memory is the one write, and only the user runs it. There is no
 on-device Apple model and no MCP configuration.

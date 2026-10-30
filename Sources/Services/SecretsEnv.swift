@@ -31,9 +31,15 @@ enum SecretsEnv {
     }
 }
 
-/// The Tavily and Brave keys: the Keychain entry from Models › Web search,
-/// else the one the hourly refresh keeps in `secrets.env`.
+/// The search keys: the Keychain entry from Models › Web search (DeepSeek:
+/// the DeepSeek provider's key), else the one the hourly refresh keeps in
+/// `secrets.env`.
 enum WebSearchKeys {
+    static func deepSeek() -> String? {
+        APIKeyStore.load(providerID: InferenceProvider.deepSeekID)
+            ?? SecretsEnv.value("DEEPSEEK_API_KEY")
+    }
+
     static func tavily() -> String? {
         APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch)
             ?? SecretsEnv.value("TAVILY_API_KEY")

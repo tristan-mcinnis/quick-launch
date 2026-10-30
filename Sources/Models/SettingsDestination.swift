@@ -243,7 +243,7 @@ enum SettingsDestinationIndex {
               ["vision", "image", "screenshot", "model", "multimodal"]),
         group("models.webSearch", .models, "models.webSearch", "Web search",
               "The provider used by Quick AI, AI Chat, and the Translator",
-              ["web search", "search provider", "tavily", "brave", "bocha"]),
+              ["web search", "search provider", "deepseek", "tavily", "brave", "bocha"]),
         group("models.instruction", .models, "models.instruction", "Quick AI instruction",
               "The system instruction the Quick AI surface and saved actions share",
               ["instruction", "system prompt", "quick ai", "prompt", "persona"]),

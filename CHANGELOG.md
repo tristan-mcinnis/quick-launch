@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-10-30
+
+- **DeepSeek leads web search.** Automatic now tries DeepSeek's search API
+  (`/v1/tools/search`, the DeepSeek provider key, else `DEEPSEEK_API_KEY` in
+  `~/.config/secrets.env`) first, then Bocha for a Chinese query, then Tavily,
+  then Brave. DeepSeek is also its own choice in Models › Web search. In a
+  timed run of 10 real queries each it answered in 0.47 s (median) against
+  1.5 s for Brave and 2.8 s for Tavily. Queries over 128 characters are cut
+  to the API's limit.
+
 ## Unreleased — 2026-10-20
 
 - **Vault Search and the House server are removed.** The vault and its server

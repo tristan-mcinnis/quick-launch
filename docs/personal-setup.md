@@ -7,12 +7,13 @@ app. The README lists the integrations in general terms.
 ## Web search and page reading
 
 - Vault Search and the `search_vault` tool are removed (2026-10-20).
-- Web search calls the Tavily API directly, then Brave when Tavily fails or
-  has no key. The key is the one in Keychain (Models › Web search), else
-  `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY` in `~/.config/secrets.env`, read
-  at call time and never stored or logged. `BRAVE_API_KEY` is accepted when
-  `BRAVE_SEARCH_API_KEY` is absent. A Chinese query still prefers Bocha
-  when that key is set.
+- Web search calls the DeepSeek search API first (2026-10-30), then Bocha
+  for a Chinese query when that key is set, then Tavily, then Brave, each
+  skipped when it fails or has no key. DeepSeek uses the DeepSeek provider
+  key, else `DEEPSEEK_API_KEY`; the others use the key in Keychain (Models ›
+  Web search), else `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY` in
+  `~/.config/secrets.env`. Keys are read at call time and never stored or
+  logged. `BRAVE_API_KEY` is accepted when `BRAVE_SEARCH_API_KEY` is absent.
 - Pages are read with a direct fetch in the app. There is no remote reader.
 - Source files open only from `~/memory`, `~/skills` and `~/Documents/Work`.
 

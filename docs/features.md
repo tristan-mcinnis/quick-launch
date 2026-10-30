@@ -378,11 +378,13 @@ failures or cancellations, successful command actions, and hotkey runs.
 - API keys are stored in the macOS Keychain and are not synced through iCloud.
   Provider settings, model choices, and actions use local `UserDefaults`.
 - Web search has its own provider choice (Settings › Models › Web search), shared
-  by Quick AI, AI Chat, and the Translator: Tavily, Brave, Bocha
-  (Chinese web), and Exa (semantic), called directly; or Automatic preferring
-  Bocha for a Chinese query when that key is set, then Tavily and Brave. The
-  keys are stored in the same owner-only Keychain as provider keys; Tavily and
-  Brave fall back to `TAVILY_API_KEY` and `BRAVE_SEARCH_API_KEY` in
+  by Quick AI, AI Chat, and the Translator: DeepSeek, Tavily, Brave, Bocha
+  (Chinese web), and Exa (semantic), called directly; or Automatic (the
+  default): DeepSeek, then Bocha for a Chinese query when that key is set,
+  then Tavily and Brave. DeepSeek uses the DeepSeek provider's API key and
+  bills about $0.75 per 1,000 searches. The other keys are stored in the same
+  owner-only Keychain as provider keys. DeepSeek, Tavily and Brave fall back
+  to `DEEPSEEK_API_KEY`, `TAVILY_API_KEY` and `BRAVE_SEARCH_API_KEY` in
   `~/.config/secrets.env`. `BRAVE_API_KEY` is accepted when the Brave name is absent.
 - Local model discovery scans the local server's model folder without starting
   it.
@@ -396,8 +398,8 @@ failures or cancellations, successful command actions, and hotkey runs.
 - Source-only turns do not silently widen to unrelated history, memory,
   web, or skills.
 - The memory and skill tools read local files only. A web search sends the
-  query to the search API behind the chosen backend (Tavily, Brave, Bocha, or
-  Exa). What a tool returns goes to the chat's model while it
+  query to the search API behind the chosen backend (DeepSeek, Tavily, Brave,
+  Bocha, or Exa). What a tool returns goes to the chat's model while it
   writes that answer.
 - Chat history and source blobs are local and owner-only. Submitted material is
   saved before provider execution; a save failure keeps the draft and blocks

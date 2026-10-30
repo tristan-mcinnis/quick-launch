@@ -54,6 +54,89 @@ struct WebSearchBackendsTests {
         }
     }
 
+    // MARK: - DeepSeek
+
+    @Test func deepSeekSendsBearerKeyAndPrefersTheModelSummary() async throws {
+        let recorder = RequestRecorder(status: 200, body: Data("""
+        {"results":[{"title":"DS Source","url":"https://example.com/d","snippet":"short","summary":"long summary for the model","content":""}]}
+        """.utf8))
+        let service = DeepSeekSearchService(apiKey: { "sk-test" }, transport: recorder.transport)
+
+        let result = try await service.search("  what is new  ")
+
+        #expect(result.contains("## DS Source"))
+        #expect(result.contains("URL: https://example.com/d"))
+        #expect(result.contains("Snippet: long summary for the model"))
+        let request = try #require(recorder.request)
+        #expect(request.url == DeepSeekSearchService.endpoint)
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
+        let body = try #require(request.httpBody)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["query"] as? String == "what is new")
+        #expect(json["count"] as? Int == 5)
+    }
+
+    @Test func deepSeekCutsTheQueryToTheAPILimitInScalars() async throws {
+        let recorder = RequestRecorder(status: 200, body: Data("""
+        {"results":[{"title":"T","url":"https://example.com","snippet":"only a snippet"}]}
+        """.utf8))
+        let service = DeepSeekSearchService(apiKey: { "k" }, transport: recorder.transport)
+
+        // Each thumbs-up with a skin tone is one Character but two scalars.
+        let result = try await service.search(String(repeating: "👍🏽", count: 200))
+
+        let body = try #require(recorder.request?.httpBody)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let sent = try #require(json["query"] as? String)
+        #expect(sent.unicodeScalars.count <= DeepSeekSearchService.maxQueryLength)
+        #expect(sent.unicodeScalars.count >= DeepSeekSearchService.maxQueryLength - 1)
+        #expect(result.contains("Snippet: only a snippet"), "no summary falls back to the snippet")
+    }
+
+    @Test func deepSeekNeverSendsABlankQuery() async {
+        let recorder = RequestRecorder(status: 200, body: Data(#"{"results":[]}"#.utf8))
+        let service = DeepSeekSearchService(apiKey: { "k" }, transport: recorder.transport)
+
+        await #expect(throws: WebSearchError.self) { _ = try await service.search("  \n ") }
+        #expect(recorder.request == nil)
+    }
+
+    @Test func deepSeekWithoutKeyFailsBeforeAnyRequest() async {
+        let recorder = RequestRecorder(status: 200, body: Data(#"{"results":[]}"#.utf8))
+        let service = DeepSeekSearchService(apiKey: { " " }, transport: recorder.transport)
+
+        await #expect(throws: WebSearchError.self) {
+            _ = try await service.search("x")
+        }
+        #expect(recorder.request == nil)
+    }
+
+    @Test func deepSeekBalanceErrorAndEmptyResultsThrow() async {
+        let unpaid = DeepSeekSearchService(
+            apiKey: { "k" },
+            transport: RequestRecorder(status: 402, body: Data("{}".utf8)).transport
+        )
+        let error = await #expect(throws: WebSearchError.self) {
+            _ = try await unpaid.search("x")
+        }
+        #expect(error?.errorDescription == "Web search failed: " + "DeepSeek balance is empty")
+        let limited = DeepSeekSearchService(
+            apiKey: { "k" },
+            transport: RequestRecorder(status: 429, body: Data("{}".utf8)).transport
+        )
+        let limitError = await #expect(throws: WebSearchError.self) {
+            _ = try await limited.search("x")
+        }
+        #expect(limitError?.errorDescription == "Web search failed: " + "DeepSeek search is rate-limited")
+
+        let empty = DeepSeekSearchService(
+            apiKey: { "k" },
+            transport: RequestRecorder(status: 200, body: Data(#"{"results":[]}"#.utf8)).transport
+        )
+        await #expect(throws: WebSearchError.self) { _ = try await empty.search("x") }
+    }
+
     // MARK: - Brave
 
     @Test func braveSendsSubscriptionTokenAndFormatsResults() async throws {
@@ -193,6 +276,65 @@ struct WebSearchBackendsTests {
         #expect(await brave.callCount() == 1)
         #expect(await bocha.callCount() == 1)
         #expect(await exa.callCount() == 1)
+    }
+
+    @Test func automaticIsTheDefaultAndTriesDeepSeekFirst() async throws {
+        #expect(QuickSettings().webSearchProvider == .automatic)
+        let deepseek = RecordingStubSearch(.text("deepseek result"))
+        let bocha = RecordingStubSearch(.text("bocha result"))
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let router = makeRouter(
+            deepseek: deepseek,
+            tavily: tavily,
+            bocha: bocha,
+            hasDeepSeekKey: true,
+            hasTavilyKey: true,
+            hasBochaKey: true
+        )
+
+        #expect(try await router.search("上海咖啡", provider: .automatic) == "deepseek result")
+        #expect(try await router.search("q", provider: .automatic) == "deepseek result")
+        #expect(await bocha.callCount() == 0)
+        #expect(await tavily.callCount() == 0)
+    }
+
+    @Test func chainFallsBackFromAFailingDeepSeekToTavily() async throws {
+        let deepseek = RecordingStubSearch(.failure)
+        let router = makeRouter(
+            deepseek: deepseek,
+            tavily: RecordingStubSearch(.text("tavily result")),
+            hasDeepSeekKey: true,
+            hasTavilyKey: true
+        )
+
+        #expect(try await router.search("q", provider: .automatic) == "tavily result")
+        #expect(await deepseek.callCount() == 1)
+    }
+
+    @Test func choosingDeepSeekWithoutAKeyNamesWhereTheKeyLives() async {
+        let deepseek = RecordingStubSearch(.text("deepseek result"))
+        let router = makeRouter(deepseek: deepseek)
+
+        let error = await #expect(throws: WebSearchError.self) {
+            _ = try await router.search("q", provider: .deepseek)
+        }
+        #expect(error?.errorDescription == "Web search failed: " + "Add a DeepSeek API key in Models \u{203A} Provider.")
+        #expect(await deepseek.callCount() == 0)
+    }
+
+    @Test func choosingDeepSeekNeverFallsBack() async {
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let router = makeRouter(
+            deepseek: RecordingStubSearch(.failure),
+            tavily: tavily,
+            hasDeepSeekKey: true,
+            hasTavilyKey: true
+        )
+
+        await #expect(throws: WebSearchError.self) {
+            _ = try await router.search("q", provider: .deepseek)
+        }
+        #expect(await tavily.callCount() == 0)
     }
 
     @Test func chainPrefersTavilyWhenItsKeyExists() async throws {
@@ -335,20 +477,24 @@ struct WebSearchBackendsTests {
     /// A router with every backend stubbed, so each test states only the
     /// backends and keys it cares about. Unset steps are unavailable.
     private func makeRouter(
+        deepseek: RecordingStubSearch = RecordingStubSearch(.failure),
         tavily: RecordingStubSearch = RecordingStubSearch(.failure),
         brave: RecordingStubSearch = RecordingStubSearch(.failure),
         bocha: RecordingStubSearch = RecordingStubSearch(.failure),
         exa: RecordingStubSearch = RecordingStubSearch(.failure),
+        hasDeepSeekKey: Bool = false,
         hasTavilyKey: Bool = false,
         hasBraveKey: Bool = false,
         hasBochaKey: Bool = false,
         hasExaKey: Bool = false
     ) -> WebSearchRouter {
         WebSearchRouter(
+            deepseek: deepseek,
             tavily: tavily,
             brave: brave,
             bocha: bocha,
             exa: exa,
+            hasDeepSeekKey: { hasDeepSeekKey },
             hasTavilyKey: { hasTavilyKey },
             hasBraveKey: { hasBraveKey },
             hasBochaKey: { hasBochaKey },

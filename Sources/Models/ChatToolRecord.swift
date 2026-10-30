@@ -205,7 +205,7 @@ extension ChatToolKind {
         case .memory: "Search notes and today's captures with recall"
         case .tasks: "Read due, overdue, in-progress, and open tasks"
         case .skills: "Read a skill from ~/.claude/skills"
-        case .web: "Search the web with Tavily, Brave or Bocha"
+        case .web: "Search the web with DeepSeek, Tavily, Brave or Bocha"
         }
     }
 }

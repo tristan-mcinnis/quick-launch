@@ -68,6 +68,92 @@ enum WebSearchResultText {
     }
 }
 
+/// DeepSeek's search API (`/v1/tools/search`), called with the DeepSeek
+/// provider key. It returns its own ranked pages, so the chat model never
+/// sees a second provider's text. It leads the Automatic chain, so its
+/// timeout is shorter than the others: a dead DeepSeek leaves the fallbacks
+/// room inside the answer's tool-time budget.
+struct DeepSeekSearchService: WebSearchServicing {
+    var apiKey: @Sendable () -> String?
+    var requestTimeout: Duration = .seconds(5)
+    var transport: WebSearchHTTPTransport
+
+    private struct Response: Decodable {
+        struct Result: Decodable {
+            let title: String?
+            let url: String?
+            let snippet: String?
+            let summary: String?
+        }
+        let results: [Result]?
+    }
+
+    init(
+        apiKey: @escaping @Sendable () -> String?,
+        requestTimeout: Duration = .seconds(5),
+        transport: @escaping WebSearchHTTPTransport = WebSearchURLSession.transport
+    ) {
+        self.apiKey = apiKey
+        self.requestTimeout = requestTimeout
+        self.transport = transport
+    }
+
+    /// Always DeepSeek's own host, whatever base URL the chat provider uses.
+    static let endpoint = URL(string: "https://api.deepseek.com/v1/tools/search")!
+    /// The API rejects a query over 128 Unicode characters (scalars).
+    static let maxQueryLength = 128
+
+    /// The query as the API accepts it: trimmed and cut to 128 scalars, so an
+    /// emoji or accent made of several scalars cannot push it over.
+    static func apiQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cut = String(String.UnicodeScalarView(trimmed.unicodeScalars.prefix(maxQueryLength)))
+        return cut.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func search(_ query: String) async throws -> String {
+        guard let key = apiKey()?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
+            throw WebSearchError.failed(WebSearchRouter.missingKeyMessage(for: .deepseek))
+        }
+        let apiQuery = Self.apiQuery(query)
+        guard !apiQuery.isEmpty else { throw WebSearchError.failed("empty query") }
+
+        let request = try makeRequest(query: apiQuery, key: key)
+        let (data, status) = try await WebSearchTimeout.run(requestTimeout) {
+            try await transport(request)
+        }
+        switch status {
+        case 200..<300: break
+        case 402: throw WebSearchError.failed("DeepSeek balance is empty")
+        case 429: throw WebSearchError.failed("DeepSeek search is rate-limited")
+        default: throw WebSearchError.failed("DeepSeek search returned HTTP \(status)")
+        }
+
+        let decoded: Response
+        do {
+            decoded = try JSONDecoder().decode(Response.self, from: data)
+        } catch {
+            throw WebSearchError.failed("invalid DeepSeek search response")
+        }
+        let rows = (decoded.results ?? []).map {
+            WebSearchResultText.Row(title: $0.title, url: $0.url, snippet: $0.summary ?? $0.snippet)
+        }
+        return try WebSearchResultText.format(rows)
+    }
+
+    private func makeRequest(query: String, key: String) throws -> URLRequest {
+        var request = URLRequest(url: Self.endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "query": query,
+            "count": 5,
+        ])
+        return request
+    }
+}
+
 /// The Tavily search API, called directly with a Keychain key.
 struct TavilySearchService: WebSearchServicing {
     /// The stored key, read lazily so a settings change takes effect without
@@ -357,13 +443,15 @@ struct ExaSearchService: WebSearchServicing {
 }
 
 /// Sends every web search to the backend the chosen provider names. The
-/// Automatic provider prefers Bocha for a Chinese query when its key is
-/// stored, then Tavily, then Brave, skipping any step whose key is missing.
+/// Automatic provider tries DeepSeek first, then Bocha for a Chinese query,
+/// then Tavily, then Brave, skipping any step whose key is missing.
 struct WebSearchRouter: WebSearchServicing {
+    let deepseek: any WebSearchServicing
     let tavily: any WebSearchServicing
     let brave: any WebSearchServicing
     let bocha: any WebSearchServicing
     let exa: any WebSearchServicing
+    var hasDeepSeekKey: @Sendable () -> Bool
     var hasTavilyKey: @Sendable () -> Bool
     var hasBraveKey: @Sendable () -> Bool
     var hasBochaKey: @Sendable () -> Bool
@@ -375,6 +463,11 @@ struct WebSearchRouter: WebSearchServicing {
 
     func search(_ query: String, provider: WebSearchProvider) async throws -> String {
         switch provider.backend {
+        case .deepseek:
+            guard hasDeepSeekKey() else {
+                throw WebSearchError.failed(Self.missingKeyMessage(for: .deepseek))
+            }
+            return try await deepseek.search(query)
         case .tavily:
             guard hasTavilyKey() else {
                 throw WebSearchError.failed(Self.missingKeyMessage(for: .tavily))
@@ -402,6 +495,13 @@ struct WebSearchRouter: WebSearchServicing {
 
     private func runChain(_ query: String) async throws -> String {
         var attempted: [String] = []
+
+        if hasDeepSeekKey() {
+            attempted.append("DeepSeek")
+            if let result = try await Self.attempt({ try await deepseek.search(query) }) {
+                return result
+            }
+        }
 
         if WebSearchQuery.containsCJK(query), hasBochaKey() {
             attempted.append("Bocha")
@@ -448,6 +548,9 @@ struct WebSearchRouter: WebSearchServicing {
     }
 
     static func missingKeyMessage(for provider: WebSearchProvider) -> String {
-        "Add a \(provider.title) API key in Models \u{203A} Web search."
+        if provider == .deepseek {
+            return "Add a DeepSeek API key in Models \u{203A} Provider."
+        }
+        return "Add a \(provider.title) API key in Models \u{203A} Web search."
     }
 }
