@@ -2632,6 +2632,12 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     /// Journal row for a hotkey run with no launcher item to learn against,
     /// such as a saved AI action. Ranking is left untouched.
+    /// The hotkey row for a saved action: `action:<uuid>`, the same id a
+    /// `savedActionRun` row carries.
+    func noteDirectHotkeyUse(ofAction action: SavedPrompt) {
+        noteDirectHotkeyUse(itemID: "action:\(action.id.uuidString)")
+    }
+
     func noteDirectHotkeyUse(
         itemID: String,
         scope: String = LauncherUsageStore.rootScope
@@ -9514,7 +9520,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         submittedInput: String,
         takesComposerText: Bool
     ) async {
-        noteFeatureUse(.savedActionRun, itemID: "action:\(definition.id.uuidString)")
         let chatHadAnswer = chatShowsAnswer
         errorMessage = nil
         output = ""
@@ -9551,6 +9556,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             isStreaming = false
             output = result
             recordJournal(kind: .actionSucceeded, scope: learningScope, detail: "command")
+            noteFeatureUse(.savedActionRun, itemID: "action:\(definition.id.uuidString)")
             var didAutoWrite = false
             if definition.outputBehavior == .reviewChanges, !output.isEmpty {
                 if !isAIChatWindow { openQuickAI() }

@@ -722,7 +722,7 @@ struct InteractionJournalTests {
         #expect(journal.count(of: .savedActionRun) == 0)
     }
 
-    @Test func aCommandSavedActionIsJournalledWhenItStarts() async {
+    @Test func aSuccessfulCommandSavedActionIsJournalledAsARun() async {
         var settings = QuickSettings()
         settings.autoCopy = false
         let action = SavedPrompt(
@@ -733,8 +733,32 @@ struct InteractionJournalTests {
         let (vm, journal) = makeViewModel(settings: settings)
         vm.input = "/run-echo hi"
         await vm.submit()
+        #expect(journal.count(of: .actionSucceeded) == 1)
         #expect(journal.recentEvents().filter { $0.kind == .savedActionRun }.map(\.itemID)
             == ["action:\(action.id.uuidString)"])
+    }
+
+    @Test func aFailingCommandSavedActionIsNotJournalledAsARun() async {
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        let action = SavedPrompt(
+            alias: "run-false", prompt: "{input}",
+            commandExecutable: "/usr/bin/false", commandArguments: []
+        )
+        settings.savedPrompts = [action]
+        let (vm, journal) = makeViewModel(settings: settings)
+        vm.input = "/run-false hi"
+        await vm.submit()
+        #expect(journal.count(of: .actionFailed) == 1)
+        #expect(journal.count(of: .savedActionRun) == 0)
+    }
+
+    @Test func aHotkeyRunOfASavedActionUsesItsUUIDNotItsAlias() {
+        let action = SavedPrompt(alias: "polish", prompt: "Polish {input}")
+        let (vm, journal) = makeViewModel()
+        vm.noteDirectHotkeyUse(ofAction: action)
+        let events = journal.recentEvents().filter { $0.kind == .directHotkeyUse }
+        #expect(events.map(\.itemID) == ["action:\(action.id.uuidString)"])
     }
 
     @Test func featureKindsAreDistinctAndTheirItemIDsSurviveSanitizing() {

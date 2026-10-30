@@ -1256,7 +1256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.captureLaunchSelection()
         // A hotkey run is a direct use; the journal keeps its own row and
         // ranking is left alone because a saved action is not a launcher item.
-        vm.noteDirectHotkeyUse(itemID: "action:\(action.id.uuidString)")
+        vm.noteDirectHotkeyUse(ofAction: action)
         showOverlay(captureSelectionTarget: false)
         Task { await vm.perform(action: action) }
     }
