@@ -123,7 +123,14 @@ extension QuickViewModel {
         // deliberate "plain text" path: the original rich/image payload is not
         // restored. An explicit Copy action still writes a real copy.
         pasteboard.writeTransientString(text)
-        guard await selectedTextService.pastePasteboard(to: target) else {
+        let outcome = await selectedTextService.pastePasteboardOutcome(to: target)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             markJustCopied()
             errorMessage = selectedTextService.isAccessibilityTrusted
                 ? "Could not paste into \(target.applicationName). The text was copied instead."

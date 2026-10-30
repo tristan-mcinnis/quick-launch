@@ -4,25 +4,64 @@ import Testing
 @MainActor
 @Suite("Paste guard")
 struct PasteGuardTests {
+    private func makeGuard(
+        count: @escaping @MainActor () -> Int = { 7 },
+        send: @escaping @MainActor () -> Bool = { true },
+        settle: @escaping @MainActor () async -> Void = {}
+    ) -> PasteGuard {
+        PasteGuard(changeCount: count, sendCommandV: send, waitForModifierRelease: settle)
+    }
+
     @Test("Command-V is sent when the clipboard is still ours")
     func sendsWhenUnchanged() {
         var sent = 0
-        let guardian = PasteGuard(changeCount: { 7 }, sendCommandV: { sent += 1; return true })
-        #expect(guardian.sendCommandV(expectingChangeCount: 7))
+        let guardian = makeGuard(send: { sent += 1; return true })
+        #expect(guardian.sendCommandV(expectingChangeCount: 7) == .pasted)
         #expect(sent == 1)
     }
 
     @Test("Command-V is not sent after the user copies something else")
     func refusesWhenClipboardChanged() {
         var sent = 0
-        let guardian = PasteGuard(changeCount: { 8 }, sendCommandV: { sent += 1; return true })
-        #expect(!guardian.sendCommandV(expectingChangeCount: 7))
+        let guardian = makeGuard(count: { 8 }, send: { sent += 1; return true })
+        #expect(guardian.sendCommandV(expectingChangeCount: 7) == .clipboardChanged)
         #expect(sent == 0)
     }
 
-    @Test("A failed keystroke reports failure")
+    @Test("A failed keystroke reports failure, not a clipboard change")
     func reportsKeystrokeFailure() {
-        let guardian = PasteGuard(changeCount: { 7 }, sendCommandV: { false })
-        #expect(!guardian.sendCommandV(expectingChangeCount: 7))
+        let guardian = makeGuard(send: { false })
+        #expect(guardian.sendCommandV(expectingChangeCount: 7) == .failed)
+    }
+
+    // The service routes through the injected guard; the entry points need
+    // Accessibility trust and a frontmost app, so these drive the shared tail
+    // that both `paste(_:to:)` and `pastePasteboard(to:)` end in.
+    @Test("A copy made while waiting for modifier keys blocks Command-V")
+    func copyDuringTheWaitBlocksCommandV() async {
+        var count = 7
+        var sent = 0
+        let service = SelectedTextService(pasteGuard: makeGuard(
+            count: { count },
+            send: { sent += 1; return true },
+            settle: { count += 1 }
+        ))
+        let outcome = await service.commandVAfterSettling(expectingChangeCount: 7)
+        #expect(outcome == .clipboardChanged)
+        #expect(sent == 0)
+    }
+
+    @Test("An undisturbed clipboard still pastes through the service")
+    func undisturbedClipboardPastes() async {
+        var sent = 0
+        let service = SelectedTextService(pasteGuard: makeGuard(send: { sent += 1; return true }))
+        #expect(await service.commandVAfterSettling(expectingChangeCount: 7) == .pasted)
+        #expect(sent == 1)
+    }
+
+    @Test("The service reports the same outcome after the caret-insert window")
+    func serviceCommandVOutcome() {
+        let service = SelectedTextService(pasteGuard: makeGuard(count: { 9 }))
+        #expect(service.commandVOutcome(expectingChangeCount: 7) == .clipboardChanged)
     }
 }

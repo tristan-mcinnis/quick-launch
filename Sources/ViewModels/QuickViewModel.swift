@@ -3860,7 +3860,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 errorMessage = "That clipboard item is no longer available on this Mac."
                 return false
             }
-            guard await selectedTextService.pastePasteboard(to: target) else {
+            let outcome = await selectedTextService.pastePasteboardOutcome(to: target)
+            if outcome == .clipboardChanged {
+                errorMessage = Self.clipboardChangedMessage
+                recoverFromExternalActionFailure?()
+                requestInputFocus()
+                return false
+            }
+            guard outcome == .pasted else {
                 _ = await copyLauncherItem(item)
                 errorMessage = selectedTextService.isAccessibilityTrusted
                     ? "Could not paste into \(target.applicationName). The item was copied instead."
@@ -3871,7 +3878,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             }
             return true
         }
-        guard await selectedTextService.paste(item.value, to: target) else {
+        let outcome = await selectedTextService.pasteOutcome(item.value, to: target)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             _ = await copyLauncherItem(item)
             errorMessage = selectedTextService.isAccessibilityTrusted
                 ? "Could not paste into \(target.applicationName). The item was copied instead."
@@ -5160,7 +5174,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         prepareForExternalAction?()
         await Task.yield()
-        guard await selectedTextService.pastePasteboard(to: target) else {
+        let outcome = await selectedTextService.pastePasteboardOutcome(to: target)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             markJustCopied()
             errorMessage = "Could not paste into \(target.applicationName). The image was copied instead."
             recoverFromExternalActionFailure?()
@@ -10304,7 +10325,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         prepareForExternalAction?()
         await Task.yield()
-        guard await selectedTextService.replace(text, in: context) else {
+        let outcome = await selectedTextService.replaceOutcome(text, in: context)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             copyOutputAndMark()
             errorMessage = selectedTextService.isAccessibilityTrusted
                 ? "Could not replace the selection in \(context.target.applicationName). The result was copied instead."
@@ -10328,7 +10356,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             requestInputFocus()
             return false
         }
-        guard await selectedTextService.paste(output, to: selectionTarget) else {
+        let outcome = await selectedTextService.pasteOutcome(output, to: selectionTarget)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             copyOutputAndMark()
             errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
             requestInputFocus()
@@ -10363,7 +10397,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         guard representation.prefersRichPaste else {
             // No structure to preserve: the plain path is the honest one.
-            guard await selectedTextService.paste(representation.plainText, to: selectionTarget) else {
+            let outcome = await selectedTextService.pasteOutcome(representation.plainText, to: selectionTarget)
+            if outcome == .clipboardChanged {
+                errorMessage = Self.clipboardChangedMessage
+                requestInputFocus()
+                return false
+            }
+            guard outcome == .pasted else {
                 pasteboard.writeTransientString(representation.plainText)
                 markJustCopied()
                 errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
@@ -10376,7 +10416,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         // The rich types are published transiently so a clipboard manager
         // skips the paste plumbing; ⌘V is the only insertion path here.
         pasteboard.writeTransientFormatted(representation)
-        guard await selectedTextService.pastePasteboard(to: selectionTarget) else {
+        let outcome = await selectedTextService.pastePasteboardOutcome(to: selectionTarget)
+        if outcome == .clipboardChanged {
+            errorMessage = Self.clipboardChangedMessage
+            requestInputFocus()
+            return false
+        }
+        guard outcome == .pasted else {
             pasteboard.writeTransientString(representation.plainText)
             markJustCopied()
             errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
@@ -10386,6 +10432,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         overlayPresenter.dismissOverlay()
         return true
     }
+
+    /// Shown when a paste was skipped because the user copied something else
+    /// first. The answer is not copied over their newer copy.
+    static let clipboardChangedMessage =
+        "Clipboard changed, so the paste was skipped. The answer is still in Quick Launch."
 
     /// What Return on an empty composer does with a finished answer: the
     /// Primary Action setting in the launcher; always Copy in the AI Chat

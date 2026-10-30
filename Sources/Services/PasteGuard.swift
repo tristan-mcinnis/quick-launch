@@ -1,5 +1,13 @@
 import AppKit
 
+/// How a paste ended. `clipboardChanged` means nothing was sent because the
+/// user copied something else first: callers must not copy the answer over it.
+enum PasteOutcome: Sendable, Equatable {
+    case pasted
+    case clipboardChanged
+    case failed
+}
+
 /// Sends Command-V only while the clipboard still holds what Quick Launch
 /// wrote. Between the write and the keystroke the app waits for the target to
 /// come forward and for modifier keys to lift; if the user copies something
@@ -9,12 +17,22 @@ import AppKit
 struct PasteGuard {
     var changeCount: @MainActor () -> Int = { NSPasteboard.general.changeCount }
     var sendCommandV: @MainActor () -> Bool = PasteGuard.postCommandV
+    /// Waits (bounded) for held modifier keys to lift, so they cannot turn
+    /// the keystroke into another shortcut.
+    var waitForModifierRelease: @MainActor () async -> Void = PasteGuard.waitForModifiers
 
-    /// Returns false, without sending, when the change count moved. The log
-    /// line carries no clipboard content.
-    func sendCommandV(expectingChangeCount expected: Int) -> Bool {
-        guard changeCount() == expected else { return false }
-        return sendCommandV()
+    /// `.clipboardChanged`, without sending, when the change count moved.
+    func sendCommandV(expectingChangeCount expected: Int) -> PasteOutcome {
+        guard changeCount() == expected else { return .clipboardChanged }
+        return sendCommandV() ? .pasted : .failed
+    }
+
+    static func waitForModifiers() async {
+        for _ in 0..<40 {
+            let held = NSEvent.modifierFlags.intersection([.command, .option, .shift, .control])
+            if held.isEmpty { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     static func postCommandV() -> Bool {
