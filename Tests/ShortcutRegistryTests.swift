@@ -487,7 +487,7 @@ struct ShortcutRegistryTests {
         #expect(vm.isCaptureChooserPresented)
         #expect(vm.topLayer == .captureChooser)
         #expect(vm.errorMessage == nil, "opening the chooser attaches nothing and cannot fail")
-        vm.performShortcut(characters: "s", keyCode: 1, modifiers: [.command, .shift])
+        _ = vm.performShortcut(characters: "s", keyCode: 1, modifiers: [.command, .shift])
         #expect(vm.isCaptureChooserPresented, "the window key opens it; it does not toggle")
 
         let replacement = ActionHotkey(keyCode: 11, modifiers: modifiers([.command, .control]))  // ⌃⌘B

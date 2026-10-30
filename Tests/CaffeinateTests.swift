@@ -144,7 +144,7 @@ struct CaffeinateTests {
         let assertion = RecordingAssertion()
         let power = FakePowerSource()
         let manager = CaffeinateManager(assertion: assertion, power: power)
-        var clock = Self.noon
+        let clock = Self.noon
         manager.now = { clock }
         manager.start()
         #expect(manager.enable(for: 600))
@@ -181,7 +181,7 @@ struct CaffeinateTests {
         let assertion = RecordingAssertion()
         let power = FakePowerSource()
         let manager = CaffeinateManager(assertion: assertion, power: power)
-        var clock = Self.noon
+        let clock = Self.noon
         manager.now = { clock }
         manager.start()
         power.set(onBattery: true, percent: 10)
@@ -200,7 +200,7 @@ struct CaffeinateTests {
     @Test func failedTimerStartRollsBackThePriorDeadline() {
         let assertion = RecordingAssertion()
         let manager = CaffeinateManager(assertion: assertion)
-        var clock = Self.noon
+        let clock = Self.noon
         manager.now = { clock }
 
         #expect(manager.enable(for: 600))
@@ -221,7 +221,7 @@ struct CaffeinateTests {
     @Test func failedEnableLeavesThePriorTimedIntentIntact() {
         let assertion = RecordingAssertion()
         let manager = CaffeinateManager(assertion: assertion)
-        var clock = Self.noon
+        let clock = Self.noon
         manager.now = { clock }
 
         #expect(manager.enable(for: 600))

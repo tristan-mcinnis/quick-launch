@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Synchronization
 import Testing
 @testable import QuickLaunch
 
@@ -179,13 +180,13 @@ struct ItemActionTests {
 
     @Test func commandReturnCopiesAndClosesTheOverlay() async {
         let (vm, _) = makeSnippetViewModel()
-        var dismissed = 0
-        let token = NotificationCenter.default.addObserver(forName: .dismissOverlay, object: nil, queue: nil) { _ in dismissed += 1 }
+        let dismissed = Mutex(0)
+        let token = NotificationCenter.default.addObserver(forName: .dismissOverlay, object: nil, queue: nil) { _ in dismissed.withLock { $0 += 1 } }
         defer { NotificationCenter.default.removeObserver(token) }
         #expect(vm.performShortcut(characters: "\r", keyCode: 36, modifiers: [.command]))
-        await eventually("the copy and the dismissal") { vm.justCopied && dismissed >= 1 }
+        await eventually("the copy and the dismissal") { vm.justCopied && dismissed.withLock { $0 } >= 1 }
         #expect(vm.justCopied)
-        #expect(dismissed >= 1)
+        #expect(dismissed.withLock { $0 } >= 1)
     }
 
     @Test func plainReturnAndUnknownKeysAreLeftToTheTextField() {

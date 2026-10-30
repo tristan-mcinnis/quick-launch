@@ -1009,7 +1009,7 @@ struct InteractionJournalTests {
         #expect(!markdown.contains("flurble"))
         #expect(markdown.contains(try #require(store.fingerprint(ofQuery: "flurble"))))
 
-        let (folder, file, key) = temporaryFile("export.md")
+        let (folder, file, _) = temporaryFile("export.md")
         defer { try? FileManager.default.removeItem(at: folder) }
         try InteractionJournalExporter.write(markdown, to: file)
         let permissions = try FileManager.default

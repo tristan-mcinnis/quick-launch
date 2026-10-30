@@ -485,7 +485,7 @@ struct QuickActionWorkflowTests {
         settings.autoCopy = false
         settings.historyEnabled = false
         let vm = QuickViewModel(settings: settings, service: service)
-        var context = CaptureContext(appName: "Safari", selectedText: "sel text", appText: "readable text")
+        let context = CaptureContext(appName: "Safari", selectedText: "sel text", appText: "readable text")
         vm.pendingContext = context
 
         let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
