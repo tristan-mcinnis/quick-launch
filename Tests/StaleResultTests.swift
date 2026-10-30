@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import Synchronization
 import Testing
 @testable import QuickLaunch
 
@@ -151,13 +150,12 @@ struct StaleResultTests {
         try staleRTIManifest.write(to: root.appendingPathComponent("rti.json"), atomically: true, encoding: .utf8)
 
         let dispatcher = GatedStatusDispatcher()
-        // A clock that jumps a minute on every read, so the follow-up refresh
-        // never reuses the first refresh's cached status.
-        let clock = Mutex(Date(timeIntervalSince1970: 1_000))
+        // A clock that never moves: both reads fall inside the 2 s freshness
+        // window, so only a forced follow-up can see the new status.
         let catalog = HouseCommandCatalog(
             directory: HouseCommandDirectory(root: root, socketExists: { _ in true }),
             dispatcher: dispatcher,
-            now: { clock.withLock { $0 = $0.addingTimeInterval(60); return $0 } }
+            now: { Date(timeIntervalSince1970: 1_000) }
         )
         let vm = QuickViewModel(service: MockQuickService(), houseCommandCatalog: catalog)
 
@@ -186,6 +184,7 @@ struct StaleResultTests {
         vm.input = "good morning in japanese"
         vm.rootInputDidChange(vm.input)
         await desk.waitForRequests(1)        // A's reply is now held
+        let olderTask = try #require(vm.inlineTranslationTaskForTesting)
 
         vm.input = "good night in french"
         vm.rootInputDidChange(vm.input)
@@ -196,7 +195,7 @@ struct StaleResultTests {
 
         await desk.release("good morning")   // A arrives late
         await desk.waitUntilDelivered("good morning")
-        for _ in 0..<20 { await Task.yield() }
+        await olderTask.value                // A's handler has run to its end
 
         #expect(vm.inlineTranslation?.query.phrase == "good night")
         #expect(vm.inlineTranslation?.text == "NEW-fr")
