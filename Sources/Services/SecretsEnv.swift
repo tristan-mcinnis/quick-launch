@@ -41,6 +41,13 @@ enum WebSearchKeys {
 
     static func brave() -> String? {
         APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch)
-            ?? SecretsEnv.value("BRAVE_API_KEY")
+            ?? brave(in: (try? String(contentsOf: SecretsEnv.defaultFileURL, encoding: .utf8)) ?? "")
+    }
+
+    /// `BRAVE_SEARCH_API_KEY` is the 1Password name. `BRAVE_API_KEY` is the
+    /// alias, used only when the primary name is absent or empty.
+    static func brave(in text: String) -> String? {
+        SecretsEnv.value("BRAVE_SEARCH_API_KEY", in: text)
+            ?? SecretsEnv.value("BRAVE_API_KEY", in: text)
     }
 }

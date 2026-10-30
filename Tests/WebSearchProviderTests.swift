@@ -69,7 +69,7 @@ struct WebSearchProviderTests {
         #expect(WebSearchProvider.exa.backend == .exa)
     }
 
-    @Test func aRetiredSearxngProviderFallsBackToAutomatic() throws {
+    @Test func aRetiredHostedEngineProviderFallsBackToAutomatic() throws {
         for name in ["google", "bing", "duckduckgo", "news"] {
             let json = #"{"autoCopy":false,"webSearchProvider":"\#(name)"}"#
             let settings = try JSONDecoder().decode(QuickSettings.self, from: Data(json.utf8))

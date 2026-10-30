@@ -59,7 +59,7 @@ Legend: ✅ have, ◐ partial, ✗ missing. "Fit" is the keyboard-first/speed sc
 | Frequency + recency ranking | ✅ (stronger: per-abbreviation) | high | Sol only gates on "ever used"; Quicksilver's explicit abbreviation list is the better model and is what shipped. |
 | Hotkey badges on rows | ✅ | high | |
 | Footer key hints | ✅ | high | |
-| ⌘↩ web search on the query | ◐ (`/search`, auto-detect) | high | Cheap win: ⌘↩ anywhere runs SearXNG on the typed text. |
+| ⌘↩ web search on the query | ◐ (`/search`, auto-detect) | high | Cheap win: ⌘↩ anywhere runs web search on the typed text. |
 | ⇧↩ translate query | ✅ | | |
 | Inline calculator | ✅ | | |
 | Unit and timezone conversion inline | ✗ | medium | Extend `MathExpressionDetector` with `10 usd in cny`, `3pm tokyo`. Deterministic, local. |

@@ -28,6 +28,25 @@ struct SecretsEnvTests {
         #expect(SecretsEnv.value("X", at: URL(fileURLWithPath: "/nonexistent/secrets.env")) == nil)
     }
 
+    @Test func bravePrefersTheSearchNameAndAcceptsTheAlias() {
+        let both = """
+        BRAVE_API_KEY=alias
+        BRAVE_SEARCH_API_KEY=primary
+        """
+        #expect(WebSearchKeys.brave(in: both) == "primary")
+
+        let aliasLater = """
+        BRAVE_SEARCH_API_KEY=primary
+        BRAVE_API_KEY=alias
+        """
+        #expect(WebSearchKeys.brave(in: aliasLater) == "primary")
+
+        #expect(WebSearchKeys.brave(in: "export BRAVE_API_KEY=\"alias-only\"\n") == "alias-only")
+        #expect(WebSearchKeys.brave(in: "export BRAVE_SEARCH_API_KEY=search-only\n") == "search-only")
+        #expect(WebSearchKeys.brave(in: "BRAVE_SEARCH_API_KEY=\nBRAVE_API_KEY=alias\n") == "alias")
+        #expect(WebSearchKeys.brave(in: "OTHER_BRAVE_API_KEY=wrong\n") == nil)
+    }
+
     @Test func readsAFileAtCallTime() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "secrets-\(UUID().uuidString).env")
         defer { try? FileManager.default.removeItem(at: file) }

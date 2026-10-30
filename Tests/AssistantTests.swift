@@ -151,6 +151,12 @@ struct AssistantModelTests {
         #expect(kept.savedPrompts.contains { $0.alias == "vault" })
     }
 
+    @Test func theToolCatalogHasNoVaultSearch() {
+        #expect(ChatToolKind.allCases == [.memory, .tasks, .skills, .web])
+        #expect(ChatToolKind(rawValue: "vault") == nil)
+        #expect(ChatToolKind(rawValue: "search_vault") == nil)
+    }
+
     @Test func aStoredVaultToolIsDroppedFromAnAssistantAndAChat() throws {
         let assistant = SavedPrompt(alias: "res", prompt: "", systemPrompt: "Rules.", enabledTools: [.memory])
         var json = try #require(

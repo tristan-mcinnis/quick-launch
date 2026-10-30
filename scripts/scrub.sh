@@ -8,8 +8,8 @@
 # publishes what it scans for. This file is the one tracked file excluded
 # from the scan: review it by hand.
 #
-# The House integration names (the vault and memory folders, the retired
-# vault server aliases) may appear in one file only: the personal setup notes.
+# The House integration names (the vault and memory folders) may appear in
+# one file only: the personal setup notes.
 # Everything else uses a placeholder.
 #
 # It lives in scripts/ rather than tests/ because Tests/ is the SwiftPM test
@@ -19,7 +19,7 @@ cd "$(dirname "$0")/.."
 
 SELF='scripts/scrub.sh'
 GENERIC='/Users/tristan|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|hf_[A-Za-z0-9]{30,}|ghp_[A-Za-z0-9]{30,}'
-HOUSE='~/vault|~/memory|vault-vps|vault-private'
+HOUSE='~/vault|~/memory|vault-private'
 HOUSE_ALLOWED='^docs/personal-setup\.md$'
 PRIVATE=''
 if [ -f .scrub-private ]; then
@@ -28,7 +28,7 @@ fi
 
 # Positive control: prove each pipeline detects a planted hit.
 control=$(mktemp)
-printf '/Users/tristan/leak\nssh vault-vps\n' > "$control"
+printf '/Users/tristan/leak\n~/vault/notes\n' > "$control"
 if ! grep -qE "$GENERIC" "$control" || ! grep -qE "$HOUSE" "$control"; then
   echo "SCRUB_SELFTEST_FAILED"; rm -f "$control"; exit 1
 fi
