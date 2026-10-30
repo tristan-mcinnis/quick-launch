@@ -231,8 +231,9 @@ private actor LocalHTTPServer {
         bodyValidator: (@Sendable (Data) -> Bool)?,
         onValid: @escaping @Sendable (Bool) -> Void
     ) {
-        // NWConnection delivers receive callbacks one at a time on its queue,
-        // so this buffer is never touched concurrently.
+        // Each receive callback asks for the next read only at its end, so
+        // callbacks run one after another (even on the concurrent `.global()`
+        // queue) and this buffer is never touched concurrently.
         final class Buffer: @unchecked Sendable { var data = Data() }
         let received = Buffer()
         @Sendable func readMore() {
