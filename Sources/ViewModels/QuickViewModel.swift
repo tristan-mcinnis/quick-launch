@@ -10359,12 +10359,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let outcome = await selectedTextService.pasteOutcome(output, to: selectionTarget)
         if outcome == .clipboardChanged {
             errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
             requestInputFocus()
             return false
         }
         guard outcome == .pasted else {
             copyOutputAndMark()
             errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
+            recoverFromExternalActionFailure?()
             requestInputFocus()
             return false
         }
@@ -10400,6 +10402,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             let outcome = await selectedTextService.pasteOutcome(representation.plainText, to: selectionTarget)
             if outcome == .clipboardChanged {
                 errorMessage = Self.clipboardChangedMessage
+                recoverFromExternalActionFailure?()
                 requestInputFocus()
                 return false
             }
@@ -10407,6 +10410,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                 pasteboard.writeTransientString(representation.plainText)
                 markJustCopied()
                 errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
+                recoverFromExternalActionFailure?()
                 requestInputFocus()
                 return false
             }
@@ -10419,6 +10423,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         let outcome = await selectedTextService.pastePasteboardOutcome(to: selectionTarget)
         if outcome == .clipboardChanged {
             errorMessage = Self.clipboardChangedMessage
+            recoverFromExternalActionFailure?()
             requestInputFocus()
             return false
         }
@@ -10426,6 +10431,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             pasteboard.writeTransientString(representation.plainText)
             markJustCopied()
             errorMessage = "Could not paste into \(selectionTarget.applicationName). The result was copied instead."
+            recoverFromExternalActionFailure?()
             requestInputFocus()
             return false
         }
