@@ -22,10 +22,11 @@ struct ChatHistoryRetentionTests {
         return service
     }
 
+    /// Waits on the view model's own flag, not a timer: a slow clear on a busy
+    /// machine is still waited for, never silently given up on.
     private func waitForClear(_ vm: QuickViewModel) async {
-        for _ in 0..<600 {
-            if !vm.isClearingHistory { return }
-            try? await Task.sleep(for: .milliseconds(5))
+        for await clearing in Observations({ vm.isClearingHistory }) where !clearing {
+            return
         }
     }
 
@@ -64,6 +65,9 @@ struct ChatHistoryRetentionTests {
         // A genuinely fresh reader of the same root sees nothing.
         let reloaded = try ChatArchive(root: directory)
         #expect(try await reloaded.loadAll().isEmpty)
+        // The cache delete is queued on the history write queue, behind any
+        // earlier save; read the file only once that queue has drained.
+        QuickHistoryStore.waitForPendingWrites()
         #expect(QuickHistoryStore.load(from: historyFile).isEmpty)
     }
 
