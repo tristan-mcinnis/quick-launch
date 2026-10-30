@@ -79,8 +79,7 @@ Finder automation, document workflows, and autonomous file changes remain
 outside the core until they have explicit interaction, permission, and safety
 designs. Quick Launch keeps no background screen history: its own Screen
 History collector was retired on 2026-09-26 (Tristan's call in the House sweep), and
-`screenctx` (`../memory-screenctx`) is the House's one screen-history
-collector. Do not bring a collector back here. Explicit screen/window
+the House collector `screenctx` was sunset on 2026-10-18. Do not bring a collector back here. Explicit screen/window
 capture for a chat is a separate action, not background capture. The old
 local files (`screen-history.sqlite3*`, `Screen History Frames`, `Screen
 History Soak`, `Screen History Coast Freeze`,

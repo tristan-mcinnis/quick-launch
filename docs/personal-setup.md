@@ -33,9 +33,8 @@ app. The README lists the integrations in general terms.
   design tokens from design-system the same way.
   `scripts/stamp-package-pins.py` stamps the pinned versions and revisions
   into the app's Info.plist.
-- Quick Launch keeps no screen history of its own. The one screen-history
-  collector is `screenctx` (memory-screenctx); Memory.app switches it on and
-  off. Quick Launch's own collector was retired on 2026-09-26.
+- Quick Launch keeps no screen history. Its own collector was retired on
+  2026-09-26, and the House collector `screenctx` on 2026-10-18.
 - The Local Models provider points at the local-models daemon on
   `127.0.0.1:8078`.
 - The house Swift rule is `../design-system/SWIFT.md`. This repo is its

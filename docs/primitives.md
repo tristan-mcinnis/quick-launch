@@ -226,7 +226,7 @@ one toggle, one Forget button.
   later questions, as long as the session holds it; after a relaunch a file is
   read again, or a link fetched again, only when the user chooses Re-attach.
   Attached images stay in memory for the session and are never written.
-- Quick Launch keeps no background screen history; its Screen History collector was retired on 2026-09-26. `screenctx` (memory-screenctx) is the House's one screen-history collector.
+- Quick Launch keeps no background screen history; its Screen History collector was retired on 2026-09-26. House keeps no screen history: `screenctx` was sunset on 2026-10-18.
 - The screenshot text index is on-device OCR (Vision), one local JSON file,
   switchable off in Settings › General.
 - Snippet and clipboard values never reach logs or diagnostics.

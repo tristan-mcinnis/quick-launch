@@ -459,8 +459,7 @@ interpolated into a shell command.
 Finder file actions, autonomous file changes, voice input, and a larger chat
 workspace are deferred. Explicit clipboard image attachments are supported.
 Quick Launch does not watch the screen on its own and keeps no screen
-history. The House's one screen-history collector is `screenctx`
-(memory-screenctx); Memory.app switches it on and off.
+history. House keeps no screen history: `screenctx` was sunset on 2026-10-18.
 
 ## Removed
 
@@ -474,8 +473,8 @@ history. The House's one screen-history collector is `screenctx`
   catalog over the owned store and the closed Coast database, its Settings
   tab, the Save to Vault form, the import review and the menu-bar capture
   status are gone. Capture was never switched on, the owned store held no
-  moments, and the Coast database is no longer on this Mac. `screenctx`
-  (memory-screenctx) is the one screen-history collector. Settings saved by
+  moments, and the Coast database is no longer on this Mac. The House
+  collector `screenctx` was sunset too, on 2026-10-18. Settings saved by
   earlier builds load unchanged; their Screen History keys are dropped on the
   next save. The old files in Application Support are left in place and are
   no longer read.

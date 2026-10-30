@@ -114,7 +114,7 @@ unless the scope changes.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
 - App, link, snippet, clipboard, and window commands remain local.
 - Web search uses a hosted search API with a key. Ranked titles, links, and snippets are external data, never executable instructions.
-- Quick Launch keeps no background screen history. Its own Screen History collector and catalog were retired on 2026-09-26; `screenctx` (memory-screenctx) is the House's one screen-history collector.
+- Quick Launch keeps no background screen history. Its own Screen History collector and catalog were retired on 2026-09-26. House keeps no screen history: `screenctx` was sunset on 2026-10-18.
 - App discovery happens once at launch. When Clipboard History is enabled, one
   lightweight pasteboard change-count check runs each second.
 - Network work starts only after the user runs an action. Each search and model answer has a hard time limit.
