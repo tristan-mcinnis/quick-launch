@@ -1,9 +1,10 @@
+// This file is over 1,000 lines because it is a generated Unicode data table (about 75 lines of code); the length is data, not logic.
+
 import Foundation
 
-/// Emoji and symbols for the Emoji & Symbols catalog. The table is generated
-/// from Unicode 16 names (`scripts/generate-emoji.py` documents the ranges)
-/// with hand-written search words for the common ones. It is parsed once,
-/// on the first request.
+/// Emoji and symbols for the Emoji & Symbols catalog. The table is built
+/// from Unicode 16 names with hand-written search words for the common ones.
+/// It is parsed once, on the first request.
 enum EmojiCatalog {
     static let items: [LauncherCatalogItem] = parse(table)
 
