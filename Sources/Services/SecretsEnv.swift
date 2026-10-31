@@ -35,9 +35,28 @@ enum SecretsEnv {
 /// the DeepSeek provider's key), else the one the hourly refresh keeps in
 /// `secrets.env`.
 enum WebSearchKeys {
+    static let deepSeekSearchHost = "api.deepseek.com"
+
     static func deepSeek() -> String? {
-        APIKeyStore.load(providerID: InferenceProvider.deepSeekID)
-            ?? SecretsEnv.value("DEEPSEEK_API_KEY")
+        let provider = QuickSettings.load().providers.first { $0.id == InferenceProvider.deepSeekID }
+        return deepSeek(
+            providerBaseURL: provider?.baseURL,
+            keychainKey: APIKeyStore.load(providerID: InferenceProvider.deepSeekID),
+            envKey: SecretsEnv.value("DEEPSEEK_API_KEY")
+        )
+    }
+
+    /// The DeepSeek search endpoint is fixed, but the built-in DeepSeek
+    /// provider's Base URL is editable. A provider pointed at a gateway
+    /// holds that gateway's key, which must never reach api.deepseek.com.
+    static func deepSeek(
+        providerBaseURL: String?,
+        keychainKey: @autoclosure () -> String?,
+        envKey: @autoclosure () -> String?
+    ) -> String? {
+        let host = providerBaseURL.flatMap { URL(string: $0.trimmingCharacters(in: .whitespaces))?.host()?.lowercased() }
+        let providerKey = host == deepSeekSearchHost ? keychainKey() : nil
+        return providerKey ?? envKey()
     }
 
     static func tavily() -> String? {

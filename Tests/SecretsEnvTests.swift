@@ -47,6 +47,25 @@ struct SecretsEnvTests {
         #expect(WebSearchKeys.brave(in: "OTHER_BRAVE_API_KEY=wrong\n") == nil)
     }
 
+    @Test func deepSeekSearchUsesTheProviderKeyOnlyForTheOfficialHost() {
+        #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://api.deepseek.com", keychainKey: "provider", envKey: "env"
+        ) == "provider")
+        #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://API.DeepSeek.com/v1", keychainKey: "provider", envKey: nil
+        ) == "provider")
+        #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://openrouter.ai/api/v1", keychainKey: "gateway", envKey: "env"
+        ) == "env")
+        #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://api.deepseek.com.example.net", keychainKey: "gateway", envKey: nil
+        ) == nil)
+        #expect(WebSearchKeys.deepSeek(providerBaseURL: nil, keychainKey: "orphan", envKey: nil) == nil)
+        #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://api.deepseek.com", keychainKey: nil, envKey: "env"
+        ) == "env")
+    }
+
     @Test func readsAFileAtCallTime() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "secrets-\(UUID().uuidString).env")
         defer { try? FileManager.default.removeItem(at: file) }
