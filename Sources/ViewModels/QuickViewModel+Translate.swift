@@ -656,4 +656,73 @@ extension QuickViewModel {
             .replacingOccurrences(of: "\n", with: " ")
         return trimmed.count > 120 ? trimmed.prefix(117) + "…" : trimmed
     }
+
+    /// Root search's field changed: a keystroke replaces a local answer
+    /// with the rows for what is typed.
+    func rootInputDidChange(_ newValue: String) {
+        if rootAnswer != nil, !newValue.isEmpty { rootAnswer = nil }
+        updateInlineTranslation()
+    }
+
+    nonisolated static let inlineTranslationDebounce: Duration = .milliseconds(300)
+
+    /// Starts, keeps or drops the live translation for the root text. The
+    /// model is asked once per (phrase, language) after a typing pause, and
+    /// only when `rankLauncherMatches` would draw the row; a local answer
+    /// ("5 km in miles") always wins.
+    func updateInlineTranslation() {
+        guard !isAnswerActive, inputMode == nil, !hasPendingAttachment,
+              pendingHouseChoice == nil, rootAnswer == nil,
+              let text = rootLauncherQuery,
+              let query = InlineTranslationQuery.parse(text),
+              localAnswer(for: text) == nil
+        else {
+            inlineTranslationTask?.cancel()
+            inlineTranslationTask = nil
+            inlineTranslation = nil
+            return
+        }
+        if inlineTranslation?.query == query { return }
+        inlineTranslationTask?.cancel()
+        inlineTranslation = InlineTranslation(query: query)
+        inlineTranslationTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.inlineTranslationDebounce)
+            guard !Task.isCancelled else { return }
+            await self?.runInlineTranslation(query)
+        }
+    }
+
+    /// The running translation task, so a test can wait on one request that
+    /// a newer query has since replaced.
+    var inlineTranslationTaskForTesting: Task<Void, Never>? { inlineTranslationTask }
+
+    /// What a caller (or a test) waits on: the typing pause and the request.
+    func inlineTranslationSettled() async {
+        await inlineTranslationTask?.value
+    }
+
+    private func runInlineTranslation(_ query: InlineTranslationQuery) async {
+        guard let service = makeCurrentService() else {
+            inlineTranslation?.status = .failed
+            return
+        }
+        let prompt = TranslatorModel.prompt(for: query.phrase, target: query.target)
+        var collected = ""
+        do {
+            for try await delta in service.send(messages: [QuickMessage(role: .user, content: prompt)]) {
+                guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+                if let piece = delta.text {
+                    collected += piece
+                    inlineTranslation?.text = collected
+                }
+            }
+            guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+            let text = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+            inlineTranslation?.text = text
+            inlineTranslation?.status = text.isEmpty ? .failed : .ready
+        } catch {
+            guard !Task.isCancelled, inlineTranslation?.query == query else { return }
+            inlineTranslation?.status = .failed
+        }
+    }
 }

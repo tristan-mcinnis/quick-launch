@@ -456,4 +456,50 @@ extension QuickViewModel {
         requestInputFocus()
         return true
     }
+
+    // MARK: - Screenshots
+
+    /// Capture a screenshot and attach it to the next question.
+    /// `clearingInput` drops the command text that was typed to reach here;
+    /// the overlay shortcut passes `false` so a half-typed question survives.
+    @discardableResult
+    func attachScreenshot(_ kind: ScreenshotKind, clearingInput: Bool) async -> Bool {
+        guard let screenshotService else {
+            errorMessage = "Screenshots are not available in this build."
+            requestInputFocus()
+            return false
+        }
+        do {
+            let attachment = try await screenshotService.capture(
+                kind,
+                target: selectionTarget,
+                ownProcess: ProcessInfo.processInfo.processIdentifier
+            )
+            pendingImage = attachment
+            if kind == .window, let selectionTarget {
+                var context = screenAwareness?.readContext(for: selectionTarget)
+                    ?? CaptureContext(appName: selectionTarget.applicationName)
+                context.hasScreenshot = true
+                pendingContext = context
+            } else if let selectionTarget {
+                pendingContext = CaptureContext(appName: selectionTarget.applicationName, hasScreenshot: true)
+            } else {
+                pendingContext = nil
+            }
+            catalogScope = nil
+            pendingQuickLinkID = nil
+            isActionPalettePresented = false
+            isApplicationActionPanePresented = false
+            isCatalogActionPanePresented = false
+            if clearingInput { input = "" }
+            errorMessage = nil
+            applicationSelectionIndex = 0
+            requestInputFocus()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            requestInputFocus()
+            return false
+        }
+    }
 }

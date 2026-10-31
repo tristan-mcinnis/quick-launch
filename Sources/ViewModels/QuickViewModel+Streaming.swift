@@ -772,4 +772,118 @@ extension QuickViewModel {
             self?.queuedFollowUpTask = nil
         }
     }
+
+    // MARK: - Cancel
+
+    /// Stops a stream as Escape does. Returns whether it kept and saved the
+    /// stopped answer; a no-text stop returns false and saves nothing.
+    @discardableResult
+    func cancel() -> Bool {
+        var keptStoppedAnswer = false
+        // A running command action has no `streamTask`; a model request does.
+        // Only claim a cancellation that really happened: the model lane
+        // records here, and the command lane records from `runCommandAction`
+        // once `ProcessRunner` confirms the child was terminated.
+        let wasStreaming = isStreaming
+        let cancelledModelRequest = wasStreaming && streamTask != nil
+        // Streaming with the question still pending and nothing else running
+        // is the enrichment phase (a web search or page read): the submit
+        // itself is what is in flight, and the question was never a turn.
+        let cancelledEnrichment = wasStreaming && streamTask == nil && commandTask == nil
+            && pendingQuestion != nil
+        // A send waiting for its chips: the reads stop, the typed text stays.
+        cancelAttachmentWait()
+        if cancelledModelRequest {
+            // Stop keeps the question and what the model said so far, as the
+            // turn's answer; `⌘R` asks the same turn again.
+            keptStoppedAnswer = keepStoppedAnswer()
+            // A stopped answer is terminal in the archive, never left looking
+            // like it is still streaming. Registering here, before this
+            // method returns, freezes the write and its own retry payload
+            // before any quit can await.
+            if let conversation = currentConversation,
+               let assistantTurnID = currentAssistantTurnID {
+                registerTerminalAnswer(
+                    conversationID: conversation.id,
+                    turnID: assistantTurnID,
+                    status: .cancelled,
+                    error: "Stopped by the user",
+                    text: output.isEmpty ? nil : output,
+                    timings: requestTimings(finishedAt: Date()),
+                    usage: streamUsage,
+                    toolRounds: streamToolRounds.isEmpty ? nil : streamToolRounds
+                )
+                if keptStoppedAnswer { persistAnsweredConversation() }
+            }
+        } else {
+            discardStreamBuffer()
+            output = ""
+        }
+        // The stopped stream may still end later; from here it writes nothing.
+        streamGeneration &+= 1
+        inFlightTurn = nil
+        streamTask?.cancel()
+        streamTask = nil
+        commandTask?.cancel()
+        commandTask = nil
+        // The submit that started the ask (Tab, or Return in the composer)
+        // is still awaiting its search; a stopped ask must not go on to
+        // call the model when that await returns.
+        tabSubmitTask?.cancel()
+        tabSubmitTask = nil
+        composerSubmitTask?.cancel()
+        composerSubmitTask = nil
+        queuedFollowUpTask?.cancel()
+        queuedFollowUpTask = nil
+        isStreaming = false
+        streamingStatus = nil
+        // A queued follow-up stays in the composer, unsent.
+        isFollowUpQueued = false
+        liveToolRecords = []
+        if cancelledEnrichment {
+            pendingQuestion = nil
+            // The search line was made for an answer that will not come.
+            webSearchNote = nil
+            // The question goes back in the composer now, before whatever
+            // the caller does next (Recent Chats or root search may clear
+            // it), not when the cancelled search returns later.
+            restoreEnrichmentInput()
+        }
+        guard cancelledModelRequest else { return keptStoppedAnswer }
+        recordJournal(kind: .aiCancelled, scope: learningScope, detail: "stopped")
+        requestInputFocus()
+        return keptStoppedAnswer
+    }
+
+    // MARK: - Stream buffering
+
+    func appendStreamText(_ text: String) {
+        streamBuffer += text
+        if output.isEmpty || ContinuousClock.now - lastStreamFlush >= Self.streamFlushInterval {
+            flushStreamBuffer()
+        } else if streamFlushTask == nil {
+            // A pause between tokens must not hide the last few: flush on a timer.
+            streamFlushTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.streamFlushInterval)
+                guard !Task.isCancelled else { return }
+                self?.streamFlushTask = nil
+                self?.flushStreamBuffer()
+            }
+        }
+    }
+
+    func flushStreamBuffer() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        guard !streamBuffer.isEmpty else { return }
+        output += streamBuffer
+        streamBuffer = ""
+        lastStreamFlush = .now
+    }
+
+    func discardStreamBuffer() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        streamBuffer = ""
+    }
 }

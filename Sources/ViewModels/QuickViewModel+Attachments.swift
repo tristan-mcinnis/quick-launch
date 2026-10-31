@@ -568,4 +568,126 @@ extension QuickViewModel {
         }
         attachmentStore.remove(refs, keeping: kept)
     }
+
+    /// `⇧⌘A`: the built-in key for Add Context on a chat. Routing and the
+    /// hints read the owner's resolved table (`shortcuts`); this is the
+    /// built-in value the key tables and the free-key checks name.
+    nonisolated static let attachShortcut: KeyShortcut = .commandShift("a")
+
+    /// The attachment menu belongs to the composer, not a chat-list search
+    /// or a rename/alias form. Those keep their own keyboard commands.
+    var canOpenAttachments: Bool {
+        isQuickAIPresented && !isRecentChatsPresented && inputMode == nil
+            && !isStreaming
+            && !isItemActionPanePresented && activeItemActionForm == nil
+    }
+
+    /// True while a chooser with its own search field is up. Those panes
+    /// take the keyboard themselves, so the composer behind them must not
+    /// pull focus back when a focus request is made.
+    var searchablePaneOwningFocus: Bool {
+        isAddContextMenuPresented || isCaptureChooserPresented
+    }
+
+    /// The four capture paths, in the order the menu lists them. The AI
+    /// Chat window has no app behind it: Focused Window and Selected Text
+    /// read the app that was in front before the window became key, and
+    /// leave the menu while no such app is known.
+    var addContextOptions: [AddContextEntry] {
+        guard isAIChatWindow, selectionTarget == nil else { return AddContextEntry.allCases }
+        return AddContextEntry.allCases.filter { !$0.needsPreviousApp }
+    }
+
+    func openAddContextMenu() {
+        guard !isStreaming else { return }
+        isAddContextMenuPresented = true
+        isClipboardHistoryOpen = false
+        clipboardHistoryQuery = ""
+        clipboardHistoryIndex = 0
+        addContextQuery = ""
+        addContextIndex = 0
+        attachmentTray.cancelLinkEntry()
+        attachmentTray.finderIsBehind = isFinderBehind
+        isModelChooserPresented = false
+        isAssistantChooserPresented = false
+        isCaptureChooserPresented = false
+        isActionPalettePresented = false
+        closeItemActionPane()
+        errorMessage = nil
+        requestInputFocus()
+    }
+
+    func toggleAddContextMenu() {
+        if isAddContextMenuPresented {
+            closeAddContextMenu()
+        } else {
+            openAddContextMenu()
+        }
+    }
+
+    func closeAddContextMenu() {
+        guard isAddContextMenuPresented else { return }
+        isAddContextMenuPresented = false
+        isClipboardHistoryOpen = false
+        clipboardHistoryQuery = ""
+        attachmentTray.cancelLinkEntry()
+        requestInputFocus()
+    }
+
+    func moveAddContextSelection(_ delta: Int) {
+        let options = addContextRows
+        guard !options.isEmpty, !attachmentTray.isEnteringLink else { return }
+        addContextIndex = ListSelection.wrappedIndex(
+            addContextIndex,
+            by: delta,
+            count: options.count
+        )
+    }
+
+    /// Return in the open Add Context menu: the highlighted row, or, in the
+    /// Link field, the link.
+    func runAddContextSelection() async {
+        if isClipboardHistoryOpen {
+            await runClipboardHistorySelection()
+            return
+        }
+        if attachmentTray.isEnteringLink {
+            submitAttachmentLink()
+            return
+        }
+        let options = addContextRows
+        guard options.indices.contains(addContextIndex) else { return }
+        switch options[addContextIndex] {
+        case .capture(let entry):
+            await addContext(entry)
+        case .file:
+            await chooseAttachmentFiles()
+        case let row:
+            runAddContextRow(row)
+        }
+    }
+
+    /// Runs one entry through the capture path it already had. The half-typed
+    /// question survives: an entry adds context to it, it never replaces it.
+    func addContext(_ entry: AddContextEntry) async {
+        isAddContextMenuPresented = false
+        actionQuery = ""
+        let typed = input
+        switch entry {
+        case .focusedWindow:
+            await attachScreenshot(.window, clearingInput: false)
+        case .selectedText:
+            _ = attachSelectedText()
+        case .selectedArea:
+            // The capture hid the window; a good one brings it back, as a
+            // failed one already did.
+            if await attachScreenArea() { overlayPresenter.restoreAfterExternalAction() }
+        case .entireScreen:
+            await attachScreenshot(.display, clearingInput: false)
+        }
+        // Selected Text and Selected Area clear the field to make room for a
+        // fresh question; from this menu the typed question comes back.
+        if input.isEmpty, !typed.isEmpty { input = typed }
+        requestInputFocus()
+    }
 }

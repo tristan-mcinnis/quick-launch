@@ -765,4 +765,95 @@ extension QuickViewModel {
             self.syncCaffeinateState()
         }
     }
+
+    /// Scope key used when learning from a selection in the current view.
+    var learningScope: String {
+        catalogScope?.rawValue ?? LauncherUsageStore.rootScope
+    }
+
+    /// Remember that the user chose `result` for the current input. `query`
+    /// overrides the field for a path that clears it before recording (a
+    /// successful app launch), so the mnemonic keeps what was typed.
+    func learn(_ result: LauncherSearchResult, query explicitQuery: String? = nil) {
+        let query = explicitQuery ?? input
+        noteActedQuery(query)
+        recordJournal(
+            kind: .selectionAccepted,
+            scope: learningScope,
+            itemID: result.id,
+            query: query
+        )
+        guard settings.launcherLearningEnabled else { return }
+        launcherUsage.recordSelection(query: query, scope: learningScope, itemID: result.id)
+        launcherRankingVersion += 1
+    }
+
+    /// Remember a use that skipped the launcher, such as a global hotkey.
+    func learnDirectUse(of item: LauncherCatalogItem) {
+        learnDirectUse(itemID: item.id, scope: LauncherUsageStore.rootScope)
+    }
+
+    func learnDirectUse(of application: LaunchableApplication) {
+        learnDirectUse(
+            itemID: LauncherSearchResult.application(application).id,
+            scope: LauncherUsageStore.rootScope
+        )
+    }
+
+    /// One hotkey run of an item that never passed through the launcher.
+    /// Journals the review row and, when ranking learning is on, the use count.
+    func learnDirectUse(itemID: String, scope: String) {
+        noteDirectHotkeyUse(itemID: itemID, scope: scope)
+        guard settings.launcherLearningEnabled else { return }
+        launcherUsage.recordUse(itemID: itemID, scope: scope)
+        launcherRankingVersion += 1
+    }
+
+    /// Journal row for a hotkey run with no launcher item to learn against,
+    /// such as a saved AI action. Ranking is left untouched.
+    /// The hotkey row for a saved action: `action:<uuid>`, the same id a
+    /// `savedActionRun` row carries.
+    func noteDirectHotkeyUse(ofAction action: SavedPrompt) {
+        noteDirectHotkeyUse(itemID: "action:\(action.id.uuidString)")
+    }
+
+    func noteDirectHotkeyUse(
+        itemID: String,
+        scope: String = LauncherUsageStore.rootScope
+    ) {
+        recordJournal(kind: .directHotkeyUse, scope: scope, itemID: itemID)
+    }
+
+    /// Journal row for a feature that has no launcher row: kind and a stable
+    /// id only (`feature:<name>`, `action:<uuid>`, `command:<id>`), never
+    /// the text, selection, answer or prompt it worked on.
+    func noteFeatureUse(_ kind: InteractionJournalEventKind, itemID: String) {
+        recordJournal(kind: kind, itemID: itemID)
+    }
+
+    /// The app's wiring from Type to Click to the journal. AppDelegate and the
+    /// tests both call this, so a test exercises the real path.
+    func journalFeatureUse(of controller: TypeToClickController) {
+        controller.onTargetUsed = { [weak self] in
+            self?.noteFeatureUse(.typeToClickUsed, itemID: "feature:type-to-click")
+        }
+    }
+
+    /// The app's wiring from the Translator window to the journal.
+    func journalFeatureUse(of model: TranslatorModel) {
+        model.onTranslationRun = { [weak self] in
+            self?.noteFeatureUse(.translatorRun, itemID: "feature:translator")
+        }
+    }
+
+    func forgetLearnedRanking() {
+        launcherUsage.reset()
+        launcherRankingVersion += 1
+        applicationSelectionIndex = 0
+    }
+
+    /// Call after an alias or hotkey edit so cached rankings pick it up.
+    func invalidateLauncherRanking() {
+        launcherRankingVersion += 1
+    }
 }

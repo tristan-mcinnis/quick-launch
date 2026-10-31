@@ -276,4 +276,38 @@ extension QuickViewModel {
         }
         persistSettings(settings)
     }
+
+    func launcherItemAlias(for item: LauncherCatalogItem) -> String {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.alias ?? ""
+    }
+
+    func launcherItemHotkey(for item: LauncherCatalogItem) -> ActionHotkey? {
+        // Type to Click predates configurable catalog items. Present its one
+        // real global hotkey through the same ⌘K editor instead of creating a
+        // second, unrelated launcher-item shortcut.
+        if item.itemID == "type-to-click.mode" {
+            return settings.typeToClickHotkeyEnabled ? settings.typeToClickHotkey : nil
+        }
+        return settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.hotkey
+    }
+
+    func setLauncherItemAlias(_ alias: String, for item: LauncherCatalogItem) {
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.alias = alias }
+    }
+
+    func isLauncherItemPinned(_ item: LauncherCatalogItem) -> Bool {
+        settings.launcherItemConfiguration(kind: item.kind, itemID: item.itemID)?.isPinned ?? false
+    }
+
+    /// `⌘⇧P` on a snippet, quick link, or screenshot. The pin lives in the
+    /// item's configuration record beside its alias and hotkey.
+    func togglePinLauncherItem(_ item: LauncherCatalogItem) {
+        updateLauncherItemConfiguration(kind: item.kind, itemID: item.itemID) { $0.isPinned.toggle() }
+        noteInteraction()
+    }
+
+    /// True for the blank item the Create commands put in the editor.
+    func isDraftItem(_ item: LauncherCatalogItem) -> Bool {
+        item.itemID == Self.draftSnippetID || item.itemID == Self.draftQuickLinkID
+    }
 }
