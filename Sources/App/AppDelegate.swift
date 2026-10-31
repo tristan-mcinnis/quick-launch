@@ -291,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // while the tests all pass, because they inject their own.
             houseCommandCatalog: HouseCommandCatalog(),
             apiKeyProvider: QuickViewModel.keychainAPIKey,
+            keychain: SystemKeychainStore(),
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
@@ -1756,6 +1757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             runningApplications: SystemRunningApplications(),
             attachmentExtractor: SharedDocumentExtractor(),
             apiKeyProvider: QuickViewModel.keychainAPIKey,
+            keychain: SystemKeychainStore(),
             currentVersion: Bundle.main.shortVersion
         )
         chat.memoryService = recall

@@ -18,7 +18,7 @@ extension QuickViewModel {
             get: { self.settings[keyPath: keyPath] },
             set: { value in
                 self.settings[keyPath: keyPath] = value
-                self.settings.save()
+                self.persistSettings(self.settings)
                 onSet?(value)
             }
         )
@@ -36,7 +36,7 @@ extension QuickViewModel {
             get: { get(self.settings) },
             set: { value in
                 set(&self.settings, value)
-                self.settings.save()
+                self.persistSettings(self.settings)
                 onSet?()
             }
         )
@@ -46,7 +46,7 @@ extension QuickViewModel {
     /// and list edits that do not go through a `Binding`.
     func updateSettings(_ mutation: (inout QuickSettings) -> Void) {
         mutation(&settings)
-        settings.save()
+        persistSettings(settings)
         // A provider may have been added, removed, or repointed; the cached
         // key presence is no longer trustworthy.
         invalidateAPIKeyPresence()

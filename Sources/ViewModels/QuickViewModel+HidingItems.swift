@@ -104,7 +104,7 @@ extension QuickViewModel {
         if settings.launcherItemConfigurations[index].isEmpty {
             settings.launcherItemConfigurations.remove(at: index)
         }
-        settings.save()
+        persistSettings(settings)
         NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
         launcherRankingVersion += 1
         applicationSelectionIndex = 0
@@ -122,7 +122,7 @@ extension QuickViewModel {
             return visible.isEmpty ? nil : visible
         }
         guard restored else { return }
-        settings.save()
+        persistSettings(settings)
         NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
         launcherRankingVersion += 1
         applicationSelectionIndex = 0
@@ -133,7 +133,7 @@ extension QuickViewModel {
         let before = settings.launcherItemConfigurations.count
         settings.launcherItemConfigurations.removeAll { $0.kind == item.kind && $0.itemID == item.itemID }
         guard settings.launcherItemConfigurations.count != before else { return }
-        settings.save()
+        persistSettings(settings)
         NotificationCenter.default.post(name: .launcherItemHotkeysChanged, object: nil)
     }
 
@@ -155,7 +155,7 @@ extension QuickViewModel {
                     settings.launcherItemConfigurations.remove(at: index)
                 }
             }
-            settings.save()
+            persistSettings(settings)
             NotificationCenter.default.post(name: .typeToClickSettingsChanged, object: nil)
             return
         }
@@ -207,7 +207,7 @@ extension QuickViewModel {
                 settings.launcherItemConfigurations.append(configuration)
             }
         }
-        settings.save()
+        persistSettings(settings)
     }
 
     func applicationAlias(for application: LaunchableApplication) -> String {
@@ -278,7 +278,7 @@ extension QuickViewModel {
                 settings.launcherItemConfigurations.append(configuration)
             }
         }
-        settings.save()
+        persistSettings(settings)
     }
 
     func closeActionPalette() {

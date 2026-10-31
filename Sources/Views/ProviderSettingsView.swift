@@ -166,12 +166,12 @@ struct ProviderSettingsView: View {
                         .background(fieldBackground)
                     Button("Save") { saveKey(provider.id) }
                     Button("Remove") {
-                        try? APIKeyStore.delete(providerID: provider.id)
+                        try? APIKeyStore.delete(providerID: provider.id, keychain: viewModel.keychain)
                         viewModel.invalidateAPIKeyPresence()
                         apiKey = ""
                         keyStatus = "Key removed"
                     }
-                    .disabled(apiKey.isEmpty && APIKeyStore.load(providerID: provider.id) == nil)
+                    .disabled(apiKey.isEmpty && APIKeyStore.load(providerID: provider.id, keychain: viewModel.keychain) == nil)
                 }
             }
         } else if provider.kind == .commandLine {
@@ -255,11 +255,11 @@ struct ProviderSettingsView: View {
                     .background(fieldBackground)
                 Button("Save") { saveSearchKey(text.wrappedValue, featureKey: featureKey) }
                 Button("Remove") {
-                    try? APIKeyStore.deleteFeatureKey(featureKey)
+                    try? APIKeyStore.deleteFeatureKey(featureKey, keychain: viewModel.keychain)
                     text.wrappedValue = ""
                     searchKeyStatus = "Key removed"
                 }
-                .disabled(text.wrappedValue.isEmpty && APIKeyStore.loadFeatureKey(featureKey) == nil)
+                .disabled(text.wrappedValue.isEmpty && APIKeyStore.loadFeatureKey(featureKey, keychain: viewModel.keychain) == nil)
             }
         }
     }
@@ -363,21 +363,21 @@ struct ProviderSettingsView: View {
     }
 
     private func loadKey() {
-        apiKey = APIKeyStore.load(providerID: viewModel.settings.selectedProviderID) ?? ""
+        apiKey = APIKeyStore.load(providerID: viewModel.settings.selectedProviderID, keychain: viewModel.keychain) ?? ""
         keyStatus = nil
     }
 
     private func loadSearchKeys() {
-        tavilyKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch) ?? ""
-        braveKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch) ?? ""
-        bochaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch) ?? ""
-        exaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch) ?? ""
+        tavilyKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch, keychain: viewModel.keychain) ?? ""
+        braveKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.braveSearch, keychain: viewModel.keychain) ?? ""
+        bochaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch, keychain: viewModel.keychain) ?? ""
+        exaKey = APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch, keychain: viewModel.keychain) ?? ""
         searchKeyStatus = nil
     }
 
     private func saveSearchKey(_ key: String, featureKey: String) {
         do {
-            try APIKeyStore.saveFeatureKey(key, name: featureKey)
+            try APIKeyStore.saveFeatureKey(key, name: featureKey, keychain: viewModel.keychain)
             searchKeyStatus = "Key saved in Keychain"
         } catch {
             searchKeyStatus = error.localizedDescription
@@ -386,7 +386,7 @@ struct ProviderSettingsView: View {
 
     private func saveKey(_ providerID: UUID) {
         do {
-            try APIKeyStore.save(apiKey, providerID: providerID)
+            try APIKeyStore.save(apiKey, providerID: providerID, keychain: viewModel.keychain)
             viewModel.invalidateAPIKeyPresence()
             keyStatus = "Key saved in Keychain"
         } catch {

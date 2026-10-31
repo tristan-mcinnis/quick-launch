@@ -53,7 +53,7 @@ extension QuickViewModel {
         var updated = settings
         if let conflict = updated.setShortcut(hotkey, for: action) { return conflict }
         settings = updated
-        settings.save()
+        persistSettings(settings)
         NotificationCenter.default.post(name: .shortcutBindingsChanged, object: nil)
         return nil
     }
@@ -68,7 +68,7 @@ extension QuickViewModel {
         var updated = settings
         updated.resetAllShortcuts()
         settings = updated
-        settings.save()
+        persistSettings(settings)
         NotificationCenter.default.post(name: .shortcutBindingsChanged, object: nil)
     }
     /// Every write tells the other view on the store (`QuickStore`), so its

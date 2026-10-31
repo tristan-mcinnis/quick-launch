@@ -540,6 +540,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// A locked login keychain prompts and hangs `swift test`, so nothing but
     /// the app's own launch path reaches the real Keychain.
     @ObservationIgnored var apiKeyProvider: (UUID) -> String?
+    /// The Keychain the Settings key fields read and write. In memory unless
+    /// the app injects `SystemKeychainStore`, for the same reason as
+    /// `apiKeyProvider`: a rendered Models pane in a test read real keys.
+    @ObservationIgnored let keychain: any KeychainStoring
     /// The production lookup, passed in by `AppDelegate`.
     static let keychainAPIKey: (UUID) -> String? = { APIKeyStore.load(providerID: $0) }
     /// Whether a provider has a key, remembered for this session. The route
@@ -1048,9 +1052,11 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         attachmentExtractor: (any AttachmentExtracting)? = nil,
         houseCommandCatalog: HouseCommandCatalog? = nil,
         apiKeyProvider: ((UUID) -> String?)? = nil,
+        keychain: (any KeychainStoring)? = nil,
         currentVersion: String = "1.0.0"
     ) {
         self.apiKeyProvider = apiKeyProvider ?? { _ in nil }
+        self.keychain = keychain ?? InMemoryKeychainStore()
         // The non-injected path matches production: the shared reader, so a
         // document is extracted by HouseChatDocuments and not the app-side
         // OOXML copy that has drifted from the package's.
@@ -2774,13 +2780,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     func selectModel(providerID: UUID, model: String) {
         settings.select(providerID: providerID, model: model)
-        settings.save()
+        persistSettings(settings)
         modelRefreshMessage = nil
     }
 
     func selectProvider(providerID: UUID) {
         settings.select(providerID: providerID)
-        settings.save()
+        persistSettings(settings)
         modelRefreshMessage = nil
     }
 
@@ -2790,7 +2796,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
         settings.selectedProviderID = providerID
         settings.providers[index].selectedModel = model
-        settings.save()
+        persistSettings(settings)
         modelRefreshMessage = nil
     }
 
@@ -2805,7 +2811,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         )
         settings.providers.append(provider)
         settings.selectedProviderID = provider.id
-        settings.save()
+        persistSettings(settings)
         return provider.id
     }
 
@@ -2818,9 +2824,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             settings.selectedProviderID = settings.providers.first?.id
                 ?? InferenceProvider.deepSeekID
         }
-        try? APIKeyStore.delete(providerID: id)
+        try? APIKeyStore.delete(providerID: id, keychain: keychain)
         invalidateAPIKeyPresence()
-        settings.save()
+        persistSettings(settings)
     }
 
     func refreshModels(providerID: UUID) async {
@@ -2844,7 +2850,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
                     for: settings.providers[index], preferences: modelPreferences
                 )
             }
-            settings.save()
+            persistSettings(settings)
             modelRefreshMessage = models.isEmpty
                 ? "No models found"
                 : "Found \(models.count) models"
