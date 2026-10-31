@@ -697,14 +697,13 @@ struct AttachmentExtractorTests {
 
     // MARK: Time and cancellation
 
-    @Test("A read over the time limit stops with its line")
+    /// The recognizer would take an hour, so a read that waited it out would
+    /// trip the time limit; no wall-clock budget decides the result.
+    @Test("A read over the time limit stops with its line", .timeLimit(.minutes(1)))
     func timeout() async throws {
         let url = file("slow-scan.pdf", AttachmentFixtures.scannedPDF(pages: ["slow"]))
-        let slow = extractor(recognizer: FakeRecognizer(delay: .seconds(5)), timeout: .milliseconds(200))
-        let clock = ContinuousClock()
-        let start = clock.now
+        let slow = extractor(recognizer: FakeRecognizer(delay: .seconds(3_600)), timeout: .milliseconds(200))
         #expect(await failure(url, with: slow) == .timedOut)
-        #expect(start.duration(to: clock.now) < .seconds(3))
         #expect(AttachmentFailure.timedOut.chipLine == "Reading took too long")
     }
 
@@ -745,8 +744,14 @@ struct AttachmentExtractorTests {
 
 /// The proof for this package: one extraction per fixture kind, timed, and
 /// printed as a table next to the numbers measured on this Mac for the spec
-/// (section 2). Each must stay inside that order of magnitude.
-@Suite("Attachment extraction timing", .serialized)
+/// (section 2). Each must stay inside that order of magnitude. Wall-clock
+/// numbers mean nothing on a busy machine, so this runs only when asked:
+/// `QUICK_LAUNCH_PERF=1 swift test --filter AttachmentTimingTests`.
+@Suite(
+    "Attachment extraction timing",
+    .serialized,
+    .enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PERF"] == "1")
+)
 struct AttachmentTimingTests {
     private struct Row {
         let kind: String

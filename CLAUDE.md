@@ -164,7 +164,7 @@ waits on the work itself (an injected clock such as `TypeToClickClock`, an
 never on a wall-clock budget. Speed budgets are opt-in and run on a quiet
 machine: `QUICK_LAUNCH_PERF=1 swift test --filter LauncherPerformanceBudgetTests`,
 or `QUICK_LAUNCH_PERF=1 swift test` for every budget (ChatSearch, launcher
-learning, OOXML bomb, show path, chat baseline).
+learning, OOXML bomb, attachment timing table, show path, chat baseline).
 Never push with `SKIP_TESTS=1`; a flaky gate is a bug to fix.
 
 The native rail focus proof takes the keyboard and runs separately from other

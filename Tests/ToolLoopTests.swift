@@ -160,15 +160,16 @@ struct ToolLoopTests {
 
     // MARK: - The wall-clock budget
 
-    @Test func aSlowToolIsCutAtTheBudgetAndTheModelAnswers() async throws {
+    /// The tool would take an hour, so a loop that waited it out would trip
+    /// the time limit; no wall-clock budget decides the result.
+    @Test(.timeLimit(.minutes(1)))
+    func aSlowToolIsCutAtTheBudgetAndTheModelAnswers() async throws {
         LoopStubHTTP.reset([
             Self.toolCallRound("call_slow", name: "recall_memory", arguments: #"{"query":"x"}"#),
             Self.answerRound("Memory was slow."),
         ])
         let memory = FakeMemory(hits: [FakeMemory.hit("a.md")])
-        await memory.setDelay(.seconds(30))
-        let clock = ContinuousClock()
-        let started = clock.now
+        await memory.setDelay(.seconds(3_600))
 
         let collected = try await Self.collect(
             Self.service(
@@ -177,7 +178,6 @@ struct ToolLoopTests {
             ).send(messages: [QuickMessage(role: .user, content: "q")])
         )
 
-        #expect(clock.now - started < .seconds(10), "the loop never waits out a stuck tool")
         #expect(collected.text == "Memory was slow.")
         #expect(collected.records.map(\.summary) == ["Memory search ran out of time"])
         let second = try Self.body(1)
