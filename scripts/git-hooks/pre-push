@@ -5,8 +5,13 @@ set -euo pipefail
 git_environment="$(git rev-parse --local-env-vars)"
 for variable in $git_environment; do unset "$variable"; done
 cd "$(git rev-parse --show-toplevel)"
+# One-shot verdict for test-command: written only when this main push changes
+# docs alone, consumed by the global hook's test run right after this one.
+docs_only_marker="$(git rev-parse --absolute-git-dir)/ql-docs-only-push"
+rm -f "$docs_only_marker"
 zero=0000000000000000000000000000000000000000
 expected=""
+base=""
 while read -r local_ref local_sha remote_ref remote_sha; do
   [[ "$remote_ref" == "refs/heads/main" ]] || continue
   if [[ "$local_sha" == "$zero" ]]; then
@@ -16,6 +21,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     echo "Refusing non-fast-forward main. Fetch and compare before retrying." >&2; exit 1
   fi
   expected="$local_sha"
+  base="$remote_sha"
 done
 [[ -n "$expected" ]] || exit 0
 if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
@@ -25,8 +31,31 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]] || [[ "$(git re
   echo "Refusing publish: main must match the clean checkout under test." >&2; exit 1
 fi
 sh scripts/scrub.sh
-# The unchanged global hook runs `swift test` after this local gate.
+# The unchanged global hook runs `swift test` after this local gate, through
+# test-command, which skips it only for the docs-only verdict below.
 # Do not run it twice or suppress the global fallback.
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]] || [[ "$(git rev-parse HEAD)" != "$expected" ]]; then
   echo "Refusing publish: checkout changed during verification." >&2; exit 1
+fi
+# Docs only means every changed path is prose no test reads. CLAUDE.md and
+# AGENTS.md are NOT on the list: AIChatWindowTests reads the contract in them.
+# Keep this list the same as paths-ignore in .github/workflows/ci.yml.
+is_docs_path() {
+  case "$1" in
+    docs/*|notes/*|README.md|CHANGELOG.md|THIRD_PARTY_NOTICES.md|LICENSE) return 0 ;;
+    scripts/git-hooks/README.md|Packaging/Release/highlights.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [[ "$base" != "$zero" ]]; then
+  changed="$(git diff --name-only "$base" "$expected")"
+  docs_only=1
+  [[ -n "$changed" ]] || docs_only=0
+  while IFS= read -r path; do
+    [[ -z "$path" ]] || is_docs_path "$path" || { docs_only=0; break; }
+  done <<< "$changed"
+  if [[ "$docs_only" == "1" ]]; then
+    printf '%s\n' "$expected" > "$docs_only_marker"
+    echo "pre-push: docs-only push; scrub ran, swift test is skipped."
+  fi
 fi
