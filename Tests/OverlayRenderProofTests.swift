@@ -198,7 +198,18 @@ struct OverlayRenderProofTests {
         try Self.saveSettings(vm, tab: .items, name: "settings-items-dark.png")
         // Emoji & Symbols, Screenshots, and Text from Screen live on this tab.
         try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-dark.png")
-        try Self.saveSettings(vm, tab: .clipboard, name: "settings-capture-light.png", appearance: .aqua)
+        // Settings follows the app's appearance setting, so a light proof
+        // needs a light view model, not only a light host.
+        let light = Self.makeViewModel(appearance: .light)
+        light.input = ""
+        try Self.saveSettings(light, tab: .clipboard, name: "settings-capture-light.png", appearance: .aqua)
+        // Models and AI Commands, at the window size and tall enough to show
+        // the whole pane, so the form spacing can be checked by eye.
+        for (tab, slug) in [(SettingsView.SettingsTab.models, "models"), (.prompts, "ai-commands")] {
+            try Self.saveSettings(vm, tab: tab, name: "settings-\(slug)-dark.png")
+            try Self.saveSettings(light, tab: tab, name: "settings-\(slug)-light.png", appearance: .aqua)
+            try Self.saveSettings(vm, tab: tab, name: "settings-\(slug)-full-dark.png", height: 2400)
+        }
     }
 
     /// The saved-media browser as a grid, in both appearances: the cells read
@@ -238,11 +249,20 @@ struct OverlayRenderProofTests {
         _ vm: QuickViewModel,
         tab: SettingsView.SettingsTab,
         name: String,
-        appearance: NSAppearance.Name = .darkAqua
+        appearance: NSAppearance.Name = .darkAqua,
+        height: CGFloat? = nil
     ) throws {
         let host = NSHostingView(rootView: SettingsView(viewModel: vm, initialTab: tab))
         host.appearance = NSAppearance(named: appearance)
-        host.frame = NSRect(origin: .zero, size: SettingsView.windowSize)
+        let size = NSSize(width: SettingsView.windowSize.width, height: height ?? SettingsView.windowSize.height)
+        // A SwiftUI Table is an NSTableView, which makes its rows only in a
+        // window. This one is never ordered front.
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { withExtendedLifetime(window) {} }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw ProofError.noBitmap }
         host.cacheDisplay(in: host.bounds, to: rep)
