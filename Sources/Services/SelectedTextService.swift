@@ -194,28 +194,7 @@ final class SelectedTextService: SelectedTextServicing {
             try? await Task.sleep(for: .milliseconds(25))
         }
         guard becameFrontmost else { return .failed }
-        return await commandVAfterSettling(expectingChangeCount: expectedChangeCount)
-    }
-
-    /// Waits for modifier keys to lift, then sends Command-V unless the
-    /// clipboard changed meanwhile.
-    func commandVAfterSettling(expectingChangeCount expected: Int) async -> PasteOutcome {
-        await pasteGuard.waitForModifierRelease()
-        return commandVOutcome(expectingChangeCount: expected)
-    }
-
-    /// The guarded keystroke, with one log line per way it can not happen
-    /// (never the clipboard text).
-    func commandVOutcome(expectingChangeCount expected: Int) -> PasteOutcome {
-        let outcome = pasteGuard.sendCommandV(expectingChangeCount: expected)
-        switch outcome {
-        case .pasted: break
-        case .clipboardChanged:
-            logger.error("Paste skipped: the clipboard changed after Quick Launch wrote it")
-        case .failed:
-            logger.error("Could not synthesise Command-V")
-        }
-        return outcome
+        return await pasteGuard.sendCommandVAfterSettling(expectingChangeCount: expectedChangeCount)
     }
 
     func paste(_ text: String, to target: SelectionTarget) async -> Bool {
@@ -270,7 +249,7 @@ final class SelectedTextService: SelectedTextServicing {
         // Fast path: accessibility insertion at the caret, no keystrokes.
         if insertAtCaret(text, processIdentifier: target.processIdentifier) { return .pasted }
         // Fallback: a synthesised Command-V into the now-frontmost app.
-        let outcome = commandVOutcome(expectingChangeCount: expectedChangeCount)
+        let outcome = pasteGuard.sendLoggedCommandV(expectingChangeCount: expectedChangeCount)
         if outcome == .pasted { logger.info("Paste completed by Command-V fallback") }
         return outcome
     }

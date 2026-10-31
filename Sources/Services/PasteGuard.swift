@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 /// How a paste ended. `clipboardChanged` means nothing was sent because the
 /// user copied something else first: callers must not copy the answer over it.
@@ -26,6 +27,29 @@ struct PasteGuard {
         guard changeCount() == expected else { return .clipboardChanged }
         return sendCommandV() ? .pasted : .failed
     }
+
+    /// Waits for modifier keys to lift, then sends Command-V unless the
+    /// clipboard changed meanwhile.
+    func sendCommandVAfterSettling(expectingChangeCount expected: Int) async -> PasteOutcome {
+        await waitForModifierRelease()
+        return sendLoggedCommandV(expectingChangeCount: expected)
+    }
+
+    /// The guarded keystroke, with one log line per way it can not happen
+    /// (never the clipboard text).
+    func sendLoggedCommandV(expectingChangeCount expected: Int) -> PasteOutcome {
+        let outcome = sendCommandV(expectingChangeCount: expected)
+        switch outcome {
+        case .pasted: break
+        case .clipboardChanged:
+            Self.logger.error("Paste skipped: the clipboard changed after Quick Launch wrote it")
+        case .failed:
+            Self.logger.error("Could not synthesise Command-V")
+        }
+        return outcome
+    }
+
+    private static let logger = Logger(subsystem: "com.tristanmcinnis.quick-launch", category: "ExternalAction")
 
     static func waitForModifiers() async {
         for _ in 0..<40 {

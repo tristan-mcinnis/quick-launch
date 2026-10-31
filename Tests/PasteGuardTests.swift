@@ -34,19 +34,18 @@ struct PasteGuardTests {
         #expect(guardian.sendCommandV(expectingChangeCount: 7) == .failed)
     }
 
-    // The service routes through the injected guard; the entry points need
-    // Accessibility trust and a frontmost app, so these drive the shared tail
-    // that both `paste(_:to:)` and `pastePasteboard(to:)` end in.
+    // The shared tail that both `paste(_:to:)` and `pastePasteboard(to:)`
+    // end in, driven on the guard so no test builds the real service.
     @Test("A copy made while waiting for modifier keys blocks Command-V")
     func copyDuringTheWaitBlocksCommandV() async {
         var count = 7
         var sent = 0
-        let service = SelectedTextService(pasteGuard: makeGuard(
+        let service = makeGuard(
             count: { count },
             send: { sent += 1; return true },
             settle: { count += 1 }
-        ))
-        let outcome = await service.commandVAfterSettling(expectingChangeCount: 7)
+        )
+        let outcome = await service.sendCommandVAfterSettling(expectingChangeCount: 7)
         #expect(outcome == .clipboardChanged)
         #expect(sent == 0)
     }
@@ -54,14 +53,14 @@ struct PasteGuardTests {
     @Test("An undisturbed clipboard still pastes through the service")
     func undisturbedClipboardPastes() async {
         var sent = 0
-        let service = SelectedTextService(pasteGuard: makeGuard(send: { sent += 1; return true }))
-        #expect(await service.commandVAfterSettling(expectingChangeCount: 7) == .pasted)
+        let service = makeGuard(send: { sent += 1; return true })
+        #expect(await service.sendCommandVAfterSettling(expectingChangeCount: 7) == .pasted)
         #expect(sent == 1)
     }
 
     @Test("The service reports the same outcome after the caret-insert window")
     func serviceCommandVOutcome() {
-        let service = SelectedTextService(pasteGuard: makeGuard(count: { 9 }))
-        #expect(service.commandVOutcome(expectingChangeCount: 7) == .clipboardChanged)
+        let service = makeGuard(count: { 9 })
+        #expect(service.sendLoggedCommandV(expectingChangeCount: 7) == .clipboardChanged)
     }
 }
