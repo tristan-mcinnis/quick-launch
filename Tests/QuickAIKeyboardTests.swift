@@ -5,7 +5,7 @@
 // That proves the destination works and proves nothing about the routing.
 //
 // This suite builds a real `KeyablePanel` wired with the closures
-// `AppDelegate.makePanel` installs (Sources/App/AppDelegate.swift:514-544),
+// `AppDelegate.makePanel` installs (Sources/App/AppDelegate.swift),
 // builds real `NSEvent`s, and pushes them through the panel's own
 // `performKeyEquivalent(with:)` / `sendEvent(_:)`. Assertions read only
 // observable state: which layer is on top, what the action list holds, what
@@ -929,7 +929,7 @@ private final class KeyboardOverlay {
         self.viewModel = viewModel
         self.panel = panel
 
-        // Mirrors Sources/App/AppDelegate.swift:514-544.
+        // Mirrors the handlers in AppDelegate.makePanel.
         panel.commandKHandler = { [weak viewModel] in
             viewModel?.handleCommandK()
         }
