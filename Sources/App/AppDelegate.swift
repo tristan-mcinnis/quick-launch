@@ -745,29 +745,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 }
 
-// MARK: - QuickViewModel extensions
-
-extension QuickViewModel {
-
-    // MARK: Silent update check
-
-    /// Fetches latest release tag from GitHub and calls handleUpdateCheck.
-    /// Never surfaces errors to the user.
-    func checkForUpdateSilently() async {
-        guard let url = URL(string: "https://api.github.com/repos/tristan-mcinnis/quick-launch/releases/latest") else { return }
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let tag = json["tag_name"] as? String {
-                await handleUpdateCheck(remoteVersion: tag)
-            }
-        } catch {
-            // Silent — ignore network errors
-        }
-    }
-
-}
-
 // MARK: - OverlayPresenting
 
 extension AppDelegate: OverlayPresenting {

@@ -292,6 +292,12 @@ struct QuickViewModelTests {
         #expect(vm.updateState == .updateAvailable(newVersion: "1.0.1"))
     }
 
+    @Test func aReleaseTagReadsAsABareVersionOnEveryCheckPath() async throws {
+        let vm = QuickViewModel(service: MockQuickService(), currentVersion: "1.0.0")
+        await vm.handleUpdateCheck(remoteVersion: "v1.2.0")
+        #expect(vm.updateState == .updateAvailable(newVersion: "1.2.0"))
+    }
+
     // MARK: - 17. Same version sets .upToDate
 
     @Test func testHandleUpdateCheckSameVersionSetsUpToDate() async throws {
