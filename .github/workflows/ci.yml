@@ -4,9 +4,31 @@ name: CI
 # The scrub reads an optional untracked .scrub-private; on CI it is absent, so
 # only the public patterns run.
 
+# Doc-only changes skip CI. Keep this list the same as is_docs_path in
+# scripts/git-hooks/pre-push. CLAUDE.md and AGENTS.md stay out of it:
+# AIChatWindowTests reads the contract in them.
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - 'notes/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'LICENSE'
+      - 'scripts/git-hooks/README.md'
+      - 'Packaging/Release/highlights.md'
+  workflow_dispatch:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'notes/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'LICENSE'
+      - 'scripts/git-hooks/README.md'
+      - 'Packaging/Release/highlights.md'
 
 permissions:
   contents: read
@@ -37,6 +59,19 @@ jobs:
           xcode-select -p
           xcodebuild -version
           swift --version
+          echo "SWIFT_VERSION=$(swift --version 2>&1 | head -n 1 | shasum | cut -c1-12)" >> "$GITHUB_ENV"
+
+      # A cold build is ~6 of the ~7 minutes. Cache SwiftPM's .build keyed on
+      # the toolchain and the resolved packages; a source change still
+      # restores the closest cache and rebuilds only what changed.
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Packages/**/Package.swift', 'Packages/**/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Packages/**/Package.swift', 'Packages/**/Package.resolved') }}-
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-
 
       - name: Publish scrub
         run: sh scripts/scrub.sh
