@@ -34,7 +34,8 @@ struct InterfaceContractTests {
         let pane = try Self.source("Sources/Views/SelectableListPane.swift")
         #expect(pane.contains("accessibilityAddTraits(isSelected ? .isSelected : [])"))
         #expect(overlay.contains("SelectableListPane("))
-        #expect(overlay.contains("private func announceSelected()"))
+        let palette = try Self.source("Sources/Views/QuickActionPalette.swift")
+        #expect(palette.contains("private func announceSelected()"))
     }
 
     @Test("Command-comma routes to the real settings interface")
@@ -43,7 +44,7 @@ struct InterfaceContractTests {
         // `showSettingsWindow:`), so it is gone; Settings is the AppKit panel
         // AppDelegate builds, and every ⌘, entry reaches it.
         let app = try Self.source("Sources/App/QuickLaunchApp.swift")
-        let delegate = try Self.source("Sources/App/AppDelegate.swift")
+        let delegate = try Self.source("Sources/App/AppDelegate+Windows.swift")
         let statusMenu = try Self.source("Sources/App/StatusMenu.swift")
         let chatMenu = try Self.source("Sources/App/AIChatMenu.swift")
         #expect(!app.contains("CommandGroup(replacing: .appSettings)"))

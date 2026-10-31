@@ -53,6 +53,7 @@ struct RealWorkspaceGuardTests {
             "Sources/Services/ApplicationCatalogService.swift",
             "Sources/Services/SelectedTextService.swift",
             "Sources/App/AppDelegate.swift",
+            "Sources/App/AppDelegate+StatusItem.swift",
             "Sources/App/AppActivation.swift",
             "Sources/Views/ChatContextRecordView.swift",
         ]
