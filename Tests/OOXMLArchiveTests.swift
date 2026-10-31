@@ -49,8 +49,21 @@ struct OOXMLArchiveTests {
         #expect(archive.inflatedBytes == 0)
     }
 
-    @Test("A bomb with a lying header stops at the per-entry cap in under 50 ms")
+    @Test("A bomb with a lying header stops at the per-entry cap")
     func lyingBombStopsAtCap() throws {
+        let archive = try OOXMLArchive(data: AttachmentFixtures.lyingBombPPTX)
+        #expect(throws: OOXMLArchiveError.tooBig(entry: "ppt/slides/slide1.xml")) {
+            try archive.data(for: "ppt/slides/slide1.xml")
+        }
+    }
+
+    /// A wall-clock budget, so it runs only when asked, on a quiet machine:
+    /// `QUICK_LAUNCH_PERF=1 swift test --filter lyingBombStopsInUnder50ms`.
+    @Test(
+        "A bomb with a lying header stops at the cap in under 50 ms",
+        .enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PERF"] == "1")
+    )
+    func lyingBombStopsInUnder50ms() throws {
         // Best of three, so a busy test run does not decide the timing.
         var best = Duration.seconds(10)
         for _ in 0..<3 {

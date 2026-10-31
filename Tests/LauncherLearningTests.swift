@@ -226,7 +226,10 @@ struct LauncherLearningTests {
         #expect(vm.catalogMatches.first?.title == "Great Escape")
     }
 
-    @Test func rankingAHundredQueriesStaysWithinBudget() {
+    /// A wall-clock budget, so it runs only when asked, on a quiet machine:
+    /// `QUICK_LAUNCH_PERF=1 swift test --filter rankingAHundredQueries`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PERF"] == "1"))
+    func rankingAHundredQueriesStaysWithinBudget() {
         let store = LauncherUsageStore(fileURL: nil)
         for index in 0..<200 {
             store.recordSelection(query: "q\(index % 40)", scope: "root", itemID: "application:app-\(index)")

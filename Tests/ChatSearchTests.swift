@@ -369,8 +369,11 @@ struct ChatSearchTests {
     /// slower, so the guard that holds everywhere is relative: a built
     /// index answers at least 20 times faster than folding the chats again
     /// (about 70 to 290 times on a Mac), which a per-query refold or raw
-    /// scan cannot do.
-    @Test func twoHundredLongChatsAnswerAQueryInUnderTenMilliseconds() {
+    /// scan cannot do. Both guards read the wall clock, so this runs only
+    /// when asked, on a quiet machine:
+    /// `QUICK_LAUNCH_PERF=1 swift test --filter twoHundredLongChats`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PERF"] == "1"))
+    func twoHundredLongChatsAnswerAQueryInUnderTenMilliseconds() {
         let words = ["release", "budget", "kyoto", "temple", "garden", "quarterly", "revenue", "rebate", "notes",
                      "plan", "design", "window", "search", "answer", "question", "model", "token", "context"]
         func text(_ length: Int, seed: Int) -> String {
