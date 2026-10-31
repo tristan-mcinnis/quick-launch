@@ -48,6 +48,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so ci-pin-mtimes.py can stamp each file with its
+          # last commit time (the clone is under 10 MB).
+          fetch-depth: 0
 
       - name: Select Xcode 26
         run: |
@@ -61,20 +65,44 @@ jobs:
           swift --version
           echo "SWIFT_VERSION=$(swift --version 2>&1 | head -n 1 | shasum | cut -c1-12)" >> "$GITHUB_ENV"
 
-      # A cold build is ~6 of the ~7 minutes. Cache SwiftPM's .build keyed on
-      # the toolchain and the resolved packages; a source change still
-      # restores the closest cache and rebuilds only what changed.
-      - name: Cache SwiftPM build
-        uses: actions/cache@v4
+      # A cold build is most of the run. Two things make a cached .build
+      # usable. (1) A fresh checkout stamps every file with the clone time, so
+      # every source looks changed: pin each file to its last commit time.
+      # (2) actions/cache archives with GNU tar, which keeps whole-second
+      # mtimes, and SwiftPM then rebuilds everything it restored. So .build
+      # travels as a tarball made by macOS tar, which keeps nanoseconds.
+      - name: Pin source mtimes to commit times
+        run: python3 scripts/ci-pin-mtimes.py
+
+      - name: Restore SwiftPM build
+        id: build-cache
+        uses: actions/cache/restore@v4
         with:
-          path: .build
-          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Packages/**/Package.swift', 'Packages/**/Package.resolved') }}-${{ github.sha }}
+          path: .build-cache.tar
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
           restore-keys: |
-            spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Packages/**/Package.swift', 'Packages/**/Package.resolved') }}-
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved') }}-
             spm-${{ runner.os }}-${{ runner.arch }}-${{ env.SWIFT_VERSION }}-
+
+      - name: Unpack SwiftPM build
+        if: steps.build-cache.outputs.cache-matched-key != ''
+        run: /usr/bin/tar -xpf .build-cache.tar && rm .build-cache.tar
 
       - name: Publish scrub
         run: sh scripts/scrub.sh
 
       - name: Test
+        id: test
         run: swift test
+
+      # Saved after a failed test too: the build itself is still good.
+      - name: Pack SwiftPM build
+        if: always() && steps.test.outcome != 'skipped' && steps.build-cache.outputs.cache-hit != 'true'
+        run: /usr/bin/tar -cf .build-cache.tar .build
+
+      - name: Save SwiftPM build
+        if: always() && steps.test.outcome != 'skipped' && steps.build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .build-cache.tar
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}

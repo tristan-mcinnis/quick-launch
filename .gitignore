@@ -32,3 +32,4 @@ local-data/
 
 # Python bytecode from the scripts tests
 __pycache__/
+.build-cache.tar
