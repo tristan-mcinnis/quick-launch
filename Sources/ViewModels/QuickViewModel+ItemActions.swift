@@ -277,4 +277,56 @@ extension QuickViewModel {
         requestInputFocus()
         noteInteraction()
     }
+
+    func closeActionPalette() {
+        isActionPalettePresented = false
+        actionPaletteSubmenu = nil
+        actionQuery = ""
+        requestInputFocus()
+    }
+
+    func perform(action: SavedPrompt) async {
+        // With nothing selected, an assistant is picked, not run: the
+        // palette row and its hotkey start or switch the Quick AI chat to
+        // it, and nothing is sent. With a selection it runs its prompt on
+        // the selection, as any saved prompt does.
+        if action.isAssistant, !hasSelectedActionSource {
+            isActionPalettePresented = false
+            actionQuery = ""
+            selectAssistant(action)
+            return
+        }
+        let source: String
+        // Explicit Screen Awareness selection, then text typed into the
+        // launcher, then the launch-scoped background selection, then a fresh
+        // capture. Typed text beats the auto-captured snapshot; stale
+        // on-screen output is never used as the source.
+        if let attached = pendingContext?.selectedText,
+           !attached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = attached
+        } else if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let launchSelection,
+                  !launchSelection.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = launchSelection.text
+        } else if let selected = captureSelectedText(promptForPermission: true),
+                  !selected.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            source = selected.text
+        } else {
+            closeActionPalette()
+            errorMessage = selectedTextService?.isAccessibilityTrusted == false
+                ? "Allow Accessibility in System Settings, then select text and try again."
+                : "Select some text, or type text in the input field, then run this action."
+            requestInputFocus()
+            return
+        }
+
+        pendingActionSource = source
+        isActionPalettePresented = false
+        actionQuery = ""
+        // Bare alias; the source travels via pendingActionSource so a
+        // multi-line selection is never whitespace-collapsed by alias context.
+        input = settings.savedPromptPrefix + action.alias
+        await submit()
+    }
 }
