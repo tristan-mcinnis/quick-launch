@@ -62,6 +62,9 @@ struct SecretsEnvTests {
         ) == nil)
         #expect(WebSearchKeys.deepSeek(providerBaseURL: nil, keychainKey: "orphan", envKey: nil) == nil)
         #expect(WebSearchKeys.deepSeek(
+            providerBaseURL: "https://api.deepseek.com\n", keychainKey: "provider", envKey: nil
+        ) == "provider")
+        #expect(WebSearchKeys.deepSeek(
             providerBaseURL: "https://api.deepseek.com", keychainKey: nil, envKey: "env"
         ) == "env")
     }

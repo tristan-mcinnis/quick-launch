@@ -54,7 +54,7 @@ enum WebSearchKeys {
         keychainKey: @autoclosure () -> String?,
         envKey: @autoclosure () -> String?
     ) -> String? {
-        let host = providerBaseURL.flatMap { URL(string: $0.trimmingCharacters(in: .whitespaces))?.host()?.lowercased() }
+        let host = providerBaseURL.flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines))?.host()?.lowercased() }
         let providerKey = host == deepSeekSearchHost ? keychainKey() : nil
         return providerKey ?? envKey()
     }
