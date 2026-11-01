@@ -124,6 +124,7 @@ History.
 ## Development
 
 - Build and test from the repository root.
+- Build and test: `make build`, `make test`; warnings are errors.
 - Run `swift test` for the full suite.
 - Run `SIGN_IDENTITY=- ./scripts/build-app.sh` to verify local packaging.
 - The built app is `build/Quick Launch.app`.

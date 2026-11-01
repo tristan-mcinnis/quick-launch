@@ -7,12 +7,16 @@
 SIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Apple Development|Developer ID Application/ {print $$2; exit}')
 export SIGN_IDENTITY
 
+# Warnings are errors in `make build` and `make test`. The flag goes on the
+# command line, not in Package.swift (unsafeFlags would break dependents).
+WERROR := -Xswiftc -warnings-as-errors
+
 build:
-	swift build -c release
+	swift build -c release $(WERROR)
 
 # The full gate: the publish scrub and the app suite.
 test: scrub
-	swift test
+	swift test $(WERROR)
 
 # No personal paths, private hosts, keys or client names in tracked files.
 scrub:
