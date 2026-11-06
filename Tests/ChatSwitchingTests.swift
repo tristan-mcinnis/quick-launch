@@ -53,6 +53,14 @@ struct ChatSwitchingTests {
         #expect(anchor.scrollTop(messageTop: 900, maximumTop: 950) == 950, "clamped to the scroll range")
     }
 
+    @Test func aHeadScrolledToTheNearestPixelIsStillTheAnchor() throws {
+        let ids = (0..<2).map { _ in UUID() }
+        let tops: [UUID: CGFloat] = [ids[0]: 0, ids[1]: 700.5]
+        let anchor = try #require(ThreadScrollAnchor.make(viewTop: 700, order: ids, tops: tops))
+        #expect(anchor.messageID == ids[1])
+        #expect(anchor.scrollTop(messageTop: 700.5, maximumTop: 5_000) == 700)
+    }
+
     @Test func noLaidOutMessageMeansNoAnchor() {
         let id = UUID()
         #expect(ThreadScrollAnchor.make(viewTop: 500, order: [id], tops: [:]) == nil)
