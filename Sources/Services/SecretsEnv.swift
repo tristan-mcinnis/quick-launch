@@ -59,6 +59,25 @@ enum WebSearchKeys {
         return providerKey ?? envKey()
     }
 
+    /// The key a provider searches with; nil for Automatic, which picks
+    /// whichever provider has one.
+    static func key(for provider: WebSearchProvider) -> String? {
+        switch provider {
+        case .automatic: nil
+        case .deepseek: deepSeek()
+        case .tavily: tavily()
+        case .brave: brave()
+        case .bocha: APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.bochaSearch)
+        case .exa: APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.exaSearch)
+        }
+    }
+
+    /// True when the chosen provider cannot search: it needs a key and has
+    /// none.
+    static func isMissingKey(for provider: WebSearchProvider) -> Bool {
+        provider.requiresAPIKey && (key(for: provider) ?? "").isEmpty
+    }
+
     static func tavily() -> String? {
         APIKeyStore.loadFeatureKey(APIKeyStore.FeatureKey.tavilySearch)
             ?? SecretsEnv.value("TAVILY_API_KEY")

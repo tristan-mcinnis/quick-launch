@@ -215,10 +215,6 @@ enum ChatMotion {
         reduceMotion ? nil : .easeOut(duration: hover)
     }
 
-    static func selectAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeOut(duration: select)
-    }
-
     static func fastAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeOut(duration: fast)
     }

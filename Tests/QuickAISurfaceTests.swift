@@ -372,7 +372,7 @@ struct QuickAISurfaceTests {
         #expect(vm.output == "4")
         #expect(vm.quickAIDetachedAnswer == "4", "drawn after the thread, not as a turn")
         #expect(vm.pendingQuestion == "2+2", "under its own pill")
-        #expect(vm.quickAIHeaderSubtitle == QuickViewModel.localAnswerSourceTitle)
+        #expect(vm.answerSourceTitle == QuickViewModel.localAnswerSourceTitle)
         #expect(vm.input.isEmpty, "the field empties as it does for a model answer")
         #expect(vm.topLayer == .answer)
         #expect(await mock.sendCallCount == 1)
@@ -380,7 +380,7 @@ struct QuickAISurfaceTests {
         // The next question is a turn of the same chat again.
         await ask(vm, mock, "and then", reply: "Two.")
         #expect(vm.conversationMessages.map(\.content) == ["first", "One.", "and then", "Two."])
-        #expect(vm.quickAIHeaderSubtitle == vm.activeModelDisplay)
+        #expect(vm.answerSourceTitle == nil)
     }
 
     // MARK: - Recent Chats

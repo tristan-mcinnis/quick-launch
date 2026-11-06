@@ -61,6 +61,19 @@ struct AttachmentTrayTests {
 
     // MARK: - States
 
+    @Test func aReadChipSaysHowItWasRead() {
+        var content = AttachmentContent(
+            ref: ChatAttachmentRef(kind: .pdf, name: "scan.pdf", byteCount: 2_000, pageCount: 12, contentHash: "scan", extractorVersion: 1),
+            text: "Scanned page 1"
+        )
+        content.notes = [.ocr(pages: Array(1...10), totalPages: 12), .spreadsheetSerialDates]
+        let item = AttachmentTray.Item(id: UUID(), source: nil, phase: .ready(content), kind: .pdf, name: "scan.pdf")
+        let chip = AttachmentChipModel(item: item)
+        #expect(chip.notes == ["OCR · pages 1-10 of 12"], "a model-only note stays off the chip")
+        #expect(chip.detailLine.hasSuffix("OCR · pages 1-10 of 12"))
+        #expect(chip.help == "scan.pdf: OCR · pages 1-10 of 12")
+    }
+
     @Test func aChipShowsReadingAtOnceThenItsReference() async {
         let (tray, extractor) = make()
         await extractor.hold("report.pdf")

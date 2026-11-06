@@ -41,6 +41,9 @@ struct AttachmentChipModel: Identifiable, Equatable {
     var detail: String
     /// The cut, in the chip's words ("first 200,000 of 612,000 characters").
     var cut: String?
+    /// How it was read, when the user should know: "OCR · pages 1-10 of
+    /// 12", "first 5 MB of the page". The model gets the same notes.
+    var notes: [String] = []
     /// PNG or JPEG bytes for an image chip's thumbnail. Memory only.
     var imageData: Data?
     /// Overrides the kind's glyph (a window context chip).
@@ -58,7 +61,10 @@ struct AttachmentChipModel: Identifiable, Equatable {
         case .reading: return "Reading…"
         case .failed(let line): return line
         case .notLoaded(let line): return line
-        case .ready: return cut == nil ? detail : [detail, "cut"].filter { !$0.isEmpty }.joined(separator: " · ")
+        case .ready:
+            return ([detail] + (cut == nil ? [] : ["cut"]) + notes)
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
         }
     }
 
@@ -69,8 +75,9 @@ struct AttachmentChipModel: Identifiable, Equatable {
         case .notLoaded(let line): return "\(name): \(line)"
         case .reading: return "Reading \(name)…"
         case .ready:
-            guard let cut else { return name }
-            return "\(name): \(Self.sentenceCase(cut))"
+            let lines = (cut.map { [Self.sentenceCase($0)] } ?? []) + notes
+            guard !lines.isEmpty else { return name }
+            return "\(name): \(lines.joined(separator: "; "))"
         }
     }
 
@@ -86,6 +93,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
         case .ready:
             if let spoken = spokenDetail, !spoken.isEmpty { parts.append(spoken) }
             if let cut { parts.append("cut to the \(cut)") }
+            parts += notes
         }
         return parts.joined(separator: ", ")
     }
@@ -114,6 +122,7 @@ struct AttachmentChipModel: Identifiable, Equatable {
         switch item.phase {
         case .ready(let content):
             self = AttachmentChipModel(ref: content.ref, imageData: content.image?.data, id: item.id.uuidString)
+            self.notes = content.notes.compactMap(\.chipLine)
         case .reading, .failed:
             self.id = item.id.uuidString
             self.kind = item.kind

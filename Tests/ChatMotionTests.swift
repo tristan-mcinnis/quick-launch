@@ -18,7 +18,6 @@ struct ChatMotionTests {
 
     @Test func reduceMotionRemovesMovementFromEveryRow() {
         #expect(ChatMotion.hoverAnimation(reduceMotion: true) == nil)
-        #expect(ChatMotion.selectAnimation(reduceMotion: true) == nil)
         #expect(ChatMotion.fastAnimation(reduceMotion: true) == nil)
         #expect(ChatMotion.scrollAnimation(reduceMotion: true) == nil)
         #expect(ChatMotion.disclosureAnimation(reduceMotion: true) == nil)

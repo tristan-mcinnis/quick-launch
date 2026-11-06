@@ -394,12 +394,6 @@ extension QuickViewModel {
     /// The header's second line under a local answer asked in a chat.
     static let localAnswerSourceTitle = "Local answer"
 
-    /// The Quick AI header's second line: the source of a command
-    /// answer, otherwise the model that answers the next message.
-    var quickAIHeaderSubtitle: String {
-        answerSourceTitle ?? activeModelDisplay
-    }
-
     /// Whether the ⇥ hint is drawn in root search. The key itself is not
     /// conditional: `handleTab()` always opens Quick AI.
     var showsTabShortcutHint: Bool { settings.tabShortcutHintVisible }

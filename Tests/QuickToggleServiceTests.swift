@@ -47,12 +47,10 @@ struct QuickToggleServiceTests {
     }
 
     @Test func automationPermissionMarksTheAppleScriptToggles() {
-        let needing = Set(QuickToggle.allCases.filter(\.needsAutomationPermission))
-        #expect(needing == [.toggleDarkMode, .lockScreen, .emptyTrash, .ejectAllDisks])
-        for toggle in QuickToggle.allCases {
-            let usesOsascript = QuickToggleService.plan(for: toggle).contains { $0.executable == QuickToggleService.osascript }
-            #expect(usesOsascript == toggle.needsAutomationPermission, "\(toggle)")
-        }
+        let usingOsascript = Set(QuickToggle.allCases.filter { toggle in
+            QuickToggleService.plan(for: toggle).contains { $0.executable == QuickToggleService.osascript }
+        })
+        #expect(usingOsascript == [.toggleDarkMode, .lockScreen, .emptyTrash, .ejectAllDisks])
     }
 
     // MARK: - Plans

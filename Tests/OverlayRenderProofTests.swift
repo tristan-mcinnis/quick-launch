@@ -721,7 +721,7 @@ struct OverlayRenderProofTests {
             ))
             command.input = "/echo-it the build is green"
             await command.submit()
-            #expect(command.quickAIHeaderSubtitle == "Echo It")
+            #expect(command.answerSourceTitle == "Echo It")
             try Self.save(try Self.renderQuickAI(command, appearance: appearance), name: "quick-ai-command-source-\(suffix).png")
 
             // 2+2 in root search: answered inline under the input row.
@@ -815,7 +815,7 @@ struct OverlayRenderProofTests {
             #expect(vm.isQuickAIPresented, "the chat stays on screen")
             #expect(vm.rootAnswer == nil)
             #expect(vm.quickAIDetachedAnswer == "4")
-            #expect(vm.quickAIHeaderSubtitle == QuickViewModel.localAnswerSourceTitle)
+            #expect(vm.answerSourceTitle == QuickViewModel.localAnswerSourceTitle)
             #expect(vm.conversationMessages.count == 2, "2+2 is not a turn")
             try Self.save(
                 try Self.renderQuickAI(vm, appearance: appearance),

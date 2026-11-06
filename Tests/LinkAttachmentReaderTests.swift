@@ -159,7 +159,7 @@ struct LinkAttachmentReaderTests {
         let result = try await reader().read(big)
         #expect(result.ref.byteCount == AttachmentLimits.linkBodyBytes)
         #expect(result.notes == [.linkBodyCut(limitBytes: AttachmentLimits.linkBodyBytes)])
-        #expect(result.chipNotes.contains("first 5 MB of the page"))
+        #expect(result.notes.compactMap(\.chipLine).contains("first 5 MB of the page"))
         #expect(result.ref.truncation?.keptCharacters == AttachmentLimits.charactersPerLink)
 
         let pdf = url("/big.pdf")

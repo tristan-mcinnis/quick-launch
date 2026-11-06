@@ -161,14 +161,6 @@ struct ExtractedAttachment: Equatable, Sendable {
     /// The bytes as read, for the archive. A fetched link keeps the raw body
     /// here, not only its extracted text. Nil when only text is available.
     var originalBytes: Data? = nil
-
-    /// The chip's detail lines beyond the size: the cut, then the notes.
-    var chipNotes: [String] {
-        var lines: [String] = []
-        if let truncation = ref.truncation { lines.append(truncation.summary) }
-        lines += notes.compactMap(\.chipLine)
-        return lines
-    }
 }
 
 // MARK: - Document text before the cap

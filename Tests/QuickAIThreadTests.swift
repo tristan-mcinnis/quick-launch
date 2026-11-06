@@ -227,7 +227,7 @@ struct QuickAIThreadTests {
 
         #expect(vm.isQuickAIPresented)
         #expect(vm.output.contains("hello"))
-        #expect(vm.quickAIHeaderSubtitle == "Echo It", "the header names the command, not the model")
+        #expect(vm.answerSourceTitle == "Echo It", "the header names the command, not the model")
         #expect(vm.answerSourceTitle == "Echo It")
         #expect(vm.pendingQuestion == "/echo-it hello", "the command's output draws under its own pill")
         #expect(vm.quickAIDetachedAnswer?.contains("hello") == true, "not a turn of the chat")
@@ -239,7 +239,7 @@ struct QuickAIThreadTests {
         // The next model answer names the model again.
         await ask(vm, mock, "and then", reply: "Two.")
         #expect(vm.answerSourceTitle == nil)
-        #expect(vm.quickAIHeaderSubtitle == vm.activeModelDisplay)
+        #expect(vm.answerSourceTitle == nil)
     }
 
     // MARK: - 5. ↑ recall, and the thread's own scroll keys

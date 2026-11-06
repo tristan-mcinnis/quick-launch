@@ -407,7 +407,7 @@ struct AttachmentExtractorTests {
 
         #expect(recognizer.count == AttachmentLimits.ocrPages)
         #expect(result.notes == [.ocr(pages: Array(1...10), totalPages: 12)])
-        #expect(result.chipNotes == ["OCR · pages 1-10 of 12"])
+        #expect(result.notes.compactMap(\.chipLine) == ["OCR · pages 1-10 of 12"])
         #expect(result.notes.first?.modelLine == "[Scanned PDF: text read by OCR on this Mac, pages 1-10 of 12.]")
         #expect(result.text?.contains("--- Page 10 ---\nRecognized text") == true)
         #expect(phases.all.contains(.recognizingText(page: 10, of: 10)))
@@ -488,7 +488,7 @@ struct AttachmentExtractorTests {
         #expect(result.ref.characterCount == 2_500_000)
         #expect(result.ref.truncation?.summary == "first 2,000,000 of 2,500,000 characters")
         #expect(result.ref.truncation?.modelNote == "[Truncated: the first 2,000,000 of 2,500,000 characters.]")
-        #expect(result.chipNotes == ["first 2,000,000 of 2,500,000 characters"])
+        #expect(result.notes.compactMap(\.chipLine).isEmpty)
     }
 
     /// The app-side document caps are copies of the shared reader's, so this

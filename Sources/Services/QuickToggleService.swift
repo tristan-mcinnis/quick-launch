@@ -69,14 +69,6 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
 
     var isDestructive: Bool { self == .emptyTrash }
 
-    /// Dark mode and lock screen go through System Events; trash and eject
-    /// go through Finder. Both need an Automation grant for Quick Launch.
-    var needsAutomationPermission: Bool {
-        switch self {
-        case .toggleDarkMode, .lockScreen, .emptyTrash, .ejectAllDisks: true
-        case .toggleHiddenFiles, .toggleDesktopIcons, .sleepDisplay, .startScreenSaver: false
-        }
-    }
 }
 
 /// One external call. `arguments` never contains user text.
