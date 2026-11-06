@@ -207,6 +207,19 @@ struct ClipboardLinksSettingsView: View {
                 .frame(width: 140)
             }
 
+            SettingsRow(
+                title: "Put new screenshots on the clipboard",
+                detail: "For 5 seconds after a capture, then your clipboard comes back. Quick captures in a row paste together. The file is still saved."
+            ) {
+                Toggle(
+                    "Put new screenshots on the clipboard",
+                    isOn: viewModel.settingsBinding(\.screenshotClipboardHold) { _ in
+                        NotificationCenter.default.post(name: .screenshotClipboardSettingsChanged, object: nil)
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+
             if viewModel.settings.screenshotUseGrid {
                 SettingsRow(title: "Grid columns") {
                     Stepper(

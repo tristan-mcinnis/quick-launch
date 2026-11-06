@@ -214,6 +214,11 @@ struct QuickSettings: Codable, Sendable {
     /// Include every image and video in the scanned folders, not only files
     /// whose name looks like a screenshot.
     var screenshotIncludeAllMedia: Bool = false
+    /// A new capture in the system screenshot folder goes on the clipboard
+    /// for a few seconds (several quick captures together), then the
+    /// clipboard goes back to what it held before. The file stays where
+    /// macOS saved it.
+    var screenshotClipboardHold: Bool = true
     /// Fast or accurate recognition for saved screenshots.
     var screenshotOCRMode: ClipboardOCRMode = .accurate
     /// Grid columns for the screenshots browser.
@@ -447,6 +452,10 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .screenshotIncludeAllMedia
         ) ?? false
+        screenshotClipboardHold = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .screenshotClipboardHold
+        ) ?? true
         screenshotOCRMode = try c.decodeIfPresent(
             ClipboardOCRMode.self,
             forKey: .screenshotOCRMode

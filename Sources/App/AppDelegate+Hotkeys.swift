@@ -38,6 +38,25 @@ extension AppDelegate {
         registerGlobalHotkey()
     }
 
+    /// Watch the system screenshot folder while the setting is on. The
+    /// folder is read again each time, so a changed screencapture location
+    /// is picked up when the setting is toggled or the app relaunches.
+    func configureScreenshotClipboardHold() {
+        guard let vm = viewModel else { return }
+        screenshotFolderWatcher?.stop()
+        screenshotFolderWatcher = nil
+        guard vm.settings.screenshotClipboardHold else {
+            screenshotClipboardHold.finish()
+            return
+        }
+        let watcher = ScreenshotFolderWatcher(folder: vm.screenshotsFolder) { [weak self] urls in
+            self?.screenshotClipboardHold.add(urls)
+            self?.viewModel?.refreshScreenshotFilesInBackground()
+        }
+        watcher.start()
+        screenshotFolderWatcher = watcher
+    }
+
     func configureClipboardHistory() {
         guard let vm = viewModel else { return }
         // Capture policy first, so a capture that lands while the hotkey is

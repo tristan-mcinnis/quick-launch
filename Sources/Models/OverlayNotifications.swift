@@ -26,4 +26,5 @@ extension Notification.Name {
     static let shortcutBindingsChanged = Notification.Name("QuickLaunch.shortcutBindingsChanged")
     static let launcherItemHotkeysChanged = Notification.Name("QuickLaunch.launcherItemHotkeysChanged")
     static let clipboardHistorySettingsChanged = Notification.Name("QuickLaunch.clipboardHistorySettingsChanged")
+    static let screenshotClipboardSettingsChanged = Notification.Name("QuickLaunch.screenshotClipboardSettingsChanged")
 }

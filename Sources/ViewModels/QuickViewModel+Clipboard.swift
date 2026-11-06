@@ -211,6 +211,7 @@ extension QuickViewModel {
             errorMessage = "Could not save the screenshot."
             return nil
         }
+        OwnScreenshotWrites.note(url)
         // The list is re-scanned in the background, never synchronously on the
         // main actor; the new file is already on disk and the next scan picks
         // it up.

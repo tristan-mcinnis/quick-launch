@@ -257,7 +257,7 @@ enum SettingsDestinationIndex {
               ["clipboard", "history", "copy", "hotkey", "limit", "text", "retention", "expire", "source", "app", "ocr"]),
         group("clipboard.screenshots", .clipboard, "clipboard.screenshots", "Screenshots",
               "Saved-capture folders, media types, OCR, and grid layout",
-              ["screenshot", "screenshots", "capture", "folder", "video", "media", "grid", "columns", "ocr"]),
+              ["screenshot", "screenshots", "capture", "folder", "video", "media", "grid", "columns", "ocr", "clipboard", "copy", "paste"]),
         group("clipboard.emoji", .clipboard, "clipboard.emoji", "Emoji & Symbols",
               "Emoji skin tone for the Emoji catalog",
               ["emoji", "symbols", "skin tone", "fitzpatrick"]),

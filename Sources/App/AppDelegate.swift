@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let applicationCatalog = ApplicationCatalogService()
     let launcherCatalog = LauncherCatalogService()
     let clipboardHistory = ClipboardHistoryStore()
+    lazy var screenshotClipboardHold = ScreenshotClipboardHold(clipboard: SystemScreenshotClipboard())
+    var screenshotFolderWatcher: ScreenshotFolderWatcher?
     let webSearchService = WebSearchRouter(
         deepseek: DeepSeekSearchService(
             apiKey: { WebSearchKeys.deepSeek() }
@@ -246,6 +248,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         typeToClickHotKey?.invalidate()
         quickAIHotKey?.invalidate()
         clipboardHistory.stopMonitoring()
+        // Quitting mid-hold must not leave a screenshot where the user's copy was.
+        screenshotFolderWatcher?.stop()
+        screenshotClipboardHold.finish()
         doubleTapMonitor.stop()
         actionHotKeys.values.forEach { $0.invalidate() }
         actionHotKeys.removeAll()
@@ -291,6 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         viewModel.loadHistory()
         configureClipboardHistory()
+        configureScreenshotClipboardHold()
 
         // b. Create NSPanel with OverlayView hosted in NSHostingController
         let panel = makePanel(viewModel: viewModel)
@@ -360,6 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.configureClipboardHistory() }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .screenshotClipboardSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.configureScreenshotClipboardHold() }
         }
 
         NotificationCenter.default.addObserver(
