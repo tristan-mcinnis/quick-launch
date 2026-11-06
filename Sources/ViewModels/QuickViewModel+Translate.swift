@@ -633,20 +633,6 @@ extension QuickViewModel {
         selectionRecaptureSuppressed = true
     }
 
-    /// Chip heading: where the captured text came from.
-    var launchSelectionTitle: String {
-        guard let appName = launchSelection?.appName else { return "Selected text" }
-        return "Selected text from \(appName)"
-    }
-
-    /// Single-line preview of the captured selection, bounded for the chip.
-    var launchSelectionPreview: String {
-        guard let text = launchSelection?.text else { return "" }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
-        return trimmed.count > 120 ? trimmed.prefix(117) + "…" : trimmed
-    }
-
     /// Root search's field changed: a keystroke replaces a local answer
     /// with the rows for what is typed.
     func rootInputDidChange(_ newValue: String) {

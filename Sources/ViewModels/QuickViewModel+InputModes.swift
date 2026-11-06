@@ -585,6 +585,13 @@ extension QuickViewModel {
         case .application:
             return
         case .command:
+            if let action = savedAction(forCommandValue: item.value) {
+                // The typed text was the search for the row, not its input.
+                input = ""
+                learn(.item(item))
+                await perform(action: action)
+                return
+            }
             if let kind = ScreenshotKind(commandID: item.value) {
                 if await attachScreenshot(kind, clearingInput: true) {
                     overlayPresenter.presentOverlay()

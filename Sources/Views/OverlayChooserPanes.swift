@@ -33,68 +33,6 @@ struct RootAnswerBlock: View {
     }
 }
 
-/// The selected text captured at launch: its title, a preview, the Transform
-/// control, and a remove button.
-struct LaunchSelectionStrip: View {
-    @Bindable var viewModel: QuickViewModel
-
-    var body: some View {
-        HStack(spacing: AQDesign.Space.standard) {
-            Image(systemName: "text.cursor")
-                .font(AQDesign.TypeToken.caption)
-                .foregroundStyle(AQDesign.ColorToken.textSecondary)
-            VStack(alignment: .leading, spacing: AQDesign.Space.compact) {
-                Text(viewModel.launchSelectionTitle)
-                    .font(AQDesign.TypeToken.label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(viewModel.launchSelectionPreview)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: AQDesign.Space.standard)
-            if let selection = viewModel.launchSelection {
-                SelectedTextPreviewButton(text: selection.text, title: viewModel.launchSelectionTitle)
-            }
-            if !viewModel.chipTransformOptions.isEmpty {
-                Button {
-                    viewModel.toggleTransformChooser()
-                } label: {
-                    Label("Transform", systemImage: "wand.and.stars")
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
-                        .padding(.horizontal, AQDesign.Space.standard)
-                        .frame(height: AQDesign.controlHeight)
-                        .background(
-                            RoundedRectangle(
-                                cornerRadius: AQDesign.fieldCornerRadius,
-                                style: .continuous
-                            )
-                            .fill(AQDesign.ColorToken.chipFill)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Transform selected text")
-                .help("Transform the selected text (\(viewModel.shortcutLabel(for: .transformChooser)))")
-            }
-            Button {
-                viewModel.clearLaunchSelection()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .frame(width: AQDesign.controlHeight, height: AQDesign.controlHeight)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove selected text")
-            .help("Remove the selected text from the next request")
-        }
-        .padding(.horizontal, AQDesign.Space.panel)
-        .padding(.vertical, AQDesign.Space.standard)
-    }
-}
-
 /// Keyboard-first Transform chooser: ↑↓ move, Return runs, Esc closes.
 /// Opened by the Transform chip or ⌘⌥T. Every row is a saved rewrite action
 /// (or the Translator) acting on the captured selection snapshot. Inline

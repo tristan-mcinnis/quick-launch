@@ -92,9 +92,6 @@ struct QuickAIComposer: View {
                 errorLine(error)
             }
             // The strips read as rows; the surface has no hairlines.
-            if viewModel.launchSelection != nil {
-                LaunchSelectionStrip(viewModel: viewModel)
-            }
             ComposerAttachmentStrip(viewModel: viewModel, tray: activeTray)
             // What this Send will read and where it will go. Recent Chats
             // uses the field to search, so the control stays out of its way.

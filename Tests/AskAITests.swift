@@ -103,7 +103,7 @@ struct AskAITests {
         #expect(ids.contains("catalog:snippets"))
     }
 
-    @Test func launchSelectionRidesWithAskAIWithoutHijackingAnotherRow() async {
+    @Test func launchSelectionStaysOutOfAPlainQuestion() async {
         let (vm, catalog, ai) = make()
         await ai.setResponses([StreamDelta(text: "Answer", finishReason: "stop")])
         vm.launchSelection = QuickViewModel.LaunchSelection(text: "background passage", appName: "Editor")
@@ -112,10 +112,10 @@ struct AskAITests {
         // The captured selection is context, not an attachment: Return still
         // runs the highlighted row rather than forcing a model-bound send.
         #expect(vm.classifySubmit() != .attachment)
-        // And when that row does reach the model, the selection rides with it.
+        // A plain question goes without it: only an action reads the selection.
         await vm.submitResolvingFuzzyAlias()
         let prompt = await ai.lastPrompt ?? ""
-        #expect(prompt.contains("background passage"), "the selection reached the model")
+        #expect(!prompt.contains("background passage"), "the selection stayed out of the question")
         #expect(catalog.launched == nil)
     }
 

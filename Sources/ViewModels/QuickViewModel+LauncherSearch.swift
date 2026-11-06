@@ -35,6 +35,54 @@ extension QuickViewModel {
         .map(\.0)
     }
 
+    // MARK: - Saved actions as root rows
+
+    static let savedActionValuePrefix = "action:"
+
+    /// Every saved action as a root search row, like Raycast's AI Commands.
+    /// Each one reads the selection when it runs, so the selection itself
+    /// is never shown or sent until an action uses it.
+    var savedActionItems: [LauncherCatalogItem] {
+        settings.savedPrompts.map { action in
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: Self.savedActionValuePrefix + action.id.uuidString,
+                title: action.name,
+                detail: savedActionDetail(action),
+                value: Self.savedActionValuePrefix + action.id.uuidString,
+                keywords: action.alias + " action"
+            )
+        }
+    }
+
+    /// The saved action a root row runs, or nil for any other command.
+    func savedAction(forCommandValue value: String) -> SavedPrompt? {
+        guard value.hasPrefix(Self.savedActionValuePrefix),
+              let id = UUID(uuidString: String(value.dropFirst(Self.savedActionValuePrefix.count)))
+        else { return nil }
+        return settings.savedPrompts.first { $0.id == id }
+    }
+
+    /// What the row will act on: the selection it found, else what it is.
+    func savedActionDetail(_ action: SavedPrompt) -> String {
+        if let selection = launchSelection {
+            let count = selection.text.trimmingCharacters(in: .whitespacesAndNewlines).count
+            return "On \(count) selected characters from \(selection.appName)"
+        }
+        return action.isAssistant ? "Assistant" : "AI Command · on selected text"
+    }
+
+    /// With text selected and nothing typed, the quick rewrites lead the
+    /// list, in the fixed Transform order.
+    var selectionSuggestionItems: [LauncherCatalogItem] {
+        guard launchSelection != nil else { return [] }
+        let items = savedActionItems
+        return Self.chipTransformOrder.compactMap { entry in
+            guard let action = settings.savedPrompts.first(where: { $0.alias == entry.value }) else { return nil }
+            return items.first { $0.value == Self.savedActionValuePrefix + action.id.uuidString }
+        }
+    }
+
     /// The launcher query when the root launcher is active, otherwise `nil`.
     var rootLauncherQuery: String? {
         guard catalogScope == nil, pendingQuickLinkID == nil else { return nil }
@@ -812,7 +860,6 @@ extension QuickViewModel {
                 )
             )
         }
-        if launchSelection != nil { total += PanelSizing.selectionChipHeight }
         if isTransformChooserPresented { total += PanelSizing.chooserBlockHeight(rows: transformChooserOptions.count) }
         if isTransformReviewPresented { total += PanelSizing.transformReviewBlockHeight }
         if isTransformArgumentFieldPresented { total += PanelSizing.searchableChooserBlockHeight(rows: 0) }

@@ -160,11 +160,6 @@ struct OverlayView: View {
             .padding(.horizontal, AQDesign.Space.panel)
             .frame(minHeight: AQDesign.inputHeight)
 
-            if viewModel.launchSelection != nil {
-                HouseDivider()
-                LaunchSelectionStrip(viewModel: viewModel)
-            }
-
             // The transform surface follows whatever source is active, not
             // only the launch-selection strip: an attached or clipboard
             // selection reaches the same chooser and argument field.

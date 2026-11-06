@@ -350,7 +350,7 @@ extension QuickViewModel {
             skillInUse = skill
         }
         if !reasksTurn, submittedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           pendingContext != nil || launchSelection != nil {
+           pendingContext != nil {
             errorMessage = "Ask a question about the attached context."
             requestInputFocus()
             return nil
@@ -593,8 +593,7 @@ extension QuickViewModel {
             effectivePrompt = plainPrompt(
                 submittedInput,
                 hasImage: submittedImage != nil,
-                hasDocuments: hasDocuments,
-                launchText: launchText
+                hasDocuments: hasDocuments
             )
         }
 
@@ -636,12 +635,14 @@ extension QuickViewModel {
 
     /// What the model gets for typed text that names no saved prompt: the
     /// text (or, for a bare attachment, a stock question), after any Add
-    /// Context and launch-selection preamble.
+    /// Context preamble. The background selection is not sent with a plain
+    /// question: as with Raycast's AI Commands, only an action reads it, and
+    /// a question gets it only when the user attaches it (Send Selected Text
+    /// to AI, or Add Context).
     private func plainPrompt(
         _ text: String,
         hasImage: Bool,
-        hasDocuments: Bool = false,
-        launchText: String?
+        hasDocuments: Bool = false
     ) -> String {
         var prompt = text
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -656,16 +657,6 @@ extension QuickViewModel {
         var preambleParts: [String] = []
         if let submittedContext = pendingContext {
             let preamble = submittedContext.promptPreamble()
-            if !preamble.isEmpty { preambleParts.append(preamble) }
-        }
-        if let launchText, !launchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           pendingContext?.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines)
-                != launchText.trimmingCharacters(in: .whitespacesAndNewlines) {
-            var context = CaptureContext(
-                appName: launchSelection?.appName ?? "the background"
-            )
-            context.selectedText = launchText
-            let preamble = context.promptPreamble()
             if !preamble.isEmpty { preambleParts.append(preamble) }
         }
         let preamble = preambleParts.joined(separator: "\n\n")
@@ -755,7 +746,7 @@ extension QuickViewModel {
                   savedPrompts: settings.savedPrompts
               ) == nil
         else { return nil }
-        return plainPrompt(text, hasImage: false, launchText: launchSelection?.text)
+        return plainPrompt(text, hasImage: false)
     }
 
     /// Whether Tab and the Ask AI row answer this text locally instead of

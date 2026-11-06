@@ -13,7 +13,7 @@ extension QuickViewModel {
 
     /// Any context waiting for the next question takes precedence over
     /// copying the previous answer when the composer is empty.
-    var hasPendingChatContext: Bool { hasPendingAttachment || launchSelection != nil }
+    var hasPendingChatContext: Bool { hasPendingAttachment }
 
     // MARK: - Add Context
 

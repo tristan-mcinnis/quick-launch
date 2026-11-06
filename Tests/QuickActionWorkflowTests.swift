@@ -211,7 +211,6 @@ struct QuickActionWorkflowTests {
 
         #expect(vm.launchSelection?.text == "background passage")
         #expect(vm.launchSelection?.appName == "Editor")
-        #expect(vm.launchSelectionTitle == "Selected text from Editor")
     }
 
     @Test func captureLaunchSelectionIsSilentWhenNoSelection() {
@@ -224,7 +223,7 @@ struct QuickActionWorkflowTests {
         #expect(vm.launchSelection == nil)
     }
 
-    @Test func backgroundSelectionReachesAdHocRequest() async {
+    @Test func backgroundSelectionStaysOutOfAnAdHocRequest() async {
         let selection = FakeSelectedTextService(text: "background passage")
         let service = MockQuickService()
         await service.setResponses([StreamDelta(text: "Parsed", finishReason: "stop")])
@@ -243,7 +242,7 @@ struct QuickActionWorkflowTests {
         await vm.submit()
 
         let messages = await service.lastMessages
-        #expect(messages.last?.content.contains("background passage") == true)
+        #expect(messages.last?.content.contains("background passage") == false)
         #expect(messages.last?.content.contains("What does this say?") == true)
     }
 
@@ -1102,7 +1101,7 @@ private final class FakeCaffeinateManager: CaffeinateManaging {
 }
 
 @MainActor
-private final class FakeSelectedTextService: SelectedTextServicing {
+final class FakeSelectedTextService: SelectedTextServicing {
     var isAccessibilityTrusted: Bool
     var selectedText: String?
     var replacedText: String?

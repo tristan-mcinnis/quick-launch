@@ -31,7 +31,9 @@ struct AttachmentUsabilityTests {
         #expect(launcher.launchSelection == nil)
         #expect(chat.input == "Explain this")
         await chat.submit()
-        #expect(await service.lastPrompt?.contains("The original selected passage") == true)
+        // A plain question never carries the background selection; only an
+        // action reads it.
+        #expect(await service.lastPrompt == "Explain this")
         #expect(chat.launchSelection == nil)
         chat.input = "One more question"
         await chat.submit()

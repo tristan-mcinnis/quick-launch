@@ -246,6 +246,8 @@ extension QuickViewModel {
         parts.append(caffeinateReason ?? "")
         parts.append(settings.launcherLearningEnabled ? "1" : "0")
         parts.append(settings.savedPromptPrefix)
+        parts.append(String(settings.savedPrompts.hashValue))
+        parts.append(launchSelection.map { "\($0.appName)\u{0}\($0.text.hashValue)" } ?? "")
         parts.append(String(settings.launcherItemConfigurations.hashValue))
         parts.append(String(launcherRankingVersion))
         parts.append(String(applicationCatalog?.version ?? 0))
@@ -277,9 +279,11 @@ extension QuickViewModel {
         }
         guard let query = rootLauncherQuery else {
             guard input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-            let favourites = emptyQueryFavourites
+            let suggestions = selectionSuggestionItems.map(LauncherSearchResult.item)
+            let suggestionIDs = Set(suggestions.map(\.id))
+            let favourites = emptyQueryFavourites.filter { !suggestionIDs.contains($0.id) }
             let ask = LauncherSearchResult.item(askAIItem(query: ""))
-            let ordered = favourites.contains { $0.id == ask.id } ? favourites + roots : favourites + [ask] + roots
+            let ordered = suggestions + (favourites.contains { $0.id == ask.id } ? favourites + roots : favourites + [ask] + roots)
             return Array(ordered.prefix(Self.maxLauncherRows))
         }
         let signals = learnedSignals(query: query, scope: LauncherUsageStore.rootScope)
@@ -322,6 +326,18 @@ extension QuickViewModel {
                 keywords: item.kind == .command || item.kind == .folder ? item.keywords : ""
             ) else { continue }
             scored.append((.item(item), score + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item)))
+        }
+        // Saved actions rank like commands; with text selected they rise,
+        // since acting on the selection is the likely reason for the open.
+        let selectionBoost = launchSelection == nil ? 0 : Self.selectionActionBoost
+        for item in savedActionItems where !hidden.contains(item.id) {
+            guard let score = matchScore(
+                foldedQuery: foldedQuery,
+                title: item.title,
+                alias: launcherItemAlias(for: item),
+                keywords: item.keywords
+            ) else { continue }
+            scored.append((.item(item), score + selectionBoost + LauncherRanker.boost(for: signals[item.id]) + pinBoost(item)))
         }
         // A web address typed in full opens in the Quick Link browser. The
         // item id carries a stable content digest, not the address itself, so
@@ -370,6 +386,10 @@ extension QuickViewModel {
         }
         return ranked
     }
+
+    /// Lifts a matching saved action above an app or command with the same
+    /// match while text is selected, without beating an exact alias.
+    static let selectionActionBoost = 2_000
 
     /// The inline answer row, and what Return on a root answer does: the
     /// answer as the title, the question as the detail; Return copies.

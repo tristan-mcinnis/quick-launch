@@ -78,9 +78,6 @@ enum PanelSizing {
     /// against this, so it cannot drift.
     static let launcherListChrome: CGFloat = 42
 
-    /// The launch-selection chip row: divider + vertical padding + a control
-    /// height of content. Inline content, so the window must include it.
-    static let selectionChipHeight = House.hairline + House.Spacing.xs * 2 + House.Control.row
 
     // MARK: - Local answer in root search
 
