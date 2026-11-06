@@ -52,9 +52,10 @@ extension QuickViewModel {
         // is unchanged.
         if request.actionDefinition?.textOnly == true { return true }
         if ChatContextGate.allowsWebSearch(request.contextEvaluation),
-           let query = webSearchQuery(
+           let (query, bestEffort) = webSearchQuery(
             submittedInput: request.submittedInput,
-            action: request.actionDefinition
+            action: request.actionDefinition,
+            plainQuestion: Self.isPlainQuestion(request) && opensAChat
         ) {
             guard let webSearchService else {
                 errorMessage = "Web search is not available on this Mac."
@@ -91,6 +92,14 @@ extension QuickViewModel {
                 }
                 output = ""
                 isStreaming = false
+                if bestEffort {
+                    // A search the user did not ask for outright only
+                    // speeds the answer up: when it fails, the model answers
+                    // as it would have, with its own tools.
+                    webSearchNote = nil
+                    streamingStatus = nil
+                    return true
+                }
                 errorMessage = error.localizedDescription
                 isFollowUpQueued = false
                 restoreEnrichmentInput()
@@ -150,24 +159,57 @@ extension QuickViewModel {
         return true
     }
 
+    /// The ask is only the typed question: no saved action, attachment,
+    /// image, page link, source in the thread, or selection or screen
+    /// context folded into the prompt. A web search replaces the prompt with
+    /// the question and its results, so anything else would be dropped.
+    static func isPlainQuestion(_ request: PreparedRequest) -> Bool {
+        let typed = request.submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return request.actionDefinition == nil
+            && request.contextEvaluation?.grounded != true
+            && request.attachments.isEmpty
+            && request.submittedImages.isEmpty
+            && PromptURLScanner.urls(in: typed).isEmpty
+            && request.effectivePrompt.trimmingCharacters(in: .whitespacesAndNewlines) == typed
+    }
+
+    /// The query to search before the model, and whether that search is
+    /// only best effort: one the recency words chose, which runs only when
+    /// web search is available and on for this chat, and whose failure
+    /// leaves the ask to the model instead of stopping it.
+    /// The question starts a chat: no earlier question in it and no
+    /// assistant. A follow-up ("what is the latest one?") leans on the
+    /// thread, and an assistant's line is text for it to work on, so
+    /// searching the bare words would answer the wrong question.
+    private var opensAChat: Bool {
+        activeAssistant == nil
+            && !(currentConversation?.messages.contains { $0.role == .user } ?? false)
+    }
+
     private func webSearchQuery(
         submittedInput: String,
-        action: SavedPrompt?
-    ) -> String? {
+        action: SavedPrompt?,
+        plainQuestion: Bool
+    ) -> (query: String, bestEffort: Bool)? {
         if action?.alias == "search" {
             let invocation = settings.savedPromptPrefix + action!.alias
             let trailing = submittedInput
                 .dropFirst(min(invocation.count, submittedInput.count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trailing.isEmpty { return trailing }
-            return captureSelectedText(promptForPermission: false)?.text
+            if !trailing.isEmpty { return (trailing, false) }
+            guard let selected = captureSelectedText(promptForPermission: false)?.text else { return nil }
+            return (selected, false)
         }
-        return WebSearchIntentDetector.shouldSearch(submittedInput)
-            ? submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            : nil
+        let query = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if WebSearchIntentDetector.shouldSearch(submittedInput) { return (query, false) }
+        let webOn = webSearchService != nil && chatTools.contains(.web)
+        if webOn, WebSearchIntentDetector.shouldSearch(submittedInput, plainQuestion: plainQuestion) {
+            return (query, true)
+        }
+        return nil
     }
 
-    private static func webAnswerPrompt(
+    static func webAnswerPrompt(
         question: String,
         searchBundle: String
     ) -> String {
@@ -196,7 +238,7 @@ extension QuickViewModel {
         """
     }
 
-    private static func webSearchFallbackMarkdown(_ searchBundle: String) -> String {
+    static func webSearchFallbackMarkdown(_ searchBundle: String) -> String {
         let lines = searchBundle.components(separatedBy: .newlines)
         var results: [(title: String, url: String, snippet: String?)] = []
         var title: String?
@@ -209,12 +251,16 @@ extension QuickViewModel {
         }
 
         for line in lines {
-            if line.hasPrefix("## [") {
+            if line.hasPrefix("## ") {
+                // `WebSearchResultText.format` writes "## <title>"; an older
+                // bundle numbered them "## [1] <title>".
                 appendCurrent()
-                title = line.split(separator: "]", maxSplits: 1)
-                    .dropFirst()
-                    .first?
-                    .trimmingCharacters(in: .whitespaces)
+                var heading = line.dropFirst(3).trimmingCharacters(in: .whitespaces)
+                if heading.hasPrefix("["), let close = heading.firstIndex(of: "]"),
+                   heading[heading.index(after: heading.startIndex)..<close].allSatisfy(\.isNumber) {
+                    heading = heading[heading.index(after: close)...].trimmingCharacters(in: .whitespaces)
+                }
+                title = heading.isEmpty ? nil : heading
                 url = nil
                 snippet = nil
             } else if line.hasPrefix("URL: ") {
