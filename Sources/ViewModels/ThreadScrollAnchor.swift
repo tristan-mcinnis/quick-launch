@@ -11,15 +11,18 @@ struct ThreadScrollAnchor: Equatable, Sendable {
     /// The anchor for a view whose top is at `viewTop`: the last laid-out
     /// message that starts at or above it, in thread order. Nil when no
     /// message has a known top yet, so a thread that has not laid out records
-    /// nothing.
+    /// nothing. A scroll to a message's head lands on the nearest pixel, so a
+    /// head up to `pixelSlack` below the view's top still counts as at it.
     static func make(viewTop: CGFloat, order: [UUID], tops: [UUID: CGFloat]) -> ThreadScrollAnchor? {
         var best: (id: UUID, top: CGFloat)?
         for id in order {
-            guard let top = tops[id], top <= viewTop else { continue }
+            guard let top = tops[id], top <= viewTop + pixelSlack else { continue }
             if best == nil || top >= best!.top { best = (id, top) }
         }
         return best.map { ThreadScrollAnchor(messageID: $0.id, offset: viewTop - $0.top) }
     }
+
+    static let pixelSlack: CGFloat = 1
 
     /// The view top that puts the anchor back, given the message's current
     /// head and the furthest the view can go.
