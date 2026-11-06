@@ -138,12 +138,22 @@ final class TypeToClickController {
     private var notice: TypeToClickNotice?
 
     private let clock: TypeToClickClock
+    /// Whether the overlay hooks the session's real mouse and keyboard (a
+    /// global click monitor and a key event tap) and activates Quick Launch.
+    /// Tests turn it off and send events to `inputPanel`, so a person using
+    /// the Mac during `swift test` cannot dismiss or retype a test's overlay.
+    private let capturesSystemInput: Bool
     /// Called each time an action succeeds on a target. Carries no label.
     var onTargetUsed: (() -> Void)?
 
-    init(service: TypeToClickServicing = TypeToClickService(), clock: TypeToClickClock = .system) {
+    init(
+        service: TypeToClickServicing = TypeToClickService(),
+        clock: TypeToClickClock = .system,
+        capturesSystemInput: Bool = true
+    ) {
         self.service = service
         self.clock = clock
+        self.capturesSystemInput = capturesSystemInput
         configureSurfaces()
     }
 
@@ -200,6 +210,7 @@ final class TypeToClickController {
     func recaptureKeyboard() {
         guard isActive else { return }
         surfaces.forEach { $0.panel.orderFrontRegardless() }
+        guard capturesSystemInput else { return }
         if let keyboardEventTap {
             CGEvent.tapEnable(tap: keyboardEventTap, enable: true)
         } else {
@@ -507,6 +518,7 @@ final class TypeToClickController {
             MainActor.assumeIsolated { self?.reconfigureForDisplayChange() }
         })
         surfaces.forEach { $0.panel.orderFrontRegardless() }
+        guard capturesSystemInput else { return }
 
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
@@ -573,7 +585,7 @@ final class TypeToClickController {
     /// Fallback used only for messages shown before Accessibility permission
     /// exists, or if macOS refuses to create the event tap.
     private func capturePanelKeyboard(attempt: Int = 0) {
-        guard let keyPanel, keyPanel.isVisible else { return }
+        guard capturesSystemInput, let keyPanel, keyPanel.isVisible else { return }
         NSApp.activate(ignoringOtherApps: true)
         keyPanel.makeKey()
         _ = keyPanel.makeFirstResponder(keyPanel.contentView)

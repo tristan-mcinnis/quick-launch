@@ -137,7 +137,7 @@ final class TypeToClickTests: XCTestCase {
 
     @MainActor
     func testGlobalCaptureSwallowsAppShortcutsButPassesOnlyItsExitHotkey() {
-        let controller = TypeToClickController()
+        let controller = TypeToClickController(capturesSystemInput: false)
         let exitHotkey = ActionHotkey(
             keyCode: 8,
             modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue
@@ -354,7 +354,7 @@ final class TypeToClickTests: XCTestCase {
     func testUntrustedPermissionMessageStaysOpenAndNeverScans() throws {
         _ = NSApplication.shared
         let service = UntrustedTypeToClickService()
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
 
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
@@ -376,7 +376,7 @@ final class TypeToClickTests: XCTestCase {
     @MainActor
     func testOneOverlaySurfacePerScreenSurvivesDisplayReconfiguration() throws {
         _ = NSApplication.shared
-        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock)
+        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -416,7 +416,7 @@ final class TypeToClickTests: XCTestCase {
     @MainActor
     func testEscapeAlwaysExitsTheOverlay() throws {
         _ = NSApplication.shared
-        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock)
+        let controller = TypeToClickController(service: UntrustedTypeToClickService(), clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -442,7 +442,7 @@ final class TypeToClickTests: XCTestCase {
             ),
             performed: performed
         )
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -470,7 +470,7 @@ final class TypeToClickTests: XCTestCase {
             height: 30
         )
         let service = BufferedTypeToClickService(frame: frame, performed: performed, succeeds: succeeds)
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         wire(controller)
         controller.start(in: 123)
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -488,6 +488,23 @@ final class TypeToClickTests: XCTestCase {
         used.assertForOverFulfill = true
         try await runBufferedSave(succeeds: true) { $0.onTargetUsed = { used.fulfill() } }
         await fulfillment(of: [used], timeout: hangGuard)
+    }
+
+    /// A test overlay never hooks the real session: a click or keystroke
+    /// from someone using the Mac during `swift test` must not reach it.
+    @MainActor
+    func testATestOverlayLeavesTheRealKeyboardAndFocusAlone() throws {
+        _ = NSApplication.shared
+        let controller = TypeToClickController(
+            service: UntrustedTypeToClickService(),
+            clock: StepClock().clock,
+            capturesSystemInput: false
+        )
+        controller.start(in: 123)
+        addTeardownBlock { @MainActor in controller.dismiss() }
+        XCTAssertTrue(controller.isActive)
+        XCTAssertFalse(controller.isCapturingKeyboard)
+        XCTAssertNotNil(controller.inputPanel)
     }
 
     /// The app's own wiring (`journalFeatureUse(of:)`) writes the journal row.
@@ -530,7 +547,7 @@ final class TypeToClickTests: XCTestCase {
             height: 30
         )
         let service = BufferedTypeToClickService(frame: frame, performed: performed)
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -568,7 +585,7 @@ final class TypeToClickTests: XCTestCase {
             refreshStarted: refreshStarted,
             performed: performed
         )
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -615,7 +632,7 @@ final class TypeToClickTests: XCTestCase {
             menuOpened: menuOpened,
             visibleCommandsReturned: visibleCommandsReturned
         )
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
@@ -659,7 +676,7 @@ final class TypeToClickTests: XCTestCase {
             ),
             performed: performed
         )
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.configureContinuation(.singleAction)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
@@ -699,7 +716,7 @@ final class TypeToClickTests: XCTestCase {
             secondPerformed: secondPerformed,
             rescanned: rescanned
         )
-        let controller = TypeToClickController(service: service, clock: StepClock().clock)
+        let controller = TypeToClickController(service: service, clock: StepClock().clock, capturesSystemInput: false)
         controller.start(in: 123)
         // A test that stops early never leaves its overlay for the next one.
         addTeardownBlock { @MainActor in controller.dismiss() }
