@@ -117,6 +117,106 @@ struct ToolLoopTests {
         #expect(result?["content"] as? String == "The search_notes tool is unavailable.")
     }
 
+    // MARK: - Calls in one round
+
+    private static func twoCallRound(_ first: (id: String, query: String), _ second: (id: String, query: String)) -> [String] {
+        func fragment(_ index: Int, _ call: (id: String, query: String)) -> String {
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":"# + "\(index)" + #","id":""# + call.id
+                + #"","function":{"name":"search_web","arguments":"{\"query\":\""# + call.query + #"\"}"}}]}}]}"#
+        }
+        return [
+            fragment(0, first),
+            fragment(1, second),
+            #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+        ]
+    }
+
+    /// The first search finishes only after the second has. Run one after
+    /// the other, the first would wait out the tool budget and come back
+    /// out of time, so the results are the test.
+    @Test(.timeLimit(.minutes(1)))
+    func aRoundsCallsRunAtTheSameTimeAndAnswerInTheModelsOrder() async throws {
+        LoopStubHTTP.reset([
+            Self.twoCallRound((id: "call_a", query: "first"), (id: "call_b", query: "second")),
+            Self.answerRound("Both found."),
+        ])
+        let order = SearchRendezvous()
+        let service = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:11451/v1")!,
+            modelName: "test-model",
+            webSearch: { query in
+                if query == "first" { await order.waitForSecond() } else { await order.secondFinished() }
+                return "result for \(query)"
+            },
+            session: Self.session()
+        )
+
+        let collected = try await Self.collect(service.send(messages: [QuickMessage(role: .user, content: "q")]))
+
+        #expect(collected.text == "Both found.")
+        #expect(collected.records.map(\.summary) == ["Searched the web: first", "Searched the web: second"])
+        let messages = try #require(try Self.body(1)["messages"] as? [[String: Any]])
+        let results = messages.filter { $0["role"] as? String == "tool" }
+        #expect(results.map { $0["tool_call_id"] as? String } == ["call_a", "call_b"])
+        #expect((results.first?["content"] as? String)?.contains("result for first") == true)
+        #expect((results.last?["content"] as? String)?.contains("result for second") == true)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func twoStalledCallsAreBothCutAtTheBudgetInTheModelsOrder() async throws {
+        LoopStubHTTP.reset([
+            Self.twoCallRound((id: "call_a", query: "first"), (id: "call_b", query: "second")),
+            Self.answerRound("Out of time."),
+        ])
+        let service = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:11451/v1")!,
+            modelName: "test-model",
+            webSearch: { _ in
+                try await Task.sleep(for: .seconds(3_600))
+                return "never"
+            },
+            toolTimeBudget: .milliseconds(50),
+            session: Self.session()
+        )
+
+        let collected = try await Self.collect(service.send(messages: [QuickMessage(role: .user, content: "q")]))
+
+        #expect(collected.text == "Out of time.")
+        let messages = try #require(try Self.body(1)["messages"] as? [[String: Any]])
+        let results = messages.filter { $0["role"] as? String == "tool" }
+        #expect(results.map { $0["tool_call_id"] as? String } == ["call_a", "call_b"])
+        #expect(results.allSatisfy { ($0["content"] as? String)?.contains("ran out of time") == true })
+        #expect(try Self.body(1)["tool_choice"] as? String == "none")
+    }
+
+    @Test func aMixedRoundKeepsEachResultWithItsCall() async throws {
+        LoopStubHTTP.reset([
+            [
+                #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_w","function":{"name":"search_web","arguments":"{\"query\":\"swift\"}"}}]}}]}"#,
+                #"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_m","function":{"name":"recall_memory","arguments":"{\"query\":\"deck\"}"}}]}}]}"#,
+                #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+                "data: [DONE]",
+            ],
+            Self.answerRound("Both."),
+        ])
+        let service = OpenAICompatibleService(
+            baseURL: URL(string: "http://127.0.0.1:11451/v1")!,
+            modelName: "test-model",
+            webSearch: { query in "web result for \(query)" },
+            tools: ChatToolbox(enabled: [.memory], memory: FakeMemory(hits: [FakeMemory.hit("a.md")])),
+            session: Self.session()
+        )
+
+        _ = try await Self.collect(service.send(messages: [QuickMessage(role: .user, content: "q")]))
+
+        let messages = try #require(try Self.body(1)["messages"] as? [[String: Any]])
+        let results = messages.filter { $0["role"] as? String == "tool" }
+        #expect(results.map { $0["tool_call_id"] as? String } == ["call_w", "call_m"])
+        #expect((results.first?["content"] as? String)?.contains("web result for swift") == true)
+        #expect((results.last?["content"] as? String)?.contains("<memory_results>") == true)
+    }
+
     // MARK: - The round cap
 
     @Test func afterSixToolRoundsTheModelIsToldToAnswer() async throws {
@@ -305,5 +405,22 @@ private final class LoopStubHTTP: URLProtocol {
             data.append(buffer, count: read)
         }
         return data
+    }
+}
+
+/// Holds the first search until the second has finished.
+private actor SearchRendezvous {
+    private var secondDone = false
+    private var waiting: CheckedContinuation<Void, Never>?
+
+    func waitForSecond() async {
+        if secondDone { return }
+        await withCheckedContinuation { waiting = $0 }
+    }
+
+    func secondFinished() {
+        secondDone = true
+        waiting?.resume()
+        waiting = nil
     }
 }

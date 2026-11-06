@@ -409,25 +409,19 @@ struct OpenAICompatibleService: QuickService, Sendable {
             transcript.append(Self.assistantToolCallMessage(toolCalls))
             let roundStarted = clock.now
             let roundStartedAt = Date()
+            try Task.checkCancellation()
+            // The round's calls run at the same time, so two searches cost
+            // the slower one rather than both. Results go back in the order
+            // the model asked for them.
+            let finished = await runConcurrently(
+                toolCalls,
+                within: remaining(),
+                clock: clock,
+                continuation: continuation
+            )
+            try Task.checkCancellation()
             var calls: [ToolCall] = []
-            for call in toolCalls {
-                try Task.checkCancellation()
-                let left = remaining()
-                guard left > .zero else {
-                    let outcome = ChatToolbox.outOfTime(call.name)
-                    continuation.yield(StreamDelta(text: nil, finishReason: nil, toolRecord: outcome.record))
-                    transcript.append(Self.toolResult(call, content: outcome.content))
-                    calls.append(Self.toolCall(
-                        call,
-                        status: .cancelled,
-                        summary: outcome.record.summary,
-                        elapsed: .zero
-                    ))
-                    continue
-                }
-                let callStarted = clock.now
-                let outcome = await run(call, within: left, continuation: continuation)
-                let elapsed = clock.now - callStarted
+            for (call, (outcome, elapsed)) in zip(toolCalls, finished) {
                 if let record = outcome.record {
                     continuation.yield(StreamDelta(text: nil, finishReason: nil, toolRecord: record))
                 }
@@ -548,6 +542,39 @@ struct OpenAICompatibleService: QuickService, Sendable {
         /// Which backend actually answered. Nil falls back to the tool name's
         /// own adapter; an unoffered tool resolves to "unavailable".
         var adapter: String? = nil
+    }
+
+    /// Runs every call of one round at the same time, each raced against the
+    /// same remaining time, and returns each outcome with how long it took,
+    /// in the order of `calls`. With no time left, every call is out of time
+    /// without running.
+    private func runConcurrently(
+        _ calls: [PendingToolCall],
+        within limit: Duration,
+        clock: ContinuousClock,
+        continuation: AsyncThrowingStream<StreamDelta, Error>.Continuation
+    ) async -> [(CallOutcome, Duration)] {
+        guard limit > .zero else {
+            return calls.map { call in
+                let outcome = ChatToolbox.outOfTime(call.name)
+                return (CallOutcome(content: outcome.content, record: outcome.record, status: .cancelled), .zero)
+            }
+        }
+        return await withTaskGroup(of: (Int, CallOutcome, Duration).self) { group in
+            for (index, call) in calls.enumerated() {
+                group.addTask {
+                    let started = clock.now
+                    let outcome = await run(call, within: limit, continuation: continuation)
+                    return (index, outcome, clock.now - started)
+                }
+            }
+            var results = [(CallOutcome, Duration)?](repeating: nil, count: calls.count)
+            for await (index, outcome, elapsed) in group {
+                results[index] = (outcome, elapsed)
+            }
+            // Every index is filled once the group drains.
+            return results.map { $0! }
+        }
     }
 
     /// Runs one call, raced against the loop's remaining time

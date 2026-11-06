@@ -444,7 +444,9 @@ struct ExaSearchService: WebSearchServicing {
 
 /// Sends every web search to the backend the chosen provider names. The
 /// Automatic provider tries DeepSeek first, then Bocha for a Chinese query,
-/// then Tavily, then Brave, skipping any step whose key is missing.
+/// then Tavily, then Brave, skipping any step whose key is missing. A step
+/// that fails moves on at once, and one that stalls past `hedgeDelay` gets
+/// the next step started beside it; the first text wins.
 struct WebSearchRouter: WebSearchServicing {
     let deepseek: any WebSearchServicing
     let tavily: any WebSearchServicing
@@ -456,6 +458,14 @@ struct WebSearchRouter: WebSearchServicing {
     var hasBraveKey: @Sendable () -> Bool
     var hasBochaKey: @Sendable () -> Bool
     var hasExaKey: @Sendable () -> Bool
+    /// How long an Automatic step may run before the next one starts beside
+    /// it. DeepSeek and Bocha answer in under half a second (measured
+    /// 2026-11-06, p90 361 ms and 226 ms), so a step this slow has stalled.
+    var hedgeDelay: Duration = WebSearchRouter.defaultHedgeDelay
+    /// Waits out `hedgeDelay`. Tests inject their own clock here.
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+
+    static let defaultHedgeDelay: Duration = .seconds(1)
 
     func search(_ query: String) async throws -> String {
         try await search(query, provider: .automatic)
@@ -493,38 +503,89 @@ struct WebSearchRouter: WebSearchServicing {
         }
     }
 
-    private func runChain(_ query: String) async throws -> String {
-        var attempted: [String] = []
-
+    /// The Automatic chain's steps for `query`, in order, each only when its
+    /// key exists.
+    private func chainSteps(for query: String) -> [(name: String, run: @Sendable () async throws -> String)] {
+        var steps: [(name: String, run: @Sendable () async throws -> String)] = []
         if hasDeepSeekKey() {
-            attempted.append("DeepSeek")
-            if let result = try await Self.attempt({ try await deepseek.search(query) }) {
-                return result
-            }
+            steps.append(("DeepSeek", { [deepseek] in try await deepseek.search(query) }))
         }
-
         if WebSearchQuery.containsCJK(query), hasBochaKey() {
-            attempted.append("Bocha")
-            if let result = try await Self.attempt({ try await bocha.search(query) }) {
-                return result
-            }
+            steps.append(("Bocha", { [bocha] in try await bocha.search(query) }))
         }
-
         if hasTavilyKey() {
-            attempted.append("Tavily")
-            if let result = try await Self.attempt({ try await tavily.search(query) }) {
-                return result
-            }
+            steps.append(("Tavily", { [tavily] in try await tavily.search(query) }))
         }
-
         if hasBraveKey() {
-            attempted.append("Brave")
-            if let result = try await Self.attempt({ try await brave.search(query) }) {
-                return result
-            }
+            steps.append(("Brave", { [brave] in try await brave.search(query) }))
         }
+        return steps
+    }
 
-        throw WebSearchError.failed("No results from " + attempted.joined(separator: ", "))
+    /// One event of the hedged chain: a step finished (its text, or nil
+    /// when it failed or came back empty), or a step's hedge delay passed.
+    private enum ChainEvent: Sendable {
+        case finished(step: Int, text: String?)
+        case hedge(step: Int)
+    }
+
+    /// Runs the chain's steps in order, hedged: a step that fails or comes
+    /// back empty starts the next at once, and a step still running after
+    /// `hedgeDelay` starts the next beside it. The first step with text wins
+    /// and the rest are cancelled, so a stalled provider costs the hedge
+    /// delay instead of its whole timeout. A cancelled search stops the
+    /// chain (`attempt`).
+    private func runChain(_ query: String) async throws -> String {
+        let steps = chainSteps(for: query)
+        let noResults = WebSearchError.failed("No results from " + steps.map(\.name).joined(separator: ", "))
+        guard !steps.isEmpty else { throw noResults }
+        let hedgeDelay = hedgeDelay
+        let sleep = sleep
+
+        return try await withThrowingTaskGroup(of: ChainEvent.self) { group in
+            var launched = 0
+            var running = 0
+            func launchNext() {
+                let index = launched
+                launched += 1
+                running += 1
+                let step = steps[index]
+                group.addTask { .finished(step: index, text: try await Self.attempt(step.run)) }
+                if launched < steps.count {
+                    group.addTask {
+                        try await sleep(hedgeDelay)
+                        return .hedge(step: index)
+                    }
+                }
+            }
+
+            launchNext()
+            while let event = try await group.next() {
+                switch event {
+                case .finished(_, let text?):
+                    group.cancelAll()
+                    return text
+                case .finished(let step, nil):
+                    running -= 1
+                    // A failed step hands on only when it is the newest or
+                    // nothing else is still running: an older step failing
+                    // beside a hedged one starts no third provider.
+                    if launched < steps.count, step == launched - 1 || running == 0 {
+                        launchNext()
+                    } else if running == 0 {
+                        group.cancelAll()
+                        throw noResults
+                    }
+                case .hedge(let step):
+                    // Only the newest step's delay counts: an older step
+                    // that failed already started the next one.
+                    if step == launched - 1, launched < steps.count {
+                        launchNext()
+                    }
+                }
+            }
+            throw noResults
+        }
     }
 
     /// One step of the chain: its text, or nil so the chain moves on. A
@@ -533,7 +594,7 @@ struct WebSearchRouter: WebSearchServicing {
     /// cancelled task as `URLError.cancelled`, so the task's own flag is
     /// checked after any failure too.
     private static func attempt(
-        _ step: () async throws -> String
+        _ step: @Sendable () async throws -> String
     ) async throws -> String? {
         try Task.checkCancellation()
         do {

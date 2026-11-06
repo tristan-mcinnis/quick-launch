@@ -452,6 +452,188 @@ struct WebSearchBackendsTests {
         #expect(await brave.callCount() == 0)
     }
 
+    // MARK: - The hedged chain (an injected clock: no hedge fires unless the test fires it)
+
+    @Test(.timeLimit(.minutes(1)))
+    func aStalledStepStartsTheNextBesideItAndTheFirstTextWins() async throws {
+        let deepseek = RecordingStubSearch(.stalls)
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let hedge = HedgeClock()
+        let router = makeRouter(deepseek: deepseek, tavily: tavily, hasDeepSeekKey: true, hasTavilyKey: true, hedge: hedge)
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        #expect(await tavily.callCount() == 0, "nothing else starts before the hedge delay")
+        await hedge.fire()
+
+        #expect(try await search.value == "tavily result")
+        #expect(await deepseek.wasCancelled(), "the stalled step is cancelled once another answers")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aStalledStepThatAnswersFirstAfterTheHedgeStillWins() async throws {
+        let deepseek = RecordingStubSearch(.waitsForRelease("deepseek result"))
+        let tavily = RecordingStubSearch(.stalls)
+        let hedge = HedgeClock()
+        let router = makeRouter(deepseek: deepseek, tavily: tavily, hasDeepSeekKey: true, hasTavilyKey: true, hedge: hedge)
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await tavily.waitUntilCalled()
+        await deepseek.release()
+
+        #expect(try await search.value == "deepseek result")
+        #expect(await tavily.wasCancelled())
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aStepThatAnswersBeforeTheHedgeDelayStartsNothingElse() async throws {
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let router = makeRouter(
+            deepseek: RecordingStubSearch(.text("deepseek result")),
+            tavily: tavily,
+            hasDeepSeekKey: true,
+            hasTavilyKey: true
+        )
+
+        #expect(try await router.search("q", provider: .automatic) == "deepseek result")
+        #expect(await tavily.callCount() == 0)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aFailedStepStartsTheNextWithoutWaitingForTheHedge() async throws {
+        // The hedge clock never fires here, so only the failure can move on.
+        let router = makeRouter(
+            deepseek: RecordingStubSearch(.failure),
+            brave: RecordingStubSearch(.text("brave result")),
+            bocha: RecordingStubSearch(.empty),
+            hasDeepSeekKey: true,
+            hasBraveKey: true,
+            hasBochaKey: true
+        )
+
+        #expect(try await router.search("上海天气", provider: .automatic) == "brave result")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func everyStepFailingAfterAHedgeStillThrowsNoResults() async throws {
+        let deepseek = RecordingStubSearch(.waitsForRelease(nil))
+        let tavily = RecordingStubSearch(.waitsForRelease(nil))
+        let hedge = HedgeClock()
+        let router = makeRouter(
+            deepseek: deepseek,
+            tavily: tavily,
+            hasDeepSeekKey: true,
+            hasTavilyKey: true,
+            hedge: hedge
+        )
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await tavily.waitUntilCalled()
+        await deepseek.release()
+        await tavily.release()
+
+        do {
+            _ = try await search.value
+            Issue.record("expected no results")
+        } catch let WebSearchError.failed(message) {
+            #expect(message == "No results from DeepSeek, Tavily")
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func cancellingTheSearchStopsEveryRunningStep() async throws {
+        let deepseek = RecordingStubSearch(.stalls)
+        let tavily = RecordingStubSearch(.stalls)
+        let hedge = HedgeClock()
+        let router = makeRouter(deepseek: deepseek, tavily: tavily, hasDeepSeekKey: true, hasTavilyKey: true, hedge: hedge)
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await tavily.waitUntilCalled()
+        search.cancel()
+
+        await #expect(throws: CancellationError.self) { _ = try await search.value }
+        #expect(await deepseek.wasCancelled())
+        #expect(await tavily.wasCancelled())
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func eachStalledStepHedgesToTheNextInOrder() async throws {
+        let deepseek = RecordingStubSearch(.stalls)
+        let bocha = RecordingStubSearch(.stalls)
+        let tavily = RecordingStubSearch(.text("tavily result"))
+        let hedge = HedgeClock()
+        let router = makeRouter(
+            deepseek: deepseek, tavily: tavily, bocha: bocha,
+            hasDeepSeekKey: true, hasTavilyKey: true, hasBochaKey: true, hedge: hedge
+        )
+
+        let search = Task { try await router.search("上海天气", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await bocha.waitUntilCalled()
+        #expect(await tavily.callCount() == 0)
+        await hedge.fire()
+
+        #expect(try await search.value == "tavily result")
+        #expect(await deepseek.wasCancelled())
+        #expect(await bocha.wasCancelled())
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func anOlderStepFailingBesideAHedgedOneStartsNoThird() async throws {
+        let deepseek = RecordingStubSearch(.waitsForRelease(nil))
+        let tavily = RecordingStubSearch(.waitsForRelease("tavily result"))
+        let brave = RecordingStubSearch(.text("brave result"))
+        let hedge = HedgeClock()
+        let router = makeRouter(
+            deepseek: deepseek, tavily: tavily, brave: brave,
+            hasDeepSeekKey: true, hasTavilyKey: true, hasBraveKey: true, hedge: hedge
+        )
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await tavily.waitUntilCalled()
+        await deepseek.release()
+        await tavily.release()
+
+        #expect(try await search.value == "tavily result")
+        #expect(await brave.callCount() == 0)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aLoneProviderIsWaitedForWithoutAHedge() async throws {
+        let deepseek = RecordingStubSearch(.waitsForRelease("deepseek result"))
+        let hedge = HedgeClock()
+        let router = makeRouter(deepseek: deepseek, hasDeepSeekKey: true, hedge: hedge)
+
+        let search = Task { try await router.search("q", provider: .automatic) }
+        await deepseek.waitUntilCalled()
+        await hedge.fire()
+        await deepseek.release()
+
+        #expect(try await search.value == "deepseek result")
+    }
+
+    @Test func aChosenProviderSkipsTheChain() async throws {
+        let deepseek = RecordingStubSearch(.text("deepseek result"))
+        let router = makeRouter(
+            deepseek: deepseek,
+            tavily: RecordingStubSearch(.text("tavily result")),
+            hasDeepSeekKey: true,
+            hasTavilyKey: true
+        )
+
+        #expect(try await router.search("q", provider: .tavily) == "tavily result")
+        #expect(await deepseek.callCount() == 0)
+    }
+
     @Test func chineseLaneDetectionFollowsIdeographsOnly() {
         #expect(WebSearchQuery.containsCJK("上海咖啡"))
         #expect(WebSearchQuery.containsCJK("東京"))
@@ -486,7 +668,8 @@ struct WebSearchBackendsTests {
         hasTavilyKey: Bool = false,
         hasBraveKey: Bool = false,
         hasBochaKey: Bool = false,
-        hasExaKey: Bool = false
+        hasExaKey: Bool = false,
+        hedge: HedgeClock = HedgeClock()
     ) -> WebSearchRouter {
         WebSearchRouter(
             deepseek: deepseek,
@@ -498,7 +681,8 @@ struct WebSearchBackendsTests {
             hasTavilyKey: { hasTavilyKey },
             hasBraveKey: { hasBraveKey },
             hasBochaKey: { hasBochaKey },
-            hasExaKey: { hasExaKey }
+            hasExaKey: { hasExaKey },
+            sleep: { _ in try await hedge.sleep() }
         )
     }
 }
@@ -544,20 +728,59 @@ private actor RecordingStubSearch: WebSearchServicing {
         /// The search task is cancelled mid-request, and the request fails
         /// the way URLSession reports it.
         case cancelsTheTask
+        /// Never answers until cancelled.
+        case stalls
+        /// Answers with this text (nil: empty) once `release()` is called.
+        case waitsForRelease(String?)
     }
 
     private let outcome: Outcome
     private var calls: [String] = []
+    private var cancelled = false
+    private var calledWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private var released = false
 
     init(_ outcome: Outcome) {
         self.outcome = outcome
     }
 
     func callCount() -> Int { calls.count }
+    func wasCancelled() -> Bool { cancelled }
+
+    func waitUntilCalled() async {
+        if !calls.isEmpty { return }
+        await withCheckedContinuation { calledWaiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+
+    private func waitForRelease() async {
+        if released { return }
+        await withCheckedContinuation { releaseWaiter = $0 }
+    }
 
     func search(_ query: String) async throws -> String {
         calls.append(query)
+        calledWaiters.forEach { $0.resume() }
+        calledWaiters = []
         switch outcome {
+        case .stalls:
+            do {
+                try await Task.sleep(for: .seconds(3_600))
+            } catch {
+                cancelled = true
+                throw error
+            }
+            throw WebSearchError.empty
+        case .waitsForRelease(let text):
+            await waitForRelease()
+            guard let text else { throw WebSearchError.empty }
+            return text
         case .text(let value): return value
         case .empty: throw WebSearchError.empty
         case .failure: throw WebSearchError.failed("stub failure")
@@ -566,5 +789,44 @@ private actor RecordingStubSearch: WebSearchServicing {
             withUnsafeCurrentTask { $0?.cancel() }
             throw URLError(.cancelled)
         }
+    }
+}
+
+/// The chain's hedge clock under test: each `fire()` lets one hedge delay
+/// pass (the one waiting, or the next to start), and a delay the test never
+/// fires never passes.
+private actor HedgeClock {
+    private var credits = 0
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Never>)] = []
+
+    /// Ends when the test fires the clock or the waiting task is cancelled.
+    func sleep() async throws {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if credits > 0 || Task.isCancelled {
+                    if credits > 0, !Task.isCancelled { credits -= 1 }
+                    continuation.resume()
+                } else {
+                    waiters.append((id, continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.wake(id) }
+        }
+        try Task.checkCancellation()
+    }
+
+    func fire() {
+        if waiters.isEmpty {
+            credits += 1
+        } else {
+            waiters.removeFirst().continuation.resume()
+        }
+    }
+
+    private func wake(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume()
     }
 }
