@@ -72,7 +72,6 @@ enum WindowLayout: String, CaseIterable, Sendable {
         }
     }
 
-    static let groupTitles = ["Whole Screen", "Halves", "Quarters", "Thirds", "Fourths", "Sixths"]
 
     /// Unit-space frame measured from the display's top-left corner.
     var normalizedFrame: CGRect {

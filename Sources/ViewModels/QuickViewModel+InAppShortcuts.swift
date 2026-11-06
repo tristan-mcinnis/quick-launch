@@ -28,10 +28,6 @@ extension QuickViewModel {
         shortcuts.keyCaps(for: action)
     }
 
-    func shortcutDisplayName(for action: ShortcutAction) -> String {
-        shortcuts.displayName(for: action)
-    }
-
     /// The caps as one label, for a tooltip: `⌥⌘K`.
     func shortcutLabel(for action: ShortcutAction) -> String {
         shortcuts.displayName(for: action)

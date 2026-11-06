@@ -54,9 +54,8 @@ struct WindowLayoutTests {
         let rightTwoThirdsMinX: CGFloat = WindowLayout.rightTwoThirds.normalizedFrame.minX
         let firstThirdMaxX: CGFloat = WindowLayout.firstThird.normalizedFrame.maxX
         #expect(rightTwoThirdsMinX == firstThirdMaxX)
-        #expect(WindowLayout.groupTitles == ["Whole Screen", "Halves", "Quarters", "Thirds", "Fourths", "Sixths"])
         let groups = Set(WindowLayout.allCases.map(\.groupTitle))
-        #expect(groups == Set(WindowLayout.groupTitles))
+        #expect(groups == ["Whole Screen", "Halves", "Quarters", "Thirds", "Fourths", "Sixths"])
     }
 
     @Test func displayMovesWrapAroundAndKeepRelativePlacement() {

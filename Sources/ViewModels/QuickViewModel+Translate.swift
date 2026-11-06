@@ -251,16 +251,6 @@ extension QuickViewModel {
             return
         }
 
-        if item.value == "caffeinate.status" {
-            answerSource = .command(item.title)
-            output = caffeinateManager?.statusSummary ?? "Decaffeinated. Normal Mac sleep is enabled."
-            lastQuestion = "Caffeinate status"
-            errorMessage = nil
-            input = ""
-            requestInputFocus()
-            return
-        }
-
         if item.value == Self.aiChatCommandID {
             openAIChatWindow()
             return

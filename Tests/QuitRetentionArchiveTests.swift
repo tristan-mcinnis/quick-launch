@@ -264,7 +264,7 @@ struct QuitRetentionArchiveTests {
         let archive = try #require(vm.chatArchive)
         // The checkpoint gate: this awaits the checkpoint the stream already
         // scheduled, so the tail gap is measured against a real record.
-        _ = await vm.flushArchiveForQuit()
+        _ = await vm.settleAnswerDurability(vm.freezeAnswerDurability())
         let checkpointed = try await archive.load(id: conversationID)
         #expect(checkpointed.turns.first { $0.role == .assistant }?.text == head)
 

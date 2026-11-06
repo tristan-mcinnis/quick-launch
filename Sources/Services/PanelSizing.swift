@@ -120,9 +120,6 @@ enum PanelSizing {
         let count = max(1, rows)
         return CGFloat(count) * actionRowHeight + CGFloat(count - 1) * actionRowSpacing
     }
-    static func addContextBlockHeight(rows: Int) -> CGFloat {
-        chooserChrome + addContextListHeight(rows: rows)
-    }
     /// The Capture chooser and Add Context carry their own search row above
     /// the list; the other choosers do not. The window estimate counts it so
     /// the field is never clipped.

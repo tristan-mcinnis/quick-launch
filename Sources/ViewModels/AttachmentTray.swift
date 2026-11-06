@@ -484,11 +484,6 @@ final class AttachmentTray {
         notice = nil
     }
 
-    /// Clears the notice once the user moves on.
-    func dismissNotice() {
-        notice = nil
-    }
-
     // MARK: - Keyboard in the strip
 
     /// `⇧Tab` from the composer: the newest chip takes the keyboard.

@@ -562,12 +562,6 @@ final class TranslatorModel {
         message = "Copied translation"
     }
 
-    func copySource() {
-        guard !source.isEmpty else { return }
-        pasteboard.writeString(source)
-        message = "Copied source text"
-    }
-
     /// ⌘⇧↩: paste the translation into the app that was behind the window.
     @discardableResult
     func pasteBack() async -> Bool {

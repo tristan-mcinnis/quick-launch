@@ -282,23 +282,6 @@ actor ChatArchive {
         return try await checkpoint(conversationID: conversationID, turnID: turnID, update: update)
     }
 
-    /// Compatibility entry point for a completed answer.
-    func commitAnswer(
-        conversationID: String,
-        text: String,
-        turnID: String,
-        selection: ModelSelection?,
-        receipt: RequestReceipt?
-    ) async throws {
-        _ = try await completeTurn(
-            conversationID: conversationID,
-            turnID: turnID,
-            text: text,
-            receipt: receipt,
-            selection: selection
-        )
-    }
-
     private func performTurnUpdate(conversationID: String, turnID: String, update: TurnUpdate) async throws -> TurnRecord {
         try ensureNotDeleted(conversationID)
         guard var record = try await storedRecord(id: conversationID) else {
@@ -686,15 +669,6 @@ actor ChatArchive {
             removedArtifacts: removed,
             gcIssue: gcIssue
         )
-    }
-
-    /// Explicit, reference-safe cleanup: removes every artifact no readable
-    /// record points at. Runs only when a caller asks, never on a timer.
-    /// Throws (and removes nothing) when any record cannot be read.
-    @discardableResult
-    func removeUnreferencedArtifacts() async throws -> [ArtifactRef] {
-        let all = try await attachments.list()
-        return try await coordinator.removeArtifactsIfUnreferenced(all)
     }
 
     static func allArtifactRefs(of record: ConversationRecord) -> [ArtifactRef] {

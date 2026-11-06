@@ -584,7 +584,6 @@ struct AttachmentTrayTests {
 
     @Test func addContextShowsEveryRowAndFourMeasureAsBefore() {
         #expect(PanelSizing.addContextListHeight(rows: 4) == PanelSizing.actionListHeight(rows: 4, padded: false))
-        #expect(PanelSizing.addContextBlockHeight(rows: 4) == PanelSizing.chooserBlockHeight(rows: 4))
         #expect(PanelSizing.addContextListHeight(rows: 7) >= 7 * House.Control.row, "no row is cut")
     }
 

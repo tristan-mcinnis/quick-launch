@@ -29,15 +29,6 @@ struct ClipboardSourceInfo: Codable, Sendable, Equatable, Hashable {
         return String(trimmed.prefix(40))
     }
 
-    /// The same app as another observation, by bundle identifier when both
-    /// have one, otherwise by case-insensitive name.
-    func isSameApp(as other: ClipboardSourceInfo) -> Bool {
-        if let lhs = bundleIdentifier, let rhs = other.bundleIdentifier,
-           !lhs.isEmpty, !rhs.isEmpty {
-            return lhs == rhs
-        }
-        return name.compare(other.name, options: .caseInsensitive) == .orderedSame
-    }
 }
 
 /// Resolves the app in front when a clipboard copy is observed. A seam so

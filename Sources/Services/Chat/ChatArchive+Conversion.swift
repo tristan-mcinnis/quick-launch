@@ -262,11 +262,6 @@ extension ChatArchive {
         return (Data(text.utf8), "txt", "extractedText", text.count)
     }
 
-    /// Compatibility shim for callers that only need the artifact list.
-    static func pendingArtifacts(for contents: [AttachmentContent]) -> [PendingArtifact] {
-        prepareArtifacts(for: contents).artifacts
-    }
-
     /// The receipt written at Send. It already carries the snapshot hash of
     /// every byte this commit writes, so the reference scan sees them.
     static func receipt(for submission: TurnSubmission, attachmentRefs: [AttachmentSnapshotRef]) -> RequestReceipt {

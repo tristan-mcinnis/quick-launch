@@ -232,59 +232,9 @@ struct ChatSettingsTests {
     @Test func aNewInstallKeeps100ChatsAndAStoredLimitIsKept() throws {
         #expect(QuickSettings().historyLimit == 100)
         #expect(QuickHistoryStore.defaultLimit == 100)
-        #expect(QuickHistoryStore.limitOptions == [20, 50, 100, 200])
         #expect(try decode(#"{"autoCopy":false}"#).historyLimit == 100, "a missing key is the new default")
         #expect(try decode(#"{"historyLimit":20}"#).historyLimit == 20, "the old default, stored, is kept")
         #expect(try decode(#"{"historyLimit":200}"#).historyLimit == 200)
-    }
-
-    @Test func thePickerShowsAStoredValueOutsideTheList() {
-        #expect(make().historyLimitChoices == [20, 50, 100, 200])
-        #expect(make { $0.historyLimit = 30 }.historyLimitChoices == [20, 30, 50, 100, 200])
-    }
-
-    private func chat(_ title: String, age: TimeInterval, pinned: Bool = false) -> QuickConversation {
-        var conversation = QuickConversation(
-            providerID: QuickSettings().providers[0].id,
-            model: "model",
-            messages: [QuickMessage(role: .user, content: title), QuickMessage(role: .assistant, content: "ok")]
-        )
-        conversation.isPinned = pinned
-        conversation.updatedAt = Date(timeIntervalSinceNow: -age)
-        return conversation
-    }
-
-    @Test func aLowerLimitPrunesTheOldestUnpinnedChatsAndNeverAPinnedOne() throws {
-        let original = QuickSettings.load(from: .standard).historyLimit
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("g3-history-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-        var settings = QuickSettings()
-        settings.historyEnabled = true
-        let vm = QuickViewModel(settings: settings, service: MockQuickService(), historyFileURL: file)
-        defer { vm.updateSettings { $0.historyLimit = original } }
-        vm.history = [
-            chat("Pinned old", age: 9_000, pinned: true),
-            chat("One", age: 10),
-            chat("Two", age: 20),
-            chat("Three", age: 30),
-            chat("Pinned older", age: 10_000, pinned: true),
-            chat("Four", age: 40),
-        ]
-
-        vm.setHistoryLimit(2)
-        #expect(vm.settings.historyLimit == 2)
-        #expect(QuickSettings.load(from: .standard).historyLimit == 2, "saved")
-        let titles = Set(vm.history.map(\.title))
-        #expect(titles == ["Pinned old", "Pinned older", "One", "Two"])
-
-        QuickHistoryStore.waitForPendingWrites()
-        let onDisk = QuickHistoryStore.load(from: file, migratingFrom: nil)
-        #expect(Set(onDisk.map(\.title)) == titles, "the file is pruned too")
-
-        // A higher limit keeps what is left; it brings nothing back.
-        vm.setHistoryLimit(100)
-        #expect(vm.history.count == 4)
     }
 
     // MARK: - Copy

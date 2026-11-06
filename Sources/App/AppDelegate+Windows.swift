@@ -306,7 +306,7 @@ extension AppDelegate {
         showAIChat(on: screenContainingMouse())
     }
 
-    /// Mirror of apfel-clip's launch-at-login alert — asked once, persisted.
+    /// Asks once whether to launch at login; the answer is persisted.
     @MainActor
     func promptForLaunchAtLogin(viewModel: QuickViewModel) {
         let alert = NSAlert()

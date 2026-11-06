@@ -24,9 +24,6 @@ enum QuickHistoryStore {
     /// back. The archive never deletes it.
     static let rollbackFileName = "chat-history.pre-archive.json"
     static let schemaVersion = 1
-    /// Settings › History › "Chats to keep": how many unpinned chats stay.
-    /// Pinned chats are never counted and never pruned.
-    static let limitOptions = [20, 50, 100, 200]
     /// The limit a new install starts with. A stored limit is kept as it is.
     static let defaultLimit = 100
 

@@ -429,12 +429,6 @@ extension QuickViewModel {
         return await durability.settle(snapshot)
     }
 
-    /// Convenience for callers that freeze and settle in one step.
-    @discardableResult
-    func flushArchiveForQuit() async -> Bool {
-        await settleAnswerDurability(freezeAnswerDurability()) == .durable
-    }
-
     /// Clears the local slash-command refusal (the composer's Send as Text,
     /// `/new`, `/clear`).
     func clearRefusedCommand() { refusedCommandText = nil }

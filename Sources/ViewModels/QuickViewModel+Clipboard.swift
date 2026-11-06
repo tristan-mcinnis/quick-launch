@@ -278,12 +278,6 @@ extension QuickViewModel {
 
     // MARK: - Open and Save as File
 
-    /// Whether an entry has something to open: a copied file, or a link.
-    func canOpenClipboardEntry(_ item: LauncherCatalogItem) -> Bool {
-        if !(item.clipboardPayload?.fileURLs.isEmpty ?? true) { return true }
-        return ItemActionCatalog.looksLikeURL(item.value)
-    }
-
     /// Open a clipboard entry: a copied file in its default app, or a copied
     /// link in the browser. Nothing else has a meaningful Open.
     @discardableResult
