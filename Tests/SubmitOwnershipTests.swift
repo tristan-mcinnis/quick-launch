@@ -184,4 +184,52 @@ struct SubmitOwnershipTests {
         #expect(newerFinished == true, "the newer send finished after its release")
         #expect(!vm.isSubmitBeforeStream)
     }
+
+    /// Escape between Return and the model request stops the send, as it
+    /// stops a stream: the surface stays, nothing reaches the model, and the
+    /// question goes back in the composer. It used to read as "go back": the
+    /// surface closed, the send went on, and its answer opened it again.
+    @Test(.timeLimit(.minutes(2)))
+    func escapeBeforeTheRequestStopsTheSendAndKeepsTheSurface() async throws {
+        let directory = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = MockQuickService()
+        await service.setResponses([StreamDelta(text: "answer", finishReason: "stop")])
+        var settings = QuickSettings()
+        settings.autoCopy = false
+        settings.historyEnabled = true
+        let vm = QuickViewModel(
+            settings: settings,
+            service: service,
+            historyFileURL: directory.appendingPathComponent("chat-history.json"),
+            archiveRootURL: directory.appendingPathComponent("archive", isDirectory: true)
+        )
+        let seam = SubmitSeam()
+        vm.beforeDurableSubmitWrite = { await seam.enter() }
+
+        vm.input = "what is the capital of Peru"
+        #expect(vm.handleTab(), "Tab sent the typed text")
+        let send = try #require(vm.tabSubmitTask)
+        #expect(await seam.waitForEntry(1), "the send is held before its request")
+        #expect(vm.isQuickAIPresented)
+        #expect(!vm.isStreaming, "nothing streams yet")
+
+        #expect(vm.topLayer == .streaming, "Escape here stops the send")
+        #expect(vm.handleEscapeKey())
+        #expect(vm.isQuickAIPresented, "Escape stopped the send; the surface stays")
+        #expect(send.isCancelled)
+
+        seam.open()
+        let finished = await withQuitDeadline(.seconds(30)) {
+            await send.value
+            return true
+        }
+        #expect(finished == true, "the stopped send unwound after its release")
+        #expect(await service.sendCallCount == 0, "a stopped send never reaches the model")
+        #expect(!vm.isStreaming)
+        #expect(!vm.isSubmitBeforeStream)
+        #expect(vm.isQuickAIPresented)
+        #expect(vm.input == "what is the capital of Peru", "the question is back in the composer")
+        #expect(!vm.conversationMessages.contains { $0.role == .user }, "the stopped question is not a turn")
+    }
 }

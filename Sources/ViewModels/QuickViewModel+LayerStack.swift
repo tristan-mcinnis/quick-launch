@@ -60,7 +60,10 @@ extension QuickViewModel {
         if isAddContextMenuPresented { return .addContextMenu }
         if isSlashCommandPalettePresented { return .slashCommandPalette }
         if isRecentChatsPresented { return .recentChats }
-        if isStreaming { return .streaming }
+        // A sent question that has not reached its request yet is stopped
+        // like a stream: Escape here must not close the surface and leave
+        // the send to open it again with its answer.
+        if isStreaming || (isQuickAIPresented && isSubmitBeforeStream) { return .streaming }
         if !input.isEmpty { return .typedText }
         if hasPendingAttachment { return .attachment }
         if isAnswerActive { return .answer }
