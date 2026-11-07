@@ -160,15 +160,40 @@ final class StreamingAnswer {
         }
     }
 
-    /// `]:` anywhere from `start` on.
-    private static func containsDefinitionMarker(_ bytes: [UInt8], from start: Int) -> Bool {
+    /// A `]:` from `start` on that could close a link reference definition.
+    ///
+    /// A definition starts its line with `[`, inside any quote or list
+    /// container, so a `]:` counts when its line starts (after spaces) with
+    /// `[`, `>`, a list marker or a digit, or when its line has no `[` before
+    /// it (the label began on an earlier line). Code such as `a[0]: 1` or
+    /// `{"k[0]": v}` does not count, so it no longer turns freezing off.
+    /// Anything unsure counts: a false marker only costs speed.
+    static func containsDefinitionMarker(_ bytes: [UInt8], from start: Int) -> Bool {
         bytes.withUnsafeBufferPointer { buffer in
             var index = start
             while index + 1 < buffer.count {
-                if buffer[index] == 0x5D, buffer[index + 1] == 0x3A { return true }
+                if buffer[index] == 0x5D, buffer[index + 1] == 0x3A, mayCloseDefinition(buffer, at: index) {
+                    return true
+                }
                 index += 1
             }
             return false
+        }
+    }
+
+    private static func mayCloseDefinition(_ buffer: UnsafeBufferPointer<UInt8>, at close: Int) -> Bool {
+        var lineStart = close
+        var hasOpen = false
+        while lineStart > 0, buffer[lineStart - 1] != 0x0A {
+            lineStart -= 1
+            if buffer[lineStart] == 0x5B { hasOpen = true }
+        }
+        guard hasOpen else { return true }
+        var first = lineStart
+        while first < close, buffer[first] == 0x20 || buffer[first] == 0x09 { first += 1 }
+        switch buffer[first] {
+        case 0x5B, 0x3E, 0x2D, 0x2A, 0x2B, 0x30...0x39: return true // [ > - * + 0-9
+        default: return false
         }
     }
 
