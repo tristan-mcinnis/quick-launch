@@ -51,9 +51,7 @@ struct AttachmentRenderProofTests {
             finishReason: "stop"
         )])
         let chat = QuickViewModel(settings: settings(appearance), service: service)
-        let suite = "AttachmentRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         chat.input = "how did the quarter go"
         await chat.submit()

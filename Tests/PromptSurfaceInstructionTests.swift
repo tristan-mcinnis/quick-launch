@@ -47,9 +47,7 @@ struct PromptSurfaceInstructionTests {
     }
 
     private func chatWindowDefaults() -> UserDefaults {
-        let suite = "PromptSurfaceInstructionTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         return defaults
     }
 

@@ -207,9 +207,7 @@ struct OwnWindowLayoutTests {
     /// `isAIChatWindow` is derived from the host, which is held weakly, so
     /// the returned model must outlive the assertions.
     private static func makeChatHost(_ vm: QuickViewModel) -> AIChatWindowModel {
-        let suite = "OwnWindowLayoutTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         return AIChatWindowModel(chat: vm, defaults: defaults)
     }
 

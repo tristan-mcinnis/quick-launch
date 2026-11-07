@@ -138,9 +138,7 @@ struct ShortcutRegistryTests {
     }
 
     @Test func overridesRoundTripThroughUserDefaults() {
-        let name = "ShortcutRegistryTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defer { defaults.removePersistentDomain(forName: name) }
+        let defaults = makeUserDefaults()
 
         var settings = QuickSettings()
         #expect(settings.setShortcut(ActionHotkey(keyCode: 38, modifiers: modifiers([.command, .option])), for: .newChat) == nil)
@@ -524,7 +522,7 @@ struct ShortcutRegistryTests {
 
     @Test func theChatWindowTakesTheReboundChatListKey() {
         let vm = QuickViewModel(settings: QuickSettings())
-        let defaults = UserDefaults(suiteName: "ShortcutRegistryTests.chat.\(UUID().uuidString)")!
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: vm, defaults: defaults)
 
         #expect(model.handleKeyEquivalent(characters: "s", keyCode: 1, modifiers: [.command, .control]))
@@ -540,9 +538,7 @@ struct ShortcutRegistryTests {
 
     @Test func theChatMenuIsRebuiltWhenAShortcutChanges() async {
         let vm = QuickViewModel(settings: QuickSettings())
-        let name = "ShortcutRegistryTests.menu.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: vm, defaults: defaults)
         let shell = MenuRefreshRecordingShell()
         let controller = AIChatWindowController(

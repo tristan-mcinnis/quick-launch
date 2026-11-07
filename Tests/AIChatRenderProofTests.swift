@@ -22,9 +22,7 @@ struct AIChatRenderProofTests {
         settings.historyEnabled = true
         let service = MockQuickService()
         let chat = QuickViewModel(settings: settings, service: service)
-        let suite = "AIChatRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
 
         let provider = settings.providers[0].id

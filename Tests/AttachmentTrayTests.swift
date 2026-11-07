@@ -622,9 +622,7 @@ struct QuickAIComposerKeyTests {
         settings.historyEnabled = false
         settings.savedPrompts.append(SavedPrompt(alias: "standup", prompt: "Write my standup notes for today."))
         let chat = QuickViewModel(settings: settings, service: MockQuickService())
-        let suite = "QuickAIComposerKeyTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
 
         window.chat.input = "what is a context budget"

@@ -262,7 +262,7 @@ struct AttachmentFlowTests {
     @Test func theAIChatWindowListsFileAndLinkAfterItsTwoCaptures() {
         let launcher = make()
         let chat = QuickViewModel(store: launcher.vm.store, service: launcher.service)
-        let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: "AttachmentFlowTests.\(UUID())")!)
+        let window = AIChatWindowModel(chat: chat, defaults: makeUserDefaults())
         withExtendedLifetime(window) {
             #expect(chat.addContextRows == [.file, .link, .clipboardHistory, .capture(.selectedArea), .capture(.entireScreen)])
             #expect(AddContextPane.rows(captures: chat.addContextOptions, tray: chat.attachmentTray) == chat.addContextRows)

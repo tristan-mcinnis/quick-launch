@@ -111,9 +111,7 @@ struct AIChatBehaviourTests {
         let recorded = Recorded()
         chat.announce = { recorded.announcements.append($0) }
         launcher.announce = { recorded.announcements.append("launcher: \($0)") }
-        let suite = "AIChatBehaviourTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         let fake = FakeAIChatWindow()
         window.window = fake

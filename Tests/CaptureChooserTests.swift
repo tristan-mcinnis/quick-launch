@@ -187,7 +187,7 @@ struct CaptureChooserTests {
     @Test func aiChatWithNoAppBehindOffersOnlyValidRowsAndNeverNoOps() async throws {
         let capture = ChooserScreenshotService()
         let chat = QuickViewModel(settings: settings(), service: MockQuickService(), screenshotService: capture)
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         // `chatWindowHost` is weak; keep the window model alive for the test.
         defer { withExtendedLifetime(window) {} }

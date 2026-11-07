@@ -22,7 +22,7 @@ struct AIChatToolParityTests {
                 view.memoryService = memory
                 view.skillLibrary = skills
             }
-            let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+            let defaults = makeUserDefaults()
             let window = AIChatWindowModel(chat: chat, defaults: defaults)
             launcher.openQuickAI()
             launcher.currentConversation = QuickConversation(
@@ -67,7 +67,7 @@ struct AIChatToolParityTests {
         await service.setResponses([StreamDelta(text: "A sourced answer", finishReason: "stop")])
         let launcher = QuickViewModel(settings: settings, service: service, webSearchService: search)
         let chat = QuickViewModel(store: launcher.store, service: service, webSearchService: search)
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         launcher.openQuickAI()
         launcher.input = "search the web for first question"

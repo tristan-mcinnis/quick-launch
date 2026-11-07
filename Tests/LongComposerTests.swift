@@ -146,9 +146,7 @@ struct LongComposerTests {
                 try save(OverlayView(viewModel: vm).preferredColorScheme(scheme),
                          size: NSSize(width: PanelSizing.panelWidth, height: PanelSizing.quickAIHeight),
                          appearance: appearance, name: "composer-quick-\(name)-\(suffix)")
-                let suite = "LongComposerTests.\(UUID().uuidString)"
-                let defaults = try #require(UserDefaults(suiteName: suite))
-                defer { defaults.removePersistentDomain(forName: suite) }
+                let defaults = makeUserDefaults()
                 let full = AIChatWindowModel(chat: vm, defaults: defaults)
                 try save(AIChatWindowView(model: full).preferredColorScheme(scheme),
                          size: NSSize(width: House.Layout.chatMinWidth, height: House.Layout.chatMinHeight),
@@ -169,9 +167,7 @@ struct LongComposerTests {
                 vm.rememberSelectionTarget(.init(processIdentifier: 42, applicationName: "Finder"))
                 vm.attachmentTray.add(.file(URL(fileURLWithPath: "/tmp/Composer reference.txt")))
                 await vm.attachmentTray.waitUntilRead()
-                let suite = "LongComposerStress.\(UUID().uuidString)"
-                let defaults = try #require(UserDefaults(suiteName: suite))
-                defer { defaults.removePersistentDomain(forName: suite) }
+                let defaults = makeUserDefaults()
                 let full = fullWindow ? AIChatWindowModel(chat: vm, defaults: defaults) : nil
                 vm.openAddContextMenu()
                 vm.attachmentTray.finderIsBehind = true

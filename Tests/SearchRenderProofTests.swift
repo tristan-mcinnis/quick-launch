@@ -91,9 +91,7 @@ struct SearchRenderProofTests {
 
     private func railWindow(_ appearance: NSAppearance.Name) -> AIChatWindowModel {
         let chat = QuickViewModel(settings: Self.settings(appearance), service: MockQuickService())
-        let suite = "SearchRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         chat.history = Self.history()
         return window
@@ -166,9 +164,7 @@ struct SearchRenderProofTests {
         for (appearance, suffix) in Self.appearances() {
             let service = MockQuickService()
             let chat = QuickViewModel(settings: Self.settings(appearance), service: service)
-            let suite = "SearchRenderProofTests.\(UUID().uuidString)"
-            let defaults = UserDefaults(suiteName: suite)!
-            defaults.removePersistentDomain(forName: suite)
+            let defaults = makeUserDefaults()
             let window = AIChatWindowModel(chat: chat, defaults: defaults)
             await service.setResponses([StreamDelta(
                 text: """

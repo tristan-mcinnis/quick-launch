@@ -88,9 +88,7 @@ struct WebSearchProviderTests {
         vm.actionQuery = "brv"
         #expect(vm.paletteSearchProviders == [.brave])
         #expect(vm.actionPaletteEntryCount == 1)
-        let suite = "WebSearchProviderTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeUserDefaults()
         vm.selectWebSearchProvider(.brave, defaults: defaults)
         #expect(chat.settings.webSearchProvider == .brave)
         #expect(!vm.isActionPalettePresented)

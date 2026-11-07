@@ -210,9 +210,7 @@ struct AttachmentIntegrationRenderProofTests {
     // MARK: - Rendering
 
     private static func defaults() -> UserDefaults {
-        let suite = "AttachmentIntegrationRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         return defaults
     }
 

@@ -135,9 +135,7 @@ struct StatusMenuTests {
             settings.historyEnabled = false
             let service = MockQuickService()
             let chat = QuickViewModel(settings: settings, service: service, pasteboard: FakePasteboard())
-            let suite = "StatusMenuTests.\(UUID().uuidString)"
-            let defaults = UserDefaults(suiteName: suite)!
-            defaults.removePersistentDomain(forName: suite)
+            let defaults = makeUserDefaults()
             let window = AIChatWindowModel(chat: chat, defaults: defaults)
             window.isAlwaysOnTop = true
             await service.setResponses([StreamDelta(text: "Friday after lunch.", finishReason: "stop")])

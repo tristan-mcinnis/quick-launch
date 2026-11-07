@@ -5,7 +5,7 @@ import Foundation
 @Suite("Quick history store")
 struct QuickHistoryStoreTests {
     private func freshDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "com.quicklaunch.history-tests.\(UUID().uuidString)")!
+        makeUserDefaults()
     }
 
     private func freshFolder() -> URL {

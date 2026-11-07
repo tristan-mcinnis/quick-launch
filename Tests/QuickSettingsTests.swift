@@ -8,11 +8,8 @@ import Foundation
 @Suite("QuickSettings")
 struct QuickSettingsTests {
 
-    // Isolated UserDefaults suite name — unique per test run
     private func freshDefaults() -> UserDefaults {
-        let suiteName = "com.quicklaunch.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        return defaults
+        makeUserDefaults()
     }
 
     // MARK: - 1. Default values

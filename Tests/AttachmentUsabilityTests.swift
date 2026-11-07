@@ -18,7 +18,7 @@ struct AttachmentUsabilityTests {
         await service.setResponses([StreamDelta(text: "An answer", finishReason: "stop")])
         let launcher = QuickViewModel(settings: settings(), service: service, selectedTextService: selection)
         let chat = QuickViewModel(store: launcher.store, service: service)
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         launcher.aiChatOpener = { handoff in window.open(handoff: handoff) }
         launcher.rememberSelectionTarget(SelectionTarget(processIdentifier: 42, applicationName: "Editor"))

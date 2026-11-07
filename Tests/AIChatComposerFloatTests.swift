@@ -16,9 +16,7 @@ struct AIChatComposerFloatTests {
         settings.autoCopy = false
         settings.historyEnabled = false
         let chat = QuickViewModel(settings: settings, service: MockQuickService(), pasteboard: FakePasteboard())
-        let suite = "AIChatComposerFloatTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         chat.input = draft
         return AIChatWindowModel(chat: chat, defaults: defaults)
     }

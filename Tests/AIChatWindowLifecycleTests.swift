@@ -110,9 +110,7 @@ struct AIChatWindowLifecycleTests {
         launcher.overlayPresenter = presenter
         let chat = QuickViewModel(store: launcher.store, service: service)
         chat.piHandoff = piHandoff
-        let suite = "AIChatWindowLifecycleTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: chat, defaults: defaults)
         model.isAlwaysOnTop = alwaysOnTop
         let shell = FakeAIChatAppShell()

@@ -22,9 +22,7 @@ struct AIChatLifecycleRenderProofTests {
         settings.historyEnabled = false
         let service = MockQuickService()
         let chat = QuickViewModel(settings: settings, service: service)
-        let suite = "AIChatLifecycleRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: chat, defaults: defaults)
         await service.setResponses([StreamDelta(
             text: "The release has three parts: build on Thursday, test on Friday morning, ship after lunch.",

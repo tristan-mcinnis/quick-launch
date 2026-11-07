@@ -437,7 +437,7 @@ struct SettingsSearchTests {
         // not start any network call for an existing user who never asked.
         #expect(QuickSettings().checkForUpdatesOnLaunch == false)
 
-        let decoded = QuickSettings.load(from: UserDefaults(suiteName: "settings-search-empty-\(UUID().uuidString)")!)
+        let decoded = QuickSettings.load(from: makeUserDefaults())
         #expect(decoded.checkForUpdatesOnLaunch == false)
     }
 }

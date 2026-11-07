@@ -170,9 +170,7 @@ struct AutoCopyFirstAnswerTests {
         let mock = MockQuickService()
         let launcher = make(pasteboard: launcherPasteboard, service: mock)
         let chat = QuickViewModel(store: launcher.store, service: mock, pasteboard: chatPasteboard)
-        let suite = "AutoCopyFirstAnswerTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         #expect(chat.isAIChatWindow)
         #expect(chat.settings.autoCopy, "the setting is on; the window still does not copy")

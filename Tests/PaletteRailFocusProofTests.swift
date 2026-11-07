@@ -24,9 +24,7 @@ struct PaletteRailFocusProofTests {
             messages: [QuickMessage(role: .user, content: "Example chat")],
             isPinned: true
         )]
-        let suite = "PaletteRailFocusProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: vm, defaults: defaults)
         model.showRail()
         let size = CGSize(width: House.Layout.chatRail, height: House.Layout.chatHeight)
@@ -135,9 +133,7 @@ struct PaletteRailFocusProofTests {
         settings.historyEnabled = false
         let vm = QuickViewModel(settings: settings, service: MockQuickService(), pasteboard: FakePasteboard())
         vm.rememberSelectionTarget(SelectionTarget(processIdentifier: 42, applicationName: "Editor"))
-        let suite = "ChooserSearchAIChatFocus.\\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: vm, defaults: defaults)
         defer { withExtendedLifetime(model) {} }
 

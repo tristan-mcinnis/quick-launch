@@ -106,9 +106,7 @@ struct ChatSettingsTests {
     // MARK: - Keep AI Chat on top
 
     private func windowModel() -> (AIChatWindowModel, FakeAIChatWindow, UserDefaults) {
-        let suite = "ChatSettingsTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let model = AIChatWindowModel(chat: QuickViewModel(service: MockQuickService()), defaults: defaults)
         let fake = FakeAIChatWindow()
         model.window = fake

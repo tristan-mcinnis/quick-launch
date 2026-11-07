@@ -386,7 +386,7 @@ struct FormattedPasteTests {
         let vm = QuickViewModel()
         vm.output = "**Emphasised** answer"
         #expect(vm.resultActions.contains(.pasteFormatted))
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: vm, defaults: defaults)
         defer { withExtendedLifetime(window) {} }
         #expect(vm.isAIChatWindow)

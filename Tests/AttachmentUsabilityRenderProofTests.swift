@@ -62,7 +62,7 @@ struct AttachmentUsabilityRenderProofTests {
             vm.pendingContext = context
             vm.attachmentTray.add(.file(URL(fileURLWithPath: "/tmp/Supporting notes.txt")))
             await vm.attachmentTray.waitUntilRead()
-            let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+            let defaults = makeUserDefaults()
             let chatWindow = AIChatWindowModel(chat: vm, defaults: defaults)
             chatWindow.showRail()
             try save(OverlayRenderProofTests.renderOnGround(

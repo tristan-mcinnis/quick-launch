@@ -184,7 +184,7 @@ struct QuickAIResizeTests {
     // MARK: - Persistence
 
     @Test func theSizeSurvivesARelaunch() {
-        let defaults = UserDefaults(suiteName: "com.quicklaunch.tests.\(UUID().uuidString)")!
+        let defaults = makeUserDefaults()
         var settings = QuickSettings()
         #expect(settings.quickAISize == .standard)
         settings.quickAISize = QuickAISize(Self.large)

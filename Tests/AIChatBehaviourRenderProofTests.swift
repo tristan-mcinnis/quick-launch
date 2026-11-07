@@ -26,9 +26,7 @@ struct AIChatBehaviourRenderProofTests {
         let chat = QuickViewModel(settings: settings, service: service)
         chat.modelPreferences = ModelPreferenceStore(fileURL: nil)
         chat.announce = { _ in }
-        let suite = "AIChatBehaviourRenderProofTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         window.open(handoff: nil)
         await service.setResponses([StreamDelta(

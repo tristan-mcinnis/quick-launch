@@ -46,7 +46,7 @@ struct PaletteSearchTests {
 
     @Test func railSearchFiltersActionsAndReturnRunsTheDisplayedAction() throws {
         let vm = answeredChat()
-        let defaults = UserDefaults(suiteName: "PaletteSearchTests.\(UUID().uuidString)")!
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: vm, defaults: defaults)
         window.showRail()
         let chatID = try #require(window.highlightedRailItem?.itemID)
@@ -63,7 +63,7 @@ struct PaletteSearchTests {
 
     @Test func railSearchUsesCurrentPinStateAndResetsWhenReopened() {
         let vm = answeredChat()
-        let defaults = UserDefaults(suiteName: "PaletteSearchTests.\(UUID().uuidString)")!
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: vm, defaults: defaults)
         window.showRail()
         window.toggleRailActions()

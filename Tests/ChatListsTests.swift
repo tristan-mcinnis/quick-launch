@@ -37,9 +37,7 @@ struct ChatListsTests {
         let presenter = RecordingPresenter()
         launcher.overlayPresenter = presenter
         let chat = QuickViewModel(store: launcher.store, service: service)
-        let suite = "ChatListsTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         let fake = FakeAIChatWindow()
         window.window = fake

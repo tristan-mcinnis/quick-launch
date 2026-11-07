@@ -44,9 +44,7 @@ struct AIChatWindowTests {
         let presenter = RecordingPresenter()
         launcher.overlayPresenter = presenter
         let chat = QuickViewModel(store: launcher.store, service: service)
-        let suite = "AIChatWindowTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeUserDefaults()
         let window = AIChatWindowModel(chat: chat, defaults: defaults)
         let fake = FakeAIChatWindow()
         window.window = fake
@@ -320,8 +318,7 @@ struct AIChatWindowTests {
         let launcher = QuickViewModel(settings: settings, service: service, attachmentExtractor: extractor)
         launcher.overlayPresenter = RecordingPresenter()
         let chat = QuickViewModel(store: launcher.store, service: service, attachmentExtractor: extractor)
-        let suite = "AIChatWindowTests.\(UUID().uuidString)"
-        let window = AIChatWindowModel(chat: chat, defaults: UserDefaults(suiteName: suite)!)
+        let window = AIChatWindowModel(chat: chat, defaults: makeUserDefaults())
         // Hold the fake strongly: `AIChatWindowModel.window` is weak, so the
         // old inline assignment was deallocated and `open(handoff:)` reached
         // a nil window while the test still passed.
