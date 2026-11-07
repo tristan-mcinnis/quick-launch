@@ -33,11 +33,16 @@ enum ShowFocus {
 
     /// True when the field took first responder here. False leaves focus
     /// untouched for the fallback request.
+    ///
+    /// Lays the content out first: the panel can be ordered front before
+    /// SwiftUI has built the surface it now shows (a reopen straight into
+    /// Quick AI), and then the field is missing or is the old surface's.
     @MainActor
     @discardableResult
     static func focusInput(in window: NSWindow) -> Bool {
-        guard let content = window.contentView, !textResponderHoldsFocus(in: window),
-              let field = soleInputField(in: content) else { return false }
+        guard let content = window.contentView, !textResponderHoldsFocus(in: window) else { return false }
+        content.layoutSubtreeIfNeeded()
+        guard let field = soleInputField(in: content) else { return false }
         return window.makeFirstResponder(field)
     }
 }
