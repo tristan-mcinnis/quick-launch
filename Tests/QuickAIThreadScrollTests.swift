@@ -58,7 +58,10 @@ struct QuickAIThreadScrollTests {
 
     /// Waits until `condition` holds and the view has been still for a
     /// moment, or fails after a few seconds.
-    private func settle(_ condition: @MainActor () -> Bool) async throws {
+    private func settle(
+        _ condition: @MainActor () -> Bool,
+        _ state: @MainActor () -> String = { "" }
+    ) async throws {
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             try await spin(0.05)
@@ -67,7 +70,19 @@ struct QuickAIThreadScrollTests {
                 if condition() { return }
             }
         }
-        Issue.record("the thread did not settle")
+        Issue.record("the thread did not settle: \(state())")
+    }
+
+    /// What the view and the view model say, for a failure message.
+    private func state(_ vm: QuickViewModel, _ window: NSWindow) -> String {
+        func find(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.documentView != nil, scroll.documentView!.frame.height > 100 { return scroll }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        let scroll = window.contentView.flatMap(find)
+        return "distance \(distance(vm)), offset \(scroll?.contentView.bounds.origin.y ?? -1), "
+            + "document \(scroll?.documentView?.frame.height ?? -1), clip \(scroll?.contentView.bounds.height ?? -1), "
+            + "following \(vm.isThreadFollowingBottom)"
     }
 
     /// Waits until `condition` holds and the view's offset has stopped
@@ -103,14 +118,14 @@ struct QuickAIThreadScrollTests {
 
         // ⌘↑: the top. The whole thread is above the view's bottom edge.
         vm.handleThreadKey(.up, command: true, option: false)
-        try await settle { distance(vm) > PanelSizing.quickAIHeight }
+        try await settle({ distance(vm) > PanelSizing.quickAIHeight }, { state(vm, window) })
         let fromTop = distance(vm)
         #expect(!vm.isThreadFollowingBottom)
         #expect(vm.showsJumpToLatest, "scrolled up, the Latest chip shows")
 
         // PageDown: one page down from the top, less than the whole way.
         vm.handleThreadKey(.pageDown, command: false, option: false)
-        try await settle { distance(vm) < fromTop - QuickViewModel.threadFollowThreshold }
+        try await settle({ distance(vm) < fromTop - QuickViewModel.threadFollowThreshold }, { state(vm, window) })
         let onePageDown = distance(vm)
         #expect(onePageDown > QuickViewModel.threadFollowThreshold, "a page, not the bottom")
 
@@ -120,7 +135,7 @@ struct QuickAIThreadScrollTests {
         // past a threshold: a page scroll crosses that threshold before it
         // lands, so the older predicate could measure mid-animation and read
         // a few points short of the top.
-        try await settle { abs(distance(vm) - fromTop) <= 1 }
+        try await settle({ abs(distance(vm) - fromTop) <= 1 }, { state(vm, window) })
         #expect(abs(distance(vm) - fromTop) <= 1)
 
         // ⌘↓ (or the chip): the bottom, following again.

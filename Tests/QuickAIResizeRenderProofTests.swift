@@ -56,7 +56,7 @@ struct QuickAIResizeRenderProofTests {
         // the thread keeps the height the chrome used to take.
         #expect(
             standard.composerHeight == QuickAIView.composerRowHeight,
-            "the composer should be the pill row alone: \(standard.composerHeight)"
+            "the composer should be the pill row alone: \(standard.composerHeight); \(Self.composerState(vm))"
         )
         let standardInk = try #require(Self.threadInkRange(
             in: standard.image,
@@ -114,6 +114,16 @@ struct QuickAIResizeRenderProofTests {
     }
 
     // MARK: - Helpers
+
+    /// What the composer draws besides the pill row, for a failure message:
+    /// the height once came out 2 pt over in the full suite and never alone.
+    private static func composerState(_ vm: QuickViewModel) -> String {
+        "input \(vm.input.count) chars, error \(vm.errorMessage ?? "none"), "
+            + "routine \(vm.chatDestinationIsRoutine), refused \(vm.refusedCommandText ?? "none"), "
+            + "skill \(vm.slashSkillNotice ?? "none"), tray \(vm.attachmentTray.items.count) "
+            + "notice \(vm.attachmentTray.notice ?? "none"), recent \(vm.isRecentChatsPresented), "
+            + "mode \(String(describing: vm.inputMode))"
+    }
 
     private static func answeredViewModel(appearance: NSAppearance.Name) async throws -> QuickViewModel {
         var settings = QuickSettings()

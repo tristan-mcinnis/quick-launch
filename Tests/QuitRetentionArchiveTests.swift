@@ -262,9 +262,11 @@ struct QuitRetentionArchiveTests {
 
         let conversationID = try #require(vm.currentConversation?.id.uuidString)
         let archive = try #require(vm.chatArchive)
-        // The checkpoint gate: this awaits the checkpoint the stream already
-        // scheduled, so the tail gap is measured against a real record.
-        _ = await vm.settleAnswerDurability(vm.freezeAnswerDurability())
+        // The checkpoint gate: await the checkpoint the stream already
+        // scheduled, so the tail gap is measured against a real record. The
+        // quit's frozen debt does not hold the checkpoint, so settling it
+        // raced the write on a busy machine and read no assistant turn.
+        await vm.archiveCheckpointTask?.value
         let checkpointed = try await archive.load(id: conversationID)
         #expect(checkpointed.turns.first { $0.role == .assistant }?.text == head)
 

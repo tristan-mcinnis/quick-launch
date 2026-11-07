@@ -68,6 +68,10 @@ struct StreamingAnswerTests {
         "cjk": "# 发布计划\n\n本次发布分为**三个部分**。周四构建，周五测试。\n\n- 检查版本号\n- 阅读更新日志\n\n```swift\nlet 版本 = 42\n```\n\n完成。😀 emoji 👨‍👩‍👧 here.\n\n结束。",
         "empty list item": "Start.\n\n-\n\nNext paragraph after an empty item.\n\nEnd.",
         "reference definition": "See [the docs][docs] for details.\n\nMiddle paragraph.\n\n[docs]: https://example.com\n\nEnd.",
+        "code with a bracket colon": "Use `ages[0]: 3` here.\n\n```python\nd = {k[0]: v for k, v in rows}\n```\n\nThen [a link](https://example.com).\n\nEnd.",
+        "definition in a list": "See [the docs][docs].\n\n- item\n- [docs]: https://example.com\n\nEnd.",
+        "definition in a quote": "See [the docs][docs].\n\nMiddle.\n\n> [docs]: https://example.com\n\nEnd.",
+        "definition with a two-line label": "See [the long\nlabel][].\n\nMiddle.\n\n[the long\nlabel]: https://example.com\n\nEnd.",
     ]
 
     /// The chunk sizes a stream might arrive in, in characters.
@@ -116,6 +120,37 @@ struct StreamingAnswerTests {
                 check(model.update(prefix), against: prefix, label: "mixed round \(round) at \(length)")
             }
         }
+    }
+
+    /// Code with `]:` in it is not a link definition, so the answer keeps
+    /// freezing its finished blocks instead of re-rendering whole.
+    @Test func codeWithABracketColonKeepsFreezing() throws {
+        let model = StreamingAnswer()
+        var text = "Set `ages[0]: 3` first.\n\n"
+        _ = model.update(text)
+        var frozen: [Int] = []
+        for index in 0..<6 {
+            text += "Paragraph \(index) with **bold** words.\n\n"
+            frozen.append(try #require(model.update(text).run).frozen.length)
+        }
+        #expect(frozen.last ?? 0 > 0, "finished blocks froze: \(frozen)")
+        #expect(frozen == frozen.sorted(), "the frozen part only grows: \(frozen)")
+    }
+
+    @Test func aDefinitionMarkerNeedsALineThatCouldStartOne() {
+        func marks(_ text: String) -> Bool {
+            StreamingAnswer.containsDefinitionMarker(Array(text.utf8), from: 0)
+        }
+        #expect(marks("[docs]: https://example.com"))
+        #expect(marks("  [docs]: https://example.com"))
+        #expect(marks("> [docs]: x"))
+        #expect(marks("- [docs]: x"))
+        #expect(marks("1. [docs]: x"))
+        #expect(marks("[long\nlabel]: x"), "the label began on the line before")
+        #expect(!marks("Use `ages[0]: 3` here."))
+        #expect(!marks("d = {k[0]: v for k, v in rows}"))
+        #expect(!marks("    let x = a[i]: Int"))
+        #expect(!marks("no marker at all"))
     }
 
     @Test func replacedTextStartsOver() {
