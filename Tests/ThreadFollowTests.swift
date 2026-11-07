@@ -22,20 +22,28 @@ struct ThreadFollowTests {
 
     /// How far the view's bottom is above the content's, once the view has
     /// held still for a few polls.
+    /// The deadline only stops a hang: a CI runner took more than 15 s to
+    /// lay out six long answers, so a view still moving fails with its last
+    /// readings rather than a bare timeout.
     private func settledDistanceFromBottom(in window: NSWindow) async throws -> CGFloat {
-        let deadline = ContinuousClock.now + .seconds(15)
+        let deadline = ContinuousClock.now + .seconds(30)
         var last: CGFloat?
         var steady = 0
+        var recent: [String] = []
         while ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(50))
-            guard let scroll = scrollView(in: window), let document = scroll.documentView else { continue }
+            guard let scroll = scrollView(in: window), let document = scroll.documentView else {
+                recent = Array((recent + ["no scroll view"]).suffix(8))
+                continue
+            }
             let bounds = scroll.contentView.bounds
             let distance = document.frame.height - bounds.maxY
+            recent = Array((recent + ["\(Int(distance)) of \(Int(document.frame.height))"]).suffix(8))
             if let previous = last, abs(distance - previous) < 0.5 { steady += 1 } else { steady = 0 }
             last = distance
             if steady >= 8 { return distance }
         }
-        Issue.record("the thread did not come to rest")
+        Issue.record("the thread did not come to rest; last readings (distance of document): \(recent)")
         return last ?? .greatestFiniteMagnitude
     }
 
