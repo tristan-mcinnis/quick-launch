@@ -3,8 +3,9 @@
 //
 // The render proofs snapshot a view once, so a scroll never gets to run in
 // them. Here the real OverlayView sits in a window that is never shown (no
-// order-front, no key status, no events), and the test sleeps while the main
-// run loop lays it out, until the scroll the view model asked for has landed.
+// order-front, no key status, no events), and the test waits while the main
+// run loop lays it out, redrawing it as a screen refresh would
+// (`OffscreenRefresh`), until the scroll the view model asked for has landed.
 // What is asserted is what
 // the view reported back: how far its view sits from the bottom of the
 // thread, and whether the thread follows the newest text.
@@ -42,6 +43,7 @@ struct QuickAIThreadScrollTests {
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        Self.window = window
         try await settle { (vm.lastThreadDistanceFromBottom ?? .infinity) <= QuickViewModel.threadFollowThreshold }
         return (vm, window, mock)
     }
@@ -105,9 +107,19 @@ struct QuickAIThreadScrollTests {
 
     private func distance(_ vm: QuickViewModel) -> CGFloat { vm.lastThreadDistanceFromBottom ?? -1 }
 
-    /// Lets the main run loop lay the view out for a while.
+    /// The hosted window the waits below redraw. The suite is serialized.
+    private static weak var window: NSWindow?
+
+    /// Lets the main run loop lay the view out for a while, redrawing the
+    /// window every 50 ms as a screen refresh would (see `OffscreenRefresh`).
     private func spin(_ seconds: TimeInterval) async throws {
-        try await Task.sleep(for: .seconds(seconds))
+        var left = seconds
+        repeat {
+            let step = min(left, 0.05)
+            try await Task.sleep(for: .seconds(step))
+            if let window = Self.window { OffscreenRefresh.tick(window) }
+            left -= step
+        } while left > 0.0001
     }
 
     @Test func theScrollKeysMoveTheThreadsView() async throws {

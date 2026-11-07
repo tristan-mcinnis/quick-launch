@@ -26,22 +26,31 @@ struct ThreadFollowTests {
         let deadline = ContinuousClock.now + .seconds(15)
         var last: CGFloat?
         var steady = 0
+        var trail: [String] = []
         while ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(50))
-            guard let scroll = scrollView(in: window), let document = scroll.documentView else { continue }
+            OffscreenRefresh.tick(window)
+            guard let scroll = scrollView(in: window), let document = scroll.documentView else {
+                trail.append("no scroll view")
+                continue
+            }
             let bounds = scroll.contentView.bounds
             let distance = document.frame.height - bounds.maxY
+            trail.append("\(Int(distance))/\(Int(document.frame.height))")
             if let previous = last, abs(distance - previous) < 0.5 { steady += 1 } else { steady = 0 }
             last = distance
             if steady >= 8 { return distance }
         }
-        Issue.record("the thread did not come to rest")
+        Issue.record("the thread did not come to rest; distance/content per poll, last 40: \(trail.suffix(40).joined(separator: " "))")
         return last ?? .greatestFiniteMagnitude
     }
 
-    private func streamEnded(_ vm: QuickViewModel) async throws {
+    private func streamEnded(_ vm: QuickViewModel, in window: NSWindow) async throws {
         let deadline = ContinuousClock.now + .seconds(15)
-        while vm.isStreaming, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        while vm.isStreaming, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+            OffscreenRefresh.tick(window)
+        }
         #expect(!vm.isStreaming, "the answer never finished")
     }
 
@@ -75,7 +84,7 @@ struct ThreadFollowTests {
             await mock.setResponses(answer(index, paragraphs: paragraphs))
             vm.input = "question \(index)"
             await vm.submit()
-            try await streamEnded(vm)
+            try await streamEnded(vm, in: window)
             let distance = try await settledDistanceFromBottom(in: window)
             // Where the view ends: at the newest text, or (an answer that
             // finished before it outgrew the room under its question) with
