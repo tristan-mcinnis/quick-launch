@@ -48,9 +48,6 @@ enum ScreenshotKind: String, CaseIterable, Sendable {
         }
     }
 
-    /// The built-in in-app key, for the key tables and the free-key checks.
-    var overlayShortcut: KeyShortcut { overlayAction.defaultShortcut }
-
     /// The caps the owner's resolved table draws, so a rebind reaches the
     /// footer hint and the attach menu together.
     func overlayKeyCaps(_ bindings: ShortcutBindings) -> [String] {

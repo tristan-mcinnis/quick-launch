@@ -64,10 +64,6 @@ struct InferenceProvider: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.command = command
         self.isBuiltIn = isBuiltIn
     }
-
-    var displayModel: String {
-        selectedModel.isEmpty ? "Choose model" : selectedModel
-    }
 }
 
 extension InferenceProvider {

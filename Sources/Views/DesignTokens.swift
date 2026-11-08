@@ -189,7 +189,6 @@ enum AQDesign {
     static let tileSize = House.Control.tile          // 26
     static let keyCapHeight = House.Control.keyCap    // 20
     static let rowHeight = House.Control.row          // 40
-    static let railRowHeight = House.Control.railRow  // 36
     static let inputHeight = House.Control.input      // 58
     static let controlHeight = House.Control.row      // 40
     static let footerHeight = House.Control.footer    // 40

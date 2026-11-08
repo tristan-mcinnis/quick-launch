@@ -23,11 +23,6 @@ enum ScreenshotLibrary {
     /// previewed through Quick Look; it is never pasted or attached as an image.
     static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
 
-    /// Every file type the browser lists.
-    static var mediaExtensions: Set<String> {
-        LatestScreenshotFinder.imageExtensions.union(videoExtensions)
-    }
-
     /// The media kind for a file, or nil when it is not a listed type.
     static func mediaKind(for url: URL) -> ScreenshotMediaKind? {
         let ext = url.pathExtension.lowercased()

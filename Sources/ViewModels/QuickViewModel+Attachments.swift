@@ -403,8 +403,6 @@ extension QuickViewModel {
     /// worth a line before Send.
     var chatDestinationIsRoutine: Bool { resolvedNextRoute().isRoutine }
 
-    var nextRouteLabel: String { resolvedNextRoute().label }
-    var nextRouteHasImages: Bool { resolvedNextRoute().hasImages }
     var nextRouteIsUsable: Bool { resolvedNextRoute().isUsable }
 
     var attachmentRoutingLine: String? {
@@ -437,7 +435,6 @@ extension QuickViewModel {
         return route.provider.location == .local ? "Only on this Mac" : nil
     }
 
-    static let pendingImageAsTextLine = "Will send as text (read on this Mac)"
     static let imageAsTextLine = "Sent as text (read on this Mac)"
 
     // MARK: - Chips on sent questions

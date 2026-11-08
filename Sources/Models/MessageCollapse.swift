@@ -133,7 +133,5 @@ struct MessageCollapseState: Equatable, Sendable {
     /// drawn yet.
     var accessibilityState: String { isExpanded ? "Expanded" : "Collapsed" }
 
-    mutating func setExpanded(_ expanded: Bool) { isExpanded = expanded }
-
     mutating func toggle() { isExpanded.toggle() }
 }

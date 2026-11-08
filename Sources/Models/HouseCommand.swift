@@ -176,12 +176,6 @@ struct HouseCommandManifest: Sendable, Equatable, Identifiable {
         transport == .socket && status != nil
     }
 
-    /// The endpoint as a file URL, for the socket and exec transports.
-    var endpointURL: URL { URL(fileURLWithPath: endpoint) }
-
-    /// The endpoint as a base URL, for the http transport.
-    var baseURL: URL? { URL(string: endpoint) }
-
     private static func string(_ value: Any?) -> String? {
         value as? String
     }

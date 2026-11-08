@@ -103,9 +103,6 @@ extension QuickViewModel {
     /// Bytes the journal occupies on disk.
     var interactionJournalByteSize: Int { interactionJournal.byteSize }
 
-    /// Age of the newest journal row, or `nil` when the journal is empty.
-    var interactionJournalLastEventDate: Date? { interactionJournal.lastEventDate }
-
     /// Explicit, reversible marker: "this recorded choice was the wrong one".
     /// Review metadata only — it is never fed into ranking.
     func setInteractionMarkedAccidental(id: UUID, accidental: Bool) {

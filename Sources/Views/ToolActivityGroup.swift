@@ -4,11 +4,6 @@ import HouseDesign
 /// The activity line's timing: 0.175 s to open, rows fading in over 0.3 s
 /// 50 ms apart. Reduce Motion: no animation at all (DESIGN.md).
 enum ToolActivityMotion {
-    /// The open and close curve, and each row's fade.
-    static let expandDuration: Double = ChatMotion.disclosure
-    static let rowFadeDuration: Double = ChatMotion.appear
-    static let rowStagger: Double = ChatMotion.appearStagger
-
     /// Reduce Motion: no movement and no stagger, rows just appear.
     static func expandAnimation(reduceMotion: Bool) -> Animation? {
         ChatMotion.disclosureAnimation(reduceMotion: reduceMotion)
