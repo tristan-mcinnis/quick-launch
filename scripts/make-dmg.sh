@@ -10,8 +10,7 @@
 # Output:  $RELEASE_OUT, default dist/release
 # Options: QL_SKIP_BUILD=1 packages the existing build/Quick Launch.app.
 #
-# The notarized path (release.sh, build-dist.sh, notarize.sh) is separate and
-# needs a Developer ID. This script never uses it.
+# There is no notarized path: Tristan has no Developer ID.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

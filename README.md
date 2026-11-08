@@ -149,8 +149,8 @@ traces to a commit. Override with `QL_ALLOW_DIRTY=1`.
 the draft-release command to `dist/release` (set `RELEASE_OUT` to move it).
 It checks the image without launching the app. It needs no Developer ID and
 publishes nothing; the printed `gh release create ... --draft` command is the
-only step left, and you run it yourself. The notarized path
-(`scripts/release.sh`) stays available for a Developer ID holder.
+only step left, and you run it yourself. There is no notarized path:
+Tristan has no Developer ID.
 
 ### Permissions
 
