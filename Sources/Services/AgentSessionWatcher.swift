@@ -13,13 +13,12 @@ final class AgentSessionWatcher {
     private var descriptors: [Int32] = []
     private var sweepTask: Task<Void, Never>?
 
-    /// Quick Launch's own folder first, then Tuna Companion's, so existing
-    /// hooks keep working until they are re-pointed.
+    /// Quick Launch's own folder, the one `scripts/quick-launch-agent-event`
+    /// writes to.
     static func defaultFolders(fileManager: FileManager = .default) -> [URL] {
         let support = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return [
             support.appendingPathComponent("Quick Launch/AgentSessions", isDirectory: true),
-            support.appendingPathComponent("Tuna Companion/AgentSessions", isDirectory: true),
         ]
     }
 

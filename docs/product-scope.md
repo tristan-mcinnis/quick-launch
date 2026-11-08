@@ -44,7 +44,7 @@ A second global hotkey (Settings › General, where it can also be cleared) open
 
 ## Agent Watch
 
-`AgentSessionWatcher` keeps the Mac awake while Claude Code or Codex is working. Agent hooks write one small JSON file per session into `~/Library/Application Support/Quick Launch/AgentSessions` (the old Tuna Companion folder is watched too). The watcher uses one file-system event source per folder, no polling, and sweeps stale files after 12 hours. Live sessions drive the Caffeinate Agent Watch state and its Status row.
+`AgentSessionWatcher` keeps the Mac awake while Claude Code or Codex is working. Agent hooks write one small JSON file per session into `~/Library/Application Support/Quick Launch/AgentSessions`. The watcher uses one file-system event source for that folder, no polling, and sweeps stale files after 12 hours. Live sessions drive the Caffeinate Agent Watch state and its Status row.
 
 ## Interaction contract
 

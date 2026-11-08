@@ -31,7 +31,7 @@ Launch:
 |---|---|---|
 | Caffeinate on/off, status | ✅ native toggle in Commands and the menu bar | none |
 | Caffeinate Until (timed) | ✅ commands for 30 min, 1 h, 2 h, 4 h, self-expiring | none |
-| Caffeinate Agent Watch (stay awake while agent sessions run, battery aware) | ✅ same hook-file signal, both folders watched, 12 h stale sweep, 20% battery cutoff, native assertions | re-point the hooks at `scripts/quick-launch-agent-event` (your call; `~/.claude/settings.json` is yours) |
+| Caffeinate Agent Watch (stay awake while agent sessions run, battery aware) | ✅ same hook-file signal, 12 h stale sweep, 20% battery cutoff, native assertions | none: the hooks point at `scripts/quick-launch-agent-event` (done 2026-11-08) |
 | Screenshots hotkey (capture to file and paste) | ✅ capture to chat context (`⌘⇧S`, `⌘⇧D`, commands with hotkeys) | file-saving variant not ported; macOS `⇧⌘4` already covers it |
 | Copy Latest Screenshot | ✅ "Attach Latest Screenshot" command | none |
 | Screenshot text index (OCR search over `~/Desktop/Screenshot*.png`) | ✗ by design | Spotlight already indexes text inside images on Apple silicon (Live Text). Replace with a Quick Link to a Finder search, or a `screenshots` catalog that lists recent files by name. The 1.1 MB `screenshot-text-index.json` can be deleted. |
@@ -39,12 +39,13 @@ Launch:
 | Translate, Translate to Chinese/English, last target memory, translation history | ✅ `⇧↩` picks the direction from the script; `/translate` and `/zh` act on selected text; history is the quick-action history | none |
 | Runtime status file, permissions report | ✗ | not needed; Settings shows Accessibility and Screen Recording state |
 
-Order to retire it: (1) re-point the Claude Code and Codex hooks at
-`scripts/quick-launch-agent-event` (needs your OK; it edits your hook files),
-(2) remove the Companion's launchd items and hotkeys, (3) delete
-`~/Library/Application Support/Tuna Companion` (the 1.1 MB OCR index goes with
-it), (4) delete `/Applications/Tuna Companion.app`. Tuna itself (the snippet
-store) stays until Quick Launch owns the snippet file. Not ported on purpose:
+Retire order, all four steps done by 2026-11-08: (1) the Claude Code and
+Codex hooks point at `scripts/quick-launch-agent-event`, (2) the Companion's
+launchd items and hotkeys are gone, (3) `~/Library/Application Support/Tuna
+Companion` is deleted (the 1.1 MB OCR index went with it), (4)
+`/Applications/Tuna Companion.app` is deleted. The watcher reads only the
+Quick Launch folder now. Tuna itself (the snippet store) stays until Quick
+Launch owns the snippet file. Not ported on purpose:
 OCR text search over screenshots and pinyin under translations.
 
 ## Gap analysis

@@ -304,8 +304,8 @@ Windows**.
   (`90m`, `2h`).
 - **Agent Watch** keeps the Mac awake while a supported agent turn is running by
   watching small JSON files that agent hooks write. Point the hooks at the
-  bundled `scripts/quick-launch-agent-event` helper; the old companion folder is
-  watched too.
+  `scripts/quick-launch-agent-event` helper in the repository's `scripts/`
+  folder; the app bundle and the DMG do not include it.
 
 ## Learning and the interaction journal
 
