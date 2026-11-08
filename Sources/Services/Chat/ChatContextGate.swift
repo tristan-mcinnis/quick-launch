@@ -4,8 +4,8 @@ import HouseChatCore
 /// What the context policy decided for one request, in Quick-Launch-native
 /// terms so the view model never needs to import the package.
 ///
-/// `execution` and `offeredScopes` are `RetrievalScope` raw values, carried
-/// as strings for receipts and for a future Attached-sources control.
+/// `execution` is a `RetrievalScope` raw value, carried as a string for
+/// receipts.
 struct ChatContextEvaluation: Sendable, Equatable {
     /// Whether the request may reach outside the conversation: web search,
     /// memory, tasks, skills. False means every broad tool is
@@ -20,35 +20,9 @@ struct ChatContextEvaluation: Sendable, Equatable {
     /// are offered either way; this is what adds the grounding sentence to
     /// the system prompt.
     var grounded: Bool
-    /// Scopes the UI may offer on top (`history`, `currentSourceAndHistory`).
-    var offeredScopes: [String]
     var rationale: String
     /// The enabled tools this request may actually offer and run.
     var gatedTools: Set<ChatToolKind>
-
-    /// True when the user may widen this request to the history the policy
-    /// withheld.
-    var offersWidening: Bool { !offeredScopes.isEmpty }
-
-    /// True when "Broader search" would change anything: the request is
-    /// grounded (a source or a sourced history) so external retrieval is
-    /// currently withheld. The composer shows the control only then.
-    var broaderSearchEnabled: Bool { !allowsExternalRetrieval }
-
-    /// The effective route in words, for the composer's context label:
-    /// what is read, and whether the broad tools are allowed.
-    var effectiveRouteLabel: String {
-        let scope: String
-        switch execution {
-        case "currentSource": scope = sourceFirst ? "attached source" : "current source"
-        case "history": scope = "earlier turns"
-        case "currentSourceAndHistory": scope = "attached source and earlier turns"
-        default: scope = "no attachment"
-        }
-        return allowsExternalRetrieval
-            ? "Reading \(scope) · tools allowed"
-            : "Reading \(scope) · tools withheld"
-    }
 }
 
 /// The one place Quick Launch asks what a request may retrieve and which
@@ -59,7 +33,7 @@ struct ChatContextEvaluation: Sendable, Equatable {
 /// Execution is about the conversation's own sources (the attachment text in
 /// this turn and earlier turns). External permission is a separate axis: a
 /// current source or a history that carried sources withholds the broad
-/// tools until the user asks for outside evidence or chooses Broader search.
+/// tools until the user asks for outside evidence.
 struct ChatContextGate: Sendable {
     static let standard = ChatContextGate()
 
@@ -92,7 +66,6 @@ struct ChatContextGate: Sendable {
             sourceFirst: decision.sourceFirst,
             includesHistory: decision.includesHistory,
             grounded: hasCurrentSource || historyHasSources,
-            offeredScopes: decision.offered.map(\.rawValue),
             rationale: decision.rationale,
             gatedTools: Self.gatedTools(enabledTools, decision: decision)
         )
