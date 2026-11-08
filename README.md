@@ -202,7 +202,7 @@ The details are in [docs/features.md](docs/features.md#privacy-boundary).
 ## Build from source
 
 ```bash
-make test                              # scrub gate, app tests, HouseChatCore tests
+make test                              # scrub gate, app tests
 swift build -c release                 # release build
 SIGN_IDENTITY=- ./scripts/build-app.sh # package build/Quick Launch.app
 make dmg                               # ad hoc DMG + SHA256SUMS + release notes
