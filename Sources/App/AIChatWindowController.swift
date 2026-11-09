@@ -563,6 +563,12 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
         Self.keepStreamForQuit(model.chat)
     }
 
+    /// A refused quit returns to normal operation. Starting the watcher is
+    /// idempotent, so repeated recovery cannot post duplicate answer notices.
+    func resumeAfterRefusedTermination() {
+        watchStream()
+    }
+
     /// Stops `chat`'s stream as Escape does (the text that arrived becomes
     /// the answer) and saves the chat, so the question is kept even when no
     /// text had arrived. A chat with no turn yet (a web search still running
@@ -578,10 +584,12 @@ final class AIChatWindowController: NSObject, NSWindowDelegate, AIChatWindowPres
     // MARK: - Answer notices
 
     private func watchStream() {
+        guard streamWatch == nil else { return }
         let chat = model.chat
         streamWatch = Task { [weak self] in
             var wasStreaming = chat.isStreaming
             for await isStreaming in Observations({ chat.isStreaming }) {
+                guard !Task.isCancelled else { return }
                 if wasStreaming, !isStreaming { await self?.answerDidEnd() }
                 wasStreaming = isStreaming
             }

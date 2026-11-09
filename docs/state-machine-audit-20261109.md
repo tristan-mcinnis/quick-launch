@@ -1,0 +1,142 @@
+# State-machine audit, 2026-11-09
+
+## Decision and scope
+
+Keep the existing local state owners. Make asynchronous operation ownership explicit at demonstrated failure points. Do not introduce a universal reducer or turn independent facts into one enum.
+
+UX benefits from reliable completion, cancellation and recovery. DX benefits from named lifecycle methods and deterministic regression tests. AX benefits from locating the owner, transitions and invariants without reconstructing them across unrelated files.
+
+This is a dated source-review report, not a live registry. The source of truth remains `Sources/` and `Tests/`, reviewed from base commit `54891fc` plus the changes described below. Four parallel audits covered App, ViewModels, Services, Models and Views; Protocols were checked for ownership contracts. Resources and static value declarations do not own behavioral transitions. Tables deliberately overlap where one machine crosses those areas. This is broad source coverage, not a proof that every possible runtime interleaving has been found.
+
+## Changes selected
+
+- Screenshot indexing now owns an identified pass. Cancelled OCR cannot publish, advance replacement progress or clear a replacement task. Cancellation resets progress. Initial callbacks occur only after ownership is installed. Controlled-continuation tests cover replacement and catalog clearing.
+- A refused quit explicitly resumes the answer-notification watcher. Restart is idempotent; cancelled watchers reject later observations. The regression waits on the provider and the notification.
+- Code-copy confirmation rejects a cancelled expiry, preserving a newer confirmation.
+- Archive projection reads capture their chat/turn key and reject cancelled or obsolete completion before publishing sources and receipts.
+
+The two view guards were independently source-reviewed. Existing view tests are compatibility coverage, not deterministic proofs of these particular SwiftUI cancellation interleavings; introducing a predicate-only test would not prove them.
+
+## Verification
+
+- `make test`: publish scrub clean; 2,621 tests in 230 suites passed.
+- `make build`: release compilation passed with warnings treated as errors.
+- `SIGN_IDENTITY=- ./scripts/build-app.sh`: passed; bundle identifier/executable match the project contract and strict code-signature verification passed. Built locally, not installed.
+- Strict design lint: clean on all five changed source files.
+- Independent diff review: no blockers found.
+- View cancellation interleavings: source-reviewed, not directly exercised by new tests.
+- Native keyboard-taking focus proof and live installed-app inspection: not run; no focus-routing change or app launch was requested.
+
+## Remaining review candidates
+
+These are source-level risks, not reproduced failures or instructions to rewrite the affected modules:
+
+- Round-trip attachment handoff may let cancelled watchers clear newer per-item ownership.
+- Concurrent update checks may overwrite installation state without operation identity.
+- Screenshot refresh during an active pass retains its existing policy: callers must cancel to replace the pass. Changes to the item set or OCR mode during a pass warrant a separate regression and policy decision.
+- Catalog refresh publication, availability-cache refresh, focus handoff and JSON decoder ownership deserve controlled interleaving tests before changes.
+- Optional hotkey recording retains an old validation error while retrying, a low-priority presentation inconsistency.
+
+For subsequent work: reproduce through the owning interface, use a phase enum only for mutually exclusive phases, use identity for replaceable work, check ownership after each suspension, and let only the matching operation perform terminal cleanup. Preserve separate state for independent overlays, data evidence and per-item operations.
+
+## App and launcher
+
+| Machine | Owner / state carriers | Events and invariant | Evidence / disposition |
+|---|---|---|---|
+| App quit arbitration (explicit) | App/QuitAttempt.swift: idle, waiting(id), finished | Begin coalesces; matching resolution either finishes or returns idle. Only current attempt can reply once. | QuitAttemptTests. Keep. |
+| Quit durability (explicit verdict, implicit transaction) | App/QuitSession.swift: frozen participant identities, revisions and snapshots | Stop/freeze before await, settle writes, reject changed participants/activity, incomplete deletion or deadline. Never exit with unproved durability. | QuitRetentionArchiveTests, QuitDeadlineTests. Keep. |
+| Answer-notice watcher lifecycle (implicit) | App/AIChatWindowController.swift: streamWatch task plus previous isStreaming | Watching -> stopped for termination -> watching again on refusal. Stopped quit must not announce cancellation; later hidden-window answers must notify. | Confirmed missing refusal recovery; fixed locally with regression. |
+| Main overlay presentation/retention | App/AppDelegate.swift: panel.isVisible, overlayClearTask, overlayRetentionID, model deferred clear | Show cancels clear; hide resets layers/selection and starts retention; expiry clears display or defers until stream ends. Stale expiry cannot clear reopened overlay. | QuickAIAnswerRetentionTests, ShowFocusTests. Already identity guarded; keep. |
+| Panel geometry and live resize | App/AppDelegate+PanelSizing.swift: panelAnchor, liveResizeRoom, panelShrinkTask, resize trigger | Show chooses anchor; content changes schedule sizing; live resize constrains room and persists size. Input anchor must remain stable. | PanelSizingTests, PanelResizeTriggerTests. Keep. |
+| Surface keyboard ownership | AppDelegate+Windows.swift and showOverlay: launcher, translator, Type to Click visibility | Presenting competing keyboard surface dismisses prior surface. Capture selection before focus takeover. | TypeToClickTests, ShowFocusTests. Cross-controller machine, no proven defect. |
+| Overlay layer navigation (explicit derived machine) | ViewModels/QuickViewModel+LayerStack.swift: topLayer derived from presentation, transform, draft, attachment, streaming, catalog state | Escape and empty Backspace pop according to priority; stop before-stream sends like active streams; root Escape dismisses. | OverlayLayerTests, InputModeTests. Keep existing centralized reducer-like interface. |
+| Action pane/palette subnavigation | QuickViewModel+InAppShortcuts.swift PresentedLayer; contextual IDs, activeItemActionForm, deleteArmedItemID, actionPaletteSubmenu | Open pane -> form/submenu -> back to pane -> dismiss. Delete armed state must reset when leaving form. | PaletteSearchTests, OverlayLayerTests, PaletteRailFocusProofTests. Independent substates deserve invariants before any consolidation. |
+| Root/catalog/input mode | QuickViewModel.swift: catalogScope, pendingQuickLinkID, inputMode, pendingSnippetInsertion, pendingHouseChoice; LauncherSearch and LayerStack extensions | Enter catalogs/argument entry; query and select; run action/back to root. Derived rootLauncherQuery prevents inappropriate root search. | LauncherCatalogTests, InputModeTests, ApplicationLauncherWorkflowTests. Do not collapse all parallel state into a single enum. |
+| Focus requests and rail ownership | Views/FocusRequest.swift, ShowFocus.swift; focus generation/request state in view model and pane-specific SwiftUI focus | Immediate AppKit focus on show then yielded SwiftUI fallback; searchable pane owns focus instead of composer. | ShowFocusTests, native PaletteRailFocusProofTests. Risk: yielded FocusRequest has no identity/cancellation; no confirmed failure, leave unchanged. |
+| Global shortcut registration | App/GlobalHotKey.swift and AppDelegate+Hotkeys.swift: weak registry, native ref, optional registered keys, registration error | Register, conflict/error, invalidate/rebind, deinit. One native registration per key owner; configured conflicts refused. | QuickAIHotkeyTests, HotkeySettingsTests, ShortcutRegistryTests. Existing explicit cleanup seam is appropriate. |
+| Hotkey recording | Views/HotkeyRecorderView.swift: recording focus and selected binding | Begin recording -> capture valid chord/cancel -> exit recording; native field becomes first responder. | HotkeySettingsTests. UI interaction machine, bounded and local. |
+| Chat window visibility and capture | App/AIChatWindowController.swift: optional window, shell visibility, isHiddenForCapture | Lazy create, show, hide for capture, restore, close; close keeps chat/stream alive, capture suppresses notices. | AIChatWindowLifecycleTests. Keep distinct from stream lifecycle. |
+| Chat window level/fullscreen | AIChatWindowController.swift: preference, isKeepOnTopPaused, chrome.isFullScreen | Pi handoff pauses floating; failure/key regain resumes; fullscreen callbacks update chrome, failure resets. | AIChatWindowLifecycleTests. Orthogonal machines; one combined enum would multiply states. |
+| Type to Click session/permission | App/TypeToClickController.swift: visible surfaces, activePID, accessibilityTrusted, isAwaitingAccessibilityPermission | Start -> permission notice or scan; retry permission reuses PID; dismiss clears all resources and generations. | TypeToClickTests. Best future refactor candidate, not bounded enough for blind rewrite. |
+| Type to Click scan freshness | same: scan/load/refresh tasks, loadGeneration, scan timestamp, targets/index | Force/reuse scan, discard stale completion, preserve selected target identity, refresh after scroll/display changes. | TypeToClickTests, TypeToClickSearchTests. Existing generation guards are valuable. |
+| Type to Click action/continuation | same: actionGeneration, pendingAction, pulsingTarget, buffered query/action, menu retry deadline, continuation setting | Queue while loading; execute chosen identity; pulse; dismiss or rescan; replay typed-ahead query; retry opened menus within deadline. | TypeToClickTests. This is several orthogonal machines, not one scanning/busy Boolean. |
+
+## Chat, attachments and translation
+
+| Machine | Owner / carriers | Events and invariant | Existing checks / decision |
+|---|---|---|---|
+| Submission pipeline | `QuickViewModel+SubmitPipeline.swift`; preStreamSubmitTokens, pendingModelFreeze, pendingSubmission, prepare/persist/enrich timestamps | submit → wait attachments → prepare → persist → enrich → stream; durable question before network; selected route frozen at submit | DurableChatTurnTests, ChatModelFreezeTests. Highest complexity; extract only with stronger phase tests, not wholesale now. |
+| Attachment wait | `QuickViewModel+Attachments.swift:128`; isWaitingForAttachments, isStreaming, readingStatusLine | reading → ready/send or failed/block or cancel/keep text; no silent missing attachment | AttachmentFlowTests, AttachmentUsabilityTests. Boolean overlay on submission. |
+| Enrichment | `QuickViewModel+Enrichment.swift`; pendingQuestion, enrichmentSubmittedInput, isStreaming, task cancellation | begin search/page read → resolved → model, failure/cancel → restore composer; typed replacement preserved | QuickAITests, input/retention tests. Cancellation checks rely on streaming flag plus task cancellation. |
+| Provider request / answer | `QuickViewModel+Streaming.swift`; streamTask, streamGeneration, inFlightTurn, currentAssistantTurnID, output, error | request → receiving → success/failure/stopped; only current generation may write, Stop saves partial answer once | QuickAIAnswerRetentionTests, DurableChatTurnTests, ChatTelemetryTests. Existing generation guard is valuable and should stay. |
+| Stream coalescing | `QuickViewModel+Streaming.swift`; streamBuffer, streamFlushTask, lastStreamFlush | append → immediate/scheduled flush → discard; trailing tokens not lost on terminal event | StreamingAnswerTests and answer-retention tests. Keep private to stream owner. |
+| Deferred follow-up | `QuickViewModel+Streaming.swift:734`; isFollowUpQueued, queuedFollowUpTask, chooser/layer flags | Return while streaming → queued → completion with no overlay → send; Stop or mode/input reset → keep draft unsent | QuickAIInputFlowTests / QuickAIThreadTests. State spans layer and request machines. |
+| Draft attachment extraction | `AttachmentTray.swift`; explicit Phase reading/ready/failed, reads/readTasks dictionaries, source/dropSource | add → resolve provider → read → ready/failed; retry failed in place; remove/cancel → drop; no removed item resurrection | AttachmentTrayTests, AttachmentDropContinuityTests, AttachmentUsabilityTests. Phase already explicit. |
+| Attachment ownership transfer | `AttachmentTray.swift:440`; Handoff items + reads, watcher tasks | handOff cancels watchers without cancelling reads; adopt installs destination watchers | AttachmentDropContinuityTests covers one-way transfer. Potential stale cancelled watcher on round-trip transfer, see below. |
+| Attachment keyboard and link input | `AttachmentTray.swift`; focusedItemID, linkDraft, pastedLink, notice | strip enter/move/remove/return-to-composer; paste-link conversion and undo | AttachmentTrayTests / AttachmentUsabilityTests. Orthogonal to extraction phase. |
+| Retained attachment repair | `QuickViewModel+Attachments.swift`; reattachStates, reattachTasks, attachment store | missing → reattach reading → ready/error; retained bytes never silently fetched again | AttachmentPrivacyTests, ChatHistoryRetentionTests. Preserve per-attachment identity. |
+| Chat handoff / switching | `QuickViewModel+AIChat.swift`; AIChatHandoff, currentConversation, pending inputs/tools/model, canonicalHistoryActive | open/capture draft/switch → cancel current request as needed → adopt draft/history; refreshing store must not overwrite active stream | AIChatBehaviourTests, ChatSwitchingTests, AIChatWindowLifecycleTests. Existing handoff value is good explicit state. |
+| Rail / find / rename focus | `AIChatWindowModel.swift`; Focus enum, isRailVisible, railActionsPresented, renamingChatID, deleteArmedChatID, isFindPresented, currentMatchIndex | show/hide/search/action/rename/delete twice; Escape unwinds appropriate layer and restores focus | AIChatBehaviourTests, ChatSearchTests, native focus proof. Multiple orthogonal machines, not one giant enum. |
+| Display reset / deferred clear | `QuickViewModel+OutputLifecycle.swift`; ResetScope option set, isTransientClearDeferred, copy/save timers | dismiss while work pending → defer clearing; terminal → clear if still owned; new ask supersedes deferred clear | QuickAIAnswerRetentionTests, AIChatLifecycleRenderProofTests. Central reset already reduces drift. |
+| Durable answer writes | `Services/Chat/AnswerDurability.swift`; entries, Work, Key, generation, revision, lastLandedSequence | register terminal/projection/deletion → writing → landed or retryable failure; freeze/settle rejects stale snapshot | DurableChatTurnTests, quit-related tests. Explicit generation and verdict types already suitable. |
+| Provider tool loop | `Services/OpenAICompatibleService.swift:372`; round, answerNow, requestIndex, transcript, time budget | model request → tools → model; round/time exhaustion → final no-tool answer; cancellation terminal | ChatToolsViewModelTests, ChatToolboxTests and provider tests. Keep loop local, avoid unnecessary enum refactor. |
+| Streaming wire decoder | `Services/OpenAICompatibleService.swift:651`; pending indexed tool fragments, sawToolFinish/sawText/sawUsage | SSE fragments accumulate → tool calls or text/usage finish | Provider tests. Flags represent accumulated observations, not mutually exclusive states. |
+| Markdown incremental rendering | `Services/StreamingAnswer.swift`; committed bytes, parseStart/runStart, frozenSegments, openText, snapshot/epoch | appended source → freeze closed blocks + render tail; replaced source/definitions → reset/reparse | StreamingAnswerTests, StreamingAnswerRenderProofTests. Algorithm state, not user mode. |
+| Reveal animation | `Views/StreamReveal.swift`; shown, lastFrame | new answer → reveal toward total; replacement/reset → restart; reduced motion bypass | StreamRevealTests. Separate rendering state from provider state. |
+| Scroll restoration | `ThreadScrollAnchor.swift` and chat views; per-chat anchor/order, bottom following and pending restoration | scroll up → save anchor; return bottom → remove; switch → restore valid anchor | ChatSwitchingTests / scroll-related tests. Existing value types make invariant clear. |
+| Translation request | `TranslatorModel.swift`; debounceTask/requestTask, isWaitingForTranslation, isTranslating, pendingCommit, translation/pinyin | text change → debounce → request → romanize → ready/error; copy/paste while pending queues commit; cancel resets flags | Translator tests; settled() waits on task identity. Task cancellation checks after each await are stronger than flags alone. |
+| Translation direction / selection | `TranslatorModel.swift`; sourceSelection auto/fixed, detectedSource, knownSourceOfSwappedText, retainedSelection, languagePicker | detect/select/swap/restore selection; source and target differ; incomplete translation never replaces source on swap | Translator tests. SourceSelection is explicit, retained-source flags are orthogonal. |
+
+## Services and persistence
+
+| Machine | Source | Carriers, events and invariant |
+|---|---|---|
+| Screenshot OCR indexing | ScreenshotTextIndex.swift | Optional pass, progress counts, cached file metadata and OCR mode. Refresh starts work; cancel relinquishes ownership; OCR completes. Only the current pass may publish or clear itself. Fixed with explicit pass identity and deterministic tests. |
+| Screenshot clipboard loan | ScreenshotClipboardHold.swift | saved clipboard + chain + deadline + written change count + expiry task. Add extends hold; copy relinquishes clipboard ownership; expiry/finish restores only the owned change count. Existing fake clipboard/clock tests. |
+| Screenshot folder watcher | ScreenshotClipboardHold.swift | source, scan task, seen paths, unreadable retry counts. Start snapshots baseline; filesystem events debounce; scans deliver fresh readable files; stop cancels. Post-await cancellation is checked. |
+| Clipboard capture | ClipboardHistoryStore.swift | timer, last pasteboard identity/count, pendingReadCount 0...4. New copy starts read; promised representations retry; privacy markers/remote policy reject; success records once. Rechecks copy identity and privacy after extraction. |
+| Clipboard OCR | ClipboardHistoryStore.swift | per-entry task dictionary and presence of stored entry. Image capture schedules once; removal/clear makes completion obsolete; completion applies only to existing ID. |
+| Clipboard retention/blob persistence | ClipboardHistoryStore.swift / ClipboardBlobStore.swift | pinned/unpinned entries, byte/count/age limits, memory cache, serialized pending writes. Prune/delete/clear preserve referenced bytes and ordering. |
+| JSON persistence | JSONFileStore.swift | serialized save/delete queue, disk envelope schema version, missing/unreadable state. Atomic saves; flush is completion seam. loadOrThrow reads outside queue despite class comment claiming encoder/decoder used only on queue; deferred review. |
+| History migration and archival cache | QuickHistoryStore.swift / TranslationHistoryStore.swift | absent/legacy/current schema, pinned retention and retired pinned filtering; backup/migration/load/save/clear. Chat archival covered by chat agent. |
+| Caffeinate | CaffeinateManager.swift / CaffeinateSchedule.swift | manual indefinite/until, live agents, battery state, policy decision inactive/active/batteryPaused, assertion held and review task. evaluate is central transition; manual failures roll back; battery pause retains intent. Existing policy and manager tests. |
+| Agent file watcher | AgentSessionWatcher.swift | filesystem sources, sessions, stale-sweep task. Start/reload/clear/stop; timestamps expire agent work. start assumes nonempty folders and is not idempotent; deferred, no confirmed product repro. |
+| Process execution | ProcessRunner.swift | lock-protected cancelled/launched/exited plus continuation ownership; timeout flag; pipe drains. Launch/cancel/exit/timeout race, resume-once invariant. Existing process regression tests. |
+| Translator | TranslatorModel.swift | debounceTask/requestTask, waiting/translating booleans, pending copy/paste, source/target/detected language and picker. Typing cancels; debounce requests; streamed results finish; queued commit runs once. Cancellation checked after asynchronous detection, stream and pinyin. Existing deterministic settled() tests. |
+| Update lifecycle | QuickViewModel+Updates.swift / UpdateState.swift | idle/checking/upToDate/available/installing/installed/error enum, but transitions are assignments from concurrent tasks. Manual/silent checks and installer have no request ownership. Deferred risk: late check can overwrite installing/installed; no controlled transport test/repro yet. |
+| Application catalog refresh | ApplicationCatalogService.swift | stamps, version, extra paths and refreshTask. Folder changes cancel previous discovery; result updates rows/version. Deferred race: cancellation checked before MainActor.run hop rather than inside publication. |
+| House command availability | HouseCommandCatalog.swift | manifests, missing sockets, per-app status/unreachable/readAt cache. Refresh fetches statuses; run invalidates status; rows derive availability. Actor suspension permits older fetches to overwrite newer status; deferred concurrency review. |
+| Paste commit | PasteGuard.swift / SelectedTextService.swift | expected clipboard count, target activation and modifier release. Await settling then pasted/clipboardChanged/failed; stale clipboard must never be overwritten by fallback. |
+| Clipboard image auto-offer | ClipboardImageReader.swift | cache by count plus last-offered pasteboard identity/count. Fresh image offered once; explicit paste bypasses suppression; own writes suppress. |
+| Login item | SystemLaunchAtLoginController.swift | OS-owned SMAppService status mapped to enabled, register/unregister and approval flow. OS is source of truth. |
+| Window previous-layout restore | WindowManager.swift / OwnWindowLayout.swift | saved window identity/frame and last layout; apply/restore. App agent covers window lifecycle. |
+| Interaction journal | InteractionJournal.swift | begin/complete/cancel/edit/export event records and migration; bounded persistent log. Event history is intentional, not a UI phase enum. |
+| Content parsing | MarkdownRenderer.swift / MathCalculator.swift / HTMLTextExtractor.swift / OOXMLArchive.swift | parser cursor, pending block flags, stack/record positions. Input-driven local machines; retain domain-specific representations instead of universal reducers. |
+
+## Presentation and interaction
+
+| Machine / owner | State carriers and events | Invariant / existing proof |
+| --- | --- | --- |
+| Thread opening and reveal, `QuickAIThread` | `knownConversationID`, `revealedChatID`, `restoring`, `revealTask`; chat changes, geometry arrives, timeout | Hold a chat until its saved anchor/bottom lands; timeout releases invisible content. Cancellation guarded. `QuickAIThreadScrollTests`, `ThreadRenderingTests` |
+| New question anchoring, `QuickAIThread.TurnGeometry` | `anchoredTurnID`, `anchoring`, reserved height, end measurements, `roomReleased`, landing task | New question stays at top until answer consumes reserved room; cancelled older landing must not move a new turn. `QuickAIThreadScrollTests` |
+| Follow vs manual reading, `QuickAIThread` | scroll phase, following flag, pending find, settling task | Manual scroll/find interrupts automatic following; settle runs only while following and not restoring/anchoring. `ThreadFollowTests`, `QuickAIThreadScrollTests` |
+| Find landing, `TurnGeometry.pending` | optional message ID/offset; layout reports | Estimate target first, refine when geometry arrives; scroll request clears restore/anchor. Thread scroll tests |
+| Archive projection load, `QuickAIThread` | archive load key (conversation/count/streaming), projection | Only current key may publish; completion gate added (finding 2) |
+| Streaming reveal, `MarkdownTextView` / `RevealClock` / `StreamingAnswer` | shown count, last frame, idle length, streaming flag, segment parser | Visible text never exceeds arrived text; reset on stream end/shrink; reduce-motion bypass. `StreamRevealTests`, `ThreadRenderingTests` |
+| Code block controls, `CodeBlockView` | wrap state; copied flag/revision; click, timeout | Copy preserves exact payload; latest confirmation owns expiration (finding 1). `CodeBlockChromeTests` |
+| Message collapse, `MessageCollapseState` / `CollapsibleMessageText` | text, expanded/collapsible state; toggle | Only long eligible content collapses; displayed prefix and accessibility agree. Policy tests in thread suite |
+| Tool activity group, `ToolActivitySummary` / `ToolActivityGroup` | running/completed grouping, expansion | Failed or approval-waiting tool lines never hide in a collapsed successful group. `ToolActivitySummaryTests` |
+| Attachment rendering, `AttachmentChipModel` | reading / ready / failed / notLoaded; source/tray projection | Missing content is explicit, not silently fetched; ready thumbnail/details reflect retained data. Thumbnail cache and context render tests |
+| Attachment strip and drop UI, `AttachmentChip` | focus ID, drop target, tray notice | Focus/selection belong to tray; announcements reflect notice changes. Attachment tray tests (covered by chat audit) |
+| Retained material controls, `ChatContextRecordView` | retained / partial / missing; hover or keyboard focus; open/export notice | Controls only offered when bytes exist; keyboard focus reveals controls independent of pointer. `ChatContextRenderProofTests` |
+| Clipboard/file preview, `CatalogPanes` | selected payload, preview image; selected item task | Clear old preview; check cancellation after async image reads. Scoped `.task` already guards publication |
+| Shared list selection, `SelectableListPane` / `SelectionPacer` | hovered ID, keyboard-driven flag, selected index, repeat timing | Hover does not select; keys clear hover; rapid stepping suppresses animation. `ListSelectionPacingTests` |
+| Field focus handoff, `FocusRequest` | delayed main-actor yield then focus binding | Wait for responder attachment. No request identity; potential obsolete focus risk, not demonstrated. `PaletteRailFocusProofTests`, `ShowFocusTests` cover actual routing |
+| Settings reveal/search, `SettingsView` / `SettingsPaneScroller` | tab, query, index, focus token, fade task | New reveal supersedes old fade; manual tab changes clear unrelated highlight. Both delayed scroll and fade guard cancellation. `SettingsSearchTests`, `G3SettingsRenderProofTests` |
+| Hotkey recording, three recorder views | idle/recording, validation error, optional binding; capture/Escape/clear | Invalid capture preserves original binding; valid capture normalizes modifier flags and notifies. `HotkeySettingsTests`, `QuickAIHotkeyTests`; inconsistency finding 3 |
+| Action and item forms, `QuickActionPalette`, `ItemActionPane` | selection index, submenu/form, title/value draft, focused field | Query/submenu changes reset index; form change primes draft and focus; model owns commit. Selection/action tests |
+| Translator picker, `TranslatorView` | picker side/query/index, source/picker focus | Opening picker moves focus, query resets index, model owns selected language and translation. Translator tests |
+| Model management / keys, `ManageModelsView`, `ProviderSettingsView`, `WebSearchProviderRow` | query/sort/group/collapse, management sheet, key entry/status/missing key | Settings remain authoritative; key values stay in memory/Keychain. Settings binding/model tests |
+| Destructive settings confirmation, `HistorySettingsView`, `ClipboardLinksSettingsView`, `ItemsSettingsView` | confirmation boolean or pending row; cancel/confirm | No deletion before confirmation; pending row identifies target. Settings and catalog tests |
+| Saved prompt editor, `SavedPromptsEditor` | selection, loaded skill names; select/add/remove/edit | Selection resolves current stored prompt; settings own persisted edits |
+| Ordinary popovers/expansion, `SelectedTextPreview`, context receipts, settings components | presentation/expanded/hover booleans | View-local reversible presentation, no asynchronous ownership; no enum migration justified |

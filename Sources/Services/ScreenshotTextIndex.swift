@@ -32,7 +32,13 @@ final class ScreenshotTextIndex {
 
     private var entries: [String: Entry]
     private var normalizedCache: [String: String] = [:]
-    private var indexingTask: Task<Void, Never>?
+    /// Only this pass may publish OCR or finish the indexing lifecycle.
+    private struct IndexingPass {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+    private var indexingPass: IndexingPass?
+    private let recognize: @Sendable (String, ClipboardOCRMode) async -> String
     private let file: JSONFileStore<[String: Entry]>?
 
     static func defaultStoreURL() -> URL {
@@ -40,7 +46,11 @@ final class ScreenshotTextIndex {
     }
 
     /// Pass `nil` for an in-memory index (tests, previews).
-    init(storeURL: URL?) {
+    init(
+        storeURL: URL?,
+        recognize: @escaping @Sendable (String, ClipboardOCRMode) async -> String = ScreenshotTextIndex.recognizeForIndex
+    ) {
+        self.recognize = recognize
         self.file = storeURL.map { JSONFileStore(fileURL: $0) }
         entries = file?.load() ?? [:]
     }
@@ -78,20 +88,22 @@ final class ScreenshotTextIndex {
             persist()
         }
         let pending = items.filter { entries[$0.value]?.matches($0, mode: mode) != true }
-        guard !pending.isEmpty, indexingTask == nil else { return }
+        guard !pending.isEmpty, indexingPass == nil else { return }
 
         progress = Progress(completed: 0, total: pending.count)
-        onProgress?(progress)
-        indexingTask = Task { @MainActor [weak self] in
-            defer { self?.indexingTask = nil }
+        let passID = UUID()
+        let recognize = self.recognize
+        let task = Task { @MainActor [weak self] in
+            defer {
+                if self?.indexingPass?.id == passID { self?.indexingPass = nil }
+            }
             var sinceSave = 0
             for item in pending {
                 if Task.isCancelled { break }
                 let path = item.value
-                let text = await Task.detached(priority: .utility) {
-                    await Self.recognizeText(atPath: path, mode: mode)
-                }.value
-                guard let self else { return }
+                let text = await recognize(path, mode)
+                guard let self, !Task.isCancelled,
+                      self.indexingPass?.id == passID else { return }
                 self.entries[path] = Entry(
                     text: text,
                     modifiedAt: item.capturedAt?.timeIntervalSince1970 ?? 0,
@@ -101,25 +113,31 @@ final class ScreenshotTextIndex {
                 self.normalizedCache[path] = nil
                 self.progress.completed += 1
                 self.onProgress?(self.progress)
+                guard !Task.isCancelled, self.indexingPass?.id == passID else { return }
                 sinceSave += 1
                 if sinceSave >= 20 {
                     sinceSave = 0
                     self.persist()
                 }
             }
-            self?.persist()
-            if let self { self.onProgress?(self.progress) }
+            guard let self, !Task.isCancelled, self.indexingPass?.id == passID else { return }
+            self.persist()
+            self.onProgress?(self.progress)
         }
+        indexingPass = IndexingPass(id: passID, task: task)
+        onProgress?(progress)
     }
 
     /// Waits for the current indexing pass, for tests.
     func waitForIndexing() async {
-        await indexingTask?.value
+        await indexingPass?.task.value
     }
 
     func cancel() {
-        indexingTask?.cancel()
-        indexingTask = nil
+        indexingPass?.task.cancel()
+        indexingPass = nil
+        progress = Progress()
+        onProgress?(progress)
         persist()
     }
 
@@ -134,6 +152,11 @@ final class ScreenshotTextIndex {
 
     nonisolated static func byteCount(of path: String) -> Int {
         (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+    }
+
+    @concurrent
+    private static func recognizeForIndex(_ path: String, _ mode: ClipboardOCRMode) async -> String {
+        await recognizeText(atPath: path, mode: mode)
     }
 
     /// Runs off the main actor; only plain text crosses back.

@@ -185,6 +185,7 @@ struct CodeBlockView: View {
         .task(id: copyRevision) {
             guard didCopy else { return }
             try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
             didCopy = false
         }
     }

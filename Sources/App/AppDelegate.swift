@@ -204,6 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self, self.quitAttempts.resolve(attempt, saved: saved) else { return }
             NSApp.reply(toApplicationShouldTerminate: saved)
             guard !saved else { return }
+            self.aiChatController?.resumeAfterRefusedTermination()
             self.reportQuitRefused(outcome)
         }
         return .terminateLater

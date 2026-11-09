@@ -346,10 +346,15 @@ struct QuickAIThread: View {
     }
 
     private func reloadArchiveProjection() async {
-        archiveProjection = await ChatArchiveProjection.load(
+        let key = archiveLoadKey
+        let projection = await ChatArchiveProjection.load(
             from: viewModel.chatArchive,
-            conversationID: viewModel.currentConversation?.id
+            conversationID: key.conversationID
         )
+        // A cancelled load can still finish its archive reads. Only the
+        // current chat and turn may publish their receipts and sources.
+        guard !Task.isCancelled, archiveLoadKey == key else { return }
+        archiveProjection = projection
     }
 
     /// What the thread's scroll view reports: where its view is, how tall

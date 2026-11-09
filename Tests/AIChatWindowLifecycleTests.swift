@@ -29,7 +29,11 @@ final class FakeAIChatAppShell: AIChatAppShell {
 final class FakeAnswerNotifier: AnswerNotifying {
     var onOpen: (() -> Void)?
     var posted: [AnswerNotice] = []
-    func post(_ notice: AnswerNotice) async { posted.append(notice) }
+    let notices = AsyncStream<AnswerNotice>.makeStream()
+    func post(_ notice: AnswerNotice) async {
+        posted.append(notice)
+        notices.continuation.yield(notice)
+    }
 }
 
 @MainActor
@@ -279,6 +283,29 @@ struct AIChatWindowLifecycleTests {
         #expect(rig.chat.conversationMessages.last?.content == "Lima is the capital")
         try? await Task.sleep(for: .milliseconds(50))
         #expect(rig.notifier.posted.isEmpty)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func refusedQuitResumesNoticesForLaterAnswers() async throws {
+        let gated = GatedQuickService(head: "Lima is the capital", tail: " of Peru.")
+        let rig = makeRig(service: gated)
+        rig.controller.prepareWindow()
+        rig.controller.stopForTermination()
+        rig.controller.resumeAfterRefusedTermination()
+        rig.controller.resumeAfterRefusedTermination()
+
+        // Wait on the provider and notification themselves, with no sleep
+        // budget that turns a busy machine into a regression.
+        rig.chat.input = "tell me about Lima"
+        async let submit: Void = rig.chat.submit()
+        await gated.waitUntilHolding()
+        gated.release()
+        await submit
+        var notices = rig.notifier.notices.stream.makeAsyncIterator()
+        let notice = try #require(await notices.next())
+        #expect(notice.chatID == rig.chat.currentConversation?.id)
+        #expect(rig.notifier.posted.count == 1)
+        rig.controller.stopForTermination()
     }
 
     // MARK: - 8. Closing does not stop the answer
