@@ -38,6 +38,15 @@ final class ScreenshotTextIndex {
         let task: Task<Void, Never>
     }
     private var indexingPass: IndexingPass?
+    /// The metadata owned by one read, captured before suspension. The
+    /// newest catalog can remove or replace it while recognition runs.
+    private struct Request: Equatable {
+        let path: String
+        let modifiedAt: Double
+        let byteCount: Int
+        let mode: ClipboardOCRMode
+    }
+    private var pendingRequests: [Request] = []
     private let recognize: @Sendable (String, ClipboardOCRMode) async -> String
     private let file: JSONFileStore<[String: Entry]>?
 
@@ -78,19 +87,32 @@ final class ScreenshotTextIndex {
             .joined(separator: " ")
     }
 
-    /// Reads anything new or changed, newest first, and drops entries for
-    /// files that are gone. Safe to call on every catalog open.
+    /// Reconciles the latest catalog, preserving an unchanged in-flight
+    /// read and draining new work without requiring another refresh. Progress
+    /// counts the current catalog, including already-cached items.
     func refresh(for items: [LauncherCatalogItem], mode: ClipboardOCRMode = .accurate) {
-        let known = Set(items.map(\.value))
+        var known: Set<String> = []
+        let uniqueItems = items.filter { known.insert($0.value).inserted }
         if entries.keys.contains(where: { !known.contains($0) }) {
             entries = entries.filter { known.contains($0.key) }
             normalizedCache = normalizedCache.filter { known.contains($0.key) }
             persist()
         }
-        let pending = items.filter { entries[$0.value]?.matches($0, mode: mode) != true }
-        guard !pending.isEmpty, indexingPass == nil else { return }
+        pendingRequests = uniqueItems.compactMap { item in
+            guard entries[item.value]?.matches(item, mode: mode) != true else { return nil }
+            return Request(
+                path: item.value,
+                modifiedAt: item.capturedAt?.timeIntervalSince1970 ?? 0,
+                byteCount: Self.byteCount(of: item.value),
+                mode: mode
+            )
+        }
+        progress = Progress(completed: uniqueItems.count - pendingRequests.count, total: uniqueItems.count)
+        guard !pendingRequests.isEmpty, indexingPass == nil else {
+            onProgress?(progress)
+            return
+        }
 
-        progress = Progress(completed: 0, total: pending.count)
         let passID = UUID()
         let recognize = self.recognize
         let task = Task { @MainActor [weak self] in
@@ -98,20 +120,23 @@ final class ScreenshotTextIndex {
                 if self?.indexingPass?.id == passID { self?.indexingPass = nil }
             }
             var sinceSave = 0
-            for item in pending {
+            while let request = self?.pendingRequests.first {
                 if Task.isCancelled { break }
-                let path = item.value
-                let text = await recognize(path, mode)
+                let text = await recognize(request.path, request.mode)
                 guard let self, !Task.isCancelled,
                       self.indexingPass?.id == passID else { return }
-                self.entries[path] = Entry(
+                // A refresh can remove this file or replace its metadata or
+                // OCR mode. Only a request still in the latest queue may land.
+                guard let position = self.pendingRequests.firstIndex(of: request) else { continue }
+                self.pendingRequests.remove(at: position)
+                self.entries[request.path] = Entry(
                     text: text,
-                    modifiedAt: item.capturedAt?.timeIntervalSince1970 ?? 0,
-                    byteCount: Self.byteCount(of: path),
-                    mode: mode.rawValue
+                    modifiedAt: request.modifiedAt,
+                    byteCount: request.byteCount,
+                    mode: request.mode.rawValue
                 )
-                self.normalizedCache[path] = nil
-                self.progress.completed += 1
+                self.normalizedCache[request.path] = nil
+                self.progress.completed = self.progress.total - self.pendingRequests.count
                 self.onProgress?(self.progress)
                 guard !Task.isCancelled, self.indexingPass?.id == passID else { return }
                 sinceSave += 1
@@ -119,10 +144,11 @@ final class ScreenshotTextIndex {
                     sinceSave = 0
                     self.persist()
                 }
+                // The callback may have refreshed the catalog, even at 100%.
+                // Read the current queue again before finishing this pass.
             }
             guard let self, !Task.isCancelled, self.indexingPass?.id == passID else { return }
             self.persist()
-            self.onProgress?(self.progress)
         }
         indexingPass = IndexingPass(id: passID, task: task)
         onProgress?(progress)
@@ -136,6 +162,7 @@ final class ScreenshotTextIndex {
     func cancel() {
         indexingPass?.task.cancel()
         indexingPass = nil
+        pendingRequests.removeAll()
         progress = Progress()
         onProgress?(progress)
         persist()

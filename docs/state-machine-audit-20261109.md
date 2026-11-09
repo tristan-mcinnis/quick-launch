@@ -33,7 +33,7 @@ These are source-level risks, not reproduced failures or instructions to rewrite
 
 - Round-trip attachment handoff may let cancelled watchers clear newer per-item ownership.
 - Concurrent update checks may overwrite installation state without operation identity.
-- Screenshot refresh during an active pass retains its existing policy: callers must cancel to replace the pass. Changes to the item set or OCR mode during a pass warrant a separate regression and policy decision.
+- Screenshot refresh during an active pass was a confirmed contract defect, not an intended cancel-before-refresh policy. The follow-up reproduces and fixes latest-catalog reconciliation; see [follow-up decision and evidence](state-machine-followup-20261109.md). Recognition-mode UI changes already explicitly cancel first.
 - Catalog refresh publication, availability-cache refresh, focus handoff and JSON decoder ownership deserve controlled interleaving tests before changes.
 - Optional hotkey recording retains an old validation error while retrying, a low-priority presentation inconsistency.
 
