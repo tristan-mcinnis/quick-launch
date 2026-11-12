@@ -18,16 +18,11 @@ extension AppDelegate {
     /// with the selection of the app behind it; toggles closed on repeat.
     func showTranslator(retainedSelection handedOffSelection: String? = nil, target requestedTarget: TranslationTarget? = nil) {
         guard let vm = viewModel else { return }
-        if let requestedTarget {
-            let model = translatorModel ?? makeTranslatorModel(for: vm)
-            translatorModel = model
-            if model.target != requestedTarget { model.setTarget(requestedTarget, remember: false) }
-        }
         if let panel = translatorPanel, panel.isVisible, panel.isKeyWindow {
             // A handoff means the user asked to translate a selection: bring the
             // existing window forward and import it, don't toggle it shut.
             if handedOffSelection != nil {
-                translatorModel?.retainLaunchSelection(handedOffSelection)
+                translatorModel?.retainLaunchSelection(handedOffSelection, requestedTarget: requestedTarget)
                 panel.makeKey()
                 panel.orderFrontRegardless()
                 NSApp.activate(ignoringOtherApps: true)
@@ -46,7 +41,8 @@ extension AppDelegate {
         model.prepare(
             target: target,
             selectedText: handedOffSelection ?? selected,
-            retainedSelection: handedOffSelection ?? vm.launchSelection?.text ?? selected
+            retainedSelection: handedOffSelection ?? selected ?? vm.launchSelection?.text,
+            requestedTarget: requestedTarget
         )
         let panel = translatorPanel ?? makeTranslatorPanel(model: model)
         translatorPanel = panel

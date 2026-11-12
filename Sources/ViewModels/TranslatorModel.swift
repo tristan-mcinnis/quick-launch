@@ -125,15 +125,10 @@ enum LanguageDetection {
         recognize(text)
     }
 
-    /// Where the text should go: CJK text goes to English, everything else
-    /// to `lastTarget` (Chinese by default). If the recognised source is the
-    /// same as `lastTarget`, English is used instead.
-    static func target(for text: String, lastTarget: TranslationTarget) -> TranslationTarget {
-        if cjkRatio(text) > 0.15 {
-            return lastTarget.isChinese || lastTarget == .english ? .english : lastTarget
-        }
-        if let source = recognize(text), source == lastTarget { return .english }
-        return lastTarget
+    /// With a Chinese/non-Chinese pair either script is Chinese input. A
+    /// Simplified/Traditional pair needs the exact script to pick a direction.
+    static func matchesTarget(_ recognized: TranslationTarget?, target: TranslationTarget, other: TranslationTarget) -> Bool {
+        recognized == target || (recognized?.isChinese == true && target.isChinese && !other.isChinese)
     }
 }
 
@@ -211,6 +206,8 @@ final class TranslatorModel {
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var requestTask: Task<Void, Never>?
     @ObservationIgnored private(set) var pasteTarget: SelectionTarget?
+    /// A completed same-language request cannot be used as a reverse translation.
+    @ObservationIgnored private var inputMatchedTarget = false
     /// Set by Swap: the language of the swapped-in text is known, not guessed.
     @ObservationIgnored private var knownSourceOfSwappedText: TranslationTarget?
     /// The launch-time selected text, retained so "Use selected text" can fill
@@ -256,7 +253,8 @@ final class TranslatorModel {
     func prepare(
         target selectionTarget: SelectionTarget?,
         selectedText: String?,
-        retainedSelection: String? = nil
+        retainedSelection: String? = nil,
+        requestedTarget: TranslationTarget? = nil
     ) {
         clear()
         reportedRunThisSession = false
@@ -268,8 +266,7 @@ final class TranslatorModel {
         knownSourceOfSwappedText = nil
         self.retainedSelection = retainedSelection
         if let selectedText, !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            source = selectedText
-            translateNow()
+            translateImportedText(selectedText, requestedTarget: requestedTarget)
         }
     }
 
@@ -278,26 +275,34 @@ final class TranslatorModel {
     func useRetainedSelection() {
         guard let text = retainedSelection,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        source = text
-        sourceChanged()
-        message = "Using selected text"
+        translateImportedText(text)
+        if isTranslating { message = "Using selected text" }
     }
 
     /// A handoff from the launcher's Translate transform: import the retained
     /// selection as the source and keep it for "Use selected text". Called when
     /// the window is already open, so a chip Translate fronts it and translates
     /// the selected text rather than toggling the window shut.
-    func retainLaunchSelection(_ text: String?) {
+    func retainLaunchSelection(_ text: String?, requestedTarget: TranslationTarget? = nil) {
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        retainedSelection = text
+        languagePicker = nil
+        requestSourceFocus()
+        translateImportedText(text, requestedTarget: requestedTarget)
+    }
+
+    private func translateImportedText(_ text: String, requestedTarget: TranslationTarget? = nil) {
         cancelTranslation()
         knownSourceOfSwappedText = nil
-        retainedSelection = text
+        detectedSource = nil
+        message = nil
         source = text
         translation = ""
         pinyin = nil
-        languagePicker = nil
-        requestSourceFocus()
-        translateNow()
+        if let requestedTarget {
+            applyTarget(requestedTarget)
+        }
+        translateNow(direction: requestedTarget == nil ? .followInput : .requestedTarget)
     }
 
     /// The open list's rows: Auto detect and every language on the source
@@ -387,12 +392,19 @@ final class TranslatorModel {
         pendingCommit = nil
     }
 
-    /// `remember: false` applies a one-off target (the launcher handing over
-    /// "hi in japanese") without changing the saved pair.
-    func setTarget(_ newTarget: TranslationTarget, remember: Bool = true) {
+    func setTarget(_ newTarget: TranslationTarget) {
         cancelTranslation()
         translation = ""
         pinyin = nil
+        applyTarget(newTarget)
+        languagePicker = nil
+        pickerQuery = ""
+        onLanguagesChange?()
+        message = "Target: \(newTarget.title)"
+        if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translateNow(direction: .keepTarget) }
+    }
+
+    private func applyTarget(_ newTarget: TranslationTarget) {
         if sourceLanguage == newTarget {
             sourceLanguage = target == newTarget ? Self.alternative(to: newTarget) : target
         }
@@ -400,11 +412,6 @@ final class TranslatorModel {
             sourceSelection = .fixed(sourceLanguage)
         }
         target = newTarget
-        languagePicker = nil
-        pickerQuery = ""
-        if remember { onLanguagesChange?() }
-        message = "Target: \(newTarget.title)"
-        if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translateNow() }
     }
 
     /// Choosing the target as the source flips the pair, so the two never
@@ -437,26 +444,27 @@ final class TranslatorModel {
         let previousSource = source
         let previousTranslation = isTranslating || isWaitingForTranslation ? "" : translation
         let previousTarget = target
-        let recognized = knownSourceOfSwappedText ?? detectedSource
-        let newTarget = recognized.flatMap { $0 == target ? nil : $0 } ?? sourceLanguage
+        let newTarget = sourceLanguage
         cancelTranslation()
         sourceLanguage = previousTarget
         if sourceSelection != .auto { sourceSelection = .fixed(previousTarget) }
         target = newTarget
-        let hasCompletedTranslation = !previousTranslation.isEmpty
-        knownSourceOfSwappedText = hasCompletedTranslation ? previousTarget : nil
+        let canExchangePanes = !previousTranslation.isEmpty && !inputMatchedTarget
+            && previousTranslation != previousSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        inputMatchedTarget = false
+        knownSourceOfSwappedText = canExchangePanes ? previousTarget : nil
         // A quick swap during debounce or streaming must never erase what was
         // typed. Only a complete result can replace the source for a round trip.
-        source = hasCompletedTranslation ? previousTranslation : previousSource
-        translation = hasCompletedTranslation ? previousSource : ""
+        source = canExchangePanes ? previousTranslation : previousSource
+        translation = canExchangePanes ? previousSource : ""
         pinyin = target.isChinese ? Pinyin.romanize(translation) : nil
-        detectedSource = hasCompletedTranslation ? previousTarget : nil
+        detectedSource = canExchangePanes ? previousTarget : nil
         onLanguagesChange?()
         languagePicker = nil
         requestSourceFocus()
-        message = hasCompletedTranslation ? "Languages swapped" : "Direction flipped"
-        if !hasCompletedTranslation, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            translateNow()
+        message = canExchangePanes ? "Languages swapped" : "Direction flipped"
+        if !canExchangePanes, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            translateNow(direction: .keepTarget)
         }
     }
 
@@ -476,14 +484,17 @@ final class TranslatorModel {
             message = "The clipboard has no text"
             return
         }
-        source = text
-        sourceChanged()
-        message = "Using clipboard text"
+        translateImportedText(text)
+        if isTranslating { message = "Using clipboard text" }
     }
 
     // MARK: Translating
 
-    func translateNow() {
+    /// Fresh input may reverse the pair in Auto. A manual flip/picker wins for
+    /// its request. An inline destination also stays out of saved preferences.
+    enum RequestDirection { case followInput, keepTarget, requestedTarget }
+
+    func translateNow(direction: RequestDirection = .followInput) {
         debounceTask?.cancel()
         isWaitingForTranslation = false
         let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -499,18 +510,33 @@ final class TranslatorModel {
             reportedRunThisSession = true
             onTranslationRun?()
         }
-        let requestTarget = target
+        let originalTarget = target
+        let reverseTarget = sourceLanguage
         let knownSource = knownSourceOfSwappedText
-        let prompt = Self.prompt(for: text, target: requestTarget, source: chosenSource)
         requestTask = Task { [weak self] in
-            let detected = chosenSource == nil ? await LanguageDetection.recognizeForTranslation(text) : nil
-            guard !Task.isCancelled else { return }
-            self?.detectedSource = chosenSource ?? knownSource ?? detected
-            if let detectedSource = self?.detectedSource, detectedSource != requestTarget,
-               detectedSource != self?.sourceLanguage {
-                self?.sourceLanguage = detectedSource
-                self?.onLanguagesChange?()
+            let recognized: TranslationTarget?
+            if let knownSource {
+                recognized = knownSource
+            } else {
+                recognized = await LanguageDetection.recognizeForTranslation(text)
             }
+            guard !Task.isCancelled else { return }
+            let matchesTarget = LanguageDetection.matchesTarget(recognized, target: originalTarget, other: reverseTarget)
+            let reverse = direction == .followInput && chosenSource == nil && matchesTarget
+            let requestTarget = reverse ? reverseTarget : originalTarget
+            let detectedSource = chosenSource ?? recognized
+            self?.inputMatchedTarget = matchesTarget && !reverse
+            self?.detectedSource = detectedSource
+            if reverse {
+                self?.target = reverseTarget
+                self?.sourceLanguage = originalTarget
+                self?.onLanguagesChange?()
+            } else if let detectedSource, !matchesTarget,
+                      !LanguageDetection.matchesTarget(detectedSource, target: reverseTarget, other: originalTarget) {
+                self?.sourceLanguage = detectedSource
+                if direction != .requestedTarget { self?.onLanguagesChange?() }
+            }
+            let prompt = Self.prompt(for: text, target: requestTarget, source: chosenSource)
             var collected = ""
             do {
                 for try await delta in service.send(messages: [QuickMessage(role: .user, content: prompt)]) {
@@ -536,6 +562,8 @@ final class TranslatorModel {
                 guard let self, !Task.isCancelled else { return }
                 self.isTranslating = false
                 self.pendingCommit = nil
+                self.translation = ""
+                self.pinyin = nil
                 self.message = error.localizedDescription
             }
         }

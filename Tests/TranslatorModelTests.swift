@@ -22,9 +22,9 @@ struct TranslatorModelTests {
     }
 
     @Test func directionRuleAndRecognition() {
-        #expect(LanguageDetection.target(for: "你好，世界", lastTarget: .simplifiedChinese) == .english)
-        #expect(LanguageDetection.target(for: "hello world", lastTarget: .simplifiedChinese) == .simplifiedChinese)
-        #expect(LanguageDetection.target(for: "hello world", lastTarget: .french) == .french)
+        #expect(LanguageDetection.matchesTarget(.traditionalChinese, target: .simplifiedChinese, other: .english))
+        #expect(!LanguageDetection.matchesTarget(.traditionalChinese, target: .simplifiedChinese, other: .traditionalChinese))
+        #expect(!LanguageDetection.matchesTarget(nil, target: .english, other: .french))
         #expect(LanguageDetection.recognize("This is clearly an English sentence about the weather today.") == .english)
         #expect(Pinyin.romanize("你好") == "nǐ hǎo")
         #expect(Pinyin.romanize("hello") == nil)
@@ -52,6 +52,63 @@ struct TranslatorModelTests {
         model.source = ""
         model.sourceChanged()
         #expect(model.translation.isEmpty && model.pinyin == nil)
+    }
+
+    @Test func autoDirectionFollowsNewSelectionsAndPastesInBothDirections() async {
+        let (model, mock, _) = await makeModel()
+        let chinese = "我今天早上坐火车去了上海。"
+        let english = "I took the train to Shanghai this morning."
+        model.prepare(target: nil, selectedText: chinese)
+        await settle(model)
+        #expect(model.target == .english)
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: chinese, target: .english))
+
+        model.retainLaunchSelection(english)
+        await settle(model)
+        #expect(model.target == .simplifiedChinese)
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: english, target: .simplifiedChinese))
+
+        model.sourceInput = chinese
+        model.copyTranslation() // Flush the pending editor paste before its debounce.
+        await settle(model)
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: chinese, target: .english))
+        #expect(await mock.sendCallCount == 3)
+    }
+
+    @Test func swapCorrectsACompletedSameLanguageRequestWithoutEditing() async {
+        let mock = MockQuickService()
+        let english = "I took the train to Shanghai this morning."
+        let chinese = "我今天早上坐火车去了上海。"
+        let board = InMemoryPasteboard()
+        let model = TranslatorModel(lastTarget: .english, sourceSelection: .fixed(.simplifiedChinese),
+                                    serviceFactory: { mock }, pasteboard: board)
+        board.writeString(english)
+        await mock.setResponses([StreamDelta(text: "An English paraphrase", finishReason: "stop")])
+        model.useClipboardAsSource()
+        await model.settled()
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: english, target: .english, source: .simplifiedChinese))
+
+        await mock.setResponses([StreamDelta(text: chinese, finishReason: "stop")])
+        model.swap()
+        #expect(model.target == .simplifiedChinese && model.source == english)
+        #expect(model.isTranslating && model.translation.isEmpty)
+        await model.settled()
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: english, target: .simplifiedChinese, source: .english))
+        #expect(model.translation == chinese && model.pinyin != nil)
+        #expect(await mock.sendCallCount == 2)
+    }
+
+    @Test func anInlineTargetAppliesOnlyToTheIncomingText() async {
+        let (model, mock, _) = await makeModel()
+        model.sourceInput = "superseded draft"
+        var saves = 0
+        model.onLanguagesChange = { saves += 1 }
+        let text = "This sentence is already in English."
+        model.retainLaunchSelection(text, requestedTarget: .english)
+        await model.settled()
+        #expect(model.target == .english)
+        #expect(await mock.lastPrompt == TranslatorModel.prompt(for: text, target: .english))
+        #expect(await mock.sendCallCount == 1 && saves == 0)
     }
 
     @Test func openingWithASelectionTranslatesAtOnceAndPasteGoesBack() async {

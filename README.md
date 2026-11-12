@@ -63,6 +63,10 @@ whose inner workings they can read and change.
 
 - A Translator window for selected or typed text, with a chosen or detected
   source language, and inline translation in search (`good morning in japanese`).
+  Auto detect translates fresh input into the other language of the pair when
+  the input already matches the target. ⌘S exchanges a finished translation
+  with its source, or translates the current text immediately if the result
+  is unfinished or already in the input language.
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions, and Agent Watch to keep the Mac awake while
   a coding agent works.

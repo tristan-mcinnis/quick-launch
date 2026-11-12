@@ -236,7 +236,7 @@ struct TranslatorParityTests {
 
         var saves = 0
         model.onLanguagesChange = { saves += 1 }
-        model.setTarget(.japanese, remember: false)
+        model.retainLaunchSelection("hello", requestedTarget: .japanese)
         #expect(model.target == .japanese && saves == 0)
     }
 
