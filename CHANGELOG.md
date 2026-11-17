@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-17
 
+- **The plate reads as a list again.** Each section is a heading with its rows
+  one per line, and a numbered list keeps its own numbers (row 3 used to show
+  as 1, or ran into the line above). "+N more" no longer drops a section's
+  uncounted extras. deepseek-flash kept the layout in 4 of 4 runs.
 - **The plate is a worklist.** Its rows are numbered; type `3` for next steps
   on row 3, `3 done` or `3 friday` to change it, `3 open` to open its link.
   Tested on deepseek-flash: 28 of 28 numbers kept, every row command reached

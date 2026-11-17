@@ -64,7 +64,10 @@ struct PlateSnapshot: Sendable, Equatable {
         for name in names {
             guard let rows = sections[name], !rows.isEmpty else { continue }
             let cap = Self.caps[name] ?? Self.defaultCap
-            lines.append("\n\(name)")
+            // A heading line, then a blank line: in markdown a list that starts
+            // at 3 cannot interrupt a paragraph, so "Waiting on you\n3. …"
+            // would run together into one line of prose.
+            lines.append("\n### \(name)\n")
             for row in rows.prefix(cap) {
                 let item = PlateItem(
                     number: items.count + 1,
@@ -78,10 +81,10 @@ struct PlateSnapshot: Sendable, Equatable {
                 let tail = [item.note, row["new"] as? Bool == true ? "new" : ""].filter { !$0.isEmpty }.joined(separator: " · ")
                 lines.append("\(item.number). \(item.text)" + (tail.isEmpty ? "" : " · \(tail)"))
             }
-            let extra = rows.count - cap + (more[name] ?? 0)
-            if extra > 0 { lines.append("+\(extra) more") }
+            let extra = max(0, rows.count - cap) + (more[name] ?? 0)
+            if extra > 0 { lines.append("\n+\(extra) more") }
         }
-        if !down.isEmpty { lines.append("\nDown: " + down.joined(separator: ". ")) }
+        if !down.isEmpty { lines.append("\n### Down\n\n" + down.joined(separator: ". ")) }
         self.items = items
         self.text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }

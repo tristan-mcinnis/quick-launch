@@ -214,6 +214,24 @@ struct MarkdownRendererTests {
         #expect(result.string.contains("Second"))
     }
 
+    @Test func testOrderedListKeepsItsStartNumber() {
+        let result = MarkdownRenderer.render("### Waiting on you\n\n3. Drafts\n4. Handover\n\n### Next 3 days\n\n5. Training")
+        #expect(result.string.contains("3. Drafts"))
+        #expect(result.string.contains("4. Handover"))
+        #expect(result.string.contains("5. Training"))
+        #expect(!result.string.contains("1. "), "a list that starts at 3 is not renumbered from 1")
+    }
+
+    @Test func testPlateTextRendersEachRowOnItsOwnLine() throws {
+        let json = #"{"sections": {"Do now": [{"key": "t:1", "text": "Send the guide", "note": "p1"}], "Waiting on you": [{"key": "drafts", "text": "1 Outlook draft", "note": ""}, {"key": "t:4", "text": "Finish the handover", "note": "p2"}]}, "more": {"Waiting on you": 2}, "down": ["slack"]}"#
+        let plate = try PlateSnapshot(json: Data(json.utf8))
+        let lines = MarkdownRenderer.render(plate.text).string.components(separatedBy: "\n").filter { !$0.isEmpty }
+        #expect(lines.contains("Waiting on you"))
+        #expect(lines.contains("2. 1 Outlook draft"))
+        #expect(lines.contains("3. Finish the handover · p2"))
+        #expect(lines.contains("+2 more"))
+    }
+
     // MARK: - Links
 
     @Test func testLinkRendered() {

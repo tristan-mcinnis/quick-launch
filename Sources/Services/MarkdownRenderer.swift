@@ -406,9 +406,12 @@ struct AttributedStringWalker: MarkupWalker {
 
     mutating func visitOrderedList(_ list: OrderedList) {
         listDepth += 1
-        orderedIndex = 1
+        // A list keeps the number it starts at: the plate's "3." stays 3,
+        // because the user acts on a row by that number.
+        let outer = orderedIndex
+        orderedIndex = Int(list.startIndex)
         descendInto(list)
-        orderedIndex = nil
+        orderedIndex = outer
         listDepth -= 1
     }
 

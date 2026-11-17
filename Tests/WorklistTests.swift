@@ -17,14 +17,14 @@ struct WorklistTests {
         {"key": "c:x5", "text": "E", "note": ""}, {"key": "c:x6", "text": "F", "note": ""}
       ],
       "Ready to review": [{"key": "f:Runs:topline", "text": "topline v2", "note": ""}]
-    }, "down": [], "more": {"Ready to review": 5}}
+    }, "down": [], "more": {"Ready to review": 2}}
     """#
 
     @Test func rowsAreNumberedInThePlatesOwnOrderAndCaps() throws {
         let plate = try PlateSnapshot(json: Data(Self.json.utf8))
         #expect(plate.items.map(\.text) == ["Send the guide", "Run club", "Check the backup drive", "C", "D", "E", "topline v2", "Old thing"])
         #expect(plate.items.map(\.number) == Array(1...8))
-        #expect(plate.text.contains("Do now\n1. Send the guide · p1 · new"))
+        #expect(plate.text.contains("### Do now\n\n1. Send the guide · p1 · new"))
         #expect(plate.text.contains("+1 more"), "Next 3 days shows five; the sixth is counted")
         #expect(plate.text.contains("+2 more"), "the plate's own uncounted extras")
         #expect(plate.items[1].kindName == "work calendar event")
