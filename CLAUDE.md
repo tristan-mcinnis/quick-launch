@@ -59,7 +59,17 @@ The one write is Todoist: the model may only propose a task
 the user presses Add to Todoist under the answer or presses Return on an
 empty composer while the footer reads Add to Todoist
 (`QuickViewModel.addProposedTodoist`, `todoist-add.py`). Opening is not a
-file change; every other write still belongs to pi.
+file change.
+
+**Changes, approved 2026-11-17** (Tristan: "yeah", after the routing
+eval): the model may also propose a change to something that exists:
+reschedule or finish an open, non-repeating Todoist task
+(`propose_task_change`, `todoist-change.py`) and move a solo work-calendar
+event, one with no attendees (`propose_event_move`, `calendar-ops.py move`,
+never `--send`). The app finds the item by its words and proposes only when
+exactly one matches; Return makes the change; ⌘Z on an empty field undoes
+the newest one. Nothing that emails or notifies another person, and no money,
+ever runs from here; every other write still belongs to pi.
 
 AI Chat is the House's general chat. RTI keeps its own standalone chats
 because they are grounded in a meeting or a recording session (decided

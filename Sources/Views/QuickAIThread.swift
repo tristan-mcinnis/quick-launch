@@ -427,7 +427,7 @@ struct QuickAIThread: View {
         Button {
             viewModel.scrollThread(.bottom)
         } label: {
-            HouseChip(text: "Latest", icon: "arrow.down")
+            HouseChip(text: "Latest", icon: "arrow.down", keys: Self.jumpToLatestKeys)
                 .raisedCard(radius: AQDesign.fieldCornerRadius, fill: AQDesign.ColorToken.raisedSurface)
                 .houseShadow(AQDesign.Shadow.card)
                 .contentShape(Rectangle())
@@ -548,6 +548,10 @@ struct QuickAIThread: View {
                     if !viewModel.isTodoistProposalAdded(proposal, in: message) {
                         todoistProposalRow(proposal, answerID: message.id)
                     }
+                } else if record.kind == .changeProposal, let change = record.change {
+                    if !viewModel.isChangeDone(change, in: message) {
+                        changeProposalRow(change, answerID: message.id)
+                    }
                 } else {
                     toolLine(record.summary, symbol: record.systemImage)
                 }
@@ -579,6 +583,32 @@ struct QuickAIThread: View {
         .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Proposed Todoist task: \(proposal.line)")
+    }
+
+    /// A change the model proposed: what changes and the one button that
+    /// makes it (Return does the same). Gone once the Done line is under
+    /// the answer.
+    private func changeProposalRow(_ change: ChangeProposal, answerID: UUID) -> some View {
+        let working = viewModel.changesInFlight.contains(change.id)
+        return HStack(spacing: House.Spacing.xs) {
+            Image(systemName: "arrow.right.circle")
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(width: House.Control.keyCap)
+            Text(change.line)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(2)
+            Button(working ? "Working…" : change.actionLabel) {
+                Task { await viewModel.applyProposedChange(change, answerID: answerID) }
+            }
+            .controlSize(.small)
+            .disabled(working || viewModel.harnessScripts == nil)
+            .help("Makes this change; ⌘Z on an empty field puts it back")
+        }
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Proposed change: \(change.line)")
     }
 
     /// The lines of the ask in flight: an explicit web search, then each

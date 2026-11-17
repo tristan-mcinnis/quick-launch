@@ -2,6 +2,13 @@
 
 ## Unreleased — 2026-11-17
 
+- **Change what is already there.** "push the backup check to friday", "mark it
+  done" and "move run club to 18:00" propose the exact task or event, old →
+  new; Return makes the change and ⌘Z on an empty field undoes it. Repeating
+  tasks and events with attendees are refused. A command ("move … today")
+  no longer runs a web search first.
+- **Read with the keyboard.** Space on an empty field pages a long answer
+  down (⇧Space up); the Latest chip shows ⌘↓.
 - **New chat tools.** `read_url` reads a link. `open_work_item` opens a project
   folder, a stage folder, or its current document under `~/Documents/Work`
   ("open the latest jade fox discussion guide"). `show_plate` reads the plate,

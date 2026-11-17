@@ -44,6 +44,13 @@ protocol HarnessScripting: Sendable {
     func calendar(_ arguments: [String]) async throws -> String
     /// `todoist-add.py`: the user's own button press, never the model's call.
     func addTodoist(_ proposal: TodoistProposal) async throws -> TodoistAdded
+    /// `todoist-change.py find`: open tasks whose title holds every word.
+    func findTasks(_ words: String) async throws -> [TaskMatch]
+    /// `calendar-ops.py search --json`: work-calendar events by words.
+    func findEvents(_ words: String) async throws -> [EventMatch]
+    /// Makes one change: the user's Return (or ⌘Z for its inverse), never
+    /// the model's call.
+    func apply(_ change: ChangeProposal) async throws
 }
 
 enum HarnessScriptError: LocalizedError, Equatable {
@@ -65,6 +72,7 @@ struct HarnessScripts: HarnessScripting {
     static let plateScript = "plate/scripts/plate.py"
     static let todoistScript = "plate/scripts/todoist-add.py"
     static let calendarScript = "ic-calendar-ops/scripts/calendar-ops.py"
+    static let changeScript = "plate/scripts/todoist-change.py"
     /// The calendar subcommands that only read.
     static let calendarReads: Set<String> = ["agenda", "day", "free", "search"]
 
@@ -110,6 +118,72 @@ struct HarnessScripts: HarnessScripting {
         if let error = object["error"] as? String { throw HarnessScriptError.failed("Todoist add failed: \(error)") }
         guard let url = object["url"] as? String else { throw HarnessScriptError.failed("Todoist add gave no task link") }
         return TodoistAdded(url: url)
+    }
+
+    func findTasks(_ words: String) async throws -> [TaskMatch] {
+        let object = try await json(Self.changeScript, ["find", words], timeout: Self.todoistTimeout, what: "Todoist search")
+        let tasks = object["tasks"] as? [[String: Any]] ?? []
+        return tasks.compactMap { task in
+            guard let id = task["id"] as? String, let content = task["content"] as? String else { return nil }
+            return TaskMatch(id: id, content: content, dueDate: task["due_date"] as? String ?? "", recurring: task["recurring"] as? Bool ?? false)
+        }
+    }
+
+    func findEvents(_ words: String) async throws -> [EventMatch] {
+        let output = try await script(Self.calendarScript, ["search", words, "--back", "1", "--json"], timeout: Self.calendarTimeout)
+        guard let data = output.data(using: .utf8),
+              let events = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HarnessScriptError.failed("Calendar search gave no answer") }
+        return events.compactMap { event in
+            guard let id = event["id"] as? String,
+                  let start = (event["start"] as? [String: Any])?["dateTime"] as? String,
+                  event["isCancelled"] as? Bool != true
+            else { return nil }
+            return EventMatch(
+                id: id,
+                subject: (event["subject"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                start: String(start.prefix(16)).replacingOccurrences(of: "T", with: " "),
+                attendees: (event["attendees"] as? [Any])?.count ?? 0,
+                isAllDay: event["isAllDay"] as? Bool ?? false
+            )
+        }
+    }
+
+    func apply(_ change: ChangeProposal) async throws {
+        switch change.kind {
+        case .reschedule:
+            let due: [String]
+            if change.to.isEmpty {
+                due = ["--due", "no date"]
+            } else if change.to.wholeMatch(of: /\d{4}-\d{2}-\d{2}/) != nil {
+                due = ["--due-date", change.to]
+            } else if change.to.wholeMatch(of: /\d{4}-\d{2}-\d{2}T[\d:]+/) != nil {
+                due = ["--due-datetime", change.to]
+            } else {
+                due = ["--due", change.to]
+            }
+            _ = try await json(Self.changeScript, ["reschedule", change.targetID] + due, timeout: Self.todoistTimeout, what: "Todoist change")
+        case .complete, .reopen:
+            _ = try await json(Self.changeScript, [change.kind.rawValue, change.targetID], timeout: Self.todoistTimeout, what: "Todoist change")
+        case .moveEvent:
+            // Never `--send`: an event with attendees only prints a dry run,
+            // which is a refusal here, not a move.
+            let output = try await script(Self.calendarScript, ["move", change.targetID, "--start", change.to, "--json"], timeout: Self.calendarTimeout)
+            guard output.contains("moved:"), !output.contains("dry_run") else {
+                throw HarnessScriptError.failed("The event was not moved; one with attendees moves only in Outlook.")
+            }
+        }
+    }
+
+    /// Runs a script that prints one JSON object, and turns its `error` into a throw.
+    private func json(_ relativePath: String, _ arguments: [String], timeout: TimeInterval, what: String) async throws -> [String: Any] {
+        let output = try await script(relativePath, arguments, timeout: timeout, checkStatus: false)
+        let line = output.split(separator: "\n").last.map(String.init) ?? ""
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw HarnessScriptError.failed("\(what) gave no answer") }
+        if let error = object["error"] as? String { throw HarnessScriptError.failed("\(what) failed: \(error)") }
+        return object
     }
 
     private func script(

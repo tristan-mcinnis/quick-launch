@@ -97,11 +97,23 @@ enum WebSearchIntentDetector {
         "we", "our", "ours", "us",
     ]
 
+    /// Opening words that make a line a command about the user's own
+    /// tasks, calendar or files ("move run club to 18:00 today"), never a
+    /// question for the web, whatever live word follows. "search" and "look
+    /// up" are the explicit web commands above, so they are not here.
+    static let actionVerbs: Set<String> = [
+        "add", "move", "reschedule", "push", "postpone", "delay", "cancel", "delete",
+        "remove", "mark", "complete", "finish", "tick", "remind", "book",
+        "open", "create", "schedule", "block", "hold", "decline", "accept",
+        "snooze", "defer",
+    ]
+
     static func isAboutTheUser(_ query: String) -> Bool {
         let words = query
             .replacingOccurrences(of: "\u{2019}", with: "'")
             .split(whereSeparator: { !($0.isLetter || $0 == "'") })
             .map(String.init)
+        if let first = words.first, actionVerbs.contains(first) { return true }
         return words.contains(where: firstPersonWords.contains)
     }
 }

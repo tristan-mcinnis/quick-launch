@@ -88,6 +88,7 @@ extension ChatToolRecord {
         case .plate: "the plate"
         case .calendar: "calendar"
         case .todoistProposal, .todoistAdded: "Todoist"
+        case .changeProposal, .changeDone, .changeUndone: "a change"
         }
     }
 }

@@ -395,6 +395,8 @@ struct ChatToolsViewModelTests {
 
         #expect(vm.quickAIComposerAction.label == "Add to Todoist")
         vm.input = ""
+        await vm.runPrimaryAnswerAction(skippingProposal: true)
+        #expect(await harness.added.isEmpty, "⌘↩ is the answer's own action, never the task")
         await vm.submitTypedText()
         #expect(await harness.added == [proposal], "Return adds the task")
         #expect(vm.composerConfirmation == "Added to Todoist")

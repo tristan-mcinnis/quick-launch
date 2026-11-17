@@ -35,6 +35,13 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case todoistProposal
         /// The user pressed Add to Todoist. Drawn under the answer.
         case todoistAdded
+        /// `propose_task_change` or `propose_event_move`: a change waiting
+        /// for the user's Return.
+        case changeProposal
+        /// The change was made. ⌘Z undoes the newest one.
+        case changeDone
+        /// ⌘Z put a change back.
+        case changeUndone
     }
 
     var kind: Kind
@@ -47,19 +54,24 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     var failed: Bool?
     /// The task a `.todoistProposal` or `.todoistAdded` line is about.
     var proposal: TodoistProposal?
+    /// The change a `.changeProposal`, `.changeDone` or `.changeUndone`
+    /// line is about. Nil in a record saved before changes existed.
+    var change: ChangeProposal?
 
     init(
         kind: Kind,
         summary: String,
         sources: [ChatSource] = [],
         failed: Bool = false,
-        proposal: TodoistProposal? = nil
+        proposal: TodoistProposal? = nil,
+        change: ChangeProposal? = nil
     ) {
         self.kind = kind
         self.summary = summary
         self.sources = sources
         self.failed = failed ? true : nil
         self.proposal = proposal
+        self.change = change
     }
 
     var isFailure: Bool { failed == true }
@@ -80,6 +92,9 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case .calendar: "calendar"
         case .todoistProposal: "plus.circle"
         case .todoistAdded: "checkmark.circle"
+        case .changeProposal: "arrow.right.circle"
+        case .changeDone: "checkmark.circle"
+        case .changeUndone: "arrow.uturn.backward.circle"
         }
     }
 
@@ -87,7 +102,7 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     /// answer, and a proposal waits on it, so those sit under it.
     var drawsAboveAnswer: Bool {
         switch kind {
-        case .capture, .todoistProposal, .todoistAdded: false
+        case .capture, .todoistProposal, .todoistAdded, .changeProposal, .changeDone, .changeUndone: false
         default: true
         }
     }

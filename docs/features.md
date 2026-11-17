@@ -162,6 +162,12 @@ Todoist proposal, which writes only when you press its button:
 | `show_plate()` | `plate.py --peek`: Todoist, the work calendar, PRs, Slack, drafts, and new mail; about 15 s (Tasks switch) |
 | `read_calendar(mode, ...)` | the work calendar through `calendar-ops.py` read subcommands: agenda, a day, free slots, search (Calendar switch) |
 | `propose_todoist_task(content, due, priority)` | nothing: it shows the task under the answer with **Add to Todoist**; only your press, or **Return** on an empty field while the footer reads **Add to Todoist ↩**, adds it to the Inbox through `todoist-add.py` (Tasks switch); ⌘↩ still pastes |
+| `propose_task_change(task, action, due)` | nothing: the app finds the one open task with those words and shows *old → new*; **Return** (footer **Reschedule ↩** or **Mark Done ↩**) makes it through `todoist-change.py`; several matches are listed for you to pick; repeating tasks are refused (Tasks switch) |
+| `propose_event_move(event, on_date, new_start)` | nothing: the app finds the one upcoming work-calendar event and shows *old → new*; **Return** (**Move Event ↩**) moves it; an event with attendees is refused, since moving it would email them (Calendar switch) |
+
+After a change, **⌘Z** on an empty field puts it back (the old due date, the
+task reopened, the old start). **⌘↩** on an empty field is always the
+answer's own Paste or Copy, never the pending task or change.
 
 - The model is told to use memory only when you ask about your own
   notes, projects, clients, decisions, or files, and a skill when you name one

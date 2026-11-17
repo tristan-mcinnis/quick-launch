@@ -72,4 +72,22 @@ struct WebSearchIntentDetectorTests {
             #expect(!WebSearchIntentDetector.shouldSearch(input, plainQuestion: true), "\(input)")
         }
     }
+
+    /// 2026-11-17: "move run club to 18:00 today please" ran a web search
+    /// for the whole sentence because of "today". A command about the
+    /// user's own tasks or calendar is never a web query.
+    @Test func aCommandIsNeverSearched() {
+        for input in [
+            "move run club to 18:00 today please",
+            "add call Sam today",
+            "cancel my 3pm today",
+            "push the backup check to friday",
+            "remind me to check the weather tonight",
+        ] {
+            #expect(!WebSearchIntentDetector.shouldSearch(input, plainQuestion: true), "\(input)")
+        }
+        for input in ["check the exchange rate today", "weather in Shanghai today", "search web move run club"] {
+            #expect(WebSearchIntentDetector.shouldSearch(input, plainQuestion: true), "\(input)")
+        }
+    }
 }

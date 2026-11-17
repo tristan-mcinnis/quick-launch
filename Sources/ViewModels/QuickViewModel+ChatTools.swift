@@ -334,4 +334,116 @@ extension QuickViewModel {
         confirmInComposer("Added to Todoist")
         requestInputFocus()
     }
+
+    // MARK: - Changes: reschedule, done, move, undo
+
+    /// What Return confirms on the newest answer, if anything waits.
+    enum PendingAction {
+        case add(TodoistProposal, answerID: UUID)
+        case change(ChangeProposal, answerID: UUID)
+    }
+
+    /// The newest answer's first proposal still waiting: a task to add or
+    /// a change to make. Return confirms it; the footer names it.
+    var pendingAction: PendingAction? {
+        guard harnessScripts != nil,
+              let answer = currentConversation?.messages.last, answer.role == .assistant
+        else { return nil }
+        for record in answer.tools {
+            if record.kind == .todoistProposal, let proposal = record.proposal,
+               !isTodoistProposalAdded(proposal, in: answer) {
+                return .add(proposal, answerID: answer.id)
+            }
+            if record.kind == .changeProposal, let change = record.change, !isChangeDone(change, in: answer) {
+                return .change(change, answerID: answer.id)
+            }
+        }
+        return nil
+    }
+
+    /// The footer's words for the pending action.
+    var pendingActionLabel: String? {
+        switch pendingAction {
+        case .add(let proposal, _):
+            todoistAddsInFlight.contains(proposal.id) ? "Adding…" : "Add to Todoist"
+        case .change(let change, _):
+            changesInFlight.contains(change.id) ? "Working…" : change.actionLabel
+        case nil: nil
+        }
+    }
+
+    /// Return on the pending action.
+    func confirmPendingAction() async {
+        switch pendingAction {
+        case .add(let proposal, let answerID): await addProposedTodoist(proposal, answerID: answerID)
+        case .change(let change, let answerID): await applyProposedChange(change, answerID: answerID)
+        case nil: break
+        }
+    }
+
+    func isChangeDone(_ change: ChangeProposal, in message: QuickMessage) -> Bool {
+        message.tools.contains { $0.kind == .changeDone && $0.change?.id == change.id }
+    }
+
+    /// The user's Return on a proposed change: the only path that makes one.
+    func applyProposedChange(_ change: ChangeProposal, answerID: UUID) async {
+        guard let harnessScripts, !changesInFlight.contains(change.id),
+              let message = currentConversation?.messages.first(where: { $0.id == answerID }),
+              !isChangeDone(change, in: message)
+        else { return }
+        changesInFlight.insert(change.id)
+        defer { changesInFlight.remove(change.id) }
+        do {
+            try await harnessScripts.apply(change)
+        } catch {
+            errorMessage = "\(change.actionLabel) failed: \(error.localizedDescription)"
+            requestInputFocus()
+            return
+        }
+        errorMessage = nil
+        appendRecord(ChatToolRecord(kind: .changeDone, summary: change.doneLine, change: change), to: answerID)
+        confirmInComposer("\(change.doneLine) · ⌘Z undoes")
+        requestInputFocus()
+    }
+
+    /// The newest change on the newest answer that is not undone yet.
+    var undoableChange: (change: ChangeProposal, answerID: UUID)? {
+        guard harnessScripts != nil,
+              let answer = currentConversation?.messages.last, answer.role == .assistant
+        else { return nil }
+        let undone = Set(answer.tools.filter { $0.kind == .changeUndone }.compactMap { $0.change?.id })
+        guard let done = answer.tools.last(where: { $0.kind == .changeDone && !undone.contains($0.change?.id ?? UUID()) }),
+              let change = done.change
+        else { return nil }
+        return (change, answer.id)
+    }
+
+    /// ⌘Z on an empty field: puts the newest change back.
+    func undoLastChange() async {
+        guard let harnessScripts, let (change, answerID) = undoableChange,
+              !changesInFlight.contains(change.id)
+        else { return }
+        changesInFlight.insert(change.id)
+        defer { changesInFlight.remove(change.id) }
+        do {
+            try await harnessScripts.apply(change.inverse)
+        } catch {
+            errorMessage = "Undo failed: \(error.localizedDescription)"
+            requestInputFocus()
+            return
+        }
+        errorMessage = nil
+        appendRecord(ChatToolRecord(kind: .changeUndone, summary: "Undone: \(change.doneLine)", change: change), to: answerID)
+        confirmInComposer("Undone")
+        requestInputFocus()
+    }
+
+    private func appendRecord(_ record: ChatToolRecord, to answerID: UUID) {
+        // The chat may have changed during the wait; find the answer again.
+        guard let index = currentConversation?.messages.firstIndex(where: { $0.id == answerID }) else { return }
+        var records = currentConversation?.messages[index].tools ?? []
+        records.append(record)
+        currentConversation?.messages[index].toolRecords = records
+        persistCurrentConversation()
+    }
 }

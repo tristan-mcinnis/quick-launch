@@ -247,6 +247,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored var quickAIGrowthChrome: CGFloat?
     /// Todoist proposals whose Add is running, so a second press waits.
     var todoistAddsInFlight: Set<UUID> = []
+    /// Changes (`ChangeProposal`) being made or undone right now.
+    var changesInFlight: Set<UUID> = []
     /// The folders Open Source may open from (the memory repo, the skills repo
     /// and the Work folder); tests point it at a temporary folder.
     @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots

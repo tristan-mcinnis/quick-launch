@@ -88,6 +88,8 @@ struct ChatToolbox: Sendable {
         static let showPlate = "show_plate"
         static let readCalendar = "read_calendar"
         static let proposeTodoist = "propose_todoist_task"
+        static let proposeTaskChange = "propose_task_change"
+        static let proposeEventMove = "propose_event_move"
     }
 
     /// The names this toolbox answers.
@@ -98,8 +100,8 @@ struct ChatToolbox: Sendable {
         if skills != nil { names.insert(Name.readSkill) }
         if pages != nil { names.insert(Name.readURL) }
         if workFiles != nil { names.insert(Name.openWorkItem) }
-        if plate != nil { names.formUnion([Name.showPlate, Name.proposeTodoist]) }
-        if calendar != nil { names.insert(Name.readCalendar) }
+        if plate != nil { names.formUnion([Name.showPlate, Name.proposeTodoist, Name.proposeTaskChange]) }
+        if calendar != nil { names.formUnion([Name.readCalendar, Name.proposeEventMove]) }
         return names
     }
 
@@ -183,7 +185,7 @@ struct ChatToolbox: Sendable {
             ))
             tools.append(Self.function(
                 Name.proposeTodoist,
-                description: "Propose one task for the user's Todoist Inbox. It does NOT add the task: the user adds it with the Add to Todoist button under your answer. Call it when the user asks to add, remember, or capture a task or a to-do. Then say in one line what will be added.",
+                description: "Propose one NEW task for the user's Todoist Inbox. It does NOT add the task: the user adds it with Return or the Add to Todoist button. Call it when the user asks to add, remember, or capture a new task or to-do. Never use it to move, reschedule, or finish a task that already exists; use propose_task_change for that. Then say in one line what will be added.",
                 properties: [
                     "content": ["type": "string", "description": "The task, short, starting with a verb."],
                     "due": ["type": "string", "description": "Todoist due words, such as \"tomorrow 10am\" or \"every friday\". Empty for none."],
@@ -191,6 +193,16 @@ struct ChatToolbox: Sendable {
                     "description": ["type": "string", "description": "A short note under the task. Empty for none."],
                 ],
                 required: ["content"]
+            ))
+            tools.append(Self.function(
+                Name.proposeTaskChange,
+                description: "Propose a change to one of the user's EXISTING open Todoist tasks: reschedule it or mark it done. It changes nothing: the app finds the task by its words and the user confirms with Return. Call it when the user asks to move, push, postpone, reschedule, finish, complete, or tick off a task. If several tasks match, it lists them; ask the user which. Then say in one line what will change.",
+                properties: [
+                    "task": ["type": "string", "description": "Two to four words from the task's title, as it appears on the plate."],
+                    "action": ["type": "string", "enum": ["reschedule", "complete"]],
+                    "due": ["type": "string", "description": "For reschedule: Todoist due words, such as \"friday\" or \"tomorrow 10am\"."],
+                ],
+                required: ["task", "action"]
             ))
         }
         if calendar != nil {
@@ -205,6 +217,16 @@ struct ChatToolbox: Sendable {
                     "query": ["type": "string", "description": "For search: words from the subject, place, or a person."],
                 ],
                 required: ["mode"]
+            ))
+            tools.append(Self.function(
+                Name.proposeEventMove,
+                description: "Propose moving one of the user's own work-calendar events (one with no other attendees) to a new start time. It changes nothing: the app finds the event and the user confirms with Return. Call it when the user asks to move, push, or reschedule an event on their calendar. An event with attendees cannot be moved here, because moving it emails them. Then say in one line what will change.",
+                properties: [
+                    "event": ["type": "string", "description": "Words from the event's title, such as \"Run club\"."],
+                    "on_date": ["type": "string", "description": "The event's current date, yyyy-MM-dd, when known."],
+                    "new_start": ["type": "string", "description": "The new start, yyyy-MM-dd HH:mm, 24-hour, local time."],
+                ],
+                required: ["event", "new_start"]
             ))
         }
         return tools
@@ -247,6 +269,8 @@ struct ChatToolbox: Sendable {
         case Name.showPlate where plate != nil: "Reading your plate…"
         case Name.proposeTodoist where plate != nil: "Drafting a Todoist task…"
         case Name.readCalendar where calendar != nil: "Reading the calendar…"
+        case Name.proposeTaskChange where plate != nil: "Finding the task…"
+        case Name.proposeEventMove where calendar != nil: "Finding the event…"
         default: nil
         }
     }
@@ -285,6 +309,12 @@ struct ChatToolbox: Sendable {
         case Name.readCalendar:
             guard let calendar else { return nil }
             return await readCalendar(calendar, arguments: arguments)
+        case Name.proposeTaskChange:
+            guard let plate else { return nil }
+            return await proposeTaskChange(plate, arguments: arguments)
+        case Name.proposeEventMove:
+            guard let calendar else { return nil }
+            return await proposeEventMove(calendar, arguments: arguments)
         default:
             return nil
         }
@@ -302,6 +332,7 @@ struct ChatToolbox: Sendable {
         case Name.showPlate: .plate
         case Name.readCalendar: .calendar
         case Name.proposeTodoist: .todoistProposal
+        case Name.proposeTaskChange, Name.proposeEventMove: .changeProposal
         default: .web
         }
         return ChatToolOutcome(
@@ -323,6 +354,8 @@ struct ChatToolbox: Sendable {
         case Name.showPlate: "Plate"
         case Name.readCalendar: "Calendar"
         case Name.proposeTodoist: "Todoist"
+        case Name.proposeTaskChange: "Task change"
+        case Name.proposeEventMove: "Event move"
         default: "Web search"
         }
     }
@@ -750,7 +783,7 @@ struct ChatToolbox: Sendable {
 
     // MARK: - Helpers
 
-    private static func wrapped(_ tag: String, note: String, body: String) -> String {
+    static func wrapped(_ tag: String, note: String, body: String) -> String {
         "<\(tag)>\n\(note)\n\(body)\n</\(tag)>"
     }
 

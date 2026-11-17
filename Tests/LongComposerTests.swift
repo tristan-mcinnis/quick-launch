@@ -134,6 +134,22 @@ struct LongComposerTests {
         #expect(vm.composerSubmitTask == nil)
     }
 
+    @Test func spaceOnAnEmptyFieldPagesTheThread() throws {
+        let vm = model("")
+        let editor = NSTextView(frame: .zero)
+        #expect(QuickAIComposerEditing.handle(try key(" ", code: 49, modifiers: []), editor: editor, model: vm))
+        #expect(vm.threadScrollRequest?.target == .pageDown)
+        #expect(QuickAIComposerEditing.handle(try key(" ", code: 49, modifiers: [.shift]), editor: editor, model: vm))
+        #expect(vm.threadScrollRequest?.target == .pageUp)
+
+        // Typed text keeps its spaces; pinyin keeps its candidate key.
+        let typing = model("call")
+        #expect(!QuickAIComposerEditing.handle(try key(" ", code: 49, modifiers: []), editor: editor, model: typing))
+        let composing = NSTextView(frame: .zero)
+        composing.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(!QuickAIComposerEditing.handle(try key(" ", code: 49, modifiers: []), editor: composing, model: vm))
+    }
+
     @Test func rendersLongDraftsOnBothSurfacesInBothAppearances() throws {
         let drafts = [
             ("english", String(repeating: "Please summarize this passage and keep its important details. ", count: 40)),

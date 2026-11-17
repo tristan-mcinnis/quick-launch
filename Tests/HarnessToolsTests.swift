@@ -131,10 +131,13 @@ struct HarnessToolsTests {
             enabled: [.web, .files, .tasks, .calendar],
             pages: FakePages(), workFiles: WorkItemResolver(), opener: FakeFileOpener(), harness: harness
         )
-        #expect(all.toolNames == ["read_url", "open_work_item", "show_plate", "propose_todoist_task", "read_calendar"])
+        #expect(all.toolNames == [
+            "read_url", "open_work_item", "show_plate", "propose_todoist_task", "propose_task_change",
+            "read_calendar", "propose_event_move",
+        ])
         let noOpener = ChatToolbox(enabled: [.files], workFiles: WorkItemResolver())
         #expect(noOpener.isEmpty, "a resolver with nothing to open with is not offered")
-        #expect(all.definitions.count == 5)
+        #expect(all.definitions.count == 7)
     }
 
     @Test func openWorkItemOpensTheFileAndListsItAsASource() async throws {
@@ -248,9 +251,9 @@ struct HarnessToolsTests {
     }
 
     /// A skills folder whose three scripts exist (empty).
-    private static func skillsStub() -> URL {
+    static func skillsStub() -> URL {
         let root = FileManager.default.temporaryDirectory.appending(path: "skills-\(UUID().uuidString)")
-        for path in [HarnessScripts.plateScript, HarnessScripts.todoistScript, HarnessScripts.calendarScript] {
+        for path in [HarnessScripts.plateScript, HarnessScripts.todoistScript, HarnessScripts.calendarScript, HarnessScripts.changeScript] {
             let url = root.appending(path: path)
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? Data().write(to: url)
@@ -277,6 +280,15 @@ actor FakeHarness: HarnessScripting {
         return TodoistAdded(url: "https://app.todoist.com/app/task/1")
     }
     func setAddError(_ error: Error?) { addError = error }
+
+    var tasks: [TaskMatch] = []
+    var events: [EventMatch] = []
+    private(set) var applied: [ChangeProposal] = []
+    func findTasks(_ words: String) async throws -> [TaskMatch] { tasks }
+    func findEvents(_ words: String) async throws -> [EventMatch] { events }
+    func apply(_ change: ChangeProposal) async throws { applied.append(change) }
+    func setTasks(_ tasks: [TaskMatch]) { self.tasks = tasks }
+    func setEvents(_ events: [EventMatch]) { self.events = events }
 }
 
 actor FakePages: WebPageReading {

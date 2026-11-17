@@ -283,6 +283,8 @@ struct RowHighlight: View {
 struct HouseChip: View {
     let text: String
     var icon: String? = nil
+    /// Key caps after the text, when the chip has a key ("Latest ⌘↓").
+    var keys: [String] = []
 
     var body: some View {
         HStack(spacing: 6) {
@@ -293,6 +295,7 @@ struct HouseChip: View {
                 .font(AQDesign.TypeToken.metadata)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if !keys.isEmpty { KeyCapGroup(keys: keys) }
         }
         .foregroundStyle(AQDesign.ColorToken.textSecondary)
         .padding(.horizontal, AQDesign.Space.standard)

@@ -291,11 +291,12 @@ extension QuickViewModel {
     /// Return with an empty composer on a finished answer runs the Quick AI
     /// primary action. Automatic copy is untouched: `autoCopy` still decides
     /// what happens the moment an answer arrives.
-    func runPrimaryAnswerAction() async {
+    func runPrimaryAnswerAction(skippingProposal: Bool = false) async {
         guard !output.isEmpty, !isStreaming else { return }
-        // A proposed task waits for Return before anything is pasted.
-        if let pending = pendingTodoistProposal {
-            await addProposedTodoist(pending.proposal, answerID: pending.answerID)
+        // A proposed task waits for Return before anything is pasted; ⌘↩
+        // skips it and pastes.
+        if !skippingProposal, pendingAction != nil {
+            await confirmPendingAction()
             return
         }
         switch primaryAnswerAction {
