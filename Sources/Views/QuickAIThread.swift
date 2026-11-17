@@ -234,7 +234,9 @@ struct QuickAIThread: View {
             // bottom. A scroll the thread made can land short while the lazy
             // stack still estimates heights, and re-measured rows shift the
             // view; neither is the reader leaving the end.
-            if !isHoldingChat {
+            // A held long answer stays held until the reader scrolls (which
+            // clears the anchor) or asks for Latest.
+            if !isHoldingChat, !(turnGeometry.roomReleased && turnGeometry.anchoring != nil) {
                 viewModel.threadDidScroll(
                     distanceFromBottom: new.distanceFromBottom,
                     moved: old.top != new.top && (scrollPhase == .interacting || scrollPhase == .decelerating)
@@ -254,7 +256,13 @@ struct QuickAIThread: View {
                 // A move the thread made (an animation) can end with new
                 // text already below it; that only ever joins the bottom,
                 // it never leaves it. Only the reader's own scroll does.
-                viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom, moved: previous != .animating)
+                // A scroll to the end sent before a long answer's hold can
+                // land after it; that landing is not the reader going down
+                // (Latest clears the anchor first), so the hold stands.
+                let heldAtQuestion = previous == .animating && turnGeometry.roomReleased && turnGeometry.anchoring != nil
+                if !heldAtQuestion {
+                    viewModel.threadDidScroll(distanceFromBottom: threadGeometry.distanceFromBottom, moved: previous != .animating)
+                }
                 // The lazy stack re-estimates heights while an animated
                 // scroll runs, so it can come to rest short of where it was
                 // sent, with nothing left changing to send it again.
