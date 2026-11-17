@@ -95,6 +95,20 @@ struct HarnessScripts: HarnessScripting {
         self.root = root
     }
 
+    /// Every script the plate, Todoist and calendar tools call. They live in
+    /// the owner's own private skills repo, not in this one.
+    static let requiredScripts = [plateScript, todoistScript, changeScript, calendarScript]
+
+    /// The harness when every script is on this Mac, else nil: on any
+    /// other Mac the model is never offered a plate, Todoist or calendar
+    /// tool, so it cannot even name them.
+    static func installed(root: URL = HarnessScripts.skillsRoot) -> HarnessScripts? {
+        let present = requiredScripts.allSatisfy {
+            FileManager.default.fileExists(atPath: root.appending(path: $0).path)
+        }
+        return present ? HarnessScripts(root: root) : nil
+    }
+
     func plate() async throws -> PlateSnapshot {
         let output = try await script(Self.plateScript, ["--peek", "--json"], timeout: Self.plateTimeout)
         return try PlateSnapshot(json: Data(output.utf8))

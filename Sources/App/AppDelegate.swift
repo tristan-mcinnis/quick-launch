@@ -145,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.memoryCapture = recall
         vm.skillLibrary = SkillLibrary()
         vm.fileOpener = OpenCommandFileOpener()
-        vm.harnessScripts = HarnessScripts()
+        vm.harnessScripts = HarnessScripts.installed()
         vm.workItemResolver = WorkItemResolver()
         vm.attachmentFilePicker = SystemAttachmentFilePicker()
         vm.piHandoff = PiHandoffService()

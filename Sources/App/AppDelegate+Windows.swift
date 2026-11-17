@@ -306,7 +306,7 @@ extension AppDelegate {
         chat.memoryCapture = recall
         chat.skillLibrary = SkillLibrary()
         chat.fileOpener = OpenCommandFileOpener()
-        chat.harnessScripts = HarnessScripts()
+        chat.harnessScripts = HarnessScripts.installed()
         chat.workItemResolver = WorkItemResolver()
         chat.attachmentFilePicker = SystemAttachmentFilePicker()
         chat.piHandoff = PiHandoffService()

@@ -212,6 +212,14 @@ struct HarnessToolsTests {
 
     // MARK: - HarnessScripts
 
+    @Test func withoutTheOwnersScriptsThereIsNoHarness() throws {
+        let empty = FileManager.default.temporaryDirectory.appending(path: "no-skills-\(UUID().uuidString)")
+        #expect(HarnessScripts.installed(root: empty) == nil, "another Mac offers no plate, Todoist or calendar tool")
+        #expect(HarnessScripts.installed(root: Self.skillsStub()) != nil)
+        let toolbox = ChatToolbox(enabled: [.tasks, .calendar], harness: HarnessScripts.installed(root: empty))
+        #expect(toolbox.isEmpty)
+    }
+
     @Test func calendarWritesAreRefusedBeforeAnythingRuns() async {
         let runs = RunLog()
         let scripts = HarnessScripts(run: runs.runner(stdout: ""), python: { URL(fileURLWithPath: "/usr/bin/true") }, root: Self.skillsStub())
