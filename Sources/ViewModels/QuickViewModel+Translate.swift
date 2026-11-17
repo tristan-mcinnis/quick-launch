@@ -608,18 +608,6 @@ extension QuickViewModel {
         )
     }
 
-    /// Remove the launch-scoped selection: invalidate the snapshot, forget the
-    /// cached context (so a result is not written back to a stale target), and
-    /// suppress any automatic re-capture until a fresh launch or an explicit
-    /// attachment.
-    func clearLaunchSelection() {
-        launchSelection = nil
-        explicitTransformSource = nil
-        explicitTransformSourceLabel = nil
-        selectedTextContext = nil
-        selectionRecaptureSuppressed = true
-    }
-
     /// Clear every piece of launch-scoped selection state. Used when the user
     /// clears attachments and when the overlay is dismissed, so a stale
     /// selection or chip cannot survive into a later request or a reopen.

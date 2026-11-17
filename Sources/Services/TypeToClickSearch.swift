@@ -60,14 +60,6 @@ enum TypeToClickSearch {
         Index(candidates: candidates).rankedIndices(query: query)
     }
 
-    /// Returns the candidates themselves, sorted best-first for `query`.
-    static func rankedCandidates(
-        _ candidates: [TypeToClickSearchCandidate],
-        query: String
-    ) -> [TypeToClickSearchCandidate] {
-        rankedIndices(in: candidates, query: query).map { candidates[$0] }
-    }
-
     /// Normalized form of any searchable string: case- and diacritic-folded,
     /// punctuation turned into whitespace, whitespace collapsed.
     ///

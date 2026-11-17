@@ -36,7 +36,7 @@ struct AttachmentUsabilityRenderProofTests {
                 height: PanelSizing.quickAIHeight
             ), name: "att-selection-draft-\(suffix).png")
 
-            vm.clearLaunchSelection()
+            vm.clearLaunchScopedState()
             vm.attachmentTray.add(.file(URL(fileURLWithPath: "/tmp/Unavailable.pdf")))
             vm.attachmentTray.add(.file(URL(fileURLWithPath: "/tmp/Notes.txt")))
             await vm.attachmentTray.waitUntilRead()

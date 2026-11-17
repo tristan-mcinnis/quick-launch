@@ -251,13 +251,13 @@ struct TypeToClickSearchTests {
 
     // MARK: - Convenience / Sendable
 
-    @Test func rankedCandidatesReturnsTheCandidatesInRankOrder() {
+    @Test func rankedIndicesPointAtTheMatchingCandidates() {
         let candidates = [
             candidate("save", label: "Save", role: "button"),
             candidate("apple", label: "Apple", role: "button"),
         ]
-        let result = TypeToClickSearch.rankedCandidates(candidates, query: "save")
-        #expect(result.map(\.id) == ["save"])
+        let result = TypeToClickSearch.rankedIndices(in: candidates, query: "save")
+        #expect(result.map { candidates[$0].id } == ["save"])
     }
 
     @Test func preparedIndexCanBeReusedAcrossQueries() {

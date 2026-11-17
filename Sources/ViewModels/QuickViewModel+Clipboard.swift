@@ -157,15 +157,6 @@ extension QuickViewModel {
         return attachmentTray.items.count > before
     }
 
-    /// A Quick Launch image attachment from raw bytes. The shared reader
-    /// validates the data (nil for corrupt bytes) and keeps the exact bytes;
-    /// the payload's real MIME type is kept so JPEG and TIFF are not
-    /// relabelled as PNG. Empty/missing MIME falls back to PNG.
-    static func imageAttachment(from data: Data, mimeType: String?) -> QuickImageAttachment? {
-        let resolved = (mimeType?.isEmpty == false) ? mimeType! : "image/png"
-        return ClipboardImageReader.attachment(data: data, mimeType: resolved)
-    }
-
     // MARK: - Annotate a saved screenshot
 
     /// Open a fresh copy of a saved screenshot in Preview (or the system's

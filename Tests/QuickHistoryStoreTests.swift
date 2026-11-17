@@ -45,31 +45,6 @@ struct QuickHistoryStoreTests {
         #expect(conversation.model == "m")
     }
 
-    @Test func upsertKeepsNewestConversationAndBoundsHistory() {
-        let providerID = InferenceProvider.deepSeekID
-        let old = QuickConversation(
-            updatedAt: Date(timeIntervalSince1970: 1),
-            providerID: providerID,
-            model: "old"
-        )
-        let newest = QuickConversation(
-            updatedAt: Date(timeIntervalSince1970: 3),
-            providerID: providerID,
-            model: "new"
-        )
-        let middle = QuickConversation(
-            updatedAt: Date(timeIntervalSince1970: 2),
-            providerID: providerID,
-            model: "middle"
-        )
-
-        var result = QuickHistoryStore.upserting(old, into: [], limit: 2)
-        result = QuickHistoryStore.upserting(newest, into: result, limit: 2)
-        result = QuickHistoryStore.upserting(middle, into: result, limit: 2)
-
-        #expect(result.map(\.model) == ["new", "middle"])
-    }
-
     @Test func saveAndLoadRoundTrip() throws {
         let folder = freshFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

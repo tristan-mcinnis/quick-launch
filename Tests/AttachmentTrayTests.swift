@@ -123,9 +123,8 @@ struct AttachmentTrayTests {
         #expect(chip.detailLine == "The file is damaged")
         #expect(chip.accessibilityLabel == "Attachment: broken.docx, Word document, The file is damaged")
 
-        let sent = tray.takeForSend()
+        let sent = tray.readyContents
         #expect(sent.map(\.ref.name) == ["notes.md"], "a failed chip never rides the request")
-        #expect(tray.isEmpty)
     }
 
     @Test func aReadThatTakesTooLongFails() async {
@@ -277,14 +276,13 @@ struct AttachmentTrayTests {
         tray.add(file("report.pdf"))
         let send = Task { @MainActor in
             await tray.waitUntilRead()
-            return tray.takeForSend()
+            return tray.readyContents
         }
         try? await Task.sleep(for: .milliseconds(30))
         #expect(tray.isReading, "the send is still waiting")
         await extractor.release("report.pdf")
         let sent = await send.value
         #expect(sent.map(\.ref.name) == ["report.pdf"])
-        #expect(tray.isEmpty)
     }
 
     @Test func removingAChipStopsItsRead() async {

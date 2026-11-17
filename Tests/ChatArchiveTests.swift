@@ -934,3 +934,19 @@ struct ChatArchiveTests {
         #expect(projection.damaged.count == 1)
     }
 }
+
+private extension ChatArchive {
+    /// Shorthand for the tests: a plain user turn through `submit(_:)`.
+    @discardableResult
+    func commitUserTurn(
+        _ conversation: QuickConversation,
+        attachmentContents: [AttachmentContent] = [],
+        model: ModelSelection? = nil
+    ) async throws -> TurnCommit {
+        try await submit(TurnSubmission(
+            conversation: conversation,
+            attachmentContents: attachmentContents,
+            model: model
+        ))
+    }
+}

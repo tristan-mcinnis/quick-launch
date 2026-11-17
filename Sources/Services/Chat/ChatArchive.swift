@@ -183,21 +183,6 @@ actor ChatArchive {
         }
     }
 
-    /// Compatibility entry point. Prefer `submit(_:)`, which also carries the
-    /// context, tools, endpoint, and request snapshot.
-    @discardableResult
-    func commitUserTurn(
-        _ conversation: QuickConversation,
-        attachmentContents: [AttachmentContent] = [],
-        model: ModelSelection? = nil
-    ) async throws -> TurnCommit {
-        try await submit(TurnSubmission(
-            conversation: conversation,
-            attachmentContents: attachmentContents,
-            model: model
-        ))
-    }
-
     private func performSubmit(_ submission: TurnSubmission) async throws -> TurnCommit {
         let id = submission.conversation.id.uuidString
         try ensureNotDeleted(id)

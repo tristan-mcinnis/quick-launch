@@ -415,15 +415,6 @@ final class AttachmentTray {
         notice = nil
     }
 
-    /// The message was sent: hands over the chips that were read, in order,
-    /// and empties the tray. A chip still reading is dropped, so the send
-    /// waits (`waitUntilRead()`) first; a failed chip never rides.
-    func takeForSend() -> [AttachmentContent] {
-        let contents = readyContents
-        removeAll()
-        return contents
-    }
-
     private func stopReading(_ id: UUID) {
         reads[id]?.cancel()
         reads[id] = nil

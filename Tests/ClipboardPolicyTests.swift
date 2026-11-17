@@ -461,17 +461,16 @@ struct ClipboardPolicyTests {
 
     @Test func imageAttachmentValidatesMIMEAndKeepsWireBytes() throws {
         let jpeg = try makeJPEG()
-        let fromJPEG = QuickViewModel.imageAttachment(from: jpeg, mimeType: "image/jpeg")
+        let fromJPEG = ClipboardImageReader.attachment(data: jpeg, mimeType: "image/jpeg")
         #expect(fromJPEG?.mimeType == "image/jpeg", "a JPEG is not relabelled PNG")
         #expect(fromJPEG?.data == jpeg, "the wire bytes are preserved exactly")
         #expect(fromJPEG?.pixelWidth == 4)
 
         let png = makePNG()
-        #expect(QuickViewModel.imageAttachment(from: png, mimeType: "image/png")?.mimeType == "image/png")
-        #expect(QuickViewModel.imageAttachment(from: png, mimeType: nil)?.mimeType == "image/png")
+        #expect(ClipboardImageReader.attachment(data: png, mimeType: "image/png")?.mimeType == "image/png")
 
         #expect(
-            QuickViewModel.imageAttachment(from: Data([0x00, 0x01, 0x02]), mimeType: "image/jpeg") == nil,
+            ClipboardImageReader.attachment(data: Data([0x00, 0x01, 0x02]), mimeType: "image/jpeg") == nil,
             "corrupt bytes are refused, not relabelled"
         )
     }

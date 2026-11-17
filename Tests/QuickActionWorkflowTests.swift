@@ -330,7 +330,7 @@ struct QuickActionWorkflowTests {
         )
         vm.rememberSelectionTarget(target)
         vm.captureLaunchSelection()
-        vm.clearLaunchSelection()
+        vm.clearLaunchScopedState()
         vm.input = "Hello"
 
         await vm.submit()
@@ -468,7 +468,7 @@ struct QuickActionWorkflowTests {
         let vm = QuickViewModel(settings: settings, service: service, selectedTextService: selection)
         vm.rememberSelectionTarget(target)
         vm.captureLaunchSelection()
-        vm.clearLaunchSelection()
+        vm.clearLaunchScopedState()
 
         let action = vm.settings.savedPrompts.first(where: { $0.alias == "improve" })!
         await vm.perform(action: action)
@@ -545,7 +545,7 @@ struct QuickActionWorkflowTests {
         vm.captureLaunchSelection()
         // Removing the chip suppresses automatic re-capture and invalidates
         // the cached context.
-        vm.clearLaunchSelection()
+        vm.clearLaunchScopedState()
         #expect(vm.launchSelection == nil)
 
         let attached = vm.attachSelectedText()

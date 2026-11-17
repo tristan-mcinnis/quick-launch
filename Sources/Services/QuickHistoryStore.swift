@@ -127,16 +127,6 @@ enum QuickHistoryStore {
         store(for: fileURL).save(bounded(conversations, limit: limit))
     }
 
-    static func upserting(
-        _ conversation: QuickConversation,
-        into conversations: [QuickConversation],
-        limit: Int
-    ) -> [QuickConversation] {
-        var result = conversations.filter { $0.id != conversation.id }
-        result.append(conversation)
-        return bounded(result, limit: limit)
-    }
-
     /// The id of the pinned conversation of the retired Chief of Staff. Old
     /// history may still hold it; it is dropped on load and never listed.
     static let retiredPinnedChatID = UUID(uuidString: "C0F5C0F5-0000-4000-8000-000000000C05")!
