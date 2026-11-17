@@ -244,7 +244,9 @@ struct QuickSettings: Codable, Sendable {
     // default, with an optional single-action dismissal. Disabling its direct
     // hotkey keeps the launcher command available.
     var typeToClickHotkey: ActionHotkey = ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
-    var typeToClickHotkeyEnabled: Bool = true
+    /// Off by default (2026-11-17): Type to Click reads the screen, so it is
+    /// switched on by choice in Settings › General › Features.
+    var typeToClickHotkeyEnabled: Bool = false
     var typeToClickContinuation: TypeToClickContinuation = .continuous
 
     // The optional direct Quick AI hotkey, off by default: opens the Quick AI
@@ -395,7 +397,7 @@ struct QuickSettings: Codable, Sendable {
             ?? ActionHotkey(keyCode: 8, modifiers: 262_144 | 524_288)
         typeToClickHotkeyEnabled = try c.decodeIfPresent(
             Bool.self, forKey: .typeToClickHotkeyEnabled
-        ) ?? true
+        ) ?? false
         typeToClickContinuation = try c.decodeIfPresent(
             TypeToClickContinuation.self, forKey: .typeToClickContinuation
         ) ?? .continuous

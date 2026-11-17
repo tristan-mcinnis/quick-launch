@@ -262,6 +262,7 @@ struct ShortcutRegistryTests {
 
     @Test func aRebindCannotTakeAGlobalHotkey() {
         var settings = QuickSettings()
+        settings.typeToClickHotkeyEnabled = true
         let launcher = ActionHotkey(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
         #expect(settings.setShortcut(launcher, for: .newChat)?.contains("main Quick Launch hotkey") == true)
         #expect(settings.setShortcut(settings.translatorHotkey, for: .newChat)?.contains("Translator") == true)
@@ -295,6 +296,7 @@ struct ShortcutRegistryTests {
         #expect(translator.translatorHotkeyConflict() == "This conflicts with Rename Chat.")
 
         var typeToClick = QuickSettings()
+        typeToClick.typeToClickHotkeyEnabled = true
         typeToClick.typeToClickHotkey = rename
         #expect(typeToClick.typeToClickHotkeyConflict() == "This conflicts with Rename Chat.")
 

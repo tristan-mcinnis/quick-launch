@@ -171,6 +171,10 @@ enum SettingsDestinationIndex {
 
     private static let groupDestinations: [SettingsDestination] = [
         // General
+        group("general.features", .general, "general.features", "Features",
+              "Turn Type to Click, Clipboard History, the Quick AI hotkey, and double-tap ⌘ on or off",
+              ["features", "on", "off", "enable", "disable", "turn off", "type to click", "screen reading",
+               "clipboard history", "quick ai hotkey", "double tap"]),
         group("general.hotkeys", .general, "general.hotkeys", "Hotkeys & Shortcuts",
               "Open Quick Launch, Translator, and Type to Click; what Return does after",
               ["hotkey", "shortcut", "key", "open quick launch", "translator", "type to click", "after return"]),

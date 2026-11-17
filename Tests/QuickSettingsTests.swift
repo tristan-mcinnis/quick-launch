@@ -151,7 +151,7 @@ struct QuickSettingsTests {
         #expect(legacy.typeToClickHotkey == ActionHotkey(
             keyCode: 8, modifiers: 262_144 | 524_288
         ))
-        #expect(legacy.typeToClickHotkeyEnabled)
+        #expect(!legacy.typeToClickHotkeyEnabled, "off unless chosen (2026-11-17)")
     }
 
     @Test func testLauncherItemConfigurationRoundTrips() {
@@ -237,6 +237,7 @@ struct QuickSettingsTests {
 
     @Test func clipboardHistoryConflictNamesDedicatedHotkeys() {
         var settings = QuickSettings()
+        settings.typeToClickHotkeyEnabled = true
         settings.clipboardHistoryHotkey = settings.typeToClickHotkey
         #expect(settings.clipboardHistoryHotkeyConflict()?.contains("Type to Click") == true)
 

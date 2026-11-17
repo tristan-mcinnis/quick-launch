@@ -109,6 +109,7 @@ struct TranslatorKeyTests {
             QuickViewModel.FooterHint(label: "Copy", keys: ["⌘", "↩"]),
             QuickViewModel.FooterHint(label: "Paste back", keys: ["⇧", "⌘", "↩"]),
             QuickViewModel.FooterHint(label: "Swap", keys: ["⌘", "S"]),
+            QuickViewModel.FooterHint(label: "Actions", keys: ["⌘", "K"]),
             QuickViewModel.FooterHint(label: "Close", keys: ["esc"]),
         ])
         #expect(!model.footerHints.contains { $0.keys == ["⌘", "P"] })

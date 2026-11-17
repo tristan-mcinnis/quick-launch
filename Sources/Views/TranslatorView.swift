@@ -12,6 +12,8 @@ struct TranslatorView: View {
     @FocusState private var sourceFocused: Bool
     @FocusState private var pickerFocused: Bool
     @State private var pickerIndex = 0
+    @State private var listIndex = 0
+    @FocusState private var listFocused: Bool
 
     static let size = NSSize(width: 680, height: 520)
 
@@ -23,6 +25,8 @@ struct TranslatorView: View {
             HouseDivider()
             if model.languagePicker != nil {
                 languagePicker
+            } else if model.list != nil {
+                listPane
             } else {
                 panes
             }
@@ -39,6 +43,10 @@ struct TranslatorView: View {
         .onChange(of: model.languagePicker) { _, side in
             pickerIndex = 0
             if side != nil { focusPicker() } else { focusSource() }
+        }
+        .onChange(of: model.list) { _, list in
+            listIndex = 0
+            if list != nil { FocusRequest.apply($listFocused) }
         }
     }
 
@@ -249,6 +257,131 @@ struct TranslatorView: View {
                 }
                 .padding(.horizontal, AQDesign.Space.row)
             }
+        }
+    }
+
+    /// ⌘K: the action list, or Translation History, with a search field
+    /// over it, in the language lists' style.
+    private var listPane: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: AQDesign.Space.row) {
+                Image(systemName: "magnifyingglass")
+                    .font(AQDesign.TypeToken.glyph)
+                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .accessibilityHidden(true)
+                TextField(model.list == .history ? "Search translations" : "Search actions", text: $model.listQuery)
+                    .textFieldStyle(.plain)
+                    .font(AQDesign.TypeToken.input)
+                    .focused($listFocused)
+                    .onSubmit { activateList(listIndex) }
+                    .onKeyPress(.downArrow) { moveList(1); return .handled }
+                    .onKeyPress(.upArrow) { moveList(-1); return .handled }
+                    .onChange(of: model.listQuery) { _, _ in listIndex = 0 }
+                KeyCapGroup(keys: ["esc"])
+            }
+            .padding(.horizontal, AQDesign.Space.panel)
+            .frame(height: AQDesign.inputHeight)
+            HouseDivider()
+            if model.list == .history {
+                historyList
+            } else {
+                actionList
+            }
+        }
+    }
+
+    private var listInsets: EdgeInsets {
+        EdgeInsets(
+            top: AQDesign.Space.standard,
+            leading: AQDesign.Space.standard,
+            bottom: AQDesign.Space.standard,
+            trailing: AQDesign.Space.standard
+        )
+    }
+
+    private var actionList: some View {
+        SelectableListPane(
+            items: model.actionOptions,
+            selectedIndex: $listIndex,
+            rowSpacing: PanelSizing.actionRowSpacing,
+            rowHeight: AQDesign.rowHeight,
+            listInsets: listInsets,
+            onActivate: { action in model.chooseAction(action) }
+        ) { _, action, _ in
+            HStack(spacing: AQDesign.Space.row) {
+                IconTile {
+                    Image(systemName: action.symbol)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                }
+                Text(action.title)
+                    .font(AQDesign.TypeToken.label)
+                    .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                Spacer()
+                if !action.keyCaps.isEmpty { KeyCapGroup(keys: action.keyCaps) }
+            }
+            .padding(.horizontal, AQDesign.Space.row)
+        }
+    }
+
+    @ViewBuilder
+    private var historyList: some View {
+        let records = model.historyOptions
+        if records.isEmpty {
+            Text(model.history.isEmpty ? "No translations yet" : "No translation matches")
+                .font(AQDesign.TypeToken.body)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            SelectableListPane(
+                items: records,
+                selectedIndex: $listIndex,
+                rowSpacing: PanelSizing.actionRowSpacing,
+                rowHeight: House.Control.large,
+                listInsets: listInsets,
+                onActivate: { record in model.reopen(record) }
+            ) { _, record, _ in
+                HStack(spacing: AQDesign.Space.row) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.oneLine(record.translation))
+                            .font(AQDesign.TypeToken.label)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                            .lineLimit(1)
+                        Text(Self.oneLine(record.source))
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: AQDesign.Space.row)
+                    Text(record.translatedAt.formatted(.relative(presentation: .named)))
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .padding(.horizontal, AQDesign.Space.row)
+            }
+        }
+    }
+
+    private static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    private func moveList(_ delta: Int) {
+        let count = model.list == .history ? model.historyOptions.count : model.actionOptions.count
+        listIndex = ListSelection.wrappedIndex(listIndex, by: delta, count: count)
+    }
+
+    private func activateList(_ index: Int) {
+        if model.list == .history {
+            let records = model.historyOptions
+            guard records.indices.contains(index) else { return }
+            model.reopen(records[index])
+        } else {
+            let actions = model.actionOptions
+            guard actions.indices.contains(index) else { return }
+            model.chooseAction(actions[index])
         }
     }
 

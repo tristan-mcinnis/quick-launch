@@ -87,6 +87,7 @@ struct ItemActionTests {
 
     @Test func typeToClickCommandUsesTheCanonicalEditableHotkey() throws {
         let vm = QuickViewModel()
+        vm.settings.typeToClickHotkeyEnabled = true
         let item = try #require(vm.systemCommands.first {
             $0.itemID == "type-to-click.mode"
         })

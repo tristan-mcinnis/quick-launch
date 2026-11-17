@@ -14,6 +14,7 @@ struct GeneralTab: View {
     var body: some View {
         SettingsPaneScroller(pane: .general) {
             VStack(alignment: .leading, spacing: SettingsMetrics.cardGap) {
+                featuresCard.settingsAnchor("general.features")
                 hotkeysCard.settingsAnchor("general.hotkeys")
                 behaviourCard.settingsAnchor("general.behaviour")
                 caffeinateCard.settingsAnchor("general.caffeinate")
@@ -29,6 +30,53 @@ struct GeneralTab: View {
             .padding(.horizontal, SettingsMetrics.paneInset)
             .padding(.bottom, SettingsMetrics.paneBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// One place to turn each feature on or off (2026-11-17). Each switch is
+    /// the same setting its own card uses, so the two always agree.
+    private var featuresCard: some View {
+        SettingsCard("Features") {
+            SettingsRow(
+                title: "Type to Click",
+                detail: "Reads the screen so you can type a label to click it. Off by default.",
+                isFirst: true
+            ) {
+                Toggle(
+                    "Type to Click",
+                    isOn: viewModel.settingsBinding(\.typeToClickHotkeyEnabled) { _ in
+                        NotificationCenter.default.post(name: .typeToClickSettingsChanged, object: nil)
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            SettingsRow(title: "Clipboard History") {
+                Toggle(
+                    "Clipboard History",
+                    isOn: viewModel.settingsBinding(\.clipboardHistoryEnabled) { _ in
+                        NotificationCenter.default.post(name: .clipboardHistorySettingsChanged, object: nil)
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            SettingsRow(title: "Quick AI hotkey") {
+                Toggle(
+                    "Quick AI hotkey",
+                    isOn: viewModel.settingsBinding(\.quickAIHotkeyEnabled) { _ in
+                        NotificationCenter.default.post(name: .quickAIHotkeyChanged, object: nil)
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+            SettingsRow(title: "Double-tap right \u{2318} sends the focused window to AI") {
+                Toggle(
+                    "Double-tap right \u{2318}",
+                    isOn: viewModel.settingsBinding(\.screenAwarenessDoubleTap) { _ in
+                        NotificationCenter.default.post(name: .screenAwarenessSettingsChanged, object: nil)
+                    }
+                )
+                .toggleStyle(InkToggleStyle())
+            }
         }
     }
 

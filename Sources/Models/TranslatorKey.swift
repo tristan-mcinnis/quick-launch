@@ -23,6 +23,8 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
     case useClipboard
     /// ⌘W: close the window.
     case close
+    /// ⌘K: the action list, with Translation History.
+    case actions
 
     var shortcut: KeyShortcut {
         switch self {
@@ -33,6 +35,7 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
         case .target: .command("t")
         case .useClipboard: .commandShift("v")
         case .close: .command("w")
+        case .actions: .command("k")
         }
     }
 
@@ -42,6 +45,7 @@ enum TranslatorKey: CaseIterable, Equatable, Sendable {
         case .copy: "Copy"
         case .pasteBack: "Paste back"
         case .swap: "Swap"
+        case .actions: "Actions"
         // The language chips show their own keys, and the footer has no room.
         case .source, .target, .useClipboard, .close: nil
         }
@@ -84,7 +88,8 @@ extension TranslatorModel {
     /// The word beside the footer's status dot, as the launcher footer's
     /// context: "Translator", or which language list is open.
     var footerContext: String {
-        switch languagePicker {
+        if let context = listFooterContext { return context }
+        return switch languagePicker {
         case .source: "Source Language"
         case .target: "Target Language"
         case nil: "Translator"
@@ -94,7 +99,13 @@ extension TranslatorModel {
     /// The footer's key hints, in the launcher footer's own hint type. They
     /// come from `TranslatorKey`, so the footer names the keys that work.
     var footerHints: [QuickViewModel.FooterHint] {
-        if languagePicker != nil {
+        if list == .history {
+            return [
+                QuickViewModel.FooterHint(label: "Open", keys: KeyShortcut.returnKey.keyCaps),
+                QuickViewModel.FooterHint(label: "Back", keys: ["esc"]),
+            ]
+        }
+        if languagePicker != nil || list != nil {
             return [
                 QuickViewModel.FooterHint(label: "Choose", keys: KeyShortcut.returnKey.keyCaps),
                 QuickViewModel.FooterHint(label: "Back", keys: ["esc"]),

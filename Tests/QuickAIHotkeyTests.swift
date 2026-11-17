@@ -122,6 +122,7 @@ struct QuickAIHotkeyTests {
 
         var typeToClick = QuickSettings()
         typeToClick.quickAIHotkeyEnabled = true
+        typeToClick.typeToClickHotkeyEnabled = true
         typeToClick.typeToClickHotkey = key
         #expect(typeToClick.typeToClickHotkeyConflict()?.contains("Quick AI") == true)
 

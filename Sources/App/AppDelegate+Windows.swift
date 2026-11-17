@@ -124,6 +124,7 @@ extension AppDelegate {
         model.onCommit = { record in
             TranslationHistoryStore.append(record, to: TranslationHistoryStore.defaultURL())
         }
+        model.historyLoader = { TranslationHistoryStore.load(from: TranslationHistoryStore.defaultURL()) }
         return model
     }
 
@@ -150,7 +151,14 @@ extension AppDelegate {
         panel.shortcutHandler = { [weak self, weak model] characters, keyCode, modifiers in
             guard let self, let model else { return false }
             if VirtualKey(rawValue: keyCode) == .escape, modifiers.isEmpty {
-                if model.languagePicker != nil {
+                if model.list == .history {
+                    // Back to the action list it was opened from.
+                    model.list = .actions
+                    model.listQuery = ""
+                } else if model.list != nil {
+                    model.list = nil
+                    model.requestSourceFocus()
+                } else if model.languagePicker != nil {
                     model.languagePicker = nil
                 } else if !model.source.isEmpty {
                     model.clear()
@@ -161,29 +169,41 @@ extension AppDelegate {
             }
             // The window's own table; ⌘P is not in it (it is the chat list
             // elsewhere), the target language is ⌘T.
-            switch TranslatorKey.matching(characters: characters, keyCode: keyCode, modifiers: modifiers) {
-            case .copy:
-                model.copyTranslation()
-                self.hideTranslator()
-            case .pasteBack:
-                self.hideTranslator()
-                Task { @MainActor in _ = await model.pasteBack() }
-            case .swap:
-                model.swap()
-            case .source:
-                model.toggleLanguagePicker(.source)
-            case .target:
-                model.toggleLanguagePicker(.target)
-            case .useClipboard:
-                model.useClipboardAsSource()
-            case .close:
-                self.hideTranslator()
-            case nil:
+            guard let key = TranslatorKey.matching(characters: characters, keyCode: keyCode, modifiers: modifiers) else {
                 return false
             }
+            self.performTranslatorKey(key, model: model)
             return true
         }
+        model.performKey = { [weak self, weak model] key in
+            guard let self, let model else { return }
+            self.performTranslatorKey(key, model: model)
+        }
         return panel
+    }
+
+    /// One Translator key, from its shortcut or from the ⌘K action list.
+    func performTranslatorKey(_ key: TranslatorKey, model: TranslatorModel) {
+        switch key {
+        case .copy:
+            model.copyTranslation()
+            hideTranslator()
+        case .pasteBack:
+            hideTranslator()
+            Task { @MainActor in _ = await model.pasteBack() }
+        case .swap:
+            model.swap()
+        case .source:
+            model.toggleLanguagePicker(.source)
+        case .target:
+            model.toggleLanguagePicker(.target)
+        case .useClipboard:
+            model.useClipboardAsSource()
+        case .close:
+            hideTranslator()
+        case .actions:
+            model.toggleActionList()
+        }
     }
 
     func showSettingsPanel(destination: SettingsDestination? = nil) {

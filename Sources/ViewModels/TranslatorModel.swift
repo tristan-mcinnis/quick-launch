@@ -188,6 +188,16 @@ final class TranslatorModel {
     var message: String?
     var languagePicker: LanguagePickerSide?
     var pickerQuery = ""
+    /// The ⌘K list open in the window (actions or Translation History).
+    var list: TranslatorList?
+    var listQuery = ""
+    /// Translation History as last read, newest first.
+    var history: [TranslationRecord] = []
+    /// Reads the saved history. The app reads `TranslationHistoryStore`;
+    /// tests pass their own.
+    @ObservationIgnored var historyLoader: () -> [TranslationRecord] = { [] }
+    /// Runs a key from the action list exactly as its shortcut does.
+    @ObservationIgnored var performKey: ((TranslatorKey) -> Void)?
     var pendingCommit: Commit?
 
     enum Commit: Equatable { case copy, paste }
@@ -261,6 +271,8 @@ final class TranslatorModel {
         message = nil
         languagePicker = nil
         pickerQuery = ""
+        list = nil
+        listQuery = ""
         requestSourceFocus()
         pasteTarget = selectionTarget
         knownSourceOfSwappedText = nil
@@ -326,6 +338,7 @@ final class TranslatorModel {
     }
 
     func toggleLanguagePicker(_ side: LanguagePickerSide) {
+        list = nil
         languagePicker = languagePicker == side ? nil : side
         pickerQuery = ""
     }
@@ -466,6 +479,21 @@ final class TranslatorModel {
         if !canExchangePanes, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             translateNow(direction: .keepTarget)
         }
+    }
+
+    /// Shows a saved translation in both panes, the target set to its
+    /// language, with nothing sent to the model.
+    func loadRecord(_ record: TranslationRecord) {
+        cancelTranslation()
+        knownSourceOfSwappedText = nil
+        if let language = TranslationTarget.named(record.target), language != target {
+            applyTarget(language)
+            onLanguagesChange?()
+        }
+        source = record.source
+        translation = record.translation
+        pinyin = target.isChinese ? Pinyin.romanize(translation) : nil
+        detectedSource = nil
     }
 
     func clear() {
