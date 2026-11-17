@@ -528,10 +528,41 @@ struct QuickAIThread: View {
                 ChatAnswerContextRecord(summary: .unrecorded, archiveFailure: failure)
             }
             ForEach(Array(records.filter { !$0.drawsAboveAnswer }.enumerated()), id: \.offset) { _, record in
-                toolLine(record.summary, symbol: record.systemImage)
+                if record.kind == .todoistProposal, let proposal = record.proposal {
+                    if !viewModel.isTodoistProposalAdded(proposal, in: message) {
+                        todoistProposalRow(proposal, answerID: message.id)
+                    }
+                } else {
+                    toolLine(record.summary, symbol: record.systemImage)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A task the model proposed: the task line and the one button that
+    /// adds it. Gone once the Added line is under the answer.
+    private func todoistProposalRow(_ proposal: TodoistProposal, answerID: UUID) -> some View {
+        let adding = viewModel.todoistAddsInFlight.contains(proposal.id)
+        return HStack(spacing: House.Spacing.xs) {
+            Image(systemName: "plus.circle")
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                .frame(width: House.Control.keyCap)
+            Text(proposal.line)
+                .font(AQDesign.TypeToken.metadata)
+                .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                .lineLimit(2)
+            Button(adding ? "Adding…" : "Add to Todoist") {
+                Task { await viewModel.addProposedTodoist(proposal, answerID: answerID) }
+            }
+            .controlSize(.small)
+            .disabled(adding || viewModel.harnessScripts == nil)
+            .help("Adds this task to your Todoist Inbox")
+        }
+        .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Proposed Todoist task: \(proposal.line)")
     }
 
     /// The lines of the ask in flight: an explicit web search, then each

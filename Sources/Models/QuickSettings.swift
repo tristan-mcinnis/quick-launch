@@ -318,6 +318,8 @@ struct QuickSettings: Codable, Sendable {
     var newChatMemoryEnabled: Bool = true
     var newChatTasksEnabled: Bool = true
     var newChatSkillsEnabled: Bool = true
+    var newChatFilesEnabled: Bool = true
+    var newChatCalendarEnabled: Bool = true
     /// The size the user dragged the Quick AI surface to. The standard
     /// 750 × 475 until the first drag; never smaller than that. Root search
     /// is not user-sized and has no stored size.
@@ -538,6 +540,8 @@ struct QuickSettings: Codable, Sendable {
         newChatTasksEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatTasksEnabled)
             ?? (decodedConfigurationVersion < 26 ? newChatMemoryEnabled : true)
         newChatSkillsEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatSkillsEnabled) ?? true
+        newChatFilesEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatFilesEnabled) ?? true
+        newChatCalendarEnabled = try c.decodeIfPresent(Bool.self, forKey: .newChatCalendarEnabled) ?? true
         // A blob from before the surface was resizable has no size: the
         // standard one. A malformed size is dropped on its own rather than
         // failing the whole decode, which would reset every other setting.

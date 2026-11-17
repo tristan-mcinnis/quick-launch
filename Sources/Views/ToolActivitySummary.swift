@@ -83,6 +83,11 @@ extension ChatToolRecord {
         case .skill: "skills"
         case .context: "context"
         case .capture: "capture"
+        case .page: "a page"
+        case .open: "work files"
+        case .plate: "the plate"
+        case .calendar: "calendar"
+        case .todoistProposal, .todoistAdded: "Todoist"
         }
     }
 }

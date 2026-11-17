@@ -36,7 +36,7 @@ struct ChatSettingsTests {
 
     @Test func anOldBlobSplitsTasksFromMemoryAndKeepsItsWebSearchChoice() throws {
         let off = try decode(#"{"configurationVersion":25,"modelWebSearchEnabled":false}"#)
-        #expect(off.newChatTools == [.memory, .tasks, .skills])
+        #expect(off.newChatTools == [.memory, .tasks, .skills, .files, .calendar], "the new tools start on")
         #expect(off.newChatMemoryEnabled)
         #expect(off.newChatTasksEnabled)
         let memoryOff = try decode(#"{"configurationVersion":25,"newChatMemoryEnabled":false}"#)
@@ -56,8 +56,12 @@ struct ChatSettingsTests {
         settings.setNewChatTool(.memory, on: false)
         settings.setNewChatTool(.tasks, on: false)
         settings.setNewChatTool(.skills, on: false)
+        settings.setNewChatTool(.files, on: false)
+        settings.setNewChatTool(.calendar, on: false)
         let back = try JSONDecoder().decode(QuickSettings.self, from: JSONEncoder().encode(settings))
         #expect(back.newChatTools == [.web])
+        #expect(back.newChatFilesEnabled == false)
+        #expect(back.newChatCalendarEnabled == false)
         #expect(back.newChatMemoryEnabled == false)
         #expect(back.newChatTasksEnabled == false)
         #expect(back.newChatSkillsEnabled == false)
@@ -67,6 +71,8 @@ struct ChatSettingsTests {
         let vm = make {
             $0.newChatSkillsEnabled = false
             $0.modelWebSearchEnabled = false
+            $0.newChatFilesEnabled = false
+            $0.newChatCalendarEnabled = false
         }
         #expect(vm.chatTools == [.memory, .tasks])
         #expect(vm.chatToolsSummary == "Memory, Tasks on")

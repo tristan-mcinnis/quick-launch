@@ -147,9 +147,9 @@ struct ChatToolsViewModelTests {
 
     @Test func defaultsAreMemoryTasksAndSkillsWithWebPerTheSetting() {
         let on = make { $0.modelWebSearchEnabled = true }
-        #expect(on.chatTools == [.memory, .tasks, .skills, .web])
+        #expect(on.chatTools == [.memory, .tasks, .skills, .web, .files, .calendar])
         let off = make { $0.modelWebSearchEnabled = false }
-        #expect(off.chatTools == [.memory, .tasks, .skills])
+        #expect(off.chatTools == [.memory, .tasks, .skills, .files, .calendar])
     }
 
     @Test func toolsChosenBeforeTheFirstQuestionGoToTheChatItStarts() async {
@@ -159,15 +159,15 @@ struct ChatToolsViewModelTests {
         vm.toggleChatTool(.skills)
         vm.toggleChatTool(.web)
         #expect(vm.currentConversation == nil)
-        #expect(vm.chatTools == [.memory, .tasks])
+        #expect(vm.chatTools == [.memory, .tasks, .files, .calendar])
 
         await ask(vm, mock, "hello", deltas: [StreamDelta(text: "Hi.", finishReason: "stop")])
-        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks])
+        #expect(vm.currentConversation?.enabledTools == [.memory, .tasks, .files, .calendar])
         #expect(vm.pendingChatTools == nil)
 
         // A new chat starts on the defaults again.
         vm.startNewConversation()
-        #expect(vm.chatTools == [.memory, .tasks, .skills, .web])
+        #expect(vm.chatTools == [.memory, .tasks, .skills, .web, .files, .calendar])
     }
 
     @Test func toolsChosenOnTheOpenChatCarryIntoTheChatTheNextQuestionStarts() async throws {
@@ -254,7 +254,7 @@ struct ChatToolsViewModelTests {
         #expect(vm.performShortcut(characters: "k", keyCode: 40, modifiers: [.command, .option]))
         #expect(vm.isActionPalettePresented)
         #expect(vm.actionPaletteSubmenu == .tools)
-        #expect(vm.resultActionDetail(.tools) == "Memory, Tasks, Skills, Web search on")
+        #expect(vm.resultActionDetail(.tools) == "Memory, Tasks, Skills, Web search, Work files, Calendar on")
     }
 
     @Test func answerActionKeysStayUniqueAndOffThePanelsOwnKeys() {
@@ -401,6 +401,56 @@ struct ChatToolsViewModelTests {
         await vm.performResultAction(.captureToMemory)
         #expect(await memory.captured.count == 2)
         #expect(vm.conversationMessages.last?.tools.count == 1)
+    }
+
+    // MARK: - Add to Todoist
+
+    @Test func addToTodoistRunsOnlyOnThePressAndOnce() async throws {
+        let mock = MockQuickService()
+        let vm = make(service: mock)
+        let harness = FakeHarness()
+        vm.harnessScripts = harness
+        let proposal = TodoistProposal(content: "Call Sam", due: "tomorrow", priority: 2)
+        await ask(vm, mock, "remind me to call Sam tomorrow", deltas: [
+            StreamDelta(text: nil, finishReason: nil, toolRecord: ChatToolRecord(
+                kind: .todoistProposal, summary: "Add to Todoist: \(proposal.line)", proposal: proposal
+            )),
+            StreamDelta(text: "I can add: Call Sam, tomorrow, p2.", finishReason: "stop"),
+        ])
+        #expect(await harness.added.isEmpty, "nothing is added before the press")
+        let answer = try #require(vm.conversationMessages.last)
+        #expect(!vm.isTodoistProposalAdded(proposal, in: answer))
+
+        await vm.addProposedTodoist(proposal, answerID: answer.id)
+        #expect(await harness.added == [proposal])
+        #expect(vm.composerConfirmation == "Added to Todoist")
+        let after = try #require(vm.conversationMessages.last)
+        #expect(vm.isTodoistProposalAdded(proposal, in: after))
+        let saved = try #require(vm.history.first { $0.id == vm.currentConversation?.id })
+        #expect(saved.messages.last?.tools.map(\.kind) == [.todoistProposal, .todoistAdded])
+
+        // A second press adds nothing more.
+        await vm.addProposedTodoist(proposal, answerID: answer.id)
+        #expect(await harness.added.count == 1)
+    }
+
+    @Test func aFailedTodoistAddSaysSoAndLeavesTheButton() async throws {
+        let mock = MockQuickService()
+        let vm = make(service: mock)
+        let harness = FakeHarness()
+        await harness.setAddError(HarnessScriptError.failed("Todoist add failed: no token"))
+        vm.harnessScripts = harness
+        let proposal = TodoistProposal(content: "Call Sam")
+        await ask(vm, mock, "add call Sam", deltas: [
+            StreamDelta(text: nil, finishReason: nil, toolRecord: ChatToolRecord(
+                kind: .todoistProposal, summary: "Add to Todoist: Call Sam", proposal: proposal
+            )),
+            StreamDelta(text: "Ready to add.", finishReason: "stop"),
+        ])
+        let answer = try #require(vm.conversationMessages.last)
+        await vm.addProposedTodoist(proposal, answerID: answer.id)
+        #expect(vm.errorMessage?.contains("no token") == true)
+        #expect(!vm.isTodoistProposalAdded(proposal, in: try #require(vm.conversationMessages.last)))
     }
 
     @Test func aFailedCaptureSaysSoAndLeavesNoLine() async {

@@ -230,6 +230,13 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var skillLibrary: SkillLibrary?
     /// Open Source: `/usr/bin/open` on a source's local path.
     var fileOpener: (any LocalFileOpening)?
+    /// The plate, the work calendar and the Todoist add, through the skills
+    /// scripts. Nil in tests that do not fake it.
+    var harnessScripts: (any HarnessScripting)?
+    /// `open_work_item`: finds a project or its current document under Work.
+    @ObservationIgnored var workItemResolver: WorkItemResolver?
+    /// Todoist proposals whose Add is running, so a second press waits.
+    var todoistAddsInFlight: Set<UUID> = []
     /// The folders Open Source may open from (the memory repo, the skills repo
     /// and the Work folder); tests point it at a temporary folder.
     @ObservationIgnored var sourceRoots: [URL] = ChatSource.defaultRoots

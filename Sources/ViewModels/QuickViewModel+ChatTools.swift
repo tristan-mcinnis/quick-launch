@@ -40,9 +40,12 @@ extension QuickViewModel {
     /// unavailable is simply not offered to the model.
     func isChatToolAvailable(_ kind: ChatToolKind) -> Bool {
         switch kind {
-        case .memory, .tasks: memoryService != nil
+        case .memory: memoryService != nil
+        case .tasks: memoryService != nil || harnessScripts != nil
         case .skills: skillLibrary != nil
-        case .web: webSearchService != nil
+        case .web: webSearchService != nil || pageReader != nil
+        case .files: workItemResolver != nil && fileOpener != nil
+        case .calendar: harnessScripts != nil
         }
     }
 
@@ -278,6 +281,41 @@ extension QuickViewModel {
             persistCurrentConversation()
         }
         confirmInComposer("Captured")
+        requestInputFocus()
+    }
+
+    // MARK: - Add to Todoist
+
+    /// Whether this answer already holds the Added line for `proposal`.
+    func isTodoistProposalAdded(_ proposal: TodoistProposal, in message: QuickMessage) -> Bool {
+        message.tools.contains { $0.kind == .todoistAdded && $0.proposal?.id == proposal.id }
+    }
+
+    /// The user's press on Add to Todoist under an answer: the only path
+    /// that writes a task. The model can only propose one.
+    func addProposedTodoist(_ proposal: TodoistProposal, answerID: UUID) async {
+        guard let harnessScripts, !todoistAddsInFlight.contains(proposal.id),
+              let message = currentConversation?.messages.first(where: { $0.id == answerID }),
+              !isTodoistProposalAdded(proposal, in: message)
+        else { return }
+        todoistAddsInFlight.insert(proposal.id)
+        defer { todoistAddsInFlight.remove(proposal.id) }
+        do {
+            _ = try await harnessScripts.addTodoist(proposal)
+        } catch {
+            errorMessage = "Add to Todoist failed: \(error.localizedDescription)"
+            requestInputFocus()
+            return
+        }
+        errorMessage = nil
+        // The chat may have changed during the wait; find the answer again.
+        if let index = currentConversation?.messages.firstIndex(where: { $0.id == answerID }) {
+            var records = currentConversation?.messages[index].tools ?? []
+            records.append(ChatToolRecord(kind: .todoistAdded, summary: "Added to Todoist: \(proposal.line)", proposal: proposal))
+            currentConversation?.messages[index].toolRecords = records
+            persistCurrentConversation()
+        }
+        confirmInComposer("Added to Todoist")
         requestInputFocus()
     }
 }

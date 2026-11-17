@@ -152,7 +152,7 @@ struct AssistantModelTests {
     }
 
     @Test func theToolCatalogHasNoVaultSearch() {
-        #expect(ChatToolKind.allCases == [.memory, .tasks, .skills, .web])
+        #expect(ChatToolKind.allCases == [.memory, .tasks, .skills, .web, .files, .calendar])
         #expect(ChatToolKind(rawValue: "vault") == nil)
         #expect(ChatToolKind(rawValue: "search_vault") == nil)
     }
@@ -708,7 +708,7 @@ struct AssistantEditorTests {
         let edited = try #require(vm.settings.savedPrompts.first { $0.id == id })
         #expect(edited.isAssistant)
         #expect(edited.systemPrompt == "Explain like a patient teacher.")
-        #expect(edited.enabledTools == [.memory, .tasks, .skills])
+        #expect(edited.enabledTools == [.memory, .tasks, .skills, .files, .calendar])
         #expect(edited.contextRefs == ["costing"])
 
         // What the editor saved is what the next launch reads.

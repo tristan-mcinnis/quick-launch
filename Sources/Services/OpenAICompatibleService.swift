@@ -497,6 +497,10 @@ struct OpenAICompatibleService: QuickService, Sendable {
         case ChatToolbox.Name.recallMemory, ChatToolbox.Name.recallCapturesToday: "memory"
         case ChatToolbox.Name.recallTasksToday, ChatToolbox.Name.recallOpenTasks: "tasks"
         case ChatToolbox.Name.readSkill: "skills"
+        case ChatToolbox.Name.readURL: "web"
+        case ChatToolbox.Name.openWorkItem: "files"
+        case ChatToolbox.Name.showPlate, ChatToolbox.Name.proposeTodoist: "tasks"
+        case ChatToolbox.Name.readCalendar: "calendar"
         default: "unavailable"
         }
     }

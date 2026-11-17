@@ -9,8 +9,13 @@ enum ChatToolKind: String, Codable, Sendable, CaseIterable, Hashable, Identifiab
     case tasks
     /// `read_skill`, the canonical `~/.claude/skills` folder.
     case skills
-    /// `search_web`.
+    /// `search_web` and `read_url`.
     case web
+    /// `open_work_item`: open a project folder or its current document
+    /// under the Work folder.
+    case files
+    /// `read_calendar`, over the work calendar.
+    case calendar
 
     var id: String { rawValue }
 
@@ -20,6 +25,8 @@ enum ChatToolKind: String, Codable, Sendable, CaseIterable, Hashable, Identifiab
         case .tasks: "Tasks"
         case .skills: "Skills"
         case .web: "Web search"
+        case .files: "Work files"
+        case .calendar: "Calendar"
         }
     }
 }

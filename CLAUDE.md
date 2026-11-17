@@ -47,6 +47,19 @@ credential type without echoing the value, then rotate the credential.
 
 AI Chat is one conversation window over the same providers and tools. No autonomy, no projects, no automations, no file changes; those belong to pi.
 
+**Harness tools, approved 2026-11-17** (Tristan: "Yes, build it"): the chat
+may also read a public web page (`read_url`; private and local hosts are
+refused), open a project folder or its current document under
+`~/Documents/Work` (`open_work_item`, Work files switch; folders and
+document types only, never an app, script or bundle, and nothing when two
+projects match), read the plate (`show_plate`, `plate.py --peek`) and the
+work calendar (`read_calendar`, `calendar-ops.py` read subcommands only).
+The one write is Todoist: the model may only propose a task
+(`propose_todoist_task`); the task is added to the Todoist Inbox only when
+the user presses Add to Todoist under the answer
+(`QuickViewModel.addProposedTodoist`, `todoist-add.py`). Opening is not a
+file change; every other write still belongs to pi.
+
 AI Chat is the House's general chat. RTI keeps its own standalone chats
 because they are grounded in a meeting or a recording session (decided
 2026-09-26); a chat that is not about a meeting belongs here.

@@ -286,6 +286,8 @@ extension AppDelegate {
         chat.memoryCapture = recall
         chat.skillLibrary = SkillLibrary()
         chat.fileOpener = OpenCommandFileOpener()
+        chat.harnessScripts = HarnessScripts()
+        chat.workItemResolver = WorkItemResolver()
         chat.attachmentFilePicker = SystemAttachmentFilePicker()
         chat.piHandoff = PiHandoffService()
         if let chatBackends { chat.dropMissingChatBackends(chatBackends) }

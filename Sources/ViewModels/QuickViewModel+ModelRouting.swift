@@ -316,7 +316,11 @@ extension QuickViewModel {
                     ? ChatToolbox(
                         enabled: tools,
                         memory: memoryService,
-                        skills: skillLibrary
+                        skills: skillLibrary,
+                        pages: pageReader,
+                        workFiles: workItemResolver,
+                        opener: fileOpener,
+                        harness: harnessScripts
                     )
                     : ChatToolbox(),
                 contextBudget: ContextBudget(contextWindow: profile.contextWindow),

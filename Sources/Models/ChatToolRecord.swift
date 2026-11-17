@@ -23,6 +23,18 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case context
         /// Capture to Memory ran on this answer. Drawn under the answer.
         case capture
+        /// `read_url`.
+        case page
+        /// `open_work_item`.
+        case open
+        /// `show_plate`.
+        case plate
+        /// `read_calendar`.
+        case calendar
+        /// `propose_todoist_task`: a task waiting for the user's Add.
+        case todoistProposal
+        /// The user pressed Add to Todoist. Drawn under the answer.
+        case todoistAdded
     }
 
     var kind: Kind
@@ -33,12 +45,21 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     /// Set only when the call failed; nil in a record saved before this
     /// field existed, so an older chat still opens.
     var failed: Bool?
+    /// The task a `.todoistProposal` or `.todoistAdded` line is about.
+    var proposal: TodoistProposal?
 
-    init(kind: Kind, summary: String, sources: [ChatSource] = [], failed: Bool = false) {
+    init(
+        kind: Kind,
+        summary: String,
+        sources: [ChatSource] = [],
+        failed: Bool = false,
+        proposal: TodoistProposal? = nil
+    ) {
         self.kind = kind
         self.summary = summary
         self.sources = sources
         self.failed = failed ? true : nil
+        self.proposal = proposal
     }
 
     var isFailure: Bool { failed == true }
@@ -53,11 +74,23 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         case .skill: "book"
         case .context: "scissors"
         case .capture: "checkmark"
+        case .page: "doc.richtext"
+        case .open: "folder"
+        case .plate: "tray.full"
+        case .calendar: "calendar"
+        case .todoistProposal: "plus.circle"
+        case .todoistAdded: "checkmark.circle"
         }
     }
 
-    /// Lines above the answer. A capture confirms the answer, so it sits under it.
-    var drawsAboveAnswer: Bool { kind != .capture }
+    /// Lines above the answer. A capture and a Todoist add confirm the
+    /// answer, and a proposal waits on it, so those sit under it.
+    var drawsAboveAnswer: Bool {
+        switch kind {
+        case .capture, .todoistProposal, .todoistAdded: false
+        default: true
+        }
+    }
 }
 
 /// One source a tool found: a memory file or a task.
@@ -162,7 +195,7 @@ struct ChatSource: Codable, Sendable, Equatable, Hashable, Identifiable {
 
 extension QuickSettings {
     /// The chat defaults: a chat's tools when it has not chosen its own, set
-    /// by the four switches in Settings › General › Chat. Memory, Tasks,
+    /// by the switches in Settings › General › Chat. Memory, Tasks,
     /// and Skills are on out of the box; Web search is the one
     /// `modelWebSearchEnabled` switch, shared with the Translator.
     var newChatTools: Set<ChatToolKind> {
@@ -175,6 +208,8 @@ extension QuickSettings {
         case .tasks: newChatTasksEnabled
         case .skills: newChatSkillsEnabled
         case .web: modelWebSearchEnabled
+        case .files: newChatFilesEnabled
+        case .calendar: newChatCalendarEnabled
         }
     }
 
@@ -184,6 +219,8 @@ extension QuickSettings {
         case .tasks: newChatTasksEnabled = on
         case .skills: newChatSkillsEnabled = on
         case .web: modelWebSearchEnabled = on
+        case .files: newChatFilesEnabled = on
+        case .calendar: newChatCalendarEnabled = on
         }
     }
 }
@@ -196,6 +233,8 @@ extension ChatToolKind {
         case .tasks: "checklist"
         case .skills: "book"
         case .web: "globe"
+        case .files: "folder"
+        case .calendar: "calendar"
         }
     }
 
@@ -203,9 +242,11 @@ extension ChatToolKind {
     var detail: String {
         switch self {
         case .memory: "Search notes and today's captures with recall"
-        case .tasks: "Read due, overdue, in-progress, and open tasks"
+        case .tasks: "Read tasks and the plate; propose a Todoist task you confirm"
         case .skills: "Read a skill from ~/.claude/skills"
-        case .web: "Search the web with DeepSeek, Tavily, Brave or Bocha"
+        case .web: "Search the web and read a link"
+        case .files: "Open a project folder or its current document in Work"
+        case .calendar: "Read the work calendar: agenda, a day, free slots"
         }
     }
 }
