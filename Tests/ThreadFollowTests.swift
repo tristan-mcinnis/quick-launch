@@ -25,6 +25,7 @@ struct ThreadFollowTests {
     private func settledDistanceFromBottom(in window: NSWindow) async throws -> CGFloat {
         let deadline = ContinuousClock.now + .seconds(15)
         var last: CGFloat?
+        var lastTop: CGFloat?
         var steady = 0
         var trail: [String] = []
         while ContinuousClock.now < deadline {
@@ -37,8 +38,14 @@ struct ThreadFollowTests {
             let bounds = scroll.contentView.bounds
             let distance = document.frame.height - bounds.maxY
             trail.append("\(Int(distance))/\(Int(document.frame.height))")
-            if let previous = last, abs(distance - previous) < 0.5 { steady += 1 } else { steady = 0 }
+            // At rest when the view holds still, or holds its distance from
+            // the end: a view held at a long answer's question stays put
+            // while the lazy stack below it still re-measures the content.
+            let stillDistance = last.map { abs(distance - $0) < 0.5 } ?? false
+            let stillTop = lastTop.map { abs(bounds.minY - $0) < 0.5 } ?? false
+            if stillDistance || stillTop { steady += 1 } else { steady = 0 }
             last = distance
+            lastTop = bounds.minY
             if steady >= 8 { return distance }
         }
         Issue.record("the thread did not come to rest; distance/content per poll, last 40: \(trail.suffix(40).joined(separator: " "))")

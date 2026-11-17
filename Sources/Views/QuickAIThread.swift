@@ -298,7 +298,7 @@ struct QuickAIThread: View {
         .onChange(of: viewModel.isStreaming) { _, streaming in
             // An answer that outgrew the view in the same moment it ended,
             // before the room's change was seen: it is held like any other.
-            if !streaming { holdIfOutgrown(streamJustEnded: true) }
+            if !streaming { holdIfOutgrown() }
             followBottom()
         }
         .onChange(of: viewModel.streamingStatus) { _, _ in
@@ -839,10 +839,12 @@ struct QuickAIThread: View {
     /// Holds the question once the room under it is used up and there is
     /// text below the view: checked on every scroll report as well as when
     /// the room runs out, since under load either can be seen first.
-    private func holdIfOutgrown(streamJustEnded: Bool = false) {
+    private func holdIfOutgrown() {
         // Once per answer: after the hold, Latest is the reader's way down.
+        // Streaming or not: an answer can finish before its room is seen to
+        // run out. A new question's first frames are excluded by needing
+        // the answer measured (its end) or text on screen.
         guard !turnGeometry.roomReleased,
-              viewModel.isStreaming || streamJustEnded,
               viewModel.isThreadFollowingBottom,
               let id = turnGeometry.anchoring, id == anchoredTurnID, id == lastUserMessageID,
               reservedHeight == 0,
