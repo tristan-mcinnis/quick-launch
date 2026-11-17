@@ -378,6 +378,30 @@ struct ChatToolsViewModelTests {
         #expect(!pathless.resultActions.contains(.openSource), "but nothing to open")
     }
 
+    // MARK: - Add to Todoist from the keyboard
+
+    @Test func returnAddsAProposedTaskThenGoesBackToPaste() async throws {
+        let mock = MockQuickService()
+        let vm = make(service: mock)
+        let harness = FakeHarness()
+        vm.harnessScripts = harness
+        await ask(vm, mock, "add call Sam tomorrow", deltas: [StreamDelta(text: "Call Sam, due tomorrow.", finishReason: "stop")])
+        let paste = vm.quickAIComposerAction.label
+        let proposal = TodoistProposal(content: "Call Sam", due: "tomorrow")
+        let index = try #require(vm.currentConversation?.messages.indices.last)
+        vm.currentConversation?.messages[index].toolRecords = [
+            ChatToolRecord(kind: .todoistProposal, summary: proposal.line, proposal: proposal),
+        ]
+
+        #expect(vm.quickAIComposerAction.label == "Add to Todoist")
+        vm.input = ""
+        await vm.submitTypedText()
+        #expect(await harness.added == [proposal], "Return adds the task")
+        #expect(vm.composerConfirmation == "Added to Todoist")
+        #expect(vm.pendingTodoistProposal == nil)
+        #expect(vm.quickAIComposerAction.label == paste, "Return goes back to the answer action")
+    }
+
     // MARK: - Capture to Memory
 
     @Test func captureSendsTheAnswerAndLeavesACheckmarkLine() async throws {

@@ -294,6 +294,11 @@ extension QuickViewModel {
             return ComposerAction(label: "Stop", keys: ["esc"], behavior: .stop)
         }
         if !hasPendingChatContext, !output.isEmpty, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // A task the answer proposed is what Return confirms first.
+            if let pending = pendingTodoistProposal {
+                let adding = todoistAddsInFlight.contains(pending.proposal.id)
+                return ComposerAction(label: adding ? "Adding…" : "Add to Todoist", keys: ["↩"])
+            }
             switch primaryAnswerAction {
             case .pasteToActiveApp: return ComposerAction(label: "Paste Response", keys: ["↩"])
             case .copyToClipboard: return ComposerAction(label: "Copy Response", keys: ["↩"])

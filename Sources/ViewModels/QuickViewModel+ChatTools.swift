@@ -291,8 +291,24 @@ extension QuickViewModel {
         message.tools.contains { $0.kind == .todoistAdded && $0.proposal?.id == proposal.id }
     }
 
-    /// The user's press on Add to Todoist under an answer: the only path
-    /// that writes a task. The model can only propose one.
+    /// The newest answer's first proposed task not yet added. While there is
+    /// one, Return on an empty composer adds it (the footer says "Add to
+    /// Todoist ↩"), so the launcher stays keyboard-only; ⌘↩ still pastes.
+    var pendingTodoistProposal: (proposal: TodoistProposal, answerID: UUID)? {
+        guard harnessScripts != nil,
+              let answer = currentConversation?.messages.last, answer.role == .assistant
+        else { return nil }
+        for record in answer.tools where record.kind == .todoistProposal {
+            if let proposal = record.proposal, !isTodoistProposalAdded(proposal, in: answer) {
+                return (proposal, answer.id)
+            }
+        }
+        return nil
+    }
+
+    /// The user's press on Add to Todoist under an answer, or Return while
+    /// the task is pending: the only paths that write a task. The model can
+    /// only propose one.
     func addProposedTodoist(_ proposal: TodoistProposal, answerID: UUID) async {
         guard let harnessScripts, !todoistAddsInFlight.contains(proposal.id),
               let message = currentConversation?.messages.first(where: { $0.id == answerID }),

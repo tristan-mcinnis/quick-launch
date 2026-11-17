@@ -161,7 +161,7 @@ Todoist proposal, which writes only when you press its button:
 | `open_work_item(project, item, target)` | opens a project folder, a stage folder (`02-proposal`, `06-discussion-guide`, ...), or its current document under `~/Documents/Work`; the project's `START-HERE.md` names the current file, else the newest version and date; folders and documents only, nothing when two projects match (Work files switch) |
 | `show_plate()` | `plate.py --peek`: Todoist, the work calendar, PRs, Slack, drafts, and new mail; about 15 s (Tasks switch) |
 | `read_calendar(mode, ...)` | the work calendar through `calendar-ops.py` read subcommands: agenda, a day, free slots, search (Calendar switch) |
-| `propose_todoist_task(content, due, priority)` | nothing: it shows the task under the answer with **Add to Todoist**; only your press adds it to the Inbox through `todoist-add.py` (Tasks switch) |
+| `propose_todoist_task(content, due, priority)` | nothing: it shows the task under the answer with **Add to Todoist**; only your press, or **Return** on an empty field while the footer reads **Add to Todoist ↩**, adds it to the Inbox through `todoist-add.py` (Tasks switch); ⌘↩ still pastes |
 
 - The model is told to use memory only when you ask about your own
   notes, projects, clients, decisions, or files, and a skill when you name one
@@ -428,7 +428,7 @@ failures or cancellations, successful command actions, and hotkey runs.
   that read Todoist, GitHub, Slack, and Outlook with your own keys. `read_url`
   fetches the one public page the model names.
 - The one tool write is Todoist: the model can only propose a task, and the
-  task is sent to Todoist only when you press **Add to Todoist**. A web search sends the
+  task is sent to Todoist only when you press **Add to Todoist** or Return. A web search sends the
   query to the search API behind the chosen backend (DeepSeek, Tavily, Brave,
   Bocha, or Exa). What a tool returns goes to the chat's model while it
   writes that answer.

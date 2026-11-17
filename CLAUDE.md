@@ -56,7 +56,8 @@ projects match), read the plate (`show_plate`, `plate.py --peek`) and the
 work calendar (`read_calendar`, `calendar-ops.py` read subcommands only).
 The one write is Todoist: the model may only propose a task
 (`propose_todoist_task`); the task is added to the Todoist Inbox only when
-the user presses Add to Todoist under the answer
+the user presses Add to Todoist under the answer or presses Return on an
+empty composer while the footer reads Add to Todoist
 (`QuickViewModel.addProposedTodoist`, `todoist-add.py`). Opening is not a
 file change; every other write still belongs to pi.
 

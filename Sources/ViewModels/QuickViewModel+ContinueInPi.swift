@@ -293,6 +293,11 @@ extension QuickViewModel {
     /// what happens the moment an answer arrives.
     func runPrimaryAnswerAction() async {
         guard !output.isEmpty, !isStreaming else { return }
+        // A proposed task waits for Return before anything is pasted.
+        if let pending = pendingTodoistProposal {
+            await addProposedTodoist(pending.proposal, answerID: pending.answerID)
+            return
+        }
         switch primaryAnswerAction {
         case .pasteToActiveApp:
             // Fails safe: it copies and explains when there is no target.

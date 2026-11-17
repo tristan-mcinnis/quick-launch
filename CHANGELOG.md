@@ -6,7 +6,8 @@
   folder, a stage folder, or its current document under `~/Documents/Work`
   ("open the latest jade fox discussion guide"). `show_plate` reads the plate,
   `read_calendar` the work calendar, and `propose_todoist_task` shows a task
-  under the answer that **Add to Todoist** adds. That button is the only write.
+  under the answer that **Add to Todoist** adds, or Return on an empty field
+  (the footer reads **Add to Todoist ↩**; ⌘↩ still pastes). That is the only write.
   New switches: Work files and Calendar.
 - **Long answers read from the start.** Quick AI grows with a long answer, up
   to 760 pt for that chat, then keeps the question at the top with **Latest**
