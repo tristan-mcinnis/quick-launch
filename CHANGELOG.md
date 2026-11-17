@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — 2026-11-17
+
+- **New chat tools.** `read_url` reads a link. `open_work_item` opens a project
+  folder, a stage folder, or its current document under `~/Documents/Work`
+  ("open the latest jade fox discussion guide"). `show_plate` reads the plate,
+  `read_calendar` the work calendar, and `propose_todoist_task` shows a task
+  under the answer that **Add to Todoist** adds. That button is the only write.
+  New switches: Work files and Calendar.
+- **Long answers read from the start.** Quick AI grows with a long answer, up
+  to 760 pt for that chat, then keeps the question at the top with **Latest**
+  instead of racing to the end. A first question in a new chat is held too. A
+  slow tool's waiting line counts its seconds.
+- **Answer receipts refresh.** The answer detail no longer stays on
+  "Streaming" and "No route recorded" after the answer has finished.
+- **Translator `Command+K`.** Actions and Translation History: the newest 50,
+  searchable in both languages, reopened without a model call. The history was
+  saved before but never shown.
+- **Settings › General › Features.** One card of on/off switches. Type to Click
+  is now off by default.
+
 ## Unreleased — 2026-10-30
 
 - **DeepSeek leads web search.** Automatic now tries DeepSeek's search API

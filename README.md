@@ -46,18 +46,25 @@ whose inner workings they can read and change.
   settings and history with the panel.
 - Saved actions and assistants add custom instructions, tools, and context,
   with fuzzy slash aliases (`/grammar`, `/tldr`, `/search`) and hotkeys.
-- Read-only tools: web search, plus skills, memory, and tasks
-  when those optional integrations are present. Each tool turns on or off per
-  chat.
+- Tools the model can call: web search and reading a link, plus skills,
+  memory, tasks, the plate, the work calendar, and opening a project folder or
+  its current document, when those optional integrations are present. The one
+  write is a Todoist task the model proposes and you add with a button. Each
+  tool turns on or off per chat.
+- A long answer grows the window, then keeps its question at the top with a
+  **Latest** chip, so a fast stream never scrolls past what you are reading.
 - Attachments: files, images, links, screenshots, and the current selection.
 
 **Capture and screen**
 
 - Screenshot attachments, a Screenshots catalog with on-device OCR, and
   commands for the focused window, a screen area, or selected text.
-- Text from screen and a bounded local Clipboard History.
+- Text from screen: drag the same crosshair as `Shift+Command+4` and the text
+  in it lands on the clipboard. Give it a hotkey in **Settings › Items**.
+- A bounded local Clipboard History (50 items by default, up to 200).
 - Type to Click labels every clickable control in the frontmost app, so you can
-  click one by typing its name.
+  click one by typing its name. Off until you turn it on in
+  **Settings › General › Features**, the one card of on/off switches.
 
 **Text and system tools**
 
@@ -66,7 +73,9 @@ whose inner workings they can read and change.
   Auto detect translates fresh input into the other language of the pair when
   the input already matches the target. ⌘S exchanges a finished translation
   with its source, or translates the current text immediately if the result
-  is unfinished or already in the input language.
+  is unfinished or already in the input language. `Command+K` in the
+  Translator opens its actions and **Translation History**: the newest 50,
+  searchable in both languages, reopened without asking the model again.
 - Window management across halves, thirds, fourths, and displays.
 - Caffeinate with timed sessions, and Agent Watch to keep the Mac awake while
   a coding agent works.
@@ -92,6 +101,8 @@ on them.
 | Skills tool | Skill folders with a `SKILL.md` in `~/.claude/skills` | The tool is not offered. |
 | Memory and Tasks tools, Capture to Memory | A `recall` CLI on `PATH` | The tools are not offered; Capture says recall is not installed. |
 | Continue in pi | `tmux` and `pi` on `PATH` | Settings shows what is missing. |
+| Work files tool | Project folders in `~/Documents/Work/<Client>/<year>/<project>` | Nothing matches; nothing is opened. |
+| Plate, calendar, and Todoist tools | `plate.py`, `todoist-add.py`, and `calendar-ops.py` under `~/skills`, and `python3` | The call fails and the answer says so. |
 
 **Settings › General › Chat** shows which of these it found.
 

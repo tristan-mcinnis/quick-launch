@@ -79,6 +79,12 @@ panel becomes a chat surface with a header, a thread, and a composer.
   in full.
 - The thread follows new text only while you are at the bottom. A **Latest**
   chip, or `Command+Down`, takes you back.
+- A long answer is read from its start. The launcher's Quick AI first grows
+  down in 60 pt steps, up to 760 pt or the display's room, for that chat only
+  (another chat, a new open, or your own drag returns it to your size). Once it
+  cannot grow, the question stays at the top and the thread stops following the
+  end; **Latest** goes down and follows again. The AI Chat window keeps its size.
+- A slow tool's waiting line counts its seconds after three seconds.
 - Command output uses the same surface, naming the command where the model
   would be, and never joins a chat.
 
@@ -139,8 +145,9 @@ The launcher closes, so one chat is open in one window.
 
 ## Tools inside the chat
 
-An OpenAI-compatible model can call read-only tools that Quick Launch runs
-itself, each through a CLI with an argv array (no shell) and a timeout:
+An OpenAI-compatible model can call tools that Quick Launch runs itself, each
+through a CLI with an argv array (no shell) and a timeout. All read, except the
+Todoist proposal, which writes only when you press its button:
 
 | Tool | Reads |
 |---|---|
@@ -150,6 +157,11 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 | `recall_open_tasks()` | the complete open backlog |
 | `read_skill(name)` | a `SKILL.md` from the skills folder, capped at 12,000 characters |
 | `search_web(query)` | the chosen web-search backend |
+| `read_url(url)` | one public http(s) page; local and private hosts are refused (Web search switch) |
+| `open_work_item(project, item, target)` | opens a project folder, a stage folder (`02-proposal`, `06-discussion-guide`, ...), or its current document under `~/Documents/Work`; the project's `START-HERE.md` names the current file, else the newest version and date; folders and documents only, nothing when two projects match (Work files switch) |
+| `show_plate()` | `plate.py --peek`: Todoist, the work calendar, PRs, Slack, drafts, and new mail; about 15 s (Tasks switch) |
+| `read_calendar(mode, ...)` | the work calendar through `calendar-ops.py` read subcommands: agenda, a day, free slots, search (Calendar switch) |
+| `propose_todoist_task(content, due, priority)` | nothing: it shows the task under the answer with **Add to Todoist**; only your press adds it to the Inbox through `todoist-add.py` (Tasks switch) |
 
 - The model is told to use memory only when you ask about your own
   notes, projects, clients, decisions, or files, and a skill when you name one
@@ -161,7 +173,8 @@ itself, each through a CLI with an argv array (no shell) and a timeout:
 - `Command+K` › **Tools** (`Option+Command+K`) turns each tool on or off per
   chat. New chats start on the defaults in **Settings › General › Chat**.
 - **Capture to Memory** (`Option+Command+M`) sends the answer on screen to
-  `recall capture`. It is the one write, and only you can run it.
+  `recall capture`. Like **Add to Todoist**, only you can run it; the model
+cannot.
 - Long chats are held to a budget from the model's context window: older tool
   results go first, then old turns, never the first or current question.
 
@@ -211,6 +224,12 @@ selected text or a fresh input field.
   Committed translations are kept locally (500).
 - `Shift+Return` in the launcher translates one-shot; `/zh` and `/translate`
   act on selected text.
+- `Command+K` opens the Translator's actions: Translation History, Copy, Paste
+  Back, Swap, the two language lists, and Use Clipboard, each with its key.
+  **Translation History** lists the newest 50 committed translations, searches
+  the source and the translation, and `Return` reopens one in the window as it
+  was, with no model call; `Command+Return` then copies it. `Escape` steps back
+  to the actions, then to the text.
 
 ## Screenshots and captures
 
@@ -231,8 +250,11 @@ selected text or a fresh input field.
 
 ## Text from screen
 
-**Copy Text from Screen Area** and **Paste Text from Screen Area** read text in
-a dragged region on this Mac with Vision and put it on the clipboard. The
+**Copy Text from Screen Area** and **Paste Text from Screen Area** open the
+system's area picker (the `Shift+Command+4` crosshair, through
+`screencapture -i`), read the text in the dragged region on this Mac with
+Vision, and put it on the clipboard. Neither has a hotkey by default; set one
+in **Settings › Items**. The
 captured pixels are not saved. A line-break preference is in
 **Settings › Clipboard & Capture**.
 
@@ -240,7 +262,10 @@ captured pixels are not saved. A line-break preference is in
 
 A global hotkey (in **Settings › General**) puts a label on every clickable
 control in the frontmost app and its menu bar, found through macOS
-Accessibility.
+Accessibility. It is off until you turn it on in
+**Settings › General › Features**, which gathers the on/off switches for Type
+to Click, Clipboard History, the Quick AI hotkey, and double-tap right
+`Command`.
 
 - Type part of a label, role, or menu path to narrow the map; `Return` clicks
   the best match.
@@ -255,7 +280,8 @@ Accessibility.
 ## Clipboard History
 
 `Command+Shift+V` opens a bounded, local, clearable history of text, images,
-rich text, and files.
+rich text, and files: 50 items by default, up to 200 in
+**Settings › Clipboard & Capture**, plus pinned items, within a 200 MB budget.
 
 - `Command+Shift+P` pins to top, `Command+Shift+N` saves as a snippet,
   `Command+Shift+L` saves as a Quick Link, `Control+X` deletes.
@@ -397,7 +423,12 @@ failures or cancellations, successful command actions, and hotkey runs.
   passages and images, and any permitted tool results.
 - Source-only turns do not silently widen to unrelated history, memory,
   web, or skills.
-- The memory and skill tools read local files only. A web search sends the
+- The memory and skill tools read local files only. The Work files tool opens
+  local folders and documents. The plate and calendar tools run local scripts
+  that read Todoist, GitHub, Slack, and Outlook with your own keys. `read_url`
+  fetches the one public page the model names.
+- The one tool write is Todoist: the model can only propose a task, and the
+  task is sent to Todoist only when you press **Add to Todoist**. A web search sends the
   query to the search API behind the chosen backend (DeepSeek, Tavily, Brave,
   Bocha, or Exa). What a tool returns goes to the chat's model while it
   writes that answer.
