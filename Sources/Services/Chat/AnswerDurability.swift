@@ -182,6 +182,9 @@ final class AnswerDurability {
     /// A landed deletion message or a log line, for the view model. Never used
     /// to decide durability.
     var onFailure: ((AnswerWriteFailure) -> Void)?
+    /// A write landed for a chat: the thread re-reads that chat's receipts,
+    /// which an earlier read may have caught mid-answer ("Streaming").
+    var onLanded: ((UUID) -> Void)?
 
     private var entries: [Key: Entry] = [:]
     /// The newest sequence that landed for a chat. A projection retried behind
@@ -385,6 +388,7 @@ final class AnswerDurability {
             lastLandedSequence[entry.conversationID] = nil
             return
         }
+        onLanded?(entry.conversationID)
         // A distinct projection stays owed until its own write lands. The only
         // thing a later landing changes is that an older projection retried
         // afterwards is applied as a replay, which cannot erase this write.

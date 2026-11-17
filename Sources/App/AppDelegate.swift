@@ -138,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         self.viewModel = vm
         vm.overlayPresenter = self
+        vm.growsWithAnswer = true
         // Tools inside the chat: memory through `recall`, skills from
         // ~/.claude/skills, and sources opened with /usr/bin/open.
         vm.memoryService = recall
@@ -638,6 +639,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // window) comes back at its remembered size, held to this
             // display and rising to fit if it is taller than the room under
             // the anchor.
+            viewModel?.quickAIGrowLimit = PanelSizing.quickAIGrowLimit(visibleFrame: screen.visibleFrame)
+            // A new open starts at the user's own size.
+            viewModel?.quickAIGrowth = nil
             let quickAISize = viewModel.flatMap { vm in
                 vm.isQuickAIPresented
                     ? PanelSizing.quickAIPlacedSize(vm.quickAISize, visibleFrame: screen.visibleFrame)

@@ -629,9 +629,9 @@ struct ChatToolbox: Sendable {
             if !alternatives.isEmpty {
                 body += " Other documents there:\n" + alternatives.map { "- \(resolver.relativePath($0))" }.joined(separator: "\n")
             }
-            let sources = ([url] + alternatives)
-                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true }
-                .map { ChatSource(title: $0.lastPathComponent, path: $0.path) }
+            // Only what was opened is listed under the answer; the other
+            // documents stay in the model's text, for it to name if asked.
+            let sources = isFolder ? [] : [ChatSource(title: url.lastPathComponent, path: url.path)]
             return ChatToolOutcome(
                 content: Self.wrapped("work_item", note: "What open_work_item did.", body: body),
                 record: ChatToolRecord(kind: .open, summary: "Opened \(url.lastPathComponent)", sources: sources),

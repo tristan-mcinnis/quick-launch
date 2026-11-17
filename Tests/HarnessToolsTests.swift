@@ -149,7 +149,8 @@ struct HarnessToolsTests {
         #expect(outcome.status == .succeeded)
         #expect(await opener.opened.map(\.lastPathComponent) == ["dg-fgd-jade-fox-v3.11-20261112.docx"])
         #expect(outcome.record.kind == .open)
-        #expect(outcome.record.sources.first?.title == "dg-fgd-jade-fox-v3.11-20261112.docx")
+        #expect(outcome.record.sources.map(\.title) == ["dg-fgd-jade-fox-v3.11-20261112.docx"], "only the opened file")
+        #expect(outcome.content.contains("Other documents there"), "the rest stay in the model's text")
         #expect(outcome.content.contains("Acme/2026/acme-jade-fox/06-discussion-guide"))
     }
 

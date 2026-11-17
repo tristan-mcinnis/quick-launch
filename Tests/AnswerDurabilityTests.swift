@@ -211,6 +211,21 @@ struct AnswerDurabilityTests {
         #expect(writer.calls.count == 1)
     }
 
+    @Test func aLandedWriteTellsWhichChatToReread() async {
+        let writer = ScriptedAnswerWriter()
+        writer.holdNextTerminalWrite()
+        let ledger = AnswerDurability(writer: writer)
+        var landed: [UUID] = []
+        ledger.onLanded = { landed.append($0) }
+        let id = UUID()
+        ledger.register(terminalWrite(conversation: id))
+        await writer.waitForWrites(1)
+        #expect(landed.isEmpty, "nothing is announced before the write lands")
+        writer.openGate()
+        #expect(await ledger.settle(ledger.freeze()) == .durable)
+        #expect(landed == [id])
+    }
+
     @Test func repeatedFreezeOfARunningWriteKeepsOneWrite() async {
         let writer = ScriptedAnswerWriter()
         writer.holdNextTerminalWrite()

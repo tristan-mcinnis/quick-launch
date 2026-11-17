@@ -235,6 +235,16 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var harnessScripts: (any HarnessScripting)?
     /// `open_work_item`: finds a project or its current document under Work.
     @ObservationIgnored var workItemResolver: WorkItemResolver?
+    /// The launcher's Quick AI grows with a long answer; the AI Chat window
+    /// (its own view model) keeps the size it has. Set by the app.
+    @ObservationIgnored var growsWithAnswer = false
+    /// The tallest the surface grows on its own: the display's room, held
+    /// to `PanelSizing.quickAIGrowMaxHeight`. Set by the app at show time.
+    @ObservationIgnored var quickAIGrowLimit: CGFloat = PanelSizing.quickAIGrowMaxHeight
+    /// The height the surface grew to for one chat, or nil.
+    var quickAIGrowth: QuickAIGrowth?
+    /// Header and composer height around the thread, for growth.
+    @ObservationIgnored var quickAIGrowthChrome: CGFloat?
     /// Todoist proposals whose Add is running, so a second press waits.
     var todoistAddsInFlight: Set<UUID> = []
     /// The folders Open Source may open from (the memory repo, the skills repo
@@ -619,6 +629,9 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// The archive writes the quit path starts, owned so a quit can wait for
     /// them and learn whether they landed.
     @ObservationIgnored var durability: AnswerDurability?
+    /// Bumped when an archive write for the open chat lands, so the thread
+    /// re-reads its receipts after the final one, not only when the stream ends.
+    var archiveLandedRevision = 0
 
     /// The archived assistant turn id for the stream in flight, so every
     /// path that persists the answer (completion, stop, error, resume) uses
@@ -876,6 +889,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
             self?.invalidateLauncherRanking()
         }
         self.store.register(self)
+        durability?.onLanded = { [weak self] conversationID in
+            guard let self, conversationID == self.currentConversation?.id else { return }
+            self.archiveLandedRevision &+= 1
+        }
         durability?.onFailure = { [weak self] failure in
             guard let self else { return }
             switch failure.kind {

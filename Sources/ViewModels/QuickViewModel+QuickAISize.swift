@@ -16,7 +16,52 @@ extension QuickViewModel {
     /// display (`PanelSizing.quickAIPlacedSize`) before it compares or
     /// applies the frame; the stored value keeps the user's choice for a
     /// larger display.
-    var quickAISize: CGSize { settings.quickAISize.atLeastStandard.cgSize }
+    var quickAISize: CGSize {
+        let base = settings.quickAISize.atLeastStandard.cgSize
+        guard let growth = quickAIGrowth, isQuickAIPresented,
+              growth.conversationID == currentConversation?.id
+        else { return base }
+        return CGSize(width: base.width, height: max(base.height, growth.height))
+    }
+
+    // MARK: - Growing with a long answer
+
+    /// The launcher's Quick AI grows taller with a long answer, up to
+    /// `quickAIGrowLimit`, before the thread holds the question at the top
+    /// (2026-11-17). Only for the chat it grew for: another chat, or the
+    /// surface opened again, starts at the user's own size.
+    struct QuickAIGrowth: Equatable {
+        var conversationID: UUID?
+        var height: CGFloat
+    }
+
+    /// Growth comes in steps of this much, so a streaming answer moves the
+    /// window's bottom edge a few times, not on every line.
+    static let quickAIGrowthStep: CGFloat = 60
+
+    /// Whether the surface can still grow for the open chat.
+    var canGrowQuickAI: Bool {
+        growsWithAnswer && isQuickAIPresented && quickAISize.height < quickAIGrowLimit - 1
+    }
+
+    /// The thread's room under the newest question is `room` (negative once
+    /// the turn is taller than the view) in a view `visibleHeight` tall.
+    /// Grows the surface by what is missing, in steps, up to the limit.
+    func noteQuickAIRoom(_ room: CGFloat, visibleHeight: CGFloat) {
+        guard growsWithAnswer, isQuickAIPresented, visibleHeight > 0 else { return }
+        let current = quickAISize.height
+        // The surface's own chrome (header, composer) around the thread:
+        // measured while it is at its requested height and not growing.
+        if quickAIGrowth == nil || quickAIGrowthChrome == nil {
+            quickAIGrowthChrome = max(0, current - visibleHeight)
+        }
+        guard room < 0, let chrome = quickAIGrowthChrome else { return }
+        let wanted = visibleHeight - room + chrome
+        let stepped = (wanted / Self.quickAIGrowthStep).rounded(.up) * Self.quickAIGrowthStep
+        let target = min(quickAIGrowLimit, stepped)
+        guard target > current + 1 else { return }
+        quickAIGrowth = QuickAIGrowth(conversationID: currentConversation?.id, height: target)
+    }
 
     /// True while Quick AI is up at a size the user dragged: a programmatic
     /// resize then keeps the window's centre where the drag left it. Root
@@ -32,6 +77,8 @@ extension QuickViewModel {
     @discardableResult
     func rememberQuickAISize(_ size: CGSize) -> Bool {
         guard isQuickAIPresented else { return false }
+        // The user's drag takes over from any growth.
+        quickAIGrowth = nil
         let remembered = QuickAISize(size).atLeastStandard
         let current = settings.quickAISize.atLeastStandard
         guard abs(remembered.width - current.width) >= 1

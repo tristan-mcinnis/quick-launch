@@ -289,7 +289,8 @@ struct QuickAIThread: View {
             // while the answer streams: an answer that had finished before its
             // room was measured keeps its question at the top, where the
             // lazy stack's re-measuring would otherwise move the view.
-            guard reservedHeight == 0, !turnGeometry.roomReleased, let id = anchoredTurnID, id == lastUserMessageID,
+            guard reservedHeight == 0, !turnGeometry.roomReleased, !viewModel.canGrowQuickAI,
+                  let id = anchoredTurnID, id == lastUserMessageID,
                   viewModel.isStreaming else { return }
             holdAtQuestion(id)
         }, questionChanged: questionChanged, conversationChanged: openedConversation))
@@ -340,13 +341,15 @@ struct QuickAIThread: View {
         var conversationID: UUID?
         var turnCount: Int
         var isStreaming: Bool
+        var landedRevision: Int
     }
 
     private var archiveLoadKey: ArchiveLoadKey {
         ArchiveLoadKey(
             conversationID: viewModel.currentConversation?.id,
             turnCount: viewModel.conversationMessages.count,
-            isStreaming: viewModel.isStreaming
+            isStreaming: viewModel.isStreaming,
+            landedRevision: viewModel.archiveLandedRevision
         )
     }
 
@@ -811,7 +814,11 @@ struct QuickAIThread: View {
             let view = threadGeometry.visibleHeight
             let ends = [turnGeometry.endTop, turnGeometry.answerEnd.map { $0 + House.Spacing.md }].compactMap { $0 }
             if let top = turnGeometry.tops[id], let end = ends.max() {
-                room = max(0, view - (end - top) - House.Spacing.md)
+                let space = view - (end - top) - House.Spacing.md
+                // The launcher's surface grows first; the hold comes only
+                // once it cannot grow any further.
+                viewModel.noteQuickAIRoom(space, visibleHeight: view)
+                room = max(0, space)
             } else {
                 room = view
             }
@@ -845,6 +852,7 @@ struct QuickAIThread: View {
         // run out. A new question's first frames are excluded by needing
         // the answer measured (its end) or text on screen.
         guard !turnGeometry.roomReleased,
+              !viewModel.canGrowQuickAI,
               viewModel.isThreadFollowingBottom,
               let id = turnGeometry.anchoring, id == anchoredTurnID, id == lastUserMessageID,
               reservedHeight == 0,

@@ -225,6 +225,15 @@ enum PanelSizing {
     /// The largest Quick AI surface a display can hold: its visible frame
     /// less the placement margin on every side, never below the standard
     /// 750 × 475 (the surface keeps its minimum on a tiny display).
+    /// The tallest Quick AI grows on its own for a long answer. The user can
+    /// still drag it taller.
+    static let quickAIGrowMaxHeight: CGFloat = 760
+
+    /// The growth limit on one display: the cap, or the display's room.
+    static func quickAIGrowLimit(visibleFrame: CGRect) -> CGFloat {
+        min(quickAIGrowMaxHeight, quickAIMaximumSize(visibleFrame: visibleFrame).height)
+    }
+
     static func quickAIMaximumSize(visibleFrame: CGRect) -> CGSize {
         let margin = ScreenPlacement.edgeMargin * 2
         return CGSize(
