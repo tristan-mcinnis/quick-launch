@@ -38,8 +38,8 @@ struct TodoistAdded: Sendable, Equatable {
 /// calendar, and the one Todoist write. A protocol seam so tests never run
 /// Python, read a calendar, or write a task.
 protocol HarnessScripting: Sendable {
-    /// `plate.py --peek`: the rundown, phone format.
-    func plate() async throws -> String
+    /// `plate.py --peek --json`: the rundown, its rows numbered.
+    func plate() async throws -> PlateSnapshot
     /// `calendar-ops.py <arguments>`: read-only subcommands only.
     func calendar(_ arguments: [String]) async throws -> String
     /// `todoist-add.py`: the user's own button press, never the model's call.
@@ -95,8 +95,9 @@ struct HarnessScripts: HarnessScripting {
         self.root = root
     }
 
-    func plate() async throws -> String {
-        try await script(Self.plateScript, ["--peek"], timeout: Self.plateTimeout)
+    func plate() async throws -> PlateSnapshot {
+        let output = try await script(Self.plateScript, ["--peek", "--json"], timeout: Self.plateTimeout)
+        return try PlateSnapshot(json: Data(output.utf8))
     }
 
     func calendar(_ arguments: [String]) async throws -> String {

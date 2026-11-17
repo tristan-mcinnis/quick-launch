@@ -52,7 +52,7 @@ may also read a public web page (`read_url`; private and local hosts are
 refused), open a project folder or its current document under
 `~/Documents/Work` (`open_work_item`, Work files switch; folders and
 document types only, never an app, script or bundle, and nothing when two
-projects match), read the plate (`show_plate`, `plate.py --peek`) and the
+projects match), read the plate (`show_plate`, `plate.py --peek --json`, its rows numbered so "3", "3 done" and "3 open" act on a row; `QuickViewModel+Worklist.swift`) and the
 work calendar (`read_calendar`, `calendar-ops.py` read subcommands only).
 The one write is Todoist: the model may only propose a task
 (`propose_todoist_task`); the task is added to the Todoist Inbox only when

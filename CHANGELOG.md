@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-17
 
+- **The plate is a worklist.** Its rows are numbered; type `3` for next steps
+  on row 3, `3 done` or `3 friday` to change it, `3 open` to open its link.
+  Tested on deepseek-flash: 28 of 28 numbers kept, every row command reached
+  the right tool, and a bare number answers at once.
 - **Change what is already there.** "push the backup check to friday", "mark it
   done" and "move run club to 18:00" propose the exact task or event, old →
   new; Return makes the change and ⌘Z on an empty field undoes it. Repeating

@@ -165,6 +165,20 @@ Todoist proposal, which writes only when you press its button:
 | `propose_task_change(task, action, due)` | nothing: the app finds the one open task with those words and shows *old → new*; **Return** (footer **Reschedule ↩** or **Mark Done ↩**) makes it through `todoist-change.py`; several matches are listed for you to pick; repeating tasks are refused (Tasks switch) |
 | `propose_event_move(event, on_date, new_start)` | nothing: the app finds the one upcoming work-calendar event and shows *old → new*; **Return** (**Move Event ↩**) moves it; an event with attendees is refused, since moving it would email them (Calendar switch) |
 
+**The plate is a worklist.** `show_plate` numbers every row it shows, in the
+plate's own order and caps, and the answer keeps the numbers. Then:
+
+| Type | What happens |
+|---|---|
+| `3` | right under the plate: the model gets row 3's own words and offers two or three next steps, numbered |
+| `3 done`, `3 friday`, `3 move to 18:00` (or `move 3 to 18:00`) | the row's words and your instruction go to the model, which proposes the change for ↩ |
+| `3 open` (or `open 3`) | opens the row's link (Todoist, a PR) at once, no model call; a row with no link is asked for |
+
+A number always means the row as it was shown, never a refreshed plate. After
+another answer a bare number answers that answer's own list; `3 done` still
+means plate row 3. A sentence that starts with a number ("3 people came…",
+more than six words or a question) is sent as typed.
+
 After a change, **⌘Z** on an empty field puts it back (the old due date, the
 task reopened, the old start). **⌘↩** on an empty field is always the
 answer's own Paste or Copy, never the pending task or change.

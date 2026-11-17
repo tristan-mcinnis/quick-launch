@@ -57,6 +57,9 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
     /// The change a `.changeProposal`, `.changeDone` or `.changeUndone`
     /// line is about. Nil in a record saved before changes existed.
     var change: ChangeProposal?
+    /// The plate's numbered rows on a `.plate` line, as they were shown:
+    /// what "3" or "3 done" points at.
+    var worklist: [PlateItem]?
 
     init(
         kind: Kind,
@@ -64,7 +67,8 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         sources: [ChatSource] = [],
         failed: Bool = false,
         proposal: TodoistProposal? = nil,
-        change: ChangeProposal? = nil
+        change: ChangeProposal? = nil,
+        worklist: [PlateItem]? = nil
     ) {
         self.kind = kind
         self.summary = summary
@@ -72,6 +76,7 @@ struct ChatToolRecord: Codable, Sendable, Equatable, Hashable {
         self.failed = failed ? true : nil
         self.proposal = proposal
         self.change = change
+        self.worklist = worklist
     }
 
     var isFailure: Bool { failed == true }

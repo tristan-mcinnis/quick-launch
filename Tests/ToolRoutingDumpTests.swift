@@ -24,4 +24,15 @@ struct ToolRoutingDumpTests {
         let data = try JSONSerialization.data(withJSONObject: dump, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: URL(fileURLWithPath: path))
     }
+
+    /// Opt-in: the live plate, numbered by the app's own parser.
+    /// `QUICK_LAUNCH_PLATE_DUMP=/path/plate.json swift test --filter ToolRoutingDump`
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["QUICK_LAUNCH_PLATE_DUMP"] != nil))
+    func dumpTheLivePlate() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["QUICK_LAUNCH_PLATE_DUMP"])
+        let plate = try await HarnessScripts().plate()
+        let items = plate.items.map { ["number": $0.number, "reference": $0.reference, "key": $0.key] as [String: Any] }
+        let data = try JSONSerialization.data(withJSONObject: ["text": plate.text, "items": items], options: [.prettyPrinted])
+        try data.write(to: URL(fileURLWithPath: path))
+    }
 }

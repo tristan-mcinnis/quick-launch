@@ -601,6 +601,9 @@ extension QuickViewModel {
     func submitTypedText() async {
         // Whatever is typed goes now; a follow-up queued before is this one.
         isFollowUpQueued = false
+        // "3", "3 done", "3 open" on a plate: the row's own words go, or its
+        // link opens here.
+        if runWorklistCommandIfAny() { return }
         switch classifySubmit() {
         case .attachment, .commandAlias, .prompt:
             await submit()

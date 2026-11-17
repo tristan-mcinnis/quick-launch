@@ -269,7 +269,12 @@ actor FakeHarness: HarnessScripting {
     private(set) var calendarCalls: [[String]] = []
     var addError: Error?
 
-    func plate() async throws -> String { "Do now\n- Send the guide" }
+    func plate() async throws -> PlateSnapshot {
+        PlateSnapshot(
+            items: [PlateItem(number: 1, section: "Do now", text: "Send the guide", note: "p1", key: "t:1", url: "https://app.todoist.com/app/task/1")],
+            text: "Do now\n1. Send the guide · p1"
+        )
+    }
     func calendar(_ arguments: [String]) async throws -> String {
         calendarCalls.append(arguments)
         return "Thu 10:00-11:00 free"
