@@ -79,6 +79,13 @@ extension QuickViewModel {
         if !isThreadFollowingBottom { isThreadFollowingBottom = true }
     }
 
+    /// The newest answer outgrew the view while it streamed: the thread
+    /// keeps its question at the top and stops following the end, and
+    /// "Latest" offers the way down.
+    func holdThreadAtNewestQuestion() {
+        if isThreadFollowingBottom { isThreadFollowingBottom = false }
+    }
+
     /// The thread's view reported where it sits. When the view moved (the
     /// reader scrolled, or a scroll the thread made landed), within
     /// `threadFollowThreshold` of the bottom it follows the newest text and

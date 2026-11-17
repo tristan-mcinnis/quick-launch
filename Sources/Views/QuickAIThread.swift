@@ -36,8 +36,8 @@ struct QuickAIThread: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The question the thread scrolled to the top of when it was sent, and
     /// the empty space reserved under its answer: the room the view still has
-    /// below the question, so the view stays put while the answer fits and
-    /// only then follows the end.
+    /// below the question, so the view stays put while the answer fits. An
+    /// answer that outgrows it keeps its question at the top as well.
     @State private var anchoredTurnID: UUID?
     @State private var reservedHeight: CGFloat = 0
     @State private var knownConversationID: UUID?
@@ -47,6 +47,8 @@ struct QuickAIThread: View {
     /// reveals it regardless.
     @State private var revealedChatID: UUID?
     @State private var revealTask: Task<Void, Never>?
+    /// When the status line's current text began, for its running seconds.
+    @State private var statusSince = Date()
     private static let revealTimeout = Duration.milliseconds(400)
 
     /// The thread's content, where `scrollTo(y:)` measures from.
@@ -218,6 +220,7 @@ struct QuickAIThread: View {
             // grows to hold it; a scroll to it before that finds nothing, so
             // it is asked again as the content lays out, until it reports.
             if let id = turnGeometry.anchoring, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { scrollToQuestion(id) }
+            holdIfOutgrown()
             if turnGeometry.restoring != nil, old.contentHeight != new.contentHeight || old.visibleHeight != new.visibleHeight { restoreAnchor() }
             noteLanding(new)
             recordAnchor(new)
@@ -286,20 +289,22 @@ struct QuickAIThread: View {
             // while the answer streams: an answer that had finished before its
             // room was measured keeps its question at the top, where the
             // lazy stack's re-measuring would otherwise move the view.
-            guard reservedHeight == 0, anchoredTurnID == lastUserMessageID, viewModel.isStreaming else { return }
-            turnGeometry.anchoring = nil
-            // The room is gone for good: an answer that outgrew the view only
-            // grows. Its question has scrolled off, so the lazy stack stops
-            // reporting its top while it re-estimates the rows above; the
-            // stale top against the answer's fresh end would reserve room
-            // again and stop the follow far above the newest text.
-            turnGeometry.roomReleased = true
-            if viewModel.isStreaming, !viewModel.output.isEmpty { followBottom() }
+            guard reservedHeight == 0, !turnGeometry.roomReleased, let id = anchoredTurnID, id == lastUserMessageID,
+                  viewModel.isStreaming else { return }
+            holdAtQuestion(id)
         }, questionChanged: questionChanged, conversationChanged: openedConversation))
         .onChange(of: viewModel.conversationMessages.count) { _, _ in followBottom() }
         .onChange(of: viewModel.output) { _, _ in followBottom() }
-        .onChange(of: viewModel.isStreaming) { _, _ in followBottom() }
-        .onChange(of: viewModel.streamingStatus) { _, _ in followBottom() }
+        .onChange(of: viewModel.isStreaming) { _, streaming in
+            // An answer that outgrew the view in the same moment it ended,
+            // before the room's change was seen: it is held like any other.
+            if !streaming { holdIfOutgrown(streamJustEnded: true) }
+            followBottom()
+        }
+        .onChange(of: viewModel.streamingStatus) { _, _ in
+            statusSince = Date()
+            followBottom()
+        }
         .onChange(of: viewModel.threadError) { _, _ in followBottom() }
         .onChange(of: viewModel.liveToolRecords.count) { _, _ in followBottom() }
         .onChange(of: viewModel.threadNotice) { _, notice in
@@ -750,7 +755,22 @@ struct QuickAIThread: View {
     private var statusLine: some View {
         let status = viewModel.streamingStatus ?? "Thinking…"
         let isWebSearch = status.hasPrefix("Search web") || status.hasPrefix("Searching the web")
-        return toolLine(status, symbol: isWebSearch ? "globe" : nil)
+        // A slow tool (the plate takes about 15 s) counts its seconds, so
+        // the wait never reads as a frozen surface.
+        return TimelineView(.periodic(from: statusSince, by: 1)) { context in
+            toolLine(
+                status + Self.elapsedSuffix(since: statusSince, now: context.date),
+                symbol: isWebSearch ? "globe" : nil
+            )
+        }
+    }
+
+    /// Seconds a status has shown, once it has shown long enough to matter.
+    nonisolated static let elapsedShownAfter: TimeInterval = 3
+
+    nonisolated static func elapsedSuffix(since start: Date, now: Date) -> String {
+        let seconds = Int(now.timeIntervalSince(start))
+        return seconds >= Int(elapsedShownAfter) ? " \(seconds) s" : ""
     }
 
     /// One quiet line: a glyph (or the thinking dots) and tertiary text.
@@ -802,6 +822,36 @@ struct QuickAIThread: View {
         if abs(room - reservedHeight) > 0.5 || (room == 0 && reservedHeight != 0) { reservedHeight = room }
     }
 
+    /// A long answer is read from its start (2026-11-17): once the newest
+    /// answer outgrows the view, its question stays at the top and the
+    /// thread stops following the end, so a fast stream does not race the
+    /// view past what the reader has read. "↓ Latest" (or ⌘↓) goes to the
+    /// end and follows it again.
+    private func holdAtQuestion(_ id: UUID) {
+        // The room is gone for good: an answer that outgrew the view only
+        // grows, so no room is reserved under this turn again.
+        turnGeometry.roomReleased = true
+        viewModel.holdThreadAtNewestQuestion()
+        turnGeometry.anchoring = id
+        scrollToQuestion(id, animated: false)
+    }
+
+    /// Holds the question once the room under it is used up and there is
+    /// text below the view: checked on every scroll report as well as when
+    /// the room runs out, since under load either can be seen first.
+    private func holdIfOutgrown(streamJustEnded: Bool = false) {
+        // Once per answer: after the hold, Latest is the reader's way down.
+        guard !turnGeometry.roomReleased,
+              viewModel.isStreaming || streamJustEnded,
+              viewModel.isThreadFollowingBottom,
+              let id = turnGeometry.anchoring, id == anchoredTurnID, id == lastUserMessageID,
+              reservedHeight == 0,
+              turnGeometry.answerEnd != nil || !viewModel.output.isEmpty,
+              threadGeometry.distanceFromBottom > QuickViewModel.threadFollowThreshold
+        else { return }
+        holdAtQuestion(id)
+    }
+
     /// The newest answer's bottom, for the room under its question. Only
     /// while that question is the one held at the top.
     private func noteAnswerEnd(_ bottom: CGFloat) {
@@ -825,7 +875,8 @@ struct QuickAIThread: View {
                 .onChange(of: lastUserMessageID) { old, new in questionChanged(old, new) }
                 .onChange(of: conversationID) { _, _ in conversationChanged() }
                 // The answer just outgrew the room under its question: from
-                // here the thread follows its end.
+                // here the question stays at the top and the end is the
+                // reader's to scroll to.
                 .onChange(of: reservedHeight == 0) { _, none in if none { roomUsedUp() } }
         }
     }
@@ -870,6 +921,14 @@ struct QuickAIThread: View {
     /// Another chat is on the thread: send the view where that chat was left
     /// (or to its end) and keep it hidden until it has landed.
     private func openedConversation() {
+        // The first question of a new chat starts that chat: it is a new
+        // turn, held at the top like any other, not a chat being opened.
+        if viewModel.isStreaming, viewModel.conversationMessages.count <= 2, let id = lastUserMessageID {
+            knownConversationID = viewModel.currentConversation?.id
+            revealedChatID = knownConversationID
+            if anchoredTurnID != id { anchorNewTurn(id) }
+            return
+        }
         anchoredTurnID = nil
         turnGeometry.anchoring = nil
         updateReservedHeight()
@@ -991,7 +1050,10 @@ struct QuickAIThread: View {
     /// the bottom, and only once the answer is taller than the view; scrolled
     /// up, or while it still fits under its question, the view stays put.
     private func followBottom() {
-        guard viewModel.isThreadFollowingBottom, reservedHeight == 0, turnGeometry.restoring == nil else { return }
+        // A question held at the top (a new turn, or a long answer being
+        // read from its start) is never pulled away by new text.
+        guard viewModel.isThreadFollowingBottom, reservedHeight == 0, turnGeometry.restoring == nil,
+              turnGeometry.anchoring == nil else { return }
         scrollToEnd()
         // At the end, a long turn just above the view is no longer drawn and
         // the lazy stack re-estimates it shorter; the view slides up into it,

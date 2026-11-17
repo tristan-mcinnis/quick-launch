@@ -210,7 +210,7 @@ struct QuickAIThreadScrollTests {
         #expect(!vm.showsJumpToLatest)
     }
 
-    @Test func aStreamingAnswerFollowsTheEndOnlyOnceItOutgrowsTheView() async throws {
+    @Test func aLongStreamingAnswerKeepsItsQuestionAtTheTop() async throws {
         let (vm, window, mock) = try await hostedWithService()
         defer { window.contentView = nil }
         await mock.setResponses([StreamDelta(text: "", finishReason: "stop")])
@@ -224,23 +224,48 @@ struct QuickAIThreadScrollTests {
         let afterShort = try await settleStill(in: window) { _ in true }
         #expect(abs(afterShort - atQuestion) <= 1, "an answer that fits moves nothing")
 
-        // Grown past the view, the thread follows its newest line.
+        // Grown past the view, it is read from its start (2026-11-17): the
+        // question stays at the top and Latest offers the way down.
         for step in 1...12 {
             vm.output += "\n" + (1...10).map { "Step \(step).\($0) of the plan." }.joined(separator: "\n")
             try await spin(0.05)
         }
-        // Lazy layout only estimates the height of what was just appended, so
-        // a scroll to the end lands short until the next flush corrects it.
+        let held = try await settleStill(in: window) { _ in true }
+        #expect(abs(held - atQuestion) <= QuickViewModel.threadFollowThreshold, "the question stayed at the top")
+        #expect(!vm.isThreadFollowingBottom)
+        #expect(vm.showsJumpToLatest)
+
+        // Latest goes to the end and follows it again.
+        vm.scrollThread(.bottom)
         for line in 1...6 {
             vm.output += "\nLast line \(line)."
             try await spin(0.05)
         }
-        // Judged while the stream is still running: once it ends the fake
-        // answer is dropped and the content shrinks back under the question.
         try await settle { distance(vm) <= QuickViewModel.threadFollowThreshold && (scrollOffset(in: window) ?? 0) > atQuestion }
         #expect(vm.isThreadFollowingBottom)
-        #expect((scrollOffset(in: window) ?? 0) > atQuestion, "the view followed the end")
         #expect(!vm.showsJumpToLatest)
         vm.isStreaming = false
+    }
+
+    @Test func aSlowToolKeepsItsNewQuestionInView() async throws {
+        let (vm, window, mock) = try await hostedWithService()
+        defer { window.contentView = nil }
+        let before = try #require(scrollOffset(in: window))
+        // The tool's status, then nothing until the test releases it.
+        await mock.setResponses([
+            StreamDelta(text: nil, finishReason: nil, status: "Reading your plate…"),
+            StreamDelta(text: "Short answer.", finishReason: "stop"),
+        ])
+        await mock.pause(beforeIndex: 1)
+        vm.input = "what's on my plate"
+        let submitting = Task { await vm.submit() }
+        // While the tool runs with no text, the new question comes to the top
+        // of the view, its waiting line under it: never an empty view.
+        let landed = try await settleStill(in: window) { $0 > before + PanelSizing.quickAIHeight / 2 }
+        #expect(vm.isStreaming && vm.output.isEmpty, "judged while the tool still runs")
+        #expect(distance(vm) <= 1, "the reserved room leaves nothing below")
+        #expect(landed > before)
+        await mock.release()
+        await submitting.value
     }
 }

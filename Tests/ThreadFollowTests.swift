@@ -97,7 +97,16 @@ struct ThreadFollowTests {
             let atTheEnd = distance <= 2 * QuickViewModel.threadFollowThreshold
             #expect(atTheEnd || questionAtTop,
                     "question \(index) of \(paragraphs)-paragraph answers ended \(Int(distance)) pt above the newest text, not at its question")
-            #expect(vm.isThreadFollowingBottom)
+            if paragraphs >= 40 {
+                // A long answer is read from its start: its question stays
+                // at the top and the thread does not chase the end.
+                #expect(questionAtTop, "question \(index): a long answer left its question")
+                #expect(!vm.isThreadFollowingBottom)
+                #expect(vm.showsJumpToLatest, "Latest offers the way down")
+            } else if !questionAtTop {
+                #expect(vm.isThreadFollowingBottom)
+            }
         }
     }
+
 }

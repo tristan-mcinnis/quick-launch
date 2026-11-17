@@ -5,6 +5,10 @@ actor MockQuickService: QuickService {
     var responses: [StreamDelta] = []
     var shouldThrow: Bool = false
     var delay: Duration = .zero
+    /// When set, the stream stops before this delta until `release()`: a
+    /// tool that runs until the test says it is done.
+    var pauseBeforeIndex: Int?
+    private(set) var isReleased = false
     var sendCallCount: Int = 0
     var lastPrompt: String?
     var lastMessages: [QuickMessage] = []
@@ -30,7 +34,16 @@ actor MockQuickService: QuickService {
                     continuation.finish(throwing: MockError.intentional)
                     return
                 }
-                for delta in responses {
+                let pauseIndex = await self.pauseBeforeIndex
+                for (index, delta) in responses.enumerated() {
+                    if index == pauseIndex {
+                        while !(await self.isReleased) {
+                            do { try await Task.sleep(for: .milliseconds(10)) } catch {
+                                continuation.finish()
+                                return
+                            }
+                        }
+                    }
                     if delay != .zero {
                         do {
                             try await Task.sleep(for: delay)
@@ -48,6 +61,13 @@ actor MockQuickService: QuickService {
             continuation.onTermination = { _ in producer.cancel() }
         }
     }
+
+    func pause(beforeIndex index: Int?) {
+        pauseBeforeIndex = index
+        isReleased = false
+    }
+
+    func release() { isReleased = true }
 
     private func recordCall(messages: [QuickMessage], images: [QuickImageAttachment]) {
         sendCallCount += 1
