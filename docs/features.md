@@ -147,26 +147,33 @@ The launcher closes, so one chat is open in one window.
 
 An OpenAI-compatible model can call tools that Quick Launch runs itself, each
 through a CLI with an argv array (no shell) and a timeout. All read, except the
-Todoist proposal, which writes only when you press its button:
+three proposals, which write only when you press Return or the button:
 
 | Tool | Reads |
 |---|---|
 | `recall_memory(query)` | the memory notes `recall` searches |
 | `recall_captures_today()` | today's captures |
-| `recall_tasks_today()` | due-today, overdue, and in-progress tasks |
+| `recall_tasks_today()` | memory's own list of due-today, overdue and in-progress tasks; with the plate on, the model is told to use `show_plate` for "what's on my plate" |
 | `recall_open_tasks()` | the complete open backlog |
 | `read_skill(name)` | a `SKILL.md` from the skills folder, capped at 12,000 characters |
 | `search_web(query)` | the chosen web-search backend |
 | `read_url(url)` | one public http(s) page; local and private hosts are refused (Web search switch) |
 | `open_work_item(project, item, target)` | opens a project folder, a stage folder (`02-proposal`, `06-discussion-guide`, ...), or its current document under `~/Documents/Work`; the project's `START-HERE.md` names the current file, else the newest version and date; folders and documents only, nothing when two projects match (Work files switch) |
-| `show_plate()` | `plate.py --peek`: Todoist, the work calendar, PRs, Slack, drafts, and new mail; about 15 s (Tasks switch) |
-| `read_calendar(mode, ...)` | the work calendar through `calendar-ops.py` read subcommands: agenda, a day, free slots, search (Calendar switch) |
+| `show_plate(refresh)` | `plate.py --peek`: Todoist, the work calendar, PRs, Slack, drafts, new mail, files ready to review, and Clean up (tasks that look done already, each with its reason); a new read takes 15 to 20 s, so a read from the last five minutes is reused and the answer starts "As of 14:02"; `refresh` or any change made here reads again (Tasks switch) |
+| `read_calendar(mode, ...)` | the work calendar through `calendar-ops.py` read subcommands: agenda, a day, free slots, search; events come back numbered, by day, and an event that has ended is marked over (Calendar switch) |
 | `propose_todoist_task(content, due, priority)` | nothing: it shows the task under the answer with **Add to Todoist**; only your press, or **Return** on an empty field while the footer reads **Add to Todoist ↩**, adds it to the Inbox through `todoist-add.py` (Tasks switch); ⌘↩ still pastes |
 | `propose_task_change(task, action, due)` | nothing: the app finds the one open task with those words and shows *old → new*; **Return** (footer **Reschedule ↩** or **Mark Done ↩**) makes it through `todoist-change.py`; several matches are listed for you to pick; repeating tasks are refused (Tasks switch) |
 | `propose_event_move(event, on_date, new_start)` | nothing: the app finds the one upcoming work-calendar event and shows *old → new*; **Return** (**Move Event ↩**) moves it; an event with attendees is refused, since moving it would email them (Calendar switch) |
 
-**The plate is a worklist.** `show_plate` numbers every row it shows, in the
-plate's own order and caps, and the answer keeps the numbers. Then:
+**The chat knows the time.** The instruction ends with today's date, and every
+plate and calendar result starts with the current minute in China Standard
+Time (the work calendar's zone), plus your local time when the Mac is
+elsewhere. "When is my next meeting" skips one that has ended.
+
+**The plate is a worklist, and so is the calendar.** `show_plate` numbers every
+row it shows, in the plate's own order and caps, and `read_calendar` numbers
+every event; the answer keeps the numbers, and they act on the newest numbered
+list. Then:
 
 | Type | What happens |
 |---|---|
@@ -180,7 +187,9 @@ means plate row 3. A sentence that starts with a number ("3 people came…",
 more than six words or a question) is sent as typed.
 
 After a change, **⌘Z** on an empty field puts it back (the old due date, the
-task reopened, the old start). **⌘↩** on an empty field is always the
+task reopened, the old start), also after the app restarts, since the change
+is saved with the answer. A write that times out says the change may have gone
+through, so check Todoist or Outlook before you try again. **⌘↩** on an empty field is always the
 answer's own Paste or Copy, never the pending task or change.
 
 - The model is told to use memory only when you ask about your own
@@ -447,8 +456,9 @@ failures or cancellations, successful command actions, and hotkey runs.
   local folders and documents. The plate and calendar tools run local scripts
   that read Todoist, GitHub, Slack, and Outlook with your own keys. `read_url`
   fetches the one public page the model names.
-- The one tool write is Todoist: the model can only propose a task, and the
-  task is sent to Todoist only when you press **Add to Todoist** or Return. A web search sends the
+- The tool writes are Todoist and the work calendar: the model can only
+  propose a new task, a task change or a solo event move, and nothing is sent
+  until you press **Add to Todoist** or Return. A web search sends the
   query to the search API behind the chosen backend (DeepSeek, Tavily, Brave,
   Bocha, or Exa). What a tool returns goes to the chat's model while it
   writes that answer.

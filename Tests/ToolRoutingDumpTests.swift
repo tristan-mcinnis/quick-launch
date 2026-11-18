@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import QuickLaunch
 
-/// Opt-in: writes the tool list and system prompt a chat sends, so an eval
-/// outside the repo can ask a real model which tool it would call.
+/// Opt-in: writes the tool list and system prompt a chat sends, so
+/// `make eval` (evals/routing_eval.py) can ask a real model which tool it
+/// would call.
 /// `QUICK_LAUNCH_TOOL_DUMP=/path/tools.json swift test --filter ToolRoutingDump`
 @Suite("Tool routing dump")
 struct ToolRoutingDumpTests {
@@ -20,7 +21,11 @@ struct ToolRoutingDumpTests {
             harness: FakeHarness()
         )
         let tools = [OpenAICompatibleService.searchToolDefinition] + toolbox.definitions
-        let dump: [String: Any] = ["system": QuickSettings.defaultSystemPrompt, "tools": tools]
+        let dump: [String: Any] = [
+            "system": QuickSettings.defaultSystemPrompt,
+            "tools": tools,
+            "focus": QuickViewModel.worklistFocusQuestion,
+        ]
         let data = try JSONSerialization.data(withJSONObject: dump, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: URL(fileURLWithPath: path))
     }

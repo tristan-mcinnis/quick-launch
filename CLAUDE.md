@@ -68,7 +68,9 @@ reschedule or finish an open, non-repeating Todoist task
 event, one with no attendees (`propose_event_move`, `calendar-ops.py move`,
 never `--send`). The app finds the item by its words and proposes only when
 exactly one matches; Return makes the change; ⌘Z on an empty field undoes
-the newest one. Nothing that emails or notifies another person, and no money,
+the newest one. Calendar reads are numbered like the plate, so "2 move to
+16:00" acts on an event (`CalendarListing`). The plate is reused for five
+minutes (`CachedHarness`); any change made here forgets it. Nothing that emails or notifies another person, and no money,
 ever runs from here; every other write still belongs to pi.
 
 AI Chat is the House's general chat. RTI keeps its own standalone chats
@@ -172,6 +174,15 @@ the file store serialises the I/O off the main thread. View models reach AppKit
 singletons only through the seams in `Sources/Protocols/SystemServicing.swift`.
 
 ## Verification
+
+After changing a chat tool, its description, or a system prompt, run
+`make eval` (needs `DEEPSEEK_API_KEY`): `evals/routing_eval.py` asks
+deepseek-flash what it would do with the real tool list on made-up data, in
+six suites (routing, plate follow-ups, plate layout, the clock, calendar rows,
+a bare row number), and exits 1 below a suite's pass bar. It is opt-in
+because it calls the API. The live calendar move is opt-in too:
+`QUICK_LAUNCH_LIVE_CALENDAR="<hold subject>|<yyyy-MM-dd HH:mm>" swift test --filter LiveCalendarMoveTests`
+on a solo hold you made and remove.
 
 Run `make test` after source changes: the publish scrub
 (`scripts/scrub.sh`; client names live in the untracked `.scrub-private`),

@@ -53,6 +53,22 @@ struct WorklistTests {
         ]
     }
 
+    @Test func aNumberedCalendarAnswerIsAWorklistToo() async throws {
+        let (vm, mock, _) = try make()
+        try await showPlate(vm, mock)
+        await mock.setResponses([StreamDelta(text: "Your day…", finishReason: "stop")])
+        vm.input = "and my calendar today"
+        await vm.submit()
+        let listing = CalendarListing.numbered(CalendarAndCacheTests.agenda, now: CalendarAndCacheTests.at)
+        let index = try #require(vm.currentConversation?.messages.indices.last)
+        vm.currentConversation?.messages[index].toolRecords = [
+            ChatToolRecord(kind: .calendar, summary: "Read the calendar: agenda", worklist: listing.items),
+        ]
+        guard case .ask(let move) = vm.worklistCommand(for: "2 move to 16:00") else { Issue.record("2 is an event"); return }
+        #expect(move == "Calendar row 2, “Diagnosis catch-up” (work calendar event, 2026-11-18 15:00-16:00): move to 16:00",
+                "the newest numbered list wins: the calendar, not the plate above it")
+    }
+
     @Test func numbersBecomeTheRowsOwnWords() async throws {
         let (vm, mock, _) = try make()
         try await showPlate(vm, mock)

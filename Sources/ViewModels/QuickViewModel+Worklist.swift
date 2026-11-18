@@ -23,7 +23,7 @@ extension QuickViewModel {
     ]
     /// What a bare number asks. Tested on deepseek-flash: without "no
     /// search first" it searched memory before answering.
-    static let worklistFocusQuestion = "what can I do with it? Answer straight away from the plate, with no search first: two or three next steps as a numbered list, each one I can say back (such as open it, mark it done, move it to a time, or draft the reply)."
+    nonisolated static let worklistFocusQuestion = "what can I do with it? Answer straight away from the list above, with no search first: two or three next steps as a numbered list, each one I can say back (such as open it, mark it done, move it to a time, or draft the reply)."
 
     /// The newest plate rows in this chat, and whether the newest answer is
     /// that plate.
@@ -31,7 +31,8 @@ extension QuickViewModel {
         guard let messages = currentConversation?.messages else { return nil }
         let newestAnswer = messages.last(where: { $0.role == .assistant })?.id
         for message in messages.reversed() where message.role == .assistant {
-            if let items = message.tools.last(where: { $0.kind == .plate && $0.worklist?.isEmpty == false })?.worklist {
+            // The plate or a numbered calendar read, whichever came last.
+            if let items = message.tools.last(where: { $0.worklist?.isEmpty == false })?.worklist {
                 return (items, message.id == newestAnswer)
             }
         }

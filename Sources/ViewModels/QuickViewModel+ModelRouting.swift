@@ -263,8 +263,8 @@ extension QuickViewModel {
     }
 
     /// "Today is Wednesday 2026-11-18, China Standard Time."
-    nonisolated static func todayLine(_ date: Date) -> String {
-        "Today is \(ChatToolbox.clockText(date, timeOfDay: false))."
+    nonisolated static func todayLine(_ date: Date, local: TimeZone = .current) -> String {
+        "Today is \(ChatToolbox.clockText(date, timeOfDay: false))\(ChatToolbox.localNote(date, local: local))."
     }
 
     /// `chatTools` offers the chat's memory and skill tools and lets

@@ -221,6 +221,18 @@ struct HarnessToolsTests {
         #expect(ChatToolbox.clockText(at, timeOfDay: false) == "Wednesday 2026-11-18, China Standard Time")
     }
 
+    @Test func aWriteThatTimesOutSaysItMayHaveLanded() async {
+        let scripts = HarnessScripts(
+            run: { _, _, seconds in throw ProcessRunnerError.timedOut(executable: "python3", seconds: seconds) },
+            python: { URL(fileURLWithPath: "/usr/bin/true") },
+            root: Self.skillsStub()
+        )
+        let move = ChangeProposal(kind: .moveEvent, targetID: "e1", title: "Run club", from: "2026-11-18 07:30", to: "2026-11-18 18:00")
+        await #expect(throws: HarnessScriptError.failed("Outlook did not answer in time, so the change may have gone through. Check Outlook before trying again.")) {
+            try await scripts.apply(move)
+        }
+    }
+
     // MARK: - HarnessScripts
 
     @Test func withoutTheOwnersScriptsThereIsNoHarness() throws {

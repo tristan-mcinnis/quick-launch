@@ -40,6 +40,9 @@ struct TodoistAdded: Sendable, Equatable {
 protocol HarnessScripting: Sendable {
     /// `plate.py --peek --json`: the rundown, its rows numbered.
     func plate() async throws -> PlateSnapshot
+    /// The plate, read again when `fresh`, else a recent read may come back
+    /// (`CachedHarness`), its `readAt` saying when.
+    func plate(fresh: Bool) async throws -> PlateSnapshot
     /// `calendar-ops.py <arguments>`: read-only subcommands only.
     func calendar(_ arguments: [String]) async throws -> String
     /// `todoist-add.py`: the user's own button press, never the model's call.
@@ -51,6 +54,10 @@ protocol HarnessScripting: Sendable {
     /// Makes one change: the user's Return (or ⌘Z for its inverse), never
     /// the model's call.
     func apply(_ change: ChangeProposal) async throws
+}
+
+extension HarnessScripting {
+    func plate(fresh: Bool) async throws -> PlateSnapshot { try await plate() }
 }
 
 enum HarnessScriptError: LocalizedError, Equatable {
@@ -80,6 +87,9 @@ struct HarnessScripts: HarnessScripting {
     static let plateTimeout: TimeInterval = 25
     static let calendarTimeout: TimeInterval = 15
     static let todoistTimeout: TimeInterval = 20
+    /// A write gets longer: Graph sometimes takes over 15 s, and a write that
+    /// times out may still have landed (seen live on 2026-11-18).
+    static let writeTimeout: TimeInterval = 40
 
     private let run: ProcessRunning
     private let python: @Sendable () -> URL?
@@ -165,6 +175,16 @@ struct HarnessScripts: HarnessScripting {
     }
 
     func apply(_ change: ChangeProposal) async throws {
+        do {
+            try await write(change)
+        } catch let error as ProcessRunnerError {
+            guard case .timedOut = error else { throw error }
+            let place = change.kind == .moveEvent ? "Outlook" : "Todoist"
+            throw HarnessScriptError.failed("\(place) did not answer in time, so the change may have gone through. Check \(place) before trying again.")
+        }
+    }
+
+    private func write(_ change: ChangeProposal) async throws {
         switch change.kind {
         case .reschedule:
             let due: [String]
@@ -177,13 +197,13 @@ struct HarnessScripts: HarnessScripting {
             } else {
                 due = ["--due", change.to]
             }
-            _ = try await json(Self.changeScript, ["reschedule", change.targetID] + due, timeout: Self.todoistTimeout, what: "Todoist change")
+            _ = try await json(Self.changeScript, ["reschedule", change.targetID] + due, timeout: Self.writeTimeout, what: "Todoist change")
         case .complete, .reopen:
-            _ = try await json(Self.changeScript, [change.kind.rawValue, change.targetID], timeout: Self.todoistTimeout, what: "Todoist change")
+            _ = try await json(Self.changeScript, [change.kind.rawValue, change.targetID], timeout: Self.writeTimeout, what: "Todoist change")
         case .moveEvent:
             // Never `--send`: an event with attendees only prints a dry run,
             // which is a refusal here, not a move.
-            let output = try await script(Self.calendarScript, ["move", change.targetID, "--start", change.to, "--json"], timeout: Self.calendarTimeout)
+            let output = try await script(Self.calendarScript, ["move", change.targetID, "--start", change.to, "--json"], timeout: Self.writeTimeout)
             guard output.contains("moved:"), !output.contains("dry_run") else {
                 throw HarnessScriptError.failed("The event was not moved; one with attendees moves only in Outlook.")
             }

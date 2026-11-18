@@ -17,6 +17,7 @@ struct PlateItem: Codable, Sendable, Equatable, Hashable {
     var kindName: String {
         switch key.split(separator: ":", maxSplits: 1).first.map(String.init) ?? key {
         case "t": "Todoist task"
+        case "e": "work calendar event"
         case "c": "work calendar event"
         case "m": "work mail"
         case "f": "file ready to review"
@@ -30,7 +31,7 @@ struct PlateItem: Codable, Sendable, Equatable, Hashable {
     /// "3. “Check the backup drive” (Todoist task, Wed 18 · p2)"
     var reference: String {
         let detail = [kindName, note].filter { !$0.isEmpty }.joined(separator: ", ")
-        return "plate item \(number), “\(text)” (\(detail))"
+        return "\(key.hasPrefix("e:") ? "calendar row" : "plate item") \(number), “\(text)” (\(detail))"
     }
 }
 
@@ -40,6 +41,8 @@ struct PlateSnapshot: Sendable, Equatable {
     var items: [PlateItem]
     /// The numbered plate for the model.
     var text: String
+    /// When it was read; set by `CachedHarness`, nil for a read just made.
+    var readAt: Date?
 
     /// plate.py's `ORDER` and `CAPS`.
     static let order = ["Do now", "Risks", "Waiting on you", "Next 3 days", "Waiting on others",

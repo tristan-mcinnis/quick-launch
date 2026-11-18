@@ -1,4 +1,4 @@
-.PHONY: build build-app dmg test scrub install clean run check-clean
+.PHONY: build build-app dmg test scrub install clean run check-clean eval
 
 # Stable code signature: Keychain items only survive rebuilds when every
 # build carries the same verifiable identity. Ad-hoc ("-") signatures change
@@ -17,6 +17,14 @@ build:
 # The full gate: the publish scrub and the app suite.
 test: scrub
 	swift test $(WERROR)
+
+# Routing eval: the real tool list against deepseek-flash, on made-up data.
+# Opt-in (it calls the API); run after changing a tool, its description or
+# the system prompt. Needs DEEPSEEK_API_KEY. See evals/routing_eval.py.
+EVAL_TOOLS ?= $(TMPDIR)quick-launch-eval-tools.json
+eval:
+	QUICK_LAUNCH_TOOL_DUMP=$(EVAL_TOOLS) swift test --filter ToolRoutingDump > /dev/null
+	python3 evals/routing_eval.py $(EVAL_TOOLS)
 
 # No personal paths, private hosts, keys or client names in tracked files.
 scrub:

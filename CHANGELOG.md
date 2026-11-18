@@ -2,6 +2,24 @@
 
 ## Unreleased — 2026-11-18
 
+- **Calendar rows have numbers.** An agenda answer is a worklist like the
+  plate: "2 move to 16:00" proposes that event's move, and an event that has
+  ended says "over".
+- **The plate answers at once the second time.** A read from the last five
+  minutes is reused and says when it was read; "refresh my plate" or any
+  change made here reads it again.
+- **"What's on my plate" always reads the plate**, not memory's older task
+  list, and the plate's Clean up now shows tasks done elsewhere (a newer
+  version, a sent mail or Slack message, a merged PR, today's event over).
+- **The clock follows you.** Away from China the model also gets your local
+  time; the calendar stays in China Standard Time.
+- **A slow write says so.** Outlook once took over 15 s and moved the event
+  while the app reported a failure; writes now get 40 s, and a timeout says
+  the change may have gone through.
+- **`make eval`**: the routing evals now live in the repo, on made-up data
+  (routing 35/36, follow-ups 11/12, layout, clock, calendar rows and a bare
+  number all pass). The event move was run once on the real calendar
+  (`LiveCalendarMoveTests`): moved, read back, undone.
 - **The chat knows the time.** The prompt carries today's date, and every
   calendar and plate result starts with the current minute. "When is my next
   meeting" at 13:43 used to name the 12:00 meeting (0 of 5 runs on

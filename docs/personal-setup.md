@@ -14,6 +14,8 @@ app. The README lists the integrations in general terms.
   Web search), else `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY` in
   `~/.config/secrets.env`. Keys are read at call time and never stored or
   logged. `BRAVE_API_KEY` is accepted when `BRAVE_SEARCH_API_KEY` is absent.
+- `make eval` takes `DEEPSEEK_API_KEY`, else the 1Password helper in
+  `~/skills/_lib/auth.py` when it is on this Mac (2026-11-18).
 - Pages are read with a direct fetch in the app. There is no remote reader.
 - Source files open only from `~/memory`, `~/skills` and `~/Documents/Work`.
 
