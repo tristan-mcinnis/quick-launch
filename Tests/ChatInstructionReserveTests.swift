@@ -229,7 +229,7 @@ struct ChatInstructionReserveTests {
 
         let sent = await rig.service.lastMessages
         let wire = try wireSystemInstruction(rig, messages: sent, grounded: true)
-        #expect(wire == ChatContextGate.groundingDirective)
+        #expect(wire.withoutTodayLine == ChatContextGate.groundingDirective)
 
         #expect(
             try await persistedShare(rig) == shareFromWire(rig, question: rig.question, wire: wire)
@@ -304,7 +304,7 @@ struct ChatInstructionReserveTests {
         let sent = await rig.service.lastMessages
         let wire = try wireSystemInstruction(rig, messages: sent, grounded: true)
         #expect(
-            wire == "ASSISTANT-RULES-1\n\nSURFACE-RULES-1\n\n" + ChatContextGate.groundingDirective,
+            wire.withoutTodayLine == "ASSISTANT-RULES-1\n\nSURFACE-RULES-1\n\n" + ChatContextGate.groundingDirective,
             "the assistant's message, the surface instruction and the sentence, one blank line apart"
         )
 
@@ -437,7 +437,7 @@ struct ChatInstructionReserveTests {
 
         let sent = await rig.service.lastMessages
         let wire = try wireSystemInstruction(rig, messages: sent, grounded: false)
-        #expect(wire == "SURFACE-RULES-1")
+        #expect(wire.withoutTodayLine == "SURFACE-RULES-1")
 
         #expect(
             try await persistedShare(rig) == shareFromWire(rig, question: rig.question, wire: wire)

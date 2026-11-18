@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — 2026-11-17
+## Unreleased — 2026-11-18
+
+- **The chat knows the time.** The prompt carries today's date, and every
+  calendar and plate result starts with the current minute. "When is my next
+  meeting" at 13:43 used to name the 12:00 meeting (0 of 5 runs on
+  deepseek-flash); now it names 15:00 (5 of 5).
+
+## 2026-11-17
 
 - **The plate reads as a list again.** Each section is a heading with its rows
   one per line, and a numbered list keeps its own numbers (row 3 used to show

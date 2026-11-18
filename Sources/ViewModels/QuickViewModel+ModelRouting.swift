@@ -247,12 +247,24 @@ extension QuickViewModel {
         grounded: Bool,
         assistantInstruction: String? = nil
     ) -> String {
-        ChatContextGate.systemInstruction(
+        // The date only, so the prompt stays the same all day and the
+        // provider's prompt cache holds; the calendar and plate results carry
+        // the minute (`ChatToolbox.nowLine`).
+        // It goes last, so the user's own instruction stays first and exactly
+        // as written.
+        let instruction = ChatContextGate.systemInstruction(
             surfacePrompt: settings.surfaceSystemPrompt(forChat: isAIChatWindow),
             grounded: grounded,
             lane: provider.kind == .commandLine ? .commandLine : .model,
             assistantInstruction: assistantInstruction
         )
+        let today = Self.todayLine(now())
+        return instruction.isEmpty ? today : instruction + "\n\n" + today
+    }
+
+    /// "Today is Wednesday 2026-11-18, China Standard Time."
+    nonisolated static func todayLine(_ date: Date) -> String {
+        "Today is \(ChatToolbox.clockText(date, timeOfDay: false))."
     }
 
     /// `chatTools` offers the chat's memory and skill tools and lets

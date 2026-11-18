@@ -43,7 +43,7 @@ struct PromptSurfaceInstructionTests {
                 grounded: grounded
             ) as? OpenAICompatibleService
         )
-        return service.systemPrompt
+        return service.systemPrompt.withoutTodayLine
     }
 
     private func chatWindowDefaults() -> UserDefaults {
@@ -408,5 +408,13 @@ struct PromptSurfaceInstructionTests {
                 to: outputDir.appendingPathComponent("prompt-surfaces-models-\(suffix).png")
             )
         }
+    }
+}
+
+extension String {
+    /// The instruction without the date line the view model adds last.
+    var withoutTodayLine: String {
+        guard let range = range(of: "Today is ", options: .backwards) else { return self }
+        return String(self[..<range.lowerBound]).trimmingCharacters(in: .newlines)
     }
 }

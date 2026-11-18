@@ -210,6 +210,17 @@ struct HarnessToolsTests {
         #expect(await harness.calendarCalls == [["free", "--days", "14", "--duration", "45"]])
     }
 
+    @Test func calendarAndPlateResultsCarryTheClock() async throws {
+        // 2026-11-18 13:43 in Beijing: the 12:00 meeting is over, so "next" is 15:00.
+        let at = Date(timeIntervalSince1970: 1794980580)
+        let toolbox = ChatToolbox(enabled: [.tasks, .calendar], harness: FakeHarness(), now: { at })
+        let agenda = try #require(await toolbox.run("read_calendar", arguments: #"{"mode":"agenda"}"#))
+        #expect(agenda.content.contains("Now: Wednesday 2026-11-18 13:43, China Standard Time"))
+        let plate = try #require(await toolbox.run("show_plate", arguments: "{}"))
+        #expect(plate.content.contains("Now: Wednesday 2026-11-18 13:43"))
+        #expect(ChatToolbox.clockText(at, timeOfDay: false) == "Wednesday 2026-11-18, China Standard Time")
+    }
+
     // MARK: - HarnessScripts
 
     @Test func withoutTheOwnersScriptsThereIsNoHarness() throws {
