@@ -184,7 +184,7 @@ final class LauncherCatalogService: LauncherCatalogServicing {
         let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard item.kind == .quickLink else { throw MutationError.invalidQuickLink }
         guard item.isEditableQuickLink else { throw MutationError.invalidQuickLink }
-        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
+        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(QuickLinkQuery.validationSample(cleanValue)) else {
             throw MutationError.invalidQuickLink
         }
         guard let index = storedCatalog.quickLinks.firstIndex(where: { $0.itemID == item.itemID }) else {
@@ -210,7 +210,7 @@ final class LauncherCatalogService: LauncherCatalogServicing {
     func createQuickLink(title: String, value: String) throws -> LauncherCatalogItem {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(cleanValue) else {
+        guard !cleanTitle.isEmpty, ItemActionCatalog.looksLikeURL(QuickLinkQuery.validationSample(cleanValue)) else {
             throw MutationError.invalidQuickLink
         }
         let stored = StoredItem(

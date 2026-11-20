@@ -2,6 +2,19 @@
 
 ## Unreleased — 2026-11-18
 
+- **Every Fallback Command is reachable.** Each one after the first has a row
+  at the foot of root search; before, only the first could run.
+- **Empty Trash asks for a second Return.** A global hotkey on it still runs
+  at once.
+- **Hotkeys on house commands and on snippets with an argument** work before
+  the launcher has been opened and show the panel when they need text.
+- **`{cursor}` in a snippet places the caret.** A Quicklink slot can be
+  written `{query}`, `{{input}}` or `{argument name="…"}`.
+- **Command actions** take quoted arguments, run in the home folder and stop
+  after five minutes.
+- **Forget Learned Ranking** for one row in `Command+K`, and **Export All
+  Chats** in the AI Chat rail.
+- The clipboard blob and agent session folders are owner-only.
 - **Calendar rows have numbers.** An agenda answer is a worklist like the
   plate: "2 move to 16:00" proposes that event's move, and an event that has
   ended says "over".

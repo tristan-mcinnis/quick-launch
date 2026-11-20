@@ -34,7 +34,8 @@ project management, no automations, and no file changes; those belong to pi.
 Unmatched root-search text runs the first Fallback Command on `Return`. Ask AI
 heads the list out of the box; the list is reordered and edited in
 **Settings › General**. The search row names whatever `Return` will actually
-run.
+run. Every Fallback Command after the first has its own row at the foot of the
+list, so each one can be picked for the typed text.
 
 ## Local answers
 
@@ -326,6 +327,11 @@ hotkeys, and pin to top (`Command+Shift+P`).
 
 - Stored in an owner-only local catalog, not in app settings. A surviving
   legacy catalog is imported once.
+- A snippet may hold `{cursor}` (the caret goes there after a paste, up to 500
+  characters from the end), `{clipboard}`, `{date}`, `{time}` and
+  `{argument name="…"}` (asked for before the paste).
+- A Quicklink asks for words when its address holds `{query}`. `{{input}}` and
+  Raycast's `{argument name="…"}` name the same slot.
 - `Command+K` on a snippet or Quicklink gives it a search alias or hotkey, or
   offers Paste, Copy, or Copy & Paste. Paste targets the topmost external window
   directly behind Quick Launch.

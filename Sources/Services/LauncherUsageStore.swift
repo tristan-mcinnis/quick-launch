@@ -89,6 +89,12 @@ final class LauncherUsageStore {
         }
     }
 
+    /// Whether anything was learned about `itemID`, in any scope.
+    func hasLearning(itemID: String) -> Bool {
+        items.keys.contains { $0.hasSuffix("\u{1F}" + itemID) }
+            || mnemonics.values.contains { $0[itemID] != nil }
+    }
+
     func forget(itemID: String) {
         for key in mnemonics.keys {
             mnemonics[key]?.removeValue(forKey: itemID)

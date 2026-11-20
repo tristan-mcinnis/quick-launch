@@ -137,6 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             currentVersion: Bundle.main.shortVersion
         )
         self.viewModel = vm
+        // House commands load once here as well as on every open, so a global
+        // hotkey bound to one works before the launcher has been shown.
+        vm.refreshHouseCommands()
         vm.overlayPresenter = self
         vm.growsWithAnswer = true
         // Tools inside the chat: memory through `recall`, skills from

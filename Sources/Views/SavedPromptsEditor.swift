@@ -8,6 +8,8 @@ import HouseDesign
 struct SavedPromptsEditor: View {
     @Bindable var viewModel: QuickViewModel
     @State private var selection: SavedPrompt.ID?
+    /// The Arguments field as typed, per action, while this editor is open.
+    @State private var commandArgumentDrafts: [SavedPrompt.ID: String] = [:]
     /// The folders `~/.claude/skills` lists, for the Add Skill menu and to
     /// mark a context skill that is gone. Nil until loaded.
     @State private var skillNames: [String]?
@@ -179,7 +181,7 @@ struct SavedPromptsEditor: View {
                         .frame(minHeight: House.Control.compact)
                         .background(fieldBackground)
                     }
-                    CardText("Optional. With an executable set, the action runs it directly (no shell) instead of a model. {input} inserts the typed text as one argument.")
+                    CardText("Optional. With an executable set, the action runs it directly (no shell) instead of a model. {input} inserts the typed text as one argument. Put quotes around an argument that holds a space. It runs in your home folder and stops after five minutes.")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -470,14 +472,16 @@ struct SavedPromptsEditor: View {
     private func bindingForCommandArguments(_ id: SavedPrompt.ID) -> Binding<String> {
         Binding(
             get: {
-                viewModel.settings.savedPrompts.first(where: { $0.id == id })?
-                    .commandArguments?.joined(separator: " ") ?? ""
+                // The text as typed while this editor is open, so a quote
+                // or a space in progress is not rewritten under the caret.
+                if let draft = commandArgumentDrafts[id] { return draft }
+                return viewModel.settings.savedPrompts.first(where: { $0.id == id })?
+                    .commandArguments.map(CommandActionRunner.joinArguments) ?? ""
             },
             set: { newValue in
+                commandArgumentDrafts[id] = newValue
                 update(id) {
-                    let parts = newValue
-                        .split(whereSeparator: { $0.isWhitespace })
-                        .map(String.init)
+                    let parts = CommandActionRunner.splitArguments(newValue)
                     $0.commandArguments = parts.isEmpty ? nil : parts
                 }
             }

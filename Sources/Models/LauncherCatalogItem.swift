@@ -72,6 +72,9 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
             return false
         case .quickLink:
             return !itemID.hasPrefix("typed:")
+        case .command where itemID.hasPrefix("fallback:"):
+            // A Fallback Command row exists only for the typed text.
+            return false
         default:
             return true
         }

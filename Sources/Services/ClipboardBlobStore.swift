@@ -109,7 +109,14 @@ final class ClipboardBlobStore: @unchecked Sendable {
         let data = try encoder.encode(items)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        // A folder an earlier build made was world-readable; the attribute
+        // above only applies to a new one.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: url.deletingLastPathComponent().path
         )
         try data.write(to: url, options: .atomic)
         try FileManager.default.setAttributes(

@@ -275,6 +275,7 @@ extension QuickViewModel {
         parts.append(inlineTranslation.map { "\($0.status)\u{0}\($0.text)" } ?? "")
         parts.append(inputMode == nil ? "" : "mode")
         parts.append(pendingHouseChoice?.row.id ?? "")
+        parts.append(armedDestructiveCommand.map { "\($0.itemID)\u{0}\($0.input)" } ?? "")
         parts.append(houseCommandRows.map(\.id).joined(separator: ","))
         parts.append(String(snippets.count))
         parts.append(String(quickLinks.count))
@@ -430,6 +431,20 @@ extension QuickViewModel {
                 ranked.insert(.item(ask), at: Self.maxLauncherRows - 1)
             }
             ranked = Array(ranked.prefix(Self.maxLauncherRows))
+        }
+        // Every Fallback Command after the first gets its own row at the foot
+        // of the list, so the whole list is reachable, not only the command
+        // Return runs. Fuzzy matching finds something for most text, so the
+        // rows do not wait for an empty list; the weakest matches make room.
+        let fallbackRows = additionalFallbackRows(text: query)
+            .prefix(Self.maxLauncherRows - 1)
+            .map(LauncherSearchResult.item)
+        if !fallbackRows.isEmpty {
+            while ranked.count + fallbackRows.count > Self.maxLauncherRows,
+                  let weakest = ranked.lastIndex(where: { $0.id != askID }) {
+                ranked.remove(at: weakest)
+            }
+            ranked.append(contentsOf: fallbackRows)
         }
         return ranked
     }

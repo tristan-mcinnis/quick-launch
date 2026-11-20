@@ -123,10 +123,21 @@ extension QuickViewModel {
         }
         if item.value.hasPrefix("toggle."),
            let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count))) {
+            // What cannot be undone takes two Returns: the first one renames
+            // the row and waits, as a Delete action does in the ⌘K pane.
+            if toggle.isDestructive, !isDestructiveCommandArmed(item.itemID) {
+                armedDestructiveCommand = ArmedDestructiveCommand(itemID: item.itemID, input: input)
+                invalidateLauncherRanking()
+                noteInteraction()
+                requestInputFocus()
+                return
+            }
+            armedDestructiveCommand = nil
             input = ""
             overlayPresenter.dismissOverlay()
             Task { @MainActor [weak self] in
-                if let failure = await QuickToggleService.run(toggle) {
+                guard let run = self?.runQuickToggle else { return }
+                if let failure = await run(toggle) {
                     guard let self else { return }
                     self.errorMessage = failure
                     self.recoverFromExternalActionFailure?()

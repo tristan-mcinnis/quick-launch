@@ -1,9 +1,15 @@
 import Foundation
 
 /// The `{query}` slot inside a Quicklink's address: the one place a stored
-/// link asks for words before it opens. Raycast spells it the same way.
+/// link asks for words before it opens.
 ///
-/// A link without `{query}` never goes through here; it opens exactly as it
+/// Three spellings name the same slot, so a link works however it arrived:
+/// `{query}` (what the edit form teaches), `{{input}}` (Tuna's Smart Links),
+/// and `{argument name="…"}` (how Raycast writes it, so a link pasted from
+/// there works as it is). A link with several Raycast arguments gets the
+/// same text in each.
+///
+/// A link without a slot never goes through here; it opens exactly as it
 /// always did.
 enum QuickLinkQuery {
     static let placeholder = "{query}"
@@ -19,8 +25,23 @@ enum QuickLinkQuery {
         value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     }
 
+    /// The Tuna spelling of the slot.
+    static let legacyPlaceholder = "{{input}}"
+
+    /// The Raycast spelling: `{argument}` with any attributes.
+    private static let argumentPattern = #"\{argument(\s[^{}]*)?\}"#
+
     static func contains(_ template: String) -> Bool {
         template.contains(placeholder)
+            || template.contains(legacyPlaceholder)
+            || template.range(of: argumentPattern, options: .regularExpression) != nil
+    }
+
+    /// The template with every slot filled by a plain word, for checking that
+    /// what surrounds the slots is a web address. A Raycast slot holds a
+    /// space, which no address may.
+    static func validationSample(_ template: String) -> String {
+        render(template, query: "x", clipboard: "x")
     }
 
     /// The address to open: every slot filled and percent-encoded. Pure, so
@@ -29,7 +50,13 @@ enum QuickLinkQuery {
         template
             .replacingOccurrences(of: placeholder, with: encode(query))
             // The two Smart Link spellings Tuna's own config uses.
-            .replacingOccurrences(of: "{{input}}", with: encode(query))
+            .replacingOccurrences(of: legacyPlaceholder, with: encode(query))
+            .replacingOccurrences(
+                of: argumentPattern,
+                // A template, so a `$` or `\` in the encoded text stays literal.
+                with: NSRegularExpression.escapedTemplate(for: encode(query)),
+                options: .regularExpression
+            )
             .replacingOccurrences(of: "{{clipboard}}", with: encode(clipboard))
     }
 }

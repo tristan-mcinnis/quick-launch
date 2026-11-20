@@ -38,9 +38,9 @@ struct ClipboardLinksSettingsView: View {
 
     private var clipboardCard: some View {
         SettingsCard("Clipboard History") {
-            SettingsRow(title: "Keep text clipboard history", isFirst: true) {
+            SettingsRow(title: "Keep clipboard history", isFirst: true) {
                 Toggle(
-                    "Keep text clipboard history",
+                    "Keep clipboard history",
                     isOn: viewModel.settingsBinding(\.clipboardHistoryEnabled) { _ in
                         notifyClipboardSettingsChanged()
                     }
@@ -49,10 +49,10 @@ struct ClipboardLinksSettingsView: View {
             }
 
             SettingsRow(
-                title: "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)"
+                title: "Keep up to \(viewModel.settings.clipboardHistoryLimit) items, or the time below if that comes first (pinned items never expire)"
             ) {
                 Stepper(
-                    "Keep \(viewModel.settings.clipboardHistoryLimit) items (pinned items never expire)",
+                    "Keep up to \(viewModel.settings.clipboardHistoryLimit) items, or the time below if that comes first (pinned items never expire)",
                     value: viewModel.settingsBinding(\.clipboardHistoryLimit) { _ in
                         notifyClipboardSettingsChanged()
                     },
@@ -156,7 +156,7 @@ struct ClipboardLinksSettingsView: View {
                 }
             }
 
-            SettingsRow(title: "\(viewModel.clipboardEntries.count) saved text items") {
+            SettingsRow(title: "\(viewModel.clipboardEntries.count) saved items") {
                 Button("Clear Clipboard History…", role: .destructive) {
                     confirmsClipboardClear = true
                 }
@@ -316,7 +316,7 @@ struct ClipboardLinksSettingsView: View {
             }
 
             CardNote {
-                CardText("Applies to every Quicklink. Links with {{input}} ask for text first.")
+                CardText("Applies to every Quicklink. Links with {query} ask for text first.")
             }
         }
     }

@@ -73,6 +73,8 @@ extension QuickViewModel {
     /// query was submitted (and then failed or was cancelled) is not abandoned:
     /// `journalActedQuery` matches the restored text.
     func endInteractionSession() {
+        // A confirm left waiting does not outlive the panel that showed it.
+        armedDestructiveCommand = nil
         defer { journalActedQuery = nil }
         // Retention is a data-lifecycle rule, not recording: it applies whether
         // or not the journal is on, so an old log does not sit on disk forever
@@ -696,9 +698,24 @@ extension QuickViewModel {
             learn(result)
             enterCatalog(scope)
         case .item(let item):
-            learn(result)
+            // An arm belongs to one row: acting on any other row drops it.
+            if armedDestructiveCommand?.itemID != item.itemID { armedDestructiveCommand = nil }
+            // Two Returns are not learned: a Fallback Command row is not a
+            // launcher item (its command learns for itself), and the first
+            // Return on a command that asks for a second is not yet a choice.
+            if !item.value.hasPrefix(Self.fallbackRowPrefix), !isArmingReturn(on: item) {
+                learn(result)
+            }
             await performLauncherItem(item)
         }
+    }
+
+    /// Whether Return on `item` will only arm it (the first of two Returns).
+    func isArmingReturn(on item: LauncherCatalogItem) -> Bool {
+        guard item.value.hasPrefix("toggle."),
+              let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count)))
+        else { return false }
+        return toggle.isDestructive && !isDestructiveCommandArmed(item.itemID)
     }
 
     /// Pull what the manager knows into the observable state.

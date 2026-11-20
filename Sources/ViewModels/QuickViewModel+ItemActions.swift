@@ -54,6 +54,23 @@ extension QuickViewModel {
         // whether the row is already hidden. A hidden row is filtered out of
         // the list, so this is always the "hide me" direction. It sits just
         // above Delete so the destructive action stays last.
+        // Like hiding, forgetting is row state: offered only for a row the
+        // launcher has learned something about.
+        if settings.launcherLearningEnabled,
+           !result.id.hasPrefix("command:" + Self.fallbackRowPrefix),
+           launcherUsage.hasLearning(itemID: result.id) {
+            let reset = ItemAction(
+                kind: .resetRanking,
+                title: "Forget Learned Ranking",
+                systemImage: "arrow.counterclockwise",
+                shortcut: nil
+            )
+            if let deleteIndex = actions.firstIndex(where: { $0.kind == .delete }) {
+                actions.insert(reset, at: deleteIndex)
+            } else {
+                actions.append(reset)
+            }
+        }
         if let hide = hideAction(for: result) {
             if let deleteIndex = actions.firstIndex(where: { $0.kind == .delete }) {
                 actions.insert(hide, at: deleteIndex)

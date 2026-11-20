@@ -598,6 +598,29 @@ struct AIChatRail: View {
             .disabled(exportableChatID == nil)
             .accessibilityLabel("Export Chat")
             .help("Export the highlighted chat as JSON")
+            Button {
+                exportAllChats()
+            } label: {
+                HStack(spacing: House.Spacing.xs) {
+                    Image(systemName: "square.and.arrow.up.on.square")
+                        .font(AQDesign.TypeToken.metadata)
+                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .frame(width: House.Control.keyCap)
+                        .accessibilityHidden(true)
+                    Text("Export All Chats")
+                        .font(AQDesign.TypeToken.label)
+                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, House.Spacing.xs)
+                .frame(height: House.Control.railRow)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.railItems.isEmpty)
+            .accessibilityLabel("Export All Chats")
+            .help("Export every saved chat as one JSON file, as a backup")
             if let storageLine {
                 Text(storageLine)
                     .font(AQDesign.TypeToken.metadata)
@@ -620,6 +643,29 @@ struct AIChatRail: View {
 
     private var exportableChatID: String? {
         model.highlightedRailItem?.itemID ?? model.openChatItemID
+    }
+
+    /// Every saved chat in one file: the only whole-history backup the app
+    /// writes. Attachments stay in `chat-assets`; the file names them.
+    private func exportAllChats() {
+        guard let archive = model.chat.chatArchive else {
+            actionNotice = "No chats to export."
+            return
+        }
+        Task {
+            do {
+                let data = try await archive.exportAll()
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "Quick Launch chats.json"
+                panel.canCreateDirectories = true
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                try data.write(to: url, options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                actionNotice = "Exported \(panel.nameFieldStringValue)"
+            } catch {
+                actionNotice = "Could not export: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func exportChat() {

@@ -131,18 +131,39 @@ extension QuickViewModel {
         dismissingOverlay: Bool
     ) async {
         var expanded = item
-        expanded.value = expandSnippet(item.value, arguments: arguments).text
+        let expansion = expandSnippet(item.value, arguments: arguments)
+        expanded.value = expansion.text
+        var pasted = false
         switch mode {
         case .paste:
-            _ = await pasteLauncherItem(expanded)
+            pasted = await pasteLauncherItem(expanded)
         case .copy:
             _ = await copyLauncherItem(expanded)
         case .copyAndPaste:
-            _ = await copyAndPasteLauncherItem(expanded)
+            pasted = await copyAndPasteLauncherItem(expanded)
+        }
+        // `{cursor}`: the paste leaves the caret at the end, so step it back
+        // to where the snippet asked for it.
+        if pasted, let steps = Self.caretStepsBack(for: expansion) {
+            await selectedTextService?.moveCaretLeft(by: steps)
         }
         guard dismissingOverlay else { return }
         input = ""
         overlayPresenter.dismissOverlay()
+    }
+
+    /// The most arrow keys a `{cursor}` sends. A longer tail is left alone:
+    /// hundreds of synthetic keys are slower and riskier than a caret at the
+    /// end.
+    static let maximumCaretSteps = 500
+
+    /// How many characters the caret moves left after a paste, or nil when
+    /// the snippet has no `{cursor}`, has it at the end, or the tail is too
+    /// long to step through.
+    static func caretStepsBack(for expansion: SnippetExpansion) -> Int? {
+        guard let offset = expansion.cursorOffset else { return nil }
+        let steps = expansion.text.count - offset
+        return (1...maximumCaretSteps).contains(steps) ? steps : nil
     }
 
     /// The pure expansion with this view model's seams filled in: the

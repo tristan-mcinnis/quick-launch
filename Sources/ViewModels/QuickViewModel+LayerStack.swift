@@ -510,6 +510,13 @@ extension QuickViewModel {
             case .catalog:
                 return true
             }
+        case .resetRanking:
+            launcherUsage.forget(itemID: result.id)
+            invalidateLauncherRanking()
+            closeItemActionPane()
+            // The row may move down without its boost: the highlight follows.
+            applicationSelectionIndex = launcherMatches.firstIndex { $0.id == result.id } ?? 0
+            noteInteraction()
         case .openInAIChat:
             guard case .item(let item) = result, item.kind == .conversation else { return true }
             openChatInAIChat(itemID: item.itemID)

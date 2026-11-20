@@ -287,11 +287,14 @@ extension QuickViewModel {
     /// helpers, as Commands catalog items.
     var utilityCommands: [LauncherCatalogItem] {
         let toggles = QuickToggle.allCases.map { toggle in
-            LauncherCatalogItem(
+            let armed = toggle.isDestructive && isDestructiveCommandArmed("toggle.\(toggle.rawValue)")
+            return LauncherCatalogItem(
                 kind: .command,
                 itemID: "toggle.\(toggle.rawValue)",
+                // The title stays, so the armed row keeps its score and its
+                // place under the highlight; only the line under it changes.
                 title: toggle.title,
-                detail: toggle.detail,
+                detail: armed ? "Press Return again to confirm. This cannot be undone." : toggle.detail,
                 value: "toggle.\(toggle.rawValue)",
                 keywords: toggle.keywords + " toggle quick"
             )

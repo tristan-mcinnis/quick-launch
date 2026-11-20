@@ -170,6 +170,9 @@ enum ItemActionKind: String, Sendable, CaseIterable {
     /// Hide the row itself from launcher search and its catalog. Reversible
     /// in Settings › Items › Hidden; it never deletes the source.
     case hideFromLauncher
+    /// Forget what the launcher learned about this one row. Its alias, pin
+    /// and hotkey stay.
+    case resetRanking
     case relaunch
     case copyCleanLink
     /// `⌘J` on a chat row: that chat moves to the AI Chat window.
@@ -372,6 +375,11 @@ enum ItemActionCatalog {
             // state, exactly like Pin/Unpin: only Decaffeinate is offered while
             // a sleep assertion is held, only Caffeinate when it is not.
             let caffeinateActive = item.caffeinateIsActive
+            // A Fallback Command row exists only for the typed text: it has
+            // no alias or hotkey of its own.
+            if item.value.hasPrefix("fallback:") {
+                return [ItemAction(kind: .primary, title: "Run", systemImage: "play", shortcut: .returnKey)]
+            }
             return [
                 ItemAction(
                     kind: .primary,

@@ -20,6 +20,7 @@ extension QuickViewModel {
         rootAnswer = nil
         renameReturnsToRecentChats = false
         inputMode = mode
+        inputStepGeneration += 1
         catalogScope = nil
         pendingQuickLinkID = nil
         closeItemActionPane()
@@ -585,6 +586,14 @@ extension QuickViewModel {
         case .application:
             return
         case .command:
+            if item.value.hasPrefix(Self.fallbackRowPrefix) {
+                // A Fallback Command row: the typed text is its input.
+                await runFallbackCommand(
+                    String(item.value.dropFirst(Self.fallbackRowPrefix.count)),
+                    text: input
+                )
+                return
+            }
             if let action = savedAction(forCommandValue: item.value) {
                 // The typed text was the search for the row, not its input.
                 input = ""
@@ -625,6 +634,12 @@ extension QuickViewModel {
                     markJustSaved()
                 }
                 requestInputFocus()
+                return
+            }
+            if HouseCommandCatalog.isHouseCommand(item.value) {
+                // Awaited here, so a caller that asks afterwards whether the
+                // command is waiting for text or a choice gets a true answer.
+                await performHouseCommand(item)
                 return
             }
             performSystemCommand(item)

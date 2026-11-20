@@ -52,10 +52,56 @@ extension QuickViewModel {
             input = text
             inputMode = nil
             await performLauncherItem(item)
+            // A command that takes text opens its own input step, which
+            // clears the field: put the typed text back as that step's draft.
+            if inputMode == .houseCommandArgument, input.isEmpty {
+                input = text
+            }
             return
         }
         errorMessage = "That fallback command is no longer available."
         requestInputFocus()
+    }
+
+    /// The `value` prefix of a root row that runs one Fallback Command.
+    static let fallbackRowPrefix = "fallback:"
+
+    /// The most extra Fallback Command rows root search shows. Each one
+    /// takes a slot from the weakest match, so a long list must not push
+    /// real results out.
+    static let maximumAdditionalFallbackRows = 3
+
+    /// Whether the command an identifier names still exists.
+    func isFallbackCommandAvailable(_ identifier: String) -> Bool {
+        if identifier == FallbackCommandID.askAI { return true }
+        if let promptID = FallbackCommandID.savedPromptUUID(from: identifier) {
+            return settings.savedPrompts.contains { $0.id == promptID }
+        }
+        if let itemID = FallbackCommandID.commandItemID(from: identifier) {
+            return fallbackCommandItems.contains { $0.itemID == itemID }
+        }
+        return false
+    }
+
+    /// Rows for the Fallback Commands after the first, shown under unmatched
+    /// root-search text. The first command is the row Return already runs
+    /// (`askAIItem`), so it is not repeated here.
+    func additionalFallbackRows(text: String) -> [LauncherCatalogItem] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return settings.fallbackCommandIDs.dropFirst()
+            .filter(isFallbackCommandAvailable)
+            .prefix(Self.maximumAdditionalFallbackRows)
+            .map { identifier in
+                let entry = fallbackCommandEntry(for: identifier)
+                return LauncherCatalogItem(
+                    kind: .command,
+                    itemID: Self.fallbackRowPrefix + identifier,
+                    title: entry.title,
+                    detail: "\u{201C}\(trimmed)\u{201D} · Fallback Command",
+                    value: Self.fallbackRowPrefix + identifier
+                )
+            }
     }
 
     /// One row of the Fallback Commands card.

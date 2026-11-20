@@ -713,6 +713,29 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// Item whose Delete action was pressed once; a second press deletes.
     var deleteArmedItemID: String?
 
+    /// A command that cannot be undone (Empty Trash), run once and waiting
+    /// for the second Return. It holds the text that was in the field, so
+    /// typing anything else disarms it without a hook on every keystroke.
+    struct ArmedDestructiveCommand: Equatable, Sendable {
+        let itemID: String
+        let input: String
+    }
+    var armedDestructiveCommand: ArmedDestructiveCommand?
+
+    /// Counts every input step that starts (an input mode, a house command's
+    /// choice list), so a caller can tell a step it just started from one
+    /// left over from the last time the panel was open.
+    @ObservationIgnored var inputStepGeneration = 0
+
+    /// Runs one system toggle. A seam so a test never empties the real Trash.
+    @ObservationIgnored
+    var runQuickToggle: @MainActor (QuickToggle) async -> String? = { await QuickToggleService.run($0) }
+
+    /// Whether `itemID` is armed for the text now in the field.
+    func isDestructiveCommandArmed(_ itemID: String) -> Bool {
+        armedDestructiveCommand == ArmedDestructiveCommand(itemID: itemID, input: input)
+    }
+
     var catalogScope: LauncherCatalogScope?
 
     var pendingQuickLinkID: String?

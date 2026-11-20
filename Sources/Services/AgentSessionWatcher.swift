@@ -32,7 +32,14 @@ final class AgentSessionWatcher {
 
     func start() {
         AppLog.attempt("Create \(folders[0].lastPathComponent)") {
-            try FileManager.default.createDirectory(at: folders[0], withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: folders[0],
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            // Owner-only, also for a folder an earlier build made. The agent
+            // hooks that write here run as the same user.
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folders[0].path)
         }
         for folder in folders {
             let descriptor = open(folder.path, O_EVTONLY)

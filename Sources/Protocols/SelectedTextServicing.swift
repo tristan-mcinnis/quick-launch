@@ -23,9 +23,15 @@ protocol SelectedTextServicing: AnyObject {
     func pasteOutcome(_ text: String, to target: SelectionTarget) async -> PasteOutcome
     func pastePasteboardOutcome(to target: SelectionTarget) async -> PasteOutcome
     func openAccessibilitySettings()
+    /// Moves the caret of the frontmost app left by `count` characters, after
+    /// a paste, for a snippet's `{cursor}`. The default does nothing, so a
+    /// conformer without keystrokes still works.
+    func moveCaretLeft(by count: Int) async
 }
 
 extension SelectedTextServicing {
+    func moveCaretLeft(by count: Int) async {}
+
     func replaceOutcome(_ text: String, in context: SelectedTextContext) async -> PasteOutcome {
         await replace(text, in: context) ? .pasted : .failed
     }

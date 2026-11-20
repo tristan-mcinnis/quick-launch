@@ -36,6 +36,22 @@ extension QuickViewModel {
         }
     }
 
+    /// Whether a step started without the panel (a global hotkey) is now
+    /// waiting for text or a choice that only the panel can take.
+    var needsPanelForPendingInput: Bool {
+        inputMode != nil || pendingHouseChoice != nil
+    }
+
+    /// A direct use (a global hotkey) of a command that asks for a second
+    /// Return counts as both: there is no row on screen to confirm on.
+    func armDestructiveCommandForDirectUse(_ item: LauncherCatalogItem) {
+        guard item.value.hasPrefix("toggle."),
+              let toggle = QuickToggle(rawValue: String(item.value.dropFirst("toggle.".count))),
+              toggle.isDestructive
+        else { return }
+        armedDestructiveCommand = ArmedDestructiveCommand(itemID: item.itemID, input: input)
+    }
+
     /// Waits out a running refresh and its follow-up, for tests.
     func waitForHouseCommandRefreshForTesting() async {
         await houseCommandRefreshTask?.value
@@ -127,6 +143,7 @@ extension QuickViewModel {
             do {
                 let choices = try await houseCommandCatalog.choices(for: row)
                 pendingHouseChoice = PendingHouseChoice(row: row, choices: choices)
+                inputStepGeneration += 1
                 inputMode = nil
                 catalogScope = nil
                 input = ""

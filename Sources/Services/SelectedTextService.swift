@@ -201,6 +201,25 @@ final class SelectedTextService: SelectedTextServicing {
         await pasteOutcome(text, to: target) == .pasted
     }
 
+    func moveCaretLeft(by count: Int) async {
+        guard count > 0 else { return }
+        // A Command-V paste lands a moment after the key is sent; arrows
+        // sent sooner would move the caret in the text before it.
+        try? await Task.sleep(for: .milliseconds(120))
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let leftArrow: CGKeyCode = 123
+        for _ in 0..<count {
+            for keyDown in [true, false] {
+                guard let event = CGEvent(keyboardEventSource: source, virtualKey: leftArrow, keyDown: keyDown)
+                else { return }
+                // No modifiers: a key still held from the hotkey must not
+                // turn the arrow into a word or line jump.
+                event.flags = []
+                event.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
     func pasteOutcome(_ text: String, to target: SelectionTarget) async -> PasteOutcome {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else {

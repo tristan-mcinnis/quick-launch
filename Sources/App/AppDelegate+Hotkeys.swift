@@ -258,7 +258,20 @@ extension AppDelegate {
             vm.enterQuickLinkInput(itemID: item.id)
             showOverlay(captureSelectionTarget: false)
         } else {
-            Task { await vm.performLauncherItem(item) }
+            // A hotkey is a deliberate press, so it stands for both Returns
+            // of a command that asks for a second one.
+            vm.armDestructiveCommandForDirectUse(item)
+            Task { @MainActor [weak self] in
+                let before = vm.inputStepGeneration
+                await vm.performLauncherItem(item)
+                // A snippet argument, a house command's text or its choice
+                // list is asked for on the panel: without it the step would
+                // wait unseen. Only a step this press started counts, not
+                // one left over from the last time the panel was open.
+                if vm.needsPanelForPendingInput, vm.inputStepGeneration != before {
+                    self?.showOverlay(captureSelectionTarget: false)
+                }
+            }
         }
     }
 
