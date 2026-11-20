@@ -53,4 +53,48 @@ struct ScreenTextCommandTests {
         await vm.copyTextFromScreenArea()
         #expect(vm.errorMessage != nil)
     }
+
+    /// The text goes to the clipboard only: the panel stays closed and
+    /// nothing is shown or sent on.
+    @Test func copiedScreenTextGoesOnlyToTheClipboard() async {
+        let pasteboard = InMemoryPasteboard()
+        let presenter = RestoreCountingPresenter()
+        let vm = QuickViewModel(screenAwareness: OneArea(), pasteboard: pasteboard)
+        vm.persistSettings = { _ in }
+        vm.overlayPresenter = presenter
+        vm.recognizeImageText = { _ in "Invoice 2041\nDue 30 Nov" }
+        await vm.copyTextFromScreenArea()
+        #expect(pasteboard.readString() == "Invoice 2041\nDue 30 Nov")
+        #expect(presenter.presentations == 0)
+        #expect(presenter.dismissals == 1)
+        #expect(vm.output.isEmpty)
+        #expect(vm.errorMessage == nil)
+    }
+
+    /// Escape in the selector leaves the clipboard alone and opens nothing.
+    @Test func cancellingTheSelectorShowsNothing() async {
+        let pasteboard = InMemoryPasteboard()
+        pasteboard.writeString("before")
+        let presenter = RestoreCountingPresenter()
+        let area = OneArea()
+        area.image = nil
+        let vm = QuickViewModel(screenAwareness: area, pasteboard: pasteboard)
+        vm.persistSettings = { _ in }
+        vm.overlayPresenter = presenter
+        await vm.copyTextFromScreenArea()
+        #expect(pasteboard.readString() == "before")
+        #expect(presenter.presentations == 0)
+        #expect(presenter.restores == 0)
+    }
+}
+
+@MainActor
+private final class OneArea: ScreenAwarenessReading {
+    var image: QuickImageAttachment? = QuickImageAttachment(
+        data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png", pixelWidth: 2, pixelHeight: 2
+    )
+    func readContext(for target: SelectionTarget) -> CaptureContext {
+        CaptureContext(appName: target.applicationName)
+    }
+    func captureArea() async -> QuickImageAttachment? { image }
 }

@@ -370,8 +370,8 @@ extension QuickViewModel {
     }
 
     /// Copy Text from Screen Area: the system selector, Vision OCR on this
-    /// Mac, the result on the clipboard and in the panel. No model involved.
-    /// Drag out an area, read it with on-device Vision, and copy the text.
+    /// Mac, the result on the clipboard. No model involved, and the panel
+    /// stays closed: the text goes to the clipboard and nowhere else.
     /// `thenPaste` sends the text straight to the app behind the overlay.
     func copyTextFromScreenArea(thenPaste: Bool = false) async {
         guard let screenAwareness else {
@@ -381,12 +381,9 @@ extension QuickViewModel {
         }
         input = ""
         prepareForExternalAction?()
-        guard let attachment = await screenAwareness.captureArea() else {
-            recoverFromExternalActionFailure?()
-            requestInputFocus()
-            return
-        }
-        let recognized = await ScreenshotTextIndex.recognizeText(in: attachment.data)
+        // Escape in the selector: nothing to copy, and nothing to show.
+        guard let attachment = await screenAwareness.captureArea() else { return }
+        let recognized = await recognizeImageText(attachment.data)
         let text = Self.flattenRecognizedText(recognized, keepLineBreaks: settings.ocrKeepLineBreaks)
         guard !text.isEmpty else {
             overlayPresenter.presentOverlay()
@@ -406,13 +403,8 @@ extension QuickViewModel {
             return
         }
         pasteboard.writeString(text)
-        markJustCopied()
-        overlayPresenter.presentOverlay()
-        answerSource = .command("Text from Screen")
-        output = text
-        lastQuestion = thenPaste ? "Text from screen" : "Text from screen, copied"
         errorMessage = nil
-        requestInputFocus()
+        overlayPresenter.dismissOverlay()
     }
 
     /// Vision returns one line per observation. Joining them into a paragraph
