@@ -142,20 +142,53 @@ final class ScreenAwarenessService: ScreenAwarenessReading {
 
     /// The system tool draws the selection rectangle; the file is read and
     /// deleted right away so nothing lingers on disk.
+    ///
+    /// A hotkey fires on key-down, so its modifiers are still held when the
+    /// selector opens. In `screencapture -i` a held Control sends the capture
+    /// to the clipboard instead of the file, and Shift or Option change the
+    /// drag, so the selector waits until they are released. If a capture
+    /// still lands on the clipboard, it is read from there.
     func captureArea() async -> QuickImageAttachment? {
+        await Self.waitForCaptureModifiersRelease()
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-launch-area-\(UUID().uuidString).png")
-        guard await AppLog.attemptAsync("Run screencapture", logger: AppLog.process, {
+        guard let result = await AppLog.attemptAsync("Run screencapture", logger: AppLog.process, {
             try await ProcessRunner.run(
                 executable: URL(fileURLWithPath: "/usr/sbin/screencapture"),
                 arguments: ["-i", "-x", "-t", "png", url.path]
             )
-        }) != nil else { return nil }
+        }) else { return nil }
         defer { try? FileManager.default.removeItem(at: url) }
-        // A cancelled capture leaves no file; that is not an error.
-        guard let data = AppLog.attempt("Read area capture", { try Data(contentsOf: url) }),
-              !data.isEmpty else { return nil }
-        return ClipboardImageReader.attachment(data: data, mimeType: "image/png")
+        if let data = try? Data(contentsOf: url), !data.isEmpty {
+            return ClipboardImageReader.attachment(data: data, mimeType: "image/png")
+        }
+        if pasteboard.changeCount != changeCount,
+           let attachment = ClipboardImageReader.attachment(from: pasteboard) {
+            return attachment
+        }
+        // A cancelled capture (Escape) leaves no file; that is not an error.
+        if result.status != 0 || !result.stderr.isEmpty {
+            AppLog.process.error(
+                "screencapture exited \(result.status, privacy: .public): \(result.stderrText, privacy: .public)"
+            )
+        }
+        return nil
+    }
+
+    /// True while a key that changes what `screencapture -i` does is held.
+    nonisolated static func holdsCaptureModifiers(_ flags: NSEvent.ModifierFlags) -> Bool {
+        !flags.intersection([.control, .option, .shift, .command]).isEmpty
+    }
+
+    /// Waits, at most `limit`, for the hotkey's modifiers to come up.
+    static func waitForCaptureModifiersRelease(limit: Duration = .seconds(2)) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now + limit
+        while holdsCaptureModifiers(NSEvent.modifierFlags), clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(15))
+        }
     }
 
     // MARK: Accessibility helpers

@@ -8,6 +8,18 @@ import Testing
 struct ScreenAwarenessTests {
     private static let safari = SelectionTarget(processIdentifier: 4242, applicationName: "Safari")
 
+    // MARK: Area capture
+
+    /// A hotkey such as ⌃⌥O is still held when the selector opens; a held
+    /// Control sends the capture to the clipboard, so the selector waits.
+    @Test func areaCaptureWaitsForHotkeyModifiers() {
+        #expect(ScreenAwarenessService.holdsCaptureModifiers([.control, .option]))
+        #expect(ScreenAwarenessService.holdsCaptureModifiers(.shift))
+        #expect(ScreenAwarenessService.holdsCaptureModifiers(.command))
+        #expect(!ScreenAwarenessService.holdsCaptureModifiers([]))
+        #expect(!ScreenAwarenessService.holdsCaptureModifiers([.capsLock, .function]))
+    }
+
     // MARK: Capture context
 
     @Test func captureContextDescribesItselfAndBuildsAPreamble() {
