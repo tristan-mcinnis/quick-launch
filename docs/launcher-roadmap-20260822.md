@@ -1,5 +1,9 @@
 # Launcher roadmap, 2026-08-22
 
+Status updated 2026-11-22 against the code. Rows marked ✅ since then name
+where the feature lives. The current gap list is
+`docs/raycast-gap-list-20261120.md`.
+
 Inputs: the Omarchy v3 manual (Hyprland hotkeys, clipboard, reminders), Sol
 (source read: stores, native window manager, theme tokens), Quicksilver's
 mnemonics (`QSMnemonics.m`, `QSObjectRanker.m`), and ueli's macOS extensions.
@@ -63,15 +67,15 @@ Legend: ✅ have, ◐ partial, ✗ missing. "Fit" is the keyboard-first/speed sc
 | ⌘↩ web search on the query | ◐ (`/search`, auto-detect) | high | Cheap win: ⌘↩ anywhere runs web search on the typed text. |
 | ⇧↩ translate query | ✅ | | |
 | Inline calculator | ✅ | | |
-| Unit and timezone conversion inline | ✗ | medium | Extend `MathExpressionDetector` with `10 usd in cny`, `3pm tokyo`. Deterministic, local. |
+| Unit and timezone conversion inline | ✅ units, date arithmetic, time in a city (`LocalConversionResolver`) | | Currency is not built. |
 | Emoji picker | ✅ Emoji & Symbols catalog | | |
-| Clipboard manager with images | ◐ text only | medium | Images conflict with the no-persist rule for screenshots; keep text. |
+| Clipboard manager with images | ✅ text, images, rich text, files | | Owner-only blobs (`ClipboardBlobStore`). |
 | Scratchpad note | ✗ | low | Out of scope (not an action). |
-| Process killer | ✗ | medium | Catalog from `NSWorkspace.runningApplications`; "Quit", "Force Quit". Native API, no shell. |
-| System preference panes | ✗ | high | `x-apple.systempreferences:` URLs for the common panes (Wi-Fi, Bluetooth, Displays, Accessibility, Privacy). Type `blue` → Bluetooth pane. |
-| System commands (sleep, lock, empty trash, toggle dark mode) | ✗ | high | Lock = `SACLockScreenImmediate` or `pmset displaysleepnow`; appearance toggle via AppleScript to System Events; confirm on restart/shutdown. |
-| Window cycling (half → third → two-thirds on repeat) | ✗ | medium | Track last layout per window id in `WindowManager`. |
-| Quarters | ✗ | medium | Four more `WindowLayout` cases. |
+| Process killer | ✅ Quit, Relaunch, Force Quit, Hide Windows in ⌘K on a running app (`ItemAction.swift`) | | |
+| System preference panes | ✅ `SystemSettingsPaneCatalog` | high | `x-apple.systempreferences:` URLs for the common panes (Wi-Fi, Bluetooth, Displays, Accessibility, Privacy). Type `blue` → Bluetooth pane. |
+| System commands (sleep, lock, empty trash, toggle dark mode) | ✅ `QuickToggleService`; Empty Trash asks for a second Return | | Lock still sends ⌃⌘Q through System Events; a direct lock call is open. |
+| Window cycling (half → third → two-thirds on repeat) | ✅ `WindowLayout.cycle` | | |
+| Quarters | ✅ quarters, fourths, sixths (`WindowLayout`) | | |
 | Move to next/previous Space | ✗ | low | No public API. Sol fakes it with a synthetic drag plus ⌃→. Fragile; skip. |
 | User scripts folder | ✗ | medium | `~/.config/quick-launch/scripts`, run with `Process` and argv, never a shell string. |
 | Browser bookmarks | ✗ | low | Helium/Chromium `Bookmarks` JSON is readable; adds catalog noise. Only if aliased. |
@@ -92,7 +96,7 @@ Legend: ✅ have, ◐ partial, ✗ missing. "Fit" is the keyboard-first/speed sc
 | Unified clipboard hotkeys | ✅ ⌘⇧V history | | |
 | Reminders (`omarchy reminder 7 'Tea'`) | ✗ | high | `remind 7 tea ready` → local `UNUserNotification` after N minutes. Deterministic, no model. |
 | Notices: time, battery, weather | ◐ time via facts | medium | Battery via `IOPSCopyPowerSourcesInfo`. Weather needs network; skip. |
-| Text extraction (OCR region) | ✗ | no | Outside core per scope doc. |
+| Text extraction (OCR region) | ✅ Copy or Paste Text from Screen Area | | |
 | Dictation | ✗ | no | `local-dictation-202605` already owns this. |
 | Show all hotkeys (Super+K) | ◐ ⌘K shows actions | high | Add a "Keyboard Shortcuts" command that lists every bound hotkey (main, clipboard, apps, items, saved prompts) in one searchable pane. |
 | Theme picker | ◐ dark/light | low | Monochrome is the theme. One accent toggle at most. |
@@ -103,7 +107,7 @@ Legend: ✅ have, ◐ partial, ✗ missing. "Fit" is the keyboard-first/speed sc
 |---|---|---|---|
 | Abbreviation mnemonics | ✅ | | Shipped with decay, which Quicksilver lacks. |
 | Implied use counts feeding score | ✅ frecency | | |
-| "Assign abbreviation" action | ◐ alias in Settings | high | Add "Set abbreviation…" to the ⌘K pane so it is done in place. |
+| "Assign abbreviation" action | ✅ Set Alias… in ⌘K | | |
 | Return-key repeat fast path | ✗ | low | Niche. |
 | Recent objects catalog | ◐ favourites on empty | medium | A "Recent" root listing the last 20 used items. |
 
@@ -120,7 +124,7 @@ Legend: ✅ have, ◐ partial, ✗ missing. "Fit" is the keyboard-first/speed sc
 
 Ordered by value for a keyboard-first daily driver divided by cost.
 
-1. **System Settings panes and system commands catalog.** One new
+1. ✅ **System Settings panes and system commands catalog.** One new
    `SystemCatalog` with ~20 deterministic items: panes by URL, Lock, Sleep
    Display, Empty Trash (confirm), Toggle Appearance, Quit Quick Launch.
    Searchable at the root, learnable, hotkey-able. Half a day.
@@ -129,19 +133,22 @@ Ordered by value for a keyboard-first daily driver divided by cost.
 3. **Keyboard Shortcuts pane.** One command that lists every hotkey, fuzzy
    searchable. Answers "what did I bind to ⌥⌘L?". Two hours.
 4. **Reminders.** `remind 15 stand up` → notification. Pure local. Two hours.
-5. **Window: quarters, grow/shrink, layout cycling.** Extends existing
+5. ◐ **Window: quarters, grow/shrink, layout cycling.** Quarters and cycling
+   shipped; grow/shrink did not. Extends existing
    `WindowLayout`/`WindowManager`. Half a day. Focus-in-direction after that.
-6. **"Set abbreviation…" in ⌘K.** In-place alias editing for any row. One
+6. ✅ **"Set abbreviation…" in ⌘K.** In-place alias editing for any row. One
    hour.
 7. **Spotlight app discovery as a second source.** Only if an app is missing
    in practice.
-8. **Process manager.** Running apps catalog with Quit/Force Quit. Two hours.
-9. **Emoji catalog.** Static table, paste action. Two hours.
+8. ✅ **Process manager.** Running apps catalog with Quit/Force Quit. Two hours.
+9. ✅ **Emoji catalog.** Static table, paste action. Two hours.
 10. **Desktop switching through Mission Control shortcuts.** Behind a setup
     check; document the System Settings step.
 
-Not planned: Spaces window moves (private API), scratchpad notes, calendar,
-OCR, dictation, image clipboard persistence, browser bookmarks by default.
+Not planned: Spaces window moves (private API), scratchpad notes, a calendar
+in the launcher (the chat reads the work calendar), dictation, browser
+bookmarks by default. OCR and image clipboard history were on this list and
+have since shipped.
 
 ## Speed: measured, and against Sol and apfel
 

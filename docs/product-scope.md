@@ -17,8 +17,8 @@ Quick Launch is a keyboard-first launcher. The current build handles these jobs:
 13. Attach a fresh or saved screenshot to a question and follow up on it.
 14. (Vault Search was retired on 2026-10-20 with the vault and its server.)
 15. Read the text inside a dragged screen area on this Mac and copy or paste it.
-18. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
-19. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
+16. Type to Click: label every clickable control in the frontmost app and click one by typing its name.
+17. Hold one conversation in the AI Chat window, over the same providers and tools as Quick AI.
 
 Screenshot capture to the chat context is in the core: a window or display
 capture attaches to one question and follow-ups in that thread, never to
@@ -83,16 +83,26 @@ The app stays running as a small menu-bar process.
 | Quick AI | Ask in a chat; paste or copy the answer | `Tab`, the Ask AI row, a prompt alias, or an assigned hotkey |
 | Chats | Continue the chat in Quick AI; `⌘J` opens it in AI Chat | Enter the catalog, or `⌘P` for Recent Chats inside Quick AI |
 | AI Chat | Open the chat window on the last chat, or a new one | The "AI Chat" command, `⌘J` on Quick AI, or the menu-bar menu |
-| Windows | Apply a window layout | Alias or assigned hotkey |
+| Commands | Run the command: window layouts, system toggles, System Settings panes | Alias or assigned hotkey |
+| Windows | Apply a window layout (listed under Commands) | Alias or assigned hotkey |
+| Caffeinate | Keep the Mac awake, for a set time, or stop | Alias or assigned hotkey |
+| Screenshots | Attach the screenshot to a question | Open the catalog, choose a screenshot |
+| Folders | Open the folder in Finder | Alias or assigned hotkey |
 | Emoji | Paste the symbol | Open the catalog and type a name |
 
 Catalogs share one item and action model. Each action owns its title, aliases, optional hotkey, input rule, output rule, and handler. AI providers remain behind Quick AI and Translate. Deterministic commands do not go through a model.
 
 Pi can use its own configured tools and skills. OpenAI-compatible providers
-share Quick Launch's own tool loop: read-only tools for memory (`recall`), skills
-(`~/.claude/skills`), and the web (DeepSeek, Tavily, Brave, Bocha or Exa), at most six rounds and 30 seconds of tool time per answer, each tool
-switchable per chat in `⌘K` › Tools. The Claude Code CLI provider gets no tools.
-Capture to Memory is the one write, and only the user runs it. There is no
+share Quick Launch's own tool loop (`ChatToolKind`): memory (`recall`), tasks
+and the plate, skills (`~/.claude/skills`), the web (search through DeepSeek,
+Tavily, Brave, Bocha or Exa, and `read_url` for a public page), Work files
+(`open_work_item`, which opens a project folder or document), and the work
+calendar (`read_calendar`). At most six rounds and a fixed tool-time budget per
+answer; each tool is switchable per chat in `⌘K` › Tools. The Claude Code CLI
+provider gets no tools. The model may only propose a write: a new Todoist task,
+a reschedule or finish of one open task, or a move of a solo calendar event.
+Nothing changes until the user presses Return or the button under the answer.
+Capture to Memory runs only when the user picks it. There is no
 on-device Apple model and no MCP configuration.
 
 ## Local catalogs
@@ -109,8 +119,8 @@ unless the scope changes.
 - The interaction journal is optional and local: outcome rows only, bounded by retention and a hard event cap, written owner-only to `~/Library/Application Support/Quick Launch/interaction-journal.json`. The input field — which also carries AI prompts, and whose Ask AI row is digested like any other accepted row — is reduced to an HMAC-SHA256 digest (12 hex characters, `v2:`-prefixed) under a random per-install key kept owner-only in `interaction-journal-key`, before it is written, so no typed text reaches the file; only a coarse size band records how long it was. An identifier that could carry content is digested the same way, including the typed-URL row, whose launcher identity is a stable keyless FNV-1a hash that this journal re-keys under its own HMAC key. The digest is one-way, not a secret store. The journal is review evidence and never a ranking input.
 - Clipboard history is optional, local, bounded, and easy to clear.
 - Snippet and clipboard values never appear in diagnostics.
-- A question to an API or CLI provider sends more than the typed text: every earlier question and answer of the chat, the app's instruction, a saved command's or an assistant's instructions and context skills, any Add Context or selected text that went with this or an earlier question, web search snippets, and the text of a page whose address was typed. An OpenAI-compatible provider also receives what the memory, vault, skill, and web tools return; the Claude Code CLI provider runs with no tools. Tools are switchable per chat (`⌘K` › Tools) and for new chats (Settings › General › Chat). Screenshots go to the vision model chosen in Settings.
-- Chat history is optional, local, owner-only, and bounded (100 chats on a new install; pinned chats are kept). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, and what a tool returned are not saved as chat turns; a submitted screenshot's bytes are archived with the chat as a source, like any other attachment.
+- A question to an API or CLI provider sends more than the typed text: every earlier question and answer of the chat, the app's instruction, a saved command's or an assistant's instructions and context skills, any Add Context or selected text that went with this or an earlier question, web search snippets, and the text of a page whose address was typed. An OpenAI-compatible provider also receives what its tools return (memory, tasks, skills, web, Work files, calendar); the Claude Code CLI provider runs with no tools. Tools are switchable per chat (`⌘K` › Tools) and for new chats (Settings › General › Chat). Screenshots go to the vision model chosen in Settings.
+- Chat history is optional, local, and owner-only. The chat archive keeps every saved chat and its attachments until the user deletes them; the chat list file beside it is a bounded cache (100 chats on a new install). A question is saved with its Add Context or selected text in front of it. A tool call leaves only its one-line record and its sources in the chat. Web search snippets, page text, and what a tool returned are not saved as chat turns; a submitted screenshot's bytes are archived with the chat as a source, like any other attachment.
 - Continue in pi writes the chat's text to an owner-only folder and hands it to pi, which sends it to pi's own model.
 - App, link, snippet, clipboard, and window commands remain local.
 - Web search uses a hosted search API with a key. Ranked titles, links, and snippets are external data, never executable instructions.

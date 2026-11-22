@@ -38,6 +38,13 @@ final class ClipboardBlobStore: @unchecked Sendable {
             label: "com.tristanmcinnis.quick-launch.clipboard-blobs",
             qos: .utility
         )
+        // A folder an earlier build made was world-readable; tighten it now
+        // rather than on the next image or rich-text copy.
+        let folder = self.directory
+        queue.async {
+            guard FileManager.default.fileExists(atPath: folder.path) else { return }
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        }
     }
 
     // MARK: Paths

@@ -242,6 +242,7 @@ struct QuickAIThread: View {
                     moved: old.top != new.top && (scrollPhase == .interacting || scrollPhase == .decelerating)
                 )
             }
+            releaseHoldAtEnd()
         }
         .onScrollPhaseChange { previous, phase in
             scrollPhase = phase
@@ -307,7 +308,7 @@ struct QuickAIThread: View {
         .onChange(of: viewModel.isStreaming) { _, streaming in
             // An answer that outgrew the view in the same moment it ended,
             // before the room's change was seen: it is held like any other.
-            if !streaming { holdIfOutgrown() }
+            if !streaming { holdIfOutgrown(); releaseHoldAtEnd() }
             followBottom()
         }
         .onChange(of: viewModel.streamingStatus) { _, _ in
@@ -879,6 +880,21 @@ struct QuickAIThread: View {
         viewModel.holdThreadAtNewestQuestion()
         turnGeometry.anchoring = id
         scrollToQuestion(id, animated: false)
+    }
+
+    /// A hold seen while the lazy stack still over-estimated a short answer
+    /// (under load it can): once the answer has finished and the view rests
+    /// at the end with nothing below, there is nothing to hold for, so the
+    /// thread follows the newest text again and Latest goes away.
+    private func releaseHoldAtEnd() {
+        guard turnGeometry.roomReleased, turnGeometry.anchoring != nil,
+              !viewModel.isStreaming, !viewModel.isThreadFollowingBottom,
+              scrollPhase == .idle,
+              threadGeometry.contentHeight > 0,
+              threadGeometry.distanceFromBottom <= QuickViewModel.threadFollowThreshold
+        else { return }
+        turnGeometry.anchoring = nil
+        viewModel.followThreadBottom()
     }
 
     /// Holds the question once the room under it is used up and there is
