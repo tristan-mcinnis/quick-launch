@@ -7,11 +7,13 @@ extension QuickViewModel {
     static let pickColorCommandID = "color.pick"
 
     /// Hides the launcher so the loupe has the whole screen, waits for the
-    /// pick, then puts the hex on the clipboard and shows it.
+    /// pick, then puts the hex on the clipboard and stops there. The copy is
+    /// the whole action, as it is for Copy Text from Screen Area: no answer,
+    /// no last question, no Copied flash, and the panel stays closed.
     ///
-    /// A cancelled pick writes nothing: the clipboard, the answer and the
-    /// last question are left exactly as they were, and the panel comes back
-    /// so the user is not stranded outside it.
+    /// A cancelled pick writes nothing and also leaves the panel closed; the
+    /// clipboard, the answer and the last question are left exactly as they
+    /// were.
     func pickColorFromScreen() async {
         guard let colorSampler else {
             errorMessage = "The color picker is not available in this build."
@@ -20,21 +22,10 @@ extension QuickViewModel {
         }
         input = ""
         prepareForExternalAction?()
-        guard let picked = await colorSampler.sampleColor() else {
-            overlayPresenter.presentOverlay()
-            requestInputFocus()
-            return
-        }
-        let hex = picked.hexString
+        guard let picked = await colorSampler.sampleColor() else { return }
         // A copy the user keeps, so Clipboard History records it, exactly as
         // a snippet copy does.
-        pasteboard.writeString(hex)
-        errorMessage = nil
-        answerSource = .command("Pick Color")
-        output = hex
-        lastQuestion = "Picked from the screen"
-        markJustCopied()
-        overlayPresenter.presentOverlay()
-        requestInputFocus()
+        pasteboard.writeString(picked.hexString)
+        overlayPresenter.dismissOverlay()
     }
 }

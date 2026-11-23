@@ -3,8 +3,9 @@
 ## Unreleased — 2026-11-18
 
 - **Pick Color from Screen.** The macOS eyedropper, and the picked pixel on
-  the clipboard as `#RRGGBB`. `Escape` writes nothing. Find it with `color`,
-  `eyedropper`, or `hex`; a hotkey can be set on the row.
+  the clipboard as `#RRGGBB`. The copy is the whole action: the panel stays
+  closed and no answer is shown. `Escape` writes nothing and stays closed.
+  Find it with `color`, `eyedropper`, or `hex`; a hotkey can be set on the row.
 - **Every Fallback Command is reachable.** Each one after the first has a row
   at the foot of root search; before, only the first could run.
 - **Empty Trash asks for a second Return.** A global hotkey on it still runs

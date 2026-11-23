@@ -4,7 +4,7 @@ import Testing
 @testable import QuickLaunch
 
 /// Pick Color from Screen: the system eyedropper, the pixel as `#RRGGBB` on
-/// the clipboard, and a cancelled pick that writes nothing.
+/// the clipboard, and the panel left closed either way.
 @Suite("Pick color", .serialized)
 @MainActor
 struct ColorPickerTests {
@@ -84,17 +84,21 @@ struct ColorPickerTests {
         )
         let vm = rig.vm
         vm.input = "color"
+        var prepared = 0
+        vm.prepareForExternalAction = { prepared += 1 }
 
         await vm.pickColorFromScreen()
 
         #expect(rig.sampler.calls == 1)
+        #expect(prepared == 1, "the panel is hidden before the loupe opens")
         #expect(rig.pasteboard.readString() == "#3A7BD5")
-        #expect(vm.output == "#3A7BD5", "the panel shows the value it copied")
-        #expect(vm.lastQuestion == "Picked from the screen")
-        #expect(vm.justCopied, "the copy is confirmed in the panel")
+        #expect(vm.output.isEmpty, "no answer is shown")
+        #expect(vm.lastQuestion == nil, "no question is shown")
+        #expect(!vm.justCopied, "no Copied flash")
         #expect(vm.errorMessage == nil)
         #expect(vm.input.isEmpty)
-        #expect(rig.presenter.presentations == 1, "the panel comes back with the value")
+        #expect(rig.presenter.presentations == 0, "the panel does not come back")
+        #expect(rig.presenter.dismissals == 1, "the panel is closed after the copy")
     }
 
     @Test func returnOnTheRowRunsThePicker() async throws {
@@ -113,7 +117,7 @@ struct ColorPickerTests {
     }
 
     /// Escape in the loupe: no clipboard write, no answer, no error, and the
-    /// panel comes back so the user is not stranded outside it.
+    /// panel stays closed.
     @Test func cancellingWritesNothing() async {
         let pasteboard = InMemoryPasteboard()
         pasteboard.writeString("before")
@@ -128,7 +132,7 @@ struct ColorPickerTests {
         #expect(vm.lastQuestion == nil)
         #expect(vm.errorMessage == nil)
         #expect(!vm.justCopied)
-        #expect(rig.presenter.presentations == 1, "the panel comes back")
+        #expect(rig.presenter.presentations == 0, "the panel does not come back")
     }
 
     @Test func aBuildWithoutAPickerExplainsItself() async {
