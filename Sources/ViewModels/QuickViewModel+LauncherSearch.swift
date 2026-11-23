@@ -767,9 +767,14 @@ extension QuickViewModel {
     }
 
     /// The row cap for the current scope. A screenshot grid lists more cells
-    /// than the list's rows so the grid is worth using.
+    /// than the list's rows so the grid is worth using. A history catalog is
+    /// not a root search: the clipboard store already bounds its entries (the
+    /// user's item limit, pins, and the byte budget), so the root row cap
+    /// would only hide copies the user asked to keep. Its extra rows scroll
+    /// inside the list's fixed height.
     var effectiveRowLimit: Int {
         if catalogScope == .screenshots, settings.screenshotUseGrid { return Self.screenshotGridCells }
+        if catalogScope == .clipboard { return max(Self.maxLauncherRows, clipboardEntries.count) }
         return Self.maxRows(for: catalogScope)
     }
 

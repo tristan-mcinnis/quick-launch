@@ -34,6 +34,45 @@ struct HistoryContinuityTests {
         #expect(vm.detailItem?.value == "second copy", "same-count captures must invalidate ranking")
     }
 
+    /// The history keeps up to the user's item limit (50 by default, 200 at
+    /// most) plus pins, but the list showed only the root-search row cap
+    /// (one row per catalog plus three), so every entry past the newest
+    /// twelve was unreachable from the list. The store's own bound is the
+    /// list's bound here; the extra rows scroll inside the capped list
+    /// height and the panel does not grow with the history.
+    @Test func clipboardCatalogListsTheWholeBoundedHistory() throws {
+        let directory = try folder()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ClipboardHistoryStore(fileURL: directory.appendingPathComponent("clipboard-history.json"))
+        let kept = QuickViewModel.maxLauncherRows + 5
+        for index in 0..<kept { store.record("copy \(index)", limit: 50) }
+        #expect(store.entries.count == kept, "the store kept every copy under its limit")
+
+        let vm = QuickViewModel(clipboardHistory: store)
+        vm.enterCatalog(.clipboard)
+        #expect(vm.catalogMatches.count == kept, "the history list lists every kept entry, not the root row cap")
+        #expect(vm.launcherMatches.count == kept)
+        #expect(vm.catalogMatches.last?.value == "copy 0", "the oldest copy is still reachable from the list")
+
+        // A shorter history of the same catalog measures the same window:
+        // past the list's fixed height the rows scroll, they do not grow it.
+        let shortDirectory = try folder()
+        defer { try? FileManager.default.removeItem(at: shortDirectory) }
+        let shortStore = ClipboardHistoryStore(
+            fileURL: shortDirectory.appendingPathComponent("clipboard-history.json")
+        )
+        for index in 0..<QuickViewModel.maxLauncherRows { shortStore.record("copy \(index)", limit: 50) }
+        let shortVM = QuickViewModel(clipboardHistory: shortStore)
+        shortVM.enterCatalog(.clipboard)
+        #expect(shortVM.catalogMatches.count == QuickViewModel.maxLauncherRows)
+        #expect(vm.estimatedWindowHeight == shortVM.estimatedWindowHeight)
+
+        // The fix belongs to the history catalog: root search keeps its cap.
+        let rootVM = QuickViewModel(clipboardHistory: store)
+        rootVM.input = ""
+        #expect(rootVM.launcherMatches.count <= QuickViewModel.maxLauncherRows)
+    }
+
     @Test func delayedPasteboardDataIsRetriedWithoutANewOwnershipChange() throws {
         let directory = try folder()
         defer { try? FileManager.default.removeItem(at: directory) }
