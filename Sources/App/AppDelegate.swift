@@ -97,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     )
     let screenshotService = ScreenshotCaptureService()
     let screenAwareness = ScreenAwarenessService()
+    /// The one eyedropper. Shared by the launcher and the AI Chat window, so
+    /// its one-loupe-at-a-time rule holds across both.
+    let colorSampler = SystemColorSampler()
     private let screenshotTextIndex = ScreenshotTextIndex(storeURL: ScreenshotTextIndex.defaultStoreURL())
     private let doubleTapMonitor = ModifierDoubleTapMonitor()
 
@@ -120,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             interactionJournal: interactionJournal,
             screenshotService: screenshotService,
             screenAwareness: screenAwareness,
+            colorSampler: colorSampler,
             screenshotTextIndex: screenshotTextIndex,
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),

@@ -175,6 +175,13 @@ extension QuickViewModel {
             return
         }
 
+        if item.value == Self.pickColorCommandID {
+            // Kept, so a test can await the pick and a second Return cannot
+            // open a second loupe.
+            colorPickerTask = Task { await pickColorFromScreen() }
+            return
+        }
+
         if item.value == "paste.plain" {
             guard let text = pasteboard.readString(), !text.isEmpty else {
                 errorMessage = "The clipboard has no text."

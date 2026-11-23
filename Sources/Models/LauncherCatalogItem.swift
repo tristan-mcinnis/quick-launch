@@ -109,6 +109,7 @@ struct LauncherCatalogItem: Identifiable, Equatable, Sendable {
         "snippet.create": "text.badge.plus",
         "quicklink.create": "link.badge.plus",
         "clipboard.cleanLink": "link.badge.plus",
+        "color.pick": "eyedropper",
         "screenshot.latest": "photo.badge.plus",
         "screenshot.pasteLatest": "photo.on.rectangle",
         "screenshot.save": "square.and.arrow.down",

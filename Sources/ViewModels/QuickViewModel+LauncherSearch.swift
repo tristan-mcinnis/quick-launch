@@ -358,6 +358,14 @@ extension QuickViewModel {
                 value: "clipboard.cleanLink",
                 keywords: "url link clean tracking utm clipboard"
             ),
+            LauncherCatalogItem(
+                kind: .command,
+                itemID: QuickViewModel.pickColorCommandID,
+                title: "Pick Color from Screen",
+                detail: "Point at any pixel; its #RRGGBB value is copied",
+                value: QuickViewModel.pickColorCommandID,
+                keywords: "color colour picker eyedropper hex screen sample pixel swatch palette copy"
+            ),
         ]
         return toggles + helpers + panes
     }

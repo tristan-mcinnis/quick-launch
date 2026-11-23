@@ -289,6 +289,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     var caffeinateManager: (any CaffeinateManaging)?
     var screenshotService: (any ScreenshotCapturing)?
     var screenAwareness: (any ScreenAwarenessReading)?
+    /// The system eyedropper behind Pick Color from Screen.
+    var colorSampler: (any ColorSampling)?
     /// AppKit seams (pasteboard, Finder/URL opening, running apps, displays).
     /// The app keeps the system defaults; tests inject fakes. The seams that
     /// change the system are the exceptions: with none injected they are
@@ -829,6 +831,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// can await it and a second Return cannot race the first.
     @ObservationIgnored var composerSubmitTask: Task<Void, Never>?
 
+    /// The Pick Color pick started from its command row, kept so a test can
+    /// await it and a second Return cannot open a second loupe.
+    @ObservationIgnored var colorPickerTask: Task<Void, Never>?
+
     @ObservationIgnored var launcherMatchesCache: (key: String, value: [LauncherSearchResult])?
 
     /// Bumped whenever learned ranking changes, so the cache cannot go stale.
@@ -852,6 +858,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         interactionJournal: InteractionJournalStore? = nil,
         screenshotService: (any ScreenshotCapturing)? = nil,
         screenAwareness: (any ScreenAwarenessReading)? = nil,
+        colorSampler: (any ColorSampling)? = nil,
         screenshotTextIndex: ScreenshotTextIndex? = nil,
         pasteboard: (any PasteboardWriting)? = nil,
         historyFileURL: URL? = nil,
@@ -893,6 +900,7 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         self.interactionJournal.prune()
         self.screenshotService = screenshotService
         self.screenAwareness = screenAwareness
+        self.colorSampler = colorSampler
         self.screenshotTextIndex = screenshotTextIndex ?? ScreenshotTextIndex(storeURL: nil)
         self.pasteboard = pasteboard ?? InMemoryPasteboard()
         self.historyFileURL = historyFileURL

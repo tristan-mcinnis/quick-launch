@@ -288,6 +288,17 @@ in **Settings › Items**. The
 captured pixels are not saved. A line-break preference is in
 **Settings › Clipboard & Capture**.
 
+## Pick a color from screen
+
+**Pick Color from Screen** opens the macOS eyedropper, the loupe that follows
+the cursor, and copies the pixel under it as `#RRGGBB` in the clipboard, so it
+pastes straight into a style sheet, a design tool, or a colour field. The value
+is also shown in the panel for a moment with the Copied flash. `Escape`
+cancels and the clipboard is left alone. It needs no permission, no hotkey to
+start, and it writes no file; set a hotkey on the row in
+**Settings › Items**. Type `color`, `colour`, `eyedropper`, or `hex` to find
+it.
+
 ## Type to Click
 
 A global hotkey (in **Settings › General**) puts a label on every clickable

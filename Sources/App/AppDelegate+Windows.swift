@@ -292,6 +292,7 @@ extension AppDelegate {
             interactionJournal: interactionJournal,
             screenshotService: screenshotService,
             screenAwareness: screenAwareness,
+            colorSampler: colorSampler,
             pasteboard: SystemPasteboard(),
             historyFileURL: QuickHistoryStore.defaultFileURL(),
             archiveRootURL: AppPaths.applicationSupportDirectory,
