@@ -161,6 +161,23 @@ struct MarkdownTextView: View {
                 findRanges: findRanges[segment.id] ?? [],
                 findCurrent: current
             )
+        case .blockquote(let source):
+            HStack(alignment: .top, spacing: House.Spacing.sm) {
+                RoundedRectangle(cornerRadius: AQDesign.hairline, style: .continuous)
+                    .fill(AQDesign.ColorToken.panelStrokeStrong)
+                    .frame(width: AQDesign.hairline + AQDesign.hairline)
+                ProseSegmentView(
+                    markdown: source,
+                    isStreaming: false,
+                    highlights: findRanges[segment.id] ?? [],
+                    current: current
+                )
+            }
+            .padding(.vertical, House.Spacing.xxs)
+            .fixedSize(horizontal: false, vertical: true)
+        case .divider:
+            HouseDivider()
+                .padding(.vertical, House.Spacing.xs)
         }
     }
 

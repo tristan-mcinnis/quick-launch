@@ -58,12 +58,7 @@ extension QuickViewModel {
     }
 
     func openCaptureChooser() {
-        isModelChooserPresented = false
-        isAssistantChooserPresented = false
-        isAddContextMenuPresented = false
-        isTransformChooserPresented = false
-        isActionPalettePresented = false
-        closeItemActionPane()
+        presentedLayer = nil
         attachmentTray.cancelLinkEntry()
         errorMessage = nil
         captureChooserQuery = ""
@@ -76,7 +71,7 @@ extension QuickViewModel {
         }
         captureChooserHasSelection = selectedTextIsAvailableSilently()
         captureChooserIndex = options.firstIndex(of: preferredCaptureEntry) ?? 0
-        isCaptureChooserPresented = true
+        presentedLayer = .captureChooser
         requestInputFocus()
     }
 

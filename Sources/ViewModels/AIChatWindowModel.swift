@@ -877,6 +877,10 @@ struct FindCorpusEntry {
                     Part(part: .segment(segment.id), text: code.code)
                 case .table(let table):
                     Part(part: .segment(segment.id), text: table.plainText)
+                case .blockquote(let source):
+                    Part(part: .segment(segment.id), text: MarkdownRenderer.render(source).string)
+                case .divider:
+                    Part(part: .segment(segment.id), text: "")
                 }
             }
         }

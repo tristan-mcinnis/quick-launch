@@ -94,12 +94,7 @@ extension QuickViewModel {
         // Recent Chats' search text belongs to the list, not to root search.
         if isRecentChatsPresented { input = "" }
         isRecentChatsPresented = false
-        isModelChooserPresented = false
-        isAssistantChooserPresented = false
-        isCaptureChooserPresented = false
-        isAddContextMenuPresented = false
-        isTransformChooserPresented = false
-        isActionPalettePresented = false
+        presentedLayer = nil
         actionQuery = ""
         clearTransformFlowState()
         isQuickAIPresented = false

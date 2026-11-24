@@ -87,13 +87,7 @@ extension QuickViewModel {
 
     /// Opens the `⌘K` palette on one of its second lists.
     func openActionPaletteSubmenu(_ submenu: ActionPaletteSubmenu) {
-        if !isActionPalettePresented {
-            closeItemActionPane()
-            isActionPalettePresented = true
-        }
-        isModelChooserPresented = false
-        isAddContextMenuPresented = false
-        isCaptureChooserPresented = false
+        presentedLayer = .actionPalette
         actionPaletteSubmenu = submenu
         actionQuery = ""
     }

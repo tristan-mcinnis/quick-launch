@@ -759,8 +759,7 @@ extension QuickViewModel {
     /// `⌘K` pane or palette. A queued follow-up waits
     /// for it to close.
     private var holdsQueuedFollowUp: Bool {
-        isTransformChooserPresented || isModelChooserPresented
-            || isAddContextMenuPresented || isRecentChatsPresented || presentedLayer != nil
+        isRecentChatsPresented || presentedLayer != nil
     }
 
     /// A layer above the composer closed: a follow-up that waited behind it

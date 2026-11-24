@@ -92,10 +92,18 @@ extension QuickViewModel {
     }
     /// The one ⌘K layer that can sit above the launcher. Exclusive by
     /// construction: a palette and a pane can never both be open.
+    /// Every floating pane or chooser that can sit over the launcher or Quick
+    /// AI composer. One enum makes two open choosers impossible by construction
+    /// and centralises exit cleanup in `presentedLayer.didSet`.
     enum PresentedLayer: Equatable, Sendable {
         case actionPalette
         case applicationPane
         case catalogPane
+        case modelChooser
+        case assistantChooser
+        case captureChooser
+        case addContextMenu
+        case transformChooser
     }
     var isActionPalettePresented: Bool {
         get { presentedLayer == .actionPalette }
@@ -108,6 +116,26 @@ extension QuickViewModel {
     var isCatalogActionPanePresented: Bool {
         get { presentedLayer == .catalogPane }
         set { presentedLayer = newValue ? .catalogPane : (presentedLayer == .catalogPane ? nil : presentedLayer) }
+    }
+    var isModelChooserPresented: Bool {
+        get { presentedLayer == .modelChooser }
+        set { presentedLayer = newValue ? .modelChooser : (presentedLayer == .modelChooser ? nil : presentedLayer) }
+    }
+    var isAssistantChooserPresented: Bool {
+        get { presentedLayer == .assistantChooser }
+        set { presentedLayer = newValue ? .assistantChooser : (presentedLayer == .assistantChooser ? nil : presentedLayer) }
+    }
+    var isCaptureChooserPresented: Bool {
+        get { presentedLayer == .captureChooser }
+        set { presentedLayer = newValue ? .captureChooser : (presentedLayer == .captureChooser ? nil : presentedLayer) }
+    }
+    var isAddContextMenuPresented: Bool {
+        get { presentedLayer == .addContextMenu }
+        set { presentedLayer = newValue ? .addContextMenu : (presentedLayer == .addContextMenu ? nil : presentedLayer) }
+    }
+    var isTransformChooserPresented: Bool {
+        get { presentedLayer == .transformChooser }
+        set { presentedLayer = newValue ? .transformChooser : (presentedLayer == .transformChooser ? nil : presentedLayer) }
     }
     /// Where the thread should scroll, and a revision so asking twice for
     /// the same place scrolls twice. Set by Show more and Collapse (the

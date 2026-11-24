@@ -120,6 +120,12 @@ struct OverlayRenderProofTests {
         | **Hydrogen** | Fast routine execution, Free plan | Cheapest |
 
         Practical read: use **Neon** by default, Carbon only for hours-long tasks.
+
+        > **Rule of thumb:** pick Neon unless a task runs for hours.
+
+        ---
+
+        Ask a follow-up if you want Claude comparisons too.
         """
         for (pref, appearance, suffix) in [
             (AppearancePreference.dark, NSAppearance.Name.darkAqua, "dark"),

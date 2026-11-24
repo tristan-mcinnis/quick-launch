@@ -250,7 +250,7 @@ final class StreamingAnswer {
             // a blank line closes a block. A fenced block is closed by the
             // block after it.
             if !(child is CodeBlock), !hasGap(after: index, in: children) { break }
-            if child is CodeBlock || child is Table {
+            if child is CodeBlock || child is Table || child is BlockQuote || child is ThematicBreak {
                 guard let span = MarkdownRenderer.liftedSpan(of: child, bytes: tailBytes, lineStarts: lineStarts)
                 else { break }
                 MarkdownRenderer.appendProse(

@@ -4,15 +4,20 @@ import Markdown
 import HouseDesign
 
 /// One slice of an assistant answer: a run of markdown, a fenced code
-/// block, or a table lifted out of the prose stream so each draws cleanly.
+/// block, a table, a blockquote, or a horizontal divider lifted out of the
+/// prose stream so each draws cleanly.
 struct AnswerSegment: Identifiable, Equatable {
     enum Content: Equatable {
-        /// A run of markdown between code blocks and tables.
+        /// A run of markdown between lifted blocks.
         case prose(String)
         /// A fenced code block, with the language and code its fence carried.
         case code(CodeBlockContent)
         /// A Markdown table, drawn as a Slate grid card.
         case table(MarkdownTableContent)
+        /// A Markdown blockquote, drawn with a Slate left bar.
+        case blockquote(String)
+        /// A Markdown thematic break (`---`), drawn as a `HouseDivider`.
+        case divider
     }
 
     /// Position in the answer. Stable while text streams onto the end.
@@ -170,11 +175,23 @@ enum MarkdownRenderer {
                 content: .table(tableContent(of: table))
             )
         }
+        if let quote = markup as? BlockQuote {
+            let inner = quote.children
+                .map { $0.format() }
+                .joined(separator: "\n\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !inner.isEmpty {
+                return LiftedSpan(range: lower..<upper, content: .blockquote(inner))
+            }
+        }
+        if markup is ThematicBreak {
+            return LiftedSpan(range: lower..<upper, content: .divider)
+        }
         return nil
     }
 
     static func collectLiftedBlocks(_ markup: Markup, into blocks: inout [Markup]) {
-        if markup is CodeBlock || markup is Table {
+        if markup is CodeBlock || markup is Table || markup is BlockQuote || markup is ThematicBreak {
             blocks.append(markup)
             return
         }
@@ -338,6 +355,11 @@ enum MarkdownRenderer {
                 height += CodeBlockMetrics.height(of: content, width: width)
             case .table(let content):
                 height += MarkdownTableMetrics.height(of: content, width: width)
+            case .blockquote(let source):
+                let innerWidth = max(1, width - House.Spacing.sm - (AQDesign.hairline + AQDesign.hairline))
+                height += proseHeight(markdown: source, width: innerWidth) + House.Spacing.xxs * 2
+            case .divider:
+                height += House.hairline + House.Spacing.xs * 2
             }
         }
         // A little slack: NSTextView's layout rounds line fragments up.
@@ -582,9 +604,13 @@ struct AttributedStringWalker: MarkupWalker {
     }
 
     mutating func visitImage(_ image: Markdown.Image) {
-        // Show alt text (the inline children of the image node)
-        appendText("\u{1F5BC} ")
-        descendInto(image)
+        // Render monochrome alt text instead of a raw color emoji.
+        let alt = image.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = alt.isEmpty ? "[Image]" : "[\(alt)]"
+        output.append(NSAttributedString(string: label, attributes: [
+            .font: NSFont.systemFont(ofSize: House.TypeToken.Size.bodySmall),
+            .foregroundColor: House.NSColorToken.textSecondary,
+        ]))
     }
 
     mutating func visitSoftBreak(_ softBreak: SoftBreak) {

@@ -514,15 +514,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// the listing reads a directory.
     @ObservationIgnored var cachedSlashSkillNames: [String] = []
 
-    var isCaptureChooserPresented = false {
-        didSet {
-            if !isCaptureChooserPresented {
-                captureChooserQuery = ""
-                resumeQueuedFollowUp()
-            }
-        }
-    }
-
     var captureChooserIndex = 0
 
     /// The chooser's own search, typed in its own field. It filters the
@@ -701,8 +692,35 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     var launcherItemHotkeyRegistrationErrors: [String: String] = [:]
 
+    /// The single active floating chooser, palette, or item action pane.
+    /// Switching or closing cleans up the outgoing layer's transient query
+    /// state in one place.
     var presentedLayer: PresentedLayer? {
-        didSet { if presentedLayer == nil { resumeQueuedFollowUp() } }
+        didSet {
+            guard presentedLayer != oldValue else { return }
+            if oldValue == .captureChooser {
+                captureChooserQuery = ""
+            }
+            if oldValue == .addContextMenu {
+                addContextQuery = ""
+                isClipboardHistoryOpen = false
+                clipboardHistoryQuery = ""
+            }
+            if oldValue == .actionPalette {
+                actionPaletteSubmenu = nil
+                actionQuery = ""
+            }
+            if oldValue == .applicationPane || oldValue == .catalogPane {
+                contextualApplicationID = nil
+                contextualCatalogItemID = nil
+                activeItemActionForm = nil
+                deleteArmedItemID = nil
+                actionQuery = ""
+            }
+            if presentedLayer == nil {
+                resumeQueuedFollowUp()
+            }
+        }
     }
 
     var contextualApplicationID: String?
@@ -946,18 +964,8 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         }
     }
 
-    // MARK: - Model chooser
+    // MARK: - Model & Assistant choosers
 
-    /// True while the keyboard model chooser is open. ↑↓ move, Return picks,
-    /// Escape closes. Opened by `⇧⌘R` and by Change Model.
-    var isModelChooserPresented = false {
-        didSet { if !isModelChooserPresented { resumeQueuedFollowUp() } }
-    }
-    /// ⌘K › Change Assistant (`⌥⌘A`): the keyboard list of assistants over
-    /// the Quick AI composer. ↑↓ move, Return picks, Escape closes.
-    var isAssistantChooserPresented = false {
-        didSet { if !isAssistantChooserPresented { resumeQueuedFollowUp() } }
-    }
     var assistantChooserIndex = 0
     var modelChooserPurpose: ModelChooserPurpose = .change
     var modelChooserIndex = 0
@@ -965,16 +973,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     // MARK: - Add Context
 
-    /// True while the Add Context menu is open. The same menu opens from the
-    /// control left of the composer and from typing `@` in it.
-    var isAddContextMenuPresented = false {
-        didSet {
-            if !isAddContextMenuPresented {
-                addContextQuery = ""
-                resumeQueuedFollowUp()
-            }
-        }
-    }
     var addContextIndex = 0
     /// Add Context's own search, typed in the pane's own field. It filters
     /// the rows and never touches the composer draft; typing clears the
@@ -996,12 +994,6 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
 
     // MARK: - Transform chooser (keyboard-first)
 
-    /// True while the Transform chooser is open (opened by the Transform chip
-    /// or its shortcut). ↑↓ move, Return runs, Esc closes. Keyboard-first:
-    /// no mouse is needed to reach any transform.
-    var isTransformChooserPresented = false {
-        didSet { if !isTransformChooserPresented { resumeQueuedFollowUp() } }
-    }
     var transformChooserIndex = 0
 
     var pendingTransformArguments: PendingTransformArguments?

@@ -193,6 +193,38 @@ struct MarkdownRendererTests {
         #expect(MarkdownRenderer.measuredHeight(markdown: input, width: 690) > 100)
     }
 
+    @Test func testSegmentsSplitAtBlockquotesAndDividers() {
+        let input = """
+        Summary line.
+
+        > A key takeaway worth highlighting.
+
+        ---
+
+        Follow-up line.
+        """
+        let segments = MarkdownRenderer.segments(input)
+        #expect(segments.count == 4)
+        guard case .prose(let intro) = segments[0].content,
+              case .blockquote(let quote) = segments[1].content,
+              case .divider = segments[2].content,
+              case .prose(let outro) = segments[3].content
+        else {
+            Issue.record("expected prose, blockquote, divider, prose, got \(segments.map(\.content))")
+            return
+        }
+        #expect(intro.contains("Summary"))
+        #expect(quote.contains("key takeaway"))
+        #expect(outro.contains("Follow-up"))
+        #expect(MarkdownRenderer.measuredHeight(markdown: input, width: 690) > 60)
+    }
+
+    @Test func testImageRendersMonochromeAltText() {
+        let rendered = MarkdownRenderer.render("See ![architecture diagram](https://example.com/a.png)")
+        #expect(rendered.string.contains("[architecture diagram]"))
+        #expect(!rendered.string.contains("\u{1F5BC}"))
+    }
+
     @Test func testSegmentsLeaveACodeFreeAnswerWhole() {
         let segments = MarkdownRenderer.segments("Just prose with `inline code`.")
         #expect(segments.count == 1)
@@ -436,9 +468,7 @@ struct MarkdownRendererTests {
 
     @Test func testImageShowsAltText() {
         let result = MarkdownRenderer.render("![Screenshot](https://example.com/img.png)")
-        #expect(result.string.contains("Screenshot"))
-        // Should have an image marker
-        #expect(result.string.contains("\u{1F5BC}"))
+        #expect(result.string == "[Screenshot]")
     }
 
     // MARK: - Bold + italic combined

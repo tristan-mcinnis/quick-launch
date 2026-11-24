@@ -339,6 +339,34 @@ struct QuickAIPolishTests {
         #expect(chat.title == "New quick action")
     }
 
+    @Test func presentedLayerEnforcesMutualExclusionAndCleansQueries() {
+        let vm = QuickViewModel()
+        vm.isAddContextMenuPresented = true
+        vm.addContextQuery = "screen"
+        #expect(vm.presentedLayer == .addContextMenu)
+        #expect(vm.isAddContextMenuPresented)
+
+        vm.isModelChooserPresented = true
+        #expect(vm.presentedLayer == .modelChooser)
+        #expect(!vm.isAddContextMenuPresented)
+        #expect(vm.addContextQuery.isEmpty, "leaving addContextMenu clears its search query")
+
+        vm.isCaptureChooserPresented = true
+        vm.captureChooserQuery = "win"
+        #expect(vm.presentedLayer == .captureChooser)
+        #expect(!vm.isModelChooserPresented)
+
+        vm.isActionPalettePresented = true
+        #expect(vm.presentedLayer == .actionPalette)
+        #expect(!vm.isCaptureChooserPresented)
+        #expect(vm.captureChooserQuery.isEmpty, "leaving captureChooser clears its search query")
+
+        vm.presentedLayer = nil
+        #expect(!vm.isActionPalettePresented)
+        #expect(!vm.isTransformChooserPresented)
+        #expect(!vm.isAssistantChooserPresented)
+    }
+
     @Test func aRenamedChatKeepsItsName() {
         var chat = conversation([("search web raycast founder", "Thomas.")])
         #expect(chat.title == "Raycast founder")

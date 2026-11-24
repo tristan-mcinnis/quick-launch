@@ -597,7 +597,6 @@ extension QuickViewModel {
 
     func openAddContextMenu() {
         guard !isStreaming else { return }
-        isAddContextMenuPresented = true
         isClipboardHistoryOpen = false
         clipboardHistoryQuery = ""
         clipboardHistoryIndex = 0
@@ -605,11 +604,7 @@ extension QuickViewModel {
         addContextIndex = 0
         attachmentTray.cancelLinkEntry()
         attachmentTray.finderIsBehind = isFinderBehind
-        isModelChooserPresented = false
-        isAssistantChooserPresented = false
-        isCaptureChooserPresented = false
-        isActionPalettePresented = false
-        closeItemActionPane()
+        presentedLayer = .addContextMenu
         errorMessage = nil
         requestInputFocus()
     }
