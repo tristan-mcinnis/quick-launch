@@ -155,6 +155,12 @@ struct MarkdownTextView: View {
                     )
                 }
             }
+        case .table(let content):
+            MarkdownTableView(
+                content: content,
+                findRanges: findRanges[segment.id] ?? [],
+                findCurrent: current
+            )
         }
     }
 

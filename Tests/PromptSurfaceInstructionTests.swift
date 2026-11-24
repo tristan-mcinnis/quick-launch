@@ -137,7 +137,7 @@ struct PromptSurfaceInstructionTests {
         #expect(settings.systemPrompt != settings.chatSystemPrompt)
 
         // Quick AI stays a direct result.
-        #expect(settings.systemPrompt.contains("Return only the result"))
+        #expect(settings.systemPrompt.contains("Lead with the direct answer"))
         #expect(settings.systemPrompt.contains("Spotlight-style action overlay"))
         // Chat may explain, and no longer carries the result-only rule.
         #expect(!settings.chatSystemPrompt.contains("Return only the result"))
@@ -158,7 +158,7 @@ struct PromptSurfaceInstructionTests {
             settings.chatSystemPrompt == custom,
             "an explicit instruction is not silently replaced by the new chat default"
         )
-        #expect(settings.configurationVersion == 28)
+        #expect(settings.configurationVersion == 29)
     }
 
     @Test func anEmptyInstructionFromTheOnePromptEraAlsoCarries() throws {

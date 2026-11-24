@@ -405,6 +405,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
             // A final round that asks for tools anyway ends the loop: the
             // model had its chance to answer.
             guard !toolCalls.isEmpty, !answerNow else { return }
+            // Drop any pre-tool narration ("I'll check...") streamed in this
+            // round so it never concatenates onto the post-tool answer.
+            continuation.yield(StreamDelta(text: nil, finishReason: nil, resetsText: true))
             round += 1
             transcript.append(Self.assistantToolCallMessage(toolCalls))
             let roundStarted = clock.now

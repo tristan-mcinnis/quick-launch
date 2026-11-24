@@ -18,6 +18,9 @@ struct StreamDelta: Sendable {
     /// Token usage the provider reported for the turn so far, or nil when it
     /// reported none. Never invented.
     var usage: TokenUsage? = nil
+    /// Drops any partial text streamed before a tool-call round so pre-tool
+    /// narration ("I'll check...") never glues onto the final answer.
+    var resetsText: Bool = false
 }
 
 extension TokenUsage {

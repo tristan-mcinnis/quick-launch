@@ -323,14 +323,13 @@ struct QuickAIPolishTests {
     @Test func aLongQuestionIsCutAtAWordUnderSixtyCharacters() throws {
         let question = "can you compare the three pricing options for the new plan and tell me which one is best"
         let title = try #require(QuickConversation.cleanTitle(from: question, aliasPrefix: "/", aliases: Self.aliases))
-        #expect(title.count < QuickConversation.titleCharacterLimit)
-        #expect(title == "Can you compare the three pricing options for the new plan")
-        #expect(question.capitalizedFirst.hasPrefix(title))
-        #expect(title.last?.isLetter == true, "never ends mid-word or on a space")
+        #expect(title.count <= QuickConversation.titleCharacterLimit)
+        #expect(title == "Can you compare the three pricing options for the new plan…")
+        #expect(title.hasSuffix("…"))
 
         let oneWord = String(repeating: "x", count: 90)
         #expect(QuickConversation.cleanTitle(from: oneWord, aliasPrefix: "/", aliases: Self.aliases)?.count
-            == QuickConversation.titleCharacterLimit - 1)
+            == QuickConversation.titleCharacterLimit)
     }
 
     @Test func nothingLeftFallsBack() {

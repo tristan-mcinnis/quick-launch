@@ -42,6 +42,7 @@ struct QuickAIView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            HouseDivider()
             Group {
                 if viewModel.isRecentChatsPresented {
                     RecentChatsList(viewModel: viewModel)
@@ -50,6 +51,7 @@ struct QuickAIView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HouseDivider()
             QuickAIComposer(viewModel: viewModel)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                     composerHeight = height
@@ -105,7 +107,7 @@ struct QuickAIView: View {
                     symbol: viewModel.isRecentChatsPresented
                         ? "bubble.left.and.text.bubble.right"
                         : "clock.arrow.circlepath",
-                    font: AQDesign.TypeToken.label,
+                    font: AQDesign.TypeToken.glyphSmall,
                     color: AQDesign.ColorToken.textSecondary,
                     label: viewModel.isRecentChatsPresented ? "Back to chat" : "Recent Chats",
                     help: viewModel.isRecentChatsPresented
@@ -121,8 +123,8 @@ struct QuickAIView: View {
             // The tooltip names the action and its key.
             QuickAIGlyphButton(
                 symbol: "arrow.up.right.square",
-                font: AQDesign.TypeToken.glyphMedium,
-                color: AQDesign.ColorToken.textPrimary,
+                font: AQDesign.TypeToken.glyphSmall,
+                color: AQDesign.ColorToken.textSecondary,
                 label: ResultAction.continueInAIChat.title,
                 help: "\(ResultAction.continueInAIChat.title) (\(viewModel.shortcutLabel(for: .continueInAIChat)))"
             ) {

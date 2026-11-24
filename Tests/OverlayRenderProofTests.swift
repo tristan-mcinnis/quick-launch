@@ -109,6 +109,43 @@ struct OverlayRenderProofTests {
         try Self.save(image, name: "overlay-answer-dark.png")
     }
 
+    @Test func rendersQuickAIWithTableInDarkAndLight() async throws {
+        let answer = """
+        Three active Gemini 4 tiers in Antigravity:
+
+        | Model | Position | Price (in/out) |
+        |---|---|---|
+        | **Carbon** | Flagship for long multi-day projects | $4 / $20 |
+        | **Neon** | Default everyday pick, fastest | $3 / $15 |
+        | **Hydrogen** | Fast routine execution, Free plan | Cheapest |
+
+        Practical read: use **Neon** by default, Carbon only for hours-long tasks.
+        """
+        for (pref, appearance, suffix) in [
+            (AppearancePreference.dark, NSAppearance.Name.darkAqua, "dark"),
+            (AppearancePreference.light, NSAppearance.Name.aqua, "light"),
+        ] {
+            let vm = Self.makeViewModel(appearance: pref)
+            let mock = MockQuickService()
+            await mock.setResponses([
+                StreamDelta(text: "I'll check the current lineup.", finishReason: nil),
+                StreamDelta(text: nil, finishReason: nil, resetsText: true),
+                StreamDelta(text: answer, finishReason: "stop"),
+            ])
+            vm.service = mock
+            vm.settings.autoCopy = false
+            vm.input = "Can you break down the three Google Antigravity model tiers and pricing for me"
+            await vm.submit()
+            #expect(vm.output.hasPrefix("Three active Gemini 4"), "pre-tool narration must be discarded")
+            let image = try Self.renderFixedHeight(
+                viewModel: vm,
+                appearance: appearance,
+                height: PanelSizing.quickAIHeight
+            )
+            try Self.save(image, name: "quick-ai-table-\(suffix).png")
+        }
+    }
+
     @Test func rendersDarkCaffeinateCatalogAndTranslateMode() throws {
         let vm = Self.makeViewModel(appearance: .dark)
         vm.enterCatalog(.caffeinate)

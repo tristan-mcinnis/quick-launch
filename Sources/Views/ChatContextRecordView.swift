@@ -438,6 +438,7 @@ struct ChatAnswerContextRecord: View {
     var onExport: ((ChatRetainedMaterial) async -> String?)? = nil
 
     @State private var expanded: Bool
+    @State private var hovering = false
     @State private var actionNotice: String?
 
     init(
@@ -471,26 +472,29 @@ struct ChatAnswerContextRecord: View {
     }
 
     private var disclosure: some View {
-        Button {
+        let ink = hovering || expanded
+            ? AQDesign.ColorToken.textSecondary
+            : AQDesign.ColorToken.textTertiary
+        return Button {
             expanded.toggle()
         } label: {
-            HStack(spacing: House.Spacing.xs) {
+            HStack(spacing: House.Spacing.xxs) {
                 Image(systemName: "chevron.right")
                     .font(AQDesign.TypeToken.footnote.weight(.semibold))
-                    .foregroundStyle(AQDesign.ColorToken.textTertiary)
+                    .foregroundStyle(ink)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .frame(width: House.Control.keyCap)
                     .accessibilityHidden(true)
                 Text(summary.route)
-                    .font(AQDesign.TypeToken.metadata)
-                    .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                    .font(AQDesign.TypeToken.caption)
+                    .foregroundStyle(ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: House.Spacing.xs)
                 if let total = summary.total {
                     Text(total)
-                        .font(AQDesign.TypeToken.metadata)
-                        .foregroundStyle(AQDesign.ColorToken.textSecondary)
+                        .font(AQDesign.TypeToken.caption)
+                        .foregroundStyle(ink)
                         .lineLimit(1)
                         .fixedSize()
                 }
@@ -498,6 +502,7 @@ struct ChatAnswerContextRecord: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .accessibilityLabel("Answer detail")
         .accessibilityValue(summary.total.map { "\(summary.route), \($0). " + (expanded ? "Open" : "Closed") } ?? summary.route)
         .accessibilityHint(expanded ? "Hide the route and sources" : "Show the route, timings and sources")

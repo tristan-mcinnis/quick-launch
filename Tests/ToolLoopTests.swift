@@ -300,7 +300,7 @@ struct ToolLoopTests {
             QuickMessage(role: .user, content: "the current question"),
         ]
         let collected = try await Self.collect(
-            Self.service(contextBudget: ContextBudget(characterLimit: 2_500)).send(messages: history)
+            Self.service(contextBudget: ContextBudget(characterLimit: 2_800)).send(messages: history)
         )
         #expect(collected.text == "Fine.")
         #expect(collected.records.map(\.kind) == [.context])

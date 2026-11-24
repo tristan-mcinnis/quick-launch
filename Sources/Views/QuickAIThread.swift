@@ -199,7 +199,7 @@ struct QuickAIThread: View {
                 }
             }
             .frame(maxWidth: QuickAIView.threadColumnWidth)
-            .padding(.top, House.Spacing.xl)
+            .padding(.top, House.Spacing.md)
             .padding(.horizontal, House.Spacing.lg)
             .padding(.bottom, House.Spacing.md)
             // Centred in a window wider than the standard surface.
@@ -750,15 +750,19 @@ struct QuickAIThread: View {
                     }
                 }
             }
-            .foregroundStyle(AQDesign.ColorToken.textSecondary)
+            .foregroundStyle(AQDesign.ColorToken.textPrimary)
             .multilineTextAlignment(.leading)
-            .padding(.horizontal, House.Spacing.sm)
+            .padding(.horizontal, House.Spacing.md)
             .padding(.vertical, House.Spacing.xs)
             .background(
-                RoundedRectangle(cornerRadius: House.Radius.pill, style: .circular)
+                RoundedRectangle(cornerRadius: House.Radius.pill, style: .continuous)
                     .fill(AQDesign.ColorToken.chipFill)
             )
-            .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth, alignment: .trailing)
+            .overlay(
+                RoundedRectangle(cornerRadius: House.Radius.pill, style: .continuous)
+                    .strokeBorder(AQDesign.ColorToken.divider, lineWidth: AQDesign.hairline)
+            )
+            .frame(maxWidth: House.Layout.quickAIAnswerMaxWidth - House.Spacing.xxxxl, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)

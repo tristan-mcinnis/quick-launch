@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AppKit
+import HouseDesign
 @testable import QuickLaunch
 
 @Suite("MarkdownRenderer")
@@ -26,8 +27,8 @@ struct MarkdownRendererTests {
         let range = (result.string as NSString).range(of: "Hello world")
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
-        #expect(color == NSColor.labelColor,
-                "Plain text must use NSColor.labelColor so it stays visible in dark mode")
+        #expect(color == House.NSColorToken.textPrimary,
+                "Plain text must use Slate primary ink so it adapts cleanly in light and dark mode")
     }
 
     @Test func testBoldTextUsesAdaptiveLabelColor() {
@@ -35,8 +36,8 @@ struct MarkdownRendererTests {
         let range = (result.string as NSString).range(of: "bold")
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
-        #expect(color == NSColor.labelColor,
-                "Bold text must use NSColor.labelColor so it stays visible in dark mode")
+        #expect(color == House.NSColorToken.textPrimary,
+                "Bold text must use Slate primary ink so it adapts cleanly in light and dark mode")
     }
 
     @Test func testHeadingUsesAdaptiveLabelColor() {
@@ -44,8 +45,8 @@ struct MarkdownRendererTests {
         let range = (result.string as NSString).range(of: "A heading")
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
-        #expect(color == NSColor.labelColor,
-                "Heading text must use NSColor.labelColor so it stays visible in dark mode")
+        #expect(color == House.NSColorToken.textPrimary,
+                "Heading text must use Slate primary ink so it adapts cleanly in light and dark mode")
     }
 
     @Test func testCodeBlockUsesAdaptiveLabelColor() {
@@ -57,8 +58,8 @@ struct MarkdownRendererTests {
         let range = (result.string as NSString).range(of: "let x = 1")
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
-        #expect(color == NSColor.labelColor,
-                "Fenced code block text must use NSColor.labelColor so it stays visible in dark mode")
+        #expect(color == House.NSColorToken.textPrimary,
+                "Fenced code block text must use Slate primary ink so it adapts cleanly in light and dark mode")
     }
 
     @Test func testInlineCodeUsesAdaptiveLabelColor() {
@@ -66,21 +67,21 @@ struct MarkdownRendererTests {
         let range = (result.string as NSString).range(of: "let")
         let attrs = result.attributes(at: range.location, effectiveRange: nil)
         let color = attrs[.foregroundColor] as? NSColor
-        #expect(color == NSColor.labelColor,
-                "Inline code must use NSColor.labelColor so it stays visible in dark mode")
+        #expect(color == House.NSColorToken.textPrimary,
+                "Inline code must use Slate primary ink so it adapts cleanly in light and dark mode")
     }
 
     @Test func testEveryGlyphCarriesLabelColor() {
         // Stricter regression test: walks every character of a multi-paragraph
-        // render and asserts each one carries .labelColor. Catches missed
+        // render and asserts each one carries Slate primary ink. Catches missed
         // attribute paths (newlines, bullets, list markers, etc.) that single-
         // range tests above can let through.
         let result = MarkdownRenderer.render("Hello world\n\nSecond paragraph.")
         for i in 0..<result.length {
             let attrs = result.attributes(at: i, effectiveRange: nil)
             let color = attrs[.foregroundColor] as? NSColor
-            #expect(color == NSColor.labelColor,
-                    "Character at \(i) has \(String(describing: color)) instead of labelColor")
+            #expect(color == House.NSColorToken.textPrimary,
+                    "Character at \(i) has \(String(describing: color)) instead of Slate textPrimary")
         }
     }
 
@@ -160,6 +161,36 @@ struct MarkdownRendererTests {
         #expect(block.copyPayload == "let x = 42")
         #expect(after.contains("After"))
         #expect(!after.contains("```"))
+    }
+
+    @Test func testSegmentsSplitAtMarkdownTables() {
+        let input = """
+        Intro line.
+
+        | Model | Role | Price |
+        |---|:---:|---:|
+        | **Carbon** | Flagship | $4 |
+        | Neon | Default | $3 |
+
+        Outro line.
+        """
+        let segments = MarkdownRenderer.segments(input)
+        #expect(segments.count == 3)
+        guard case .prose(let before) = segments[0].content,
+              case .table(let table) = segments[1].content,
+              case .prose(let after) = segments[2].content
+        else {
+            Issue.record("expected prose, table, prose, got \(segments.map(\.content))")
+            return
+        }
+        #expect(before.contains("Intro"))
+        #expect(after.contains("Outro"))
+        #expect(table.headers == ["Model", "Role", "Price"])
+        #expect(table.rows.count == 2)
+        #expect(table.rows[0] == ["**Carbon**", "Flagship", "$4"])
+        #expect(table.alignments == [.leading, .center, .trailing])
+        #expect(table.plainText.contains("Carbon | Flagship | $4"))
+        #expect(MarkdownRenderer.measuredHeight(markdown: input, width: 690) > 100)
     }
 
     @Test func testSegmentsLeaveACodeFreeAnswerWhole() {

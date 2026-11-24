@@ -154,12 +154,14 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
                 .trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":")))
         }
 
+        var wasTruncated = false
         if text.count >= titleCharacterLimit {
-            let head = text.prefix(titleCharacterLimit)
+            wasTruncated = true
+            let head = text.prefix(titleCharacterLimit - 1)
             if let lastSpace = head.lastIndex(where: \.isWhitespace) {
                 text = String(head[head.startIndex..<lastSpace])
             } else {
-                text = String(head.prefix(titleCharacterLimit - 1))
+                text = String(head)
             }
         }
         text = text.trimmingCharacters(in: .whitespaces)
@@ -168,7 +170,8 @@ struct QuickConversation: Codable, Sendable, Equatable, Identifiable {
             text = text.trimmingCharacters(in: .whitespaces)
         }
         guard let first = text.first else { return nil }
-        return first.uppercased() + text.dropFirst()
+        let capitalized = first.uppercased() + text.dropFirst()
+        return wasTruncated ? capitalized + "…" : capitalized
     }
 
     var lastAnswer: String? {

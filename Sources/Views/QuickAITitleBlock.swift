@@ -16,7 +16,7 @@ struct QuickAITitleBlock: View {
                 .font(AQDesign.TypeToken.subheading)
                 .foregroundStyle(AQDesign.ColorToken.textPrimary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
             if let source = viewModel.answerSourceTitle {
                 // A command's output is not the model's:
                 // the line names where the answer came from.
@@ -80,7 +80,8 @@ struct QuickAITitleBlock: View {
     }
 }
 
-/// A header glyph button: a `Control.compact` square around one symbol.
+/// A header glyph button: a `Control.compact` square around one symbol
+/// with quiet hover fill feedback.
 struct QuickAIGlyphButton: View {
     let symbol: String
     let font: Font
@@ -89,15 +90,24 @@ struct QuickAIGlyphButton: View {
     let help: String
     let action: () -> Void
 
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(font)
-                .foregroundStyle(color)
+                .foregroundStyle(hovering ? AQDesign.ColorToken.textPrimary : color)
                 .frame(width: House.Control.compact, height: House.Control.compact)
+                .background(
+                    RoundedRectangle(cornerRadius: AQDesign.menuCornerRadius, style: .continuous)
+                        .fill(hovering ? AQDesign.ColorToken.hoverFill : Color.clear)
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(ChatMotion.hoverAnimation(reduceMotion: reduceMotion), value: hovering)
         .accessibilityLabel(label)
         .help(help)
     }

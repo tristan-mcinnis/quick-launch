@@ -130,7 +130,7 @@ enum FallbackCommandID {
 
 struct QuickSettings: Codable, Sendable {
     // Increment when a one-time settings migration is required.
-    var configurationVersion: Int = 28
+    var configurationVersion: Int = 29
 
     // Hotkey — stored as key code + modifier flags raw value
     var hotkeyKeyCode: UInt16 = 49       // Space bar
@@ -343,7 +343,7 @@ struct QuickSettings: Codable, Sendable {
             Int.self,
             forKey: .configurationVersion
         ) ?? 0
-        configurationVersion = 28
+        configurationVersion = 29
         // Read before the migration at the end: the old key is gone from this
         // version's keys, so it needs its own container.
         let legacyNewConversationAfterMinutes = try decoder.container(
@@ -791,6 +791,11 @@ struct QuickSettings: Codable, Sendable {
             if !Self.isStockQuickAIPrompt(systemPrompt) {
                 chatSystemPrompt = systemPrompt
             }
+        }
+        if decodedConfigurationVersion < 29, Self.isStockQuickAIPrompt(systemPrompt) {
+            // 2026-11-24: upgrade untouched stock Quick AI installs to the
+            // tighter glanceable prompt; any custom prompt is left alone.
+            systemPrompt = Self.defaultSystemPrompt
         }
     }
 

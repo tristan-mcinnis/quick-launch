@@ -236,8 +236,8 @@ final class StreamingAnswer {
         if children.contains(where: { $0.range == nil }) { reset(); return wholeSnapshot(markdown) }
 
         // Phase A: walk the blocks a later block has closed. A top-level code
-        // block closes the prose run before it and becomes a segment; a block
-        // with code nested in it stops the walk.
+        // block or table closes the prose run before it and becomes a segment;
+        // a block with a lifted block nested in it stops the walk.
         var segments = frozenSegments
         var closed = false
         var pendingFrom = 0
@@ -250,21 +250,21 @@ final class StreamingAnswer {
             // a blank line closes a block. A fenced block is closed by the
             // block after it.
             if !(child is CodeBlock), !hasGap(after: index, in: children) { break }
-            if let block = child as? CodeBlock {
-                guard let span = MarkdownRenderer.codeSpan(of: block, bytes: tailBytes, lineStarts: lineStarts)
+            if child is CodeBlock || child is Table {
+                guard let span = MarkdownRenderer.liftedSpan(of: child, bytes: tailBytes, lineStarts: lineStarts)
                 else { break }
                 MarkdownRenderer.appendProse(
                     markdown, bytes: bytes, range: runStart..<(base + span.range.lowerBound), into: &segments
                 )
-                segments.append(AnswerSegment(id: segments.count, content: .code(span.content)))
+                segments.append(AnswerSegment(id: segments.count, content: span.content))
                 runStart = base + span.range.upperBound
                 openText = NSMutableAttributedString()
                 openCarriesBreak = false
                 closed = true
                 pendingFrom = index + 1
             } else {
-                var nested: [CodeBlock] = []
-                MarkdownRenderer.collectCodeBlocks(child, into: &nested)
+                var nested: [Markup] = []
+                MarkdownRenderer.collectLiftedBlocks(child, into: &nested)
                 if !nested.isEmpty { break }
             }
             index += 1
@@ -293,23 +293,23 @@ final class StreamingAnswer {
 
         // Phase C: the live blocks. Segments follow the whole-answer split.
         let liveFrom = stop < children.count ? (start(of: children[stop]) ?? 0) : tailBytes.count
-        let spans = MarkdownRenderer.codeSpans(in: document, bytes: tailBytes, lineStarts: lineStarts)
+        let spans = MarkdownRenderer.liftedSpans(in: document, bytes: tailBytes, lineStarts: lineStarts)
             .filter { $0.range.lowerBound >= liveFrom }
         var cursor = runStart
-        var sawCode = false
+        var sawLifted = false
         for span in spans {
             let lower = base + span.range.lowerBound
             guard lower >= cursor else { continue }
             MarkdownRenderer.appendProse(markdown, bytes: bytes, range: cursor..<lower, into: &segments)
-            segments.append(AnswerSegment(id: segments.count, content: .code(span.content)))
+            segments.append(AnswerSegment(id: segments.count, content: span.content))
             cursor = base + span.range.upperBound
-            sawCode = true
+            sawLifted = true
         }
         MarkdownRenderer.appendProse(markdown, bytes: bytes, range: cursor..<bytes.count, into: &segments)
         guard case .prose(let lastSource)? = segments.last?.content,
               cursor < bytes.count else { return Snapshot(segments: segments, run: nil) }
 
-        if sawCode {
+        if sawLifted {
             run.set(frozen: NSMutableAttributedString(), tail: MarkdownRenderer.render(lastSource), extends: false)
         } else {
             var walker = AttributedStringWalker(

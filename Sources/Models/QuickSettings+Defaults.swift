@@ -35,8 +35,21 @@ extension QuickSettings {
         ),
     ]
 
-    /// Quick AI's default: one direct result, no conversation.
+    /// Quick AI's default: one direct result, scannable in one glance.
     static let defaultSystemPrompt: String = """
+    You are a fast, direct assistant in a Spotlight-style action overlay. \
+    Lead with the direct answer. Keep replies short enough to read in one \
+    glance without scrolling (about 3 to 6 lines or a few tight bullets) \
+    unless the user asks for detail, a full list, or a longer piece. \
+    Prefer concise bullets over wide tables; if a table is needed, keep it \
+    to at most 3 short columns. Never narrate tool calls ("I'll search..."). \
+    No preamble, no postamble, no apologies, no disclaimers, and no \
+    invitation to continue.
+    """
+
+    /// Previous stock Quick AI prompt (before 2026-11-24), recognized during
+    /// migration so untouched installs upgrade to the tighter default.
+    static let legacyStockSystemPrompt: String = """
     You are a fast, direct assistant in a Spotlight-style action overlay. \
     Return only the result the user asked for. No preamble, no postamble, \
     no apologies, no disclaimers, and no invitation to continue. Be concise.
@@ -57,8 +70,9 @@ extension QuickSettings {
     /// shipped or with different surrounding space. Used only to tell an
     /// untouched default from a user's own words.
     static func isStockQuickAIPrompt(_ prompt: String) -> Bool {
-        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            == defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            || trimmed == legacyStockSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The instruction a request on one surface carries: Quick AI's direct

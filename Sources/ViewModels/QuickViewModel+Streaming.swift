@@ -412,6 +412,11 @@ extension QuickViewModel {
                     if let usage = delta.usage {
                         streamUsage = usage
                     }
+                    if delta.resetsText {
+                        discardStreamBuffer()
+                        output = ""
+                        streamFirstTokenAt = nil
+                    }
                     if let text = delta.text {
                         if !text.isEmpty {
                             streamingStatus = nil

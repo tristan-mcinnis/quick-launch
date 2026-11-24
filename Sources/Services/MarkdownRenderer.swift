@@ -3,14 +3,16 @@ import AppKit
 import Markdown
 import HouseDesign
 
-/// One slice of an assistant answer: a run of markdown, or a fenced code
-/// block lifted out of the prose stream so it can draw as its own block.
+/// One slice of an assistant answer: a run of markdown, a fenced code
+/// block, or a table lifted out of the prose stream so each draws cleanly.
 struct AnswerSegment: Identifiable, Equatable {
     enum Content: Equatable {
-        /// A run of markdown between code blocks.
+        /// A run of markdown between code blocks and tables.
         case prose(String)
         /// A fenced code block, with the language and code its fence carried.
         case code(CodeBlockContent)
+        /// A Markdown table, drawn as a Slate grid card.
+        case table(MarkdownTableContent)
     }
 
     /// Position in the answer. Stable while text streams onto the end.
@@ -99,14 +101,13 @@ enum MarkdownRenderer {
         return segments
     }
 
-    /// The answer split at its fenced code blocks: prose, code, prose, in
-    /// document order. A document with no fenced code block is one prose
-    /// segment, so a code-free answer renders exactly as it always did.
+    /// The answer split at its fenced code blocks and tables: prose, code,
+    /// table, in document order. A document with neither is one prose segment.
     static func segments(_ markdown: String) -> [AnswerSegment] {
         guard !markdown.isEmpty else { return [] }
         let bytes = Array(markdown.utf8)
         let lineStarts = utf8LineStarts(bytes)
-        let spans = codeSpans(
+        let spans = liftedSpans(
             in: Document(parsing: markdown),
             bytes: bytes,
             lineStarts: lineStarts
@@ -118,8 +119,7 @@ enum MarkdownRenderer {
         var segments: [AnswerSegment] = []
         var cursor = 0
         for span in spans {
-            // A code block inside a block already taken is part of the outer
-            // block's code text, not a segment of its own.
+            // A block inside one already taken stays inside it.
             guard span.range.lowerBound >= cursor else { continue }
             appendProse(
                 markdown,
@@ -127,50 +127,82 @@ enum MarkdownRenderer {
                 range: cursor..<span.range.lowerBound,
                 into: &segments
             )
-            segments.append(AnswerSegment(id: segments.count, content: .code(span.content)))
+            segments.append(AnswerSegment(id: segments.count, content: span.content))
             cursor = span.range.upperBound
         }
         appendProse(markdown, bytes: bytes, range: cursor..<bytes.count, into: &segments)
         return segments
     }
 
-    /// A fenced code block's byte range in the source, and what it carries.
-    struct CodeSpan {
+    /// A lifted block's byte range in the source (fenced code or table) and its
+    /// segment content.
+    struct LiftedSpan {
         let range: Range<Int>
-        let content: CodeBlockContent
+        let content: AnswerSegment.Content
     }
 
-    static func codeSpans(
+    static func liftedSpans(
         in document: Markup,
         bytes: [UInt8],
         lineStarts: [Int]
-    ) -> [CodeSpan] {
-        var blocks: [CodeBlock] = []
-        collectCodeBlocks(document, into: &blocks)
-        return blocks.compactMap { codeSpan(of: $0, bytes: bytes, lineStarts: lineStarts) }
+    ) -> [LiftedSpan] {
+        var blocks: [Markup] = []
+        collectLiftedBlocks(document, into: &blocks)
+        return blocks.compactMap { liftedSpan(of: $0, bytes: bytes, lineStarts: lineStarts) }
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
-    static func codeSpan(of block: CodeBlock, bytes: [UInt8], lineStarts: [Int]) -> CodeSpan? {
-        guard let source = block.range,
+    static func liftedSpan(of markup: Markup, bytes: [UInt8], lineStarts: [Int]) -> LiftedSpan? {
+        guard let source = markup.range,
               let lower = utf8Offset(of: source.lowerBound, lineStarts: lineStarts),
               let upper = utf8Offset(of: source.upperBound, lineStarts: lineStarts),
               lower < upper, upper <= bytes.count
         else { return nil }
-        return CodeSpan(
-            range: lower..<upper,
-            content: CodeBlockContent(infoString: block.language, code: codeText(block))
-        )
+        if let block = markup as? CodeBlock {
+            return LiftedSpan(
+                range: lower..<upper,
+                content: .code(CodeBlockContent(infoString: block.language, code: codeText(block)))
+            )
+        }
+        if let table = markup as? Table {
+            return LiftedSpan(
+                range: lower..<upper,
+                content: .table(tableContent(of: table))
+            )
+        }
+        return nil
     }
 
-    static func collectCodeBlocks(_ markup: Markup, into blocks: inout [CodeBlock]) {
-        if let block = markup as? CodeBlock {
-            blocks.append(block)
+    static func collectLiftedBlocks(_ markup: Markup, into blocks: inout [Markup]) {
+        if markup is CodeBlock || markup is Table {
+            blocks.append(markup)
             return
         }
         for child in markup.children {
-            collectCodeBlocks(child, into: &blocks)
+            collectLiftedBlocks(child, into: &blocks)
         }
+    }
+
+    static func tableContent(of table: Table) -> MarkdownTableContent {
+        let headers = Array(table.head.cells.map { cellInlineMarkdown($0) })
+        let rows = Array(table.body.rows.map { row in
+            Array(row.cells.map { cellInlineMarkdown($0) })
+        })
+        let alignments: [MarkdownTableContent.ColumnAlignment] = table.columnAlignments.map { alignment in
+            switch alignment {
+            case .center: .center
+            case .right: .trailing
+            case .left, nil: .leading
+            }
+        }
+        return MarkdownTableContent(headers: headers, rows: rows, alignments: alignments)
+    }
+
+    private static func cellInlineMarkdown(_ cell: Table.Cell) -> String {
+        cell.children
+            .map { $0.format() }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The code a fenced block wraps, without the fence's trailing newline.
@@ -304,6 +336,8 @@ enum MarkdownRenderer {
                 height += proseHeight(markdown: source, width: width)
             case .code(let content):
                 height += CodeBlockMetrics.height(of: content, width: width)
+            case .table(let content):
+                height += MarkdownTableMetrics.height(of: content, width: width)
             }
         }
         // A little slack: NSTextView's layout rounds line fragments up.
@@ -372,9 +406,17 @@ struct AttributedStringWalker: MarkupWalker {
 
     mutating func visitHeading(_ heading: Heading) {
         blockBreak(2)
+        let start = output.length
         headingLevel = heading.level
         descendInto(heading)
         headingLevel = 0
+        let range = NSRange(location: start, length: output.length - start)
+        if range.length > 0 {
+            let style = NSMutableParagraphStyle()
+            style.paragraphSpacingBefore = House.Spacing.xs
+            style.paragraphSpacing = House.Spacing.xxs
+            output.addAttribute(.paragraphStyle, value: style, range: range)
+        }
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
@@ -392,7 +434,7 @@ struct AttributedStringWalker: MarkupWalker {
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: House.NSColorToken.textPrimary,
             .backgroundColor: House.NSColorToken.surfaceTint,
         ]
         output.append(NSAttributedString(string: code, attributes: attrs))
@@ -436,7 +478,7 @@ struct AttributedStringWalker: MarkupWalker {
         let style = NSMutableParagraphStyle()
         style.firstLineHeadIndent = 0
         style.headIndent = CGFloat(listDepth) * 18
-        style.paragraphSpacingBefore = 3
+        style.paragraphSpacingBefore = House.Spacing.xxs
         let range = NSRange(location: start, length: output.length - start)
         output.enumerateAttribute(.paragraphStyle, in: range) { value, subRange, _ in
             if value == nil {
@@ -448,8 +490,20 @@ struct AttributedStringWalker: MarkupWalker {
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
         blockQuoteDepth += 1
         if output.length > 0 { appendNewlines(1) }
+        let start = output.length
         suppressBlockBreak = true
         descendInto(blockQuote)
+        let range = NSRange(location: start, length: output.length - start)
+        if range.length > 0 {
+            let style = NSMutableParagraphStyle()
+            style.firstLineHeadIndent = House.Spacing.sm
+            style.headIndent = House.Spacing.sm
+            output.enumerateAttribute(.paragraphStyle, in: range) { value, subRange, _ in
+                if value == nil {
+                    output.addAttribute(.paragraphStyle, value: style, range: subRange)
+                }
+            }
+        }
         blockQuoteDepth -= 1
     }
 
@@ -550,11 +604,11 @@ struct AttributedStringWalker: MarkupWalker {
     // MARK: - Helpers
 
     private func appendText(_ text: String) {
-        // Default to the adaptive system label color so output stays visible
-        // in both light and dark mode (issues #20, #23). Blockquote / link
-        // branches below override this when they need a different color.
+        // Default to the adaptive Slate primary ink so output stays warm and
+        // legible in both light and dark mode (issues #20, #23). Blockquote /
+        // link branches below override this when they need a different color.
         var attrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: House.NSColorToken.textPrimary,
         ]
 
         // Determine effective bold state (explicit bold OR table header)
@@ -585,7 +639,9 @@ struct AttributedStringWalker: MarkupWalker {
 
         if let url = linkURL {
             attrs[.link] = url
-            attrs[.foregroundColor] = NSColor.linkColor
+            attrs[.foregroundColor] = House.NSColorToken.accent
+            attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            attrs[.underlineColor] = House.NSColorToken.accent.withAlphaComponent(0.35)
         }
 
         // Blockquote styling: supporting ink, not a second grey.
@@ -605,7 +661,7 @@ struct AttributedStringWalker: MarkupWalker {
         let nl = String(repeating: "\n", count: count)
         output.append(NSAttributedString(string: nl, attributes: [
             .font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: House.NSColorToken.textPrimary,
         ]))
     }
 }
