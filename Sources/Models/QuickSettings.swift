@@ -46,6 +46,7 @@ enum QuickAIPrimaryAction: String, Codable, CaseIterable, Sendable {
 /// a fresh chat for every question. `never` keeps the one thread until the
 /// user starts a new chat by hand.
 enum NewChatInterval: String, Codable, CaseIterable, Sendable, Identifiable {
+    case oneMinute
     case fiveMinutes
     case tenMinutes
     case fifteenMinutes
@@ -58,6 +59,7 @@ enum NewChatInterval: String, Codable, CaseIterable, Sendable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .oneMinute: "1 minute"
         case .fiveMinutes: "5 minutes"
         case .tenMinutes: "10 minutes"
         case .fifteenMinutes: "15 minutes"
@@ -72,6 +74,7 @@ enum NewChatInterval: String, Codable, CaseIterable, Sendable, Identifiable {
     /// are not windows.
     var minutes: Int? {
         switch self {
+        case .oneMinute: 1
         case .fiveMinutes: 5
         case .tenMinutes: 10
         case .fifteenMinutes: 15
@@ -302,6 +305,10 @@ struct QuickSettings: Codable, Sendable {
     /// Draw the ⇥ hint in root search. Tab asks Quick AI either way (math
     /// and conversions still answer in place).
     var tabShortcutHintVisible: Bool = true
+    /// Show the collapsible route, timing, and token-usage receipt row under
+    /// each Quick AI answer. Off by default to keep the overlay clean; the AI
+    /// Chat window always shows it.
+    var showQuickAIAnswerDetails: Bool = false
     /// The provider and model the Quick AI surface answers with. Unset means
     /// the current selection, so the two can never disagree by accident.
     var quickAIProviderID: UUID?
@@ -523,6 +530,10 @@ struct QuickSettings: Codable, Sendable {
             Bool.self,
             forKey: .tabShortcutHintVisible
         ) ?? true
+        showQuickAIAnswerDetails = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .showQuickAIAnswerDetails
+        ) ?? false
         quickAIProviderID = try c.decodeIfPresent(UUID.self, forKey: .quickAIProviderID)
         quickAIModel = try c.decodeIfPresent(String.self, forKey: .quickAIModel) ?? ""
         fallbackCommandIDs = (try c.decodeIfPresent(

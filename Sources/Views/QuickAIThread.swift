@@ -515,34 +515,35 @@ struct QuickAIThread: View {
                 sourceList(sources)
             }
             // The durable receipt and the material the question carried,
-            // drawn only once the archive holds this answer: a chat with no
-            // archive (history off, every test) gains no line here.
-            if let archived = archiveProjection.turn(message.id) {
-                let conversationID = viewModel.currentConversation?.id.uuidString
-                ChatAnswerContextRecord(
-                    summary: ChatAnswerReceiptSummary(
-                        answer: archived,
-                        question: archiveProjection.question(before: message.id),
-                        projection: archiveProjection
-                    ),
-                    archiveFailure: nil,
-                    onOpen: {
-                        await ChatRetainedMaterialIO.open(
-                            $0,
-                            conversationID: conversationID,
-                            archive: viewModel.chatArchive
-                        )
-                    },
-                    onExport: {
-                        await ChatRetainedMaterialIO.export(
-                            $0,
-                            conversationID: conversationID,
-                            archive: viewModel.chatArchive
-                        )
-                    }
-                )
-            } else if let failure = archiveProjection.loadFailure {
-                ChatAnswerContextRecord(summary: .unrecorded, archiveFailure: failure)
+            // shown in AI Chat and optionally in Quick AI (Settings › General).
+            if viewModel.isAIChatWindow || viewModel.settings.showQuickAIAnswerDetails {
+                if let archived = archiveProjection.turn(message.id) {
+                    let conversationID = viewModel.currentConversation?.id.uuidString
+                    ChatAnswerContextRecord(
+                        summary: ChatAnswerReceiptSummary(
+                            answer: archived,
+                            question: archiveProjection.question(before: message.id),
+                            projection: archiveProjection
+                        ),
+                        archiveFailure: nil,
+                        onOpen: {
+                            await ChatRetainedMaterialIO.open(
+                                $0,
+                                conversationID: conversationID,
+                                archive: viewModel.chatArchive
+                            )
+                        },
+                        onExport: {
+                            await ChatRetainedMaterialIO.export(
+                                $0,
+                                conversationID: conversationID,
+                                archive: viewModel.chatArchive
+                            )
+                        }
+                    )
+                } else if let failure = archiveProjection.loadFailure {
+                    ChatAnswerContextRecord(summary: .unrecorded, archiveFailure: failure)
+                }
             }
             ForEach(Array(records.filter { !$0.drawsAboveAnswer }.enumerated()), id: \.offset) { _, record in
                 if record.kind == .todoistProposal, let proposal = record.proposal {

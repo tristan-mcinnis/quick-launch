@@ -38,6 +38,17 @@ struct QuickAISettingsView: View {
                     .toggleStyle(InkToggleStyle())
             }
 
+            SettingsRow(
+                title: "Answer Details",
+                detail: "Show route, timing, and token usage under Quick AI answers."
+            ) {
+                Toggle(
+                    "Show answer details in Quick AI",
+                    isOn: viewModel.settingsBinding(\.showQuickAIAnswerDetails)
+                )
+                .toggleStyle(InkToggleStyle())
+            }
+
             SettingsRow(title: "Start New Chat", detail: startNewChatDetail) {
                 Picker("Start New Chat", selection: viewModel.settingsBinding(\.newChatInterval)) {
                     ForEach(NewChatInterval.allCases) { interval in

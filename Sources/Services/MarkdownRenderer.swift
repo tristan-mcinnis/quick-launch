@@ -477,7 +477,7 @@ struct AttributedStringWalker: MarkupWalker {
         // own ranges already, so only fill where no style exists yet.
         let style = NSMutableParagraphStyle()
         style.firstLineHeadIndent = 0
-        style.headIndent = CGFloat(listDepth) * 18
+        style.headIndent = CGFloat(listDepth) * House.Spacing.sm
         style.paragraphSpacingBefore = House.Spacing.xxs
         let range = NSRange(location: start, length: output.length - start)
         output.enumerateAttribute(.paragraphStyle, in: range) { value, subRange, _ in

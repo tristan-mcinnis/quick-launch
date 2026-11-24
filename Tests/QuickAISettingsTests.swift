@@ -39,7 +39,7 @@ struct QuickAISettingsTests {
 
     @Test func aLegacyMinuteCountMovesOntoTheNearestOption() throws {
         let expected: [(stored: Int, option: NewChatInterval)] = [
-            (1, .fiveMinutes),
+            (1, .oneMinute),
             (5, .fiveMinutes),
             (7, .fiveMinutes),
             (8, .tenMinutes),
@@ -110,14 +110,16 @@ struct QuickAISettingsTests {
     }
 
     @Test func theNearestOptionTiesOnTheShorterWindow() {
-        #expect(NewChatInterval.nearest(toMinutes: 0) == .fiveMinutes)
+        #expect(NewChatInterval.nearest(toMinutes: 0) == .oneMinute)
+        #expect(NewChatInterval.nearest(toMinutes: 3) == .oneMinute)
+        #expect(NewChatInterval.nearest(toMinutes: 4) == .fiveMinutes)
         #expect(NewChatInterval.nearest(toMinutes: 12) == .tenMinutes)
         #expect(NewChatInterval.nearest(toMinutes: 13) == .fifteenMinutes)
         #expect(NewChatInterval.nearest(toMinutes: 22) == .fifteenMinutes)
         #expect(NewChatInterval.nearest(toMinutes: 23) == .thirtyMinutes)
         // The order the card reads, which is the order the manual gives.
         #expect(NewChatInterval.allCases.map(\.displayName) == [
-            "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "Always", "Never",
+            "1 minute", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "Always", "Never",
         ])
         #expect(NewChatInterval.always.minutes == nil)
         #expect(NewChatInterval.never.minutes == nil)

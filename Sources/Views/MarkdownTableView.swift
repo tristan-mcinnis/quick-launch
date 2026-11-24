@@ -90,7 +90,7 @@ enum MarkdownTableMetrics {
         let headerCount: CGFloat = content.headers.isEmpty ? 0 : 1
         let bodyCount = CGFloat(content.rows.count)
         let dividers = max(0, headerCount + bodyCount - 1) * House.hairline
-        return headerCount * headerRowEstimate + bodyCount * bodyRowEstimate + dividers
+        return headerCount * headerRowEstimate + bodyCount * bodyRowEstimate + dividers + House.Spacing.xxs * 2
     }
 }
 
@@ -100,11 +100,24 @@ struct MarkdownTableView: View {
     let content: MarkdownTableContent
     var findRanges: [TextRange] = []
     var findCurrent: TextRange? = nil
+    @State private var headerHeight: CGFloat = 0
 
     /// Tables with 4+ columns scroll horizontally so cells stay readable
     /// instead of squeezing into narrow single-word slivers.
     private var scrollsHorizontally: Bool {
         content.columnCount >= 4
+    }
+
+    /// Column 0 hugs its text when it holds short row labels (like "Lineup"
+    /// or "Access") beside wider value columns, so it does not hog a third
+    /// of the table width.
+    private func hugsContent(column: Int) -> Bool {
+        guard !scrollsHorizontally, column == 0, content.columnCount >= 2 else { return false }
+        let headerLen = content.headers.first.map { MarkdownTableContent.stripInlineMarkdown($0).count } ?? 0
+        let maxBodyLen = content.rows.compactMap { $0.first }
+            .map { MarkdownTableContent.stripInlineMarkdown($0).count }
+            .max() ?? 0
+        return max(headerLen, maxBodyLen) <= 22
     }
 
     var body: some View {
@@ -130,6 +143,7 @@ struct MarkdownTableView: View {
             RoundedRectangle(cornerRadius: MarkdownTableMetrics.cornerRadius, style: .continuous)
                 .strokeBorder(AQDesign.ColorToken.panelStroke, lineWidth: AQDesign.hairline)
         )
+        .padding(.vertical, House.Spacing.xxs)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(content.accessibilityLabel)
     }
@@ -142,10 +156,12 @@ struct MarkdownTableView: View {
                     ForEach(0..<colCount, id: \.self) { col in
                         let text = col < content.headers.count ? content.headers[col] : ""
                         let align = content.alignment(for: col)
-                        cellText(text, isHeader: true, alignment: align)
+                        cellText(text, isHeader: true, alignment: align, hugs: hugsContent(column: col))
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                                if height > headerHeight { headerHeight = height }
+                            }
                     }
                 }
-                .background(AQDesign.ColorToken.well)
 
                 if !content.rows.isEmpty {
                     HouseDivider()
@@ -162,9 +178,15 @@ struct MarkdownTableView: View {
                     ForEach(0..<colCount, id: \.self) { col in
                         let text = col < row.count ? row[col] : ""
                         let align = content.alignment(for: col)
-                        cellText(text, isHeader: false, alignment: align)
+                        cellText(text, isHeader: false, alignment: align, hugs: hugsContent(column: col))
                     }
                 }
+            }
+        }
+        .background(alignment: .top) {
+            if !content.headers.isEmpty, headerHeight > 0 {
+                AQDesign.ColorToken.well
+                    .frame(height: headerHeight)
             }
         }
     }
@@ -172,16 +194,17 @@ struct MarkdownTableView: View {
     private func cellText(
         _ raw: String,
         isHeader: Bool,
-        alignment: MarkdownTableContent.ColumnAlignment
+        alignment: MarkdownTableContent.ColumnAlignment,
+        hugs: Bool
     ) -> some View {
         Text(MarkdownTableContent.inlineAttributed(raw))
             .font(isHeader ? AQDesign.TypeToken.label : AQDesign.TypeToken.body)
             .foregroundStyle(isHeader ? AQDesign.ColorToken.textSecondary : AQDesign.ColorToken.textPrimary)
             .multilineTextAlignment(alignment.textAlignment)
             .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(horizontal: hugs, vertical: true)
             .frame(
-                maxWidth: scrollsHorizontally ? House.Layout.chatRail : .infinity,
+                maxWidth: hugs ? nil : (scrollsHorizontally ? House.Layout.chatRail : .infinity),
                 alignment: alignment.frameAlignment
             )
             .padding(.horizontal, MarkdownTableMetrics.cellHorizontalPadding)
