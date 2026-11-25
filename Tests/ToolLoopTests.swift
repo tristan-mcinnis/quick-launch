@@ -58,6 +58,7 @@ struct ToolLoopTests {
     private static func collect(_ stream: AsyncThrowingStream<StreamDelta, Error>) async throws -> Collected {
         var collected = Collected()
         for try await delta in stream {
+            if delta.resetsText { collected.text = "" }
             if let text = delta.text { collected.text += text }
             if let status = delta.status { collected.statuses.append(status) }
             if let record = delta.toolRecord { collected.records.append(record) }
@@ -115,6 +116,27 @@ struct ToolLoopTests {
         let messages = try #require(try Self.body(1)["messages"] as? [[String: Any]])
         let result = messages.first { $0["role"] as? String == "tool" }
         #expect(result?["content"] as? String == "The search_notes tool is unavailable.")
+    }
+
+    @Test func preToolNarrationIsResetBeforeToolRoundAnswer() async throws {
+        let narratedToolRound = [
+            #"data: {"choices":[{"delta":{"content":"I'll check the current lineup."}}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_m","function":{"name":"recall_memory","arguments":"{\"query\":\"lineup\"}"}}]}}]}"#,
+            #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+        ]
+        LoopStubHTTP.reset([
+            narratedToolRound,
+            Self.answerRound("Close, but not quite."),
+        ])
+        let memory = FakeMemory(hits: [FakeMemory.hit("state/decisions/dec-01.md")])
+        let service = Self.service(tools: ChatToolbox(enabled: [.memory], memory: memory))
+
+        let collected = try await Self.collect(
+            service.send(messages: [QuickMessage(role: .user, content: "check lineup")])
+        )
+
+        #expect(collected.text == "Close, but not quite.")
     }
 
     // MARK: - Calls in one round

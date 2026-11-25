@@ -204,7 +204,7 @@ struct ChatToolbox: Sendable {
             ))
             tools.append(Self.function(
                 Name.proposeTaskChange,
-                description: "Propose a change to one of the user's EXISTING open Todoist tasks: reschedule it or mark it done. It changes nothing: the app finds the task by its words and the user confirms with Return. Call it when the user asks to move, push, postpone, reschedule, finish, complete, or tick off a task. If several tasks match, it lists them; ask the user which. Then say in one line what will change.",
+                description: "Propose a change to one of the user's EXISTING open Todoist tasks: reschedule it or mark it done. It changes nothing: the app finds the task by its words and the user confirms with Return. Call it whenever the user asks to move, push, postpone, reschedule, finish, complete, or tick off a task, or replies with a new date like \"tomorrow\" or \"friday\" (even if the current due date looks close). If several tasks match, it lists them; ask the user which. Then say in one line what will change.",
                 properties: [
                     "task": ["type": "string", "description": "Two to four words from the task's title, as it appears on the plate."],
                     "action": ["type": "string", "enum": ["reschedule", "complete"]],
