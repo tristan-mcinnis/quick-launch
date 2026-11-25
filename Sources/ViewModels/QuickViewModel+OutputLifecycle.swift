@@ -144,8 +144,6 @@ extension QuickViewModel {
             // new-chat path in `stream`).
             streamGeneration &+= 1
             inFlightTurn = nil
-            // A clear waiting on this turn goes with the thread it described.
-            isTransientClearDeferred = false
             streamTask?.cancel()
             streamTask = nil
             commandTask?.cancel()
@@ -160,18 +158,13 @@ extension QuickViewModel {
             queuedFollowUpTask = nil
             discardStreamBuffer()
             isStreaming = false
-            streamingStatus = nil
+            activeTurn.reset()
             output = ""
             answerSource = .model
             threadError = nil
-            isFollowUpQueued = false
             isThreadFollowingBottom = true
             errorMessage = nil
             lastQuestion = nil
-            pendingQuestion = nil
-            enrichmentSubmittedInput = nil
-            webSearchNote = nil
-            liveToolRecords = []
             pendingChatTools = nil
             pendingModelChoice = nil
             threadNotice = nil

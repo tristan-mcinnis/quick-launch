@@ -367,6 +367,39 @@ struct QuickAIPolishTests {
         #expect(!vm.isAssistantChooserPresented)
     }
 
+    @Test func labeledSourceNeverLeavesAnOrphanLabel() {
+        let vm = QuickViewModel()
+        vm.pendingActionSource = "copied snippet"
+        vm.pendingActionSourceLabel = "Clipboard"
+        #expect(vm.pendingActionLabeledSource == LabeledSource(text: "copied snippet", label: "Clipboard"))
+
+        vm.pendingActionSource = nil
+        #expect(vm.pendingActionSourceLabel == nil, "clearing text drops its attribution label")
+
+        vm.explicitTransformSource = "explicit text"
+        vm.explicitTransformSourceLabel = "Notes"
+        vm.explicitTransformSource = nil
+        #expect(vm.explicitTransformSourceLabel == nil)
+    }
+
+    @Test func threadResetClearsEntireActiveTurnAtomically() {
+        let vm = QuickViewModel()
+        vm.pendingQuestion = "q"
+        vm.enrichmentSubmittedInput = "q"
+        vm.webSearchNote = "Search web: q"
+        vm.streamingStatus = "Searching…"
+        vm.liveToolRecords = [ChatToolRecord(kind: .web, summary: "Searched")]
+        vm.isWaitingForAttachments = true
+        vm.isFollowUpQueued = true
+        vm.isTransientClearDeferred = true
+
+        vm.reset(.thread)
+        #expect(vm.activeTurn == ActiveTurnState())
+        #expect(!vm.isWaitingForAttachments)
+        #expect(vm.webSearchNote == nil)
+        #expect(vm.liveToolRecords.isEmpty)
+    }
+
     @Test func aRenamedChatKeepsItsName() {
         var chat = conversation([("search web raycast founder", "Thomas.")])
         #expect(chat.title == "Raycast founder")

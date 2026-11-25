@@ -89,10 +89,16 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     @ObservationIgnored var threadAnchors = ThreadScrollAnchorStore()
     /// How close to the bottom counts as reading the newest text.
     static let threadFollowThreshold = House.Control.row
-    /// Return while an answer streams queues the typed follow-up: it stays
-    /// in the composer and is sent when the stream ends. Escape stops the
-    /// stream and keeps the text, unsent.
-    var isFollowUpQueued = false
+    /// All transient state of the turn in flight (pending question, enrichment
+    /// input, web search note, streaming status, live tool records, attachment
+    /// wait, queued follow-up, deferred clear). One value type so every reset
+    /// clears the entire turn atomically.
+    var activeTurn = ActiveTurnState()
+
+    var isFollowUpQueued: Bool {
+        get { activeTurn.isFollowUpQueued }
+        set { activeTurn.isFollowUpQueued = newValue }
+    }
     var isStreaming: Bool = false {
         didSet { if isStreaming { isQuickAIPresented = true } }
     }
@@ -110,14 +116,14 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     }
     /// Highlighted row of the Recent Chats list.
     var recentChatsIndex = 0
-    /// "Search web: …" for the ask in flight, drawn as the tool line above
-    /// its answer while the search runs and the answer streams. When the
-    /// answer lands the line moves onto it (`QuickMessage.toolRecords`), so
-    /// a reopened chat still shows it.
-    var webSearchNote: String?
-    /// The tool lines of the answer streaming now, in the order the calls
-    /// finished. They join the answer's message when it lands.
-    var liveToolRecords: [ChatToolRecord] = []
+    var webSearchNote: String? {
+        get { activeTurn.webSearchNote }
+        set { activeTurn.webSearchNote = newValue }
+    }
+    var liveToolRecords: [ChatToolRecord] {
+        get { activeTurn.liveToolRecords }
+        set { activeTurn.liveToolRecords = newValue }
+    }
     /// The tools chosen on the empty surface, before a chat exists. The chat
     /// the next question starts takes them; nil means the defaults.
     var pendingChatTools: Set<ChatToolKind>?
@@ -142,9 +148,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     static let chatNoticeSymbol = "info.circle"
     /// True while Continue in pi runs, so a second press waits for it.
     var isHandingOffToPi = false
-    /// Short progress note from the service while streaming ("Searching
-    /// the web…"); shown in place of "Thinking…" until answer text lands.
-    var streamingStatus: String?
+    var streamingStatus: String? {
+        get { activeTurn.streamingStatus }
+        set { activeTurn.streamingStatus = newValue }
+    }
     var errorMessage: String? = nil
     /// Settings and chat history live in `store`, which the AI Chat window's
     /// own view model shares: one store, two views.
@@ -424,19 +431,40 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// for a later follow-up or an unrelated ad-hoc answer. Cleared when a new
     /// request begins.
     @ObservationIgnored var replaceableSelectionContext: SelectedTextContext?
-    /// Text an action dispatch (picker/hotkey) resolved explicitly, so a
-    /// multi-line selection is never whitespace-collapsed by alias context.
-    @ObservationIgnored var pendingActionSource: String?
-    /// The label of the source in `pendingActionSource` ("Clipboard", or an
-    /// app name), consumed once for the review card's attribution.
-    @ObservationIgnored var pendingActionSourceLabel: String?
-    /// The text of a source the user chose explicitly (a clipboard item),
-    /// which a transform must act on ahead of the auto-captured launch
-    /// snapshot. Cleared with the launch scope it belongs to.
-    @ObservationIgnored var explicitTransformSource: String?
-    /// The label of `explicitTransformSource`, so the review card says
-    /// "Clipboard" rather than borrowing the live selection's app name.
-    @ObservationIgnored var explicitTransformSourceLabel: String?
+    /// Text an action dispatch (picker/hotkey) resolved explicitly, paired
+    /// with its attribution label so the two can never drift apart.
+    @ObservationIgnored var pendingActionLabeledSource: LabeledSource?
+    var pendingActionSource: String? {
+        get { pendingActionLabeledSource?.text }
+        set {
+            if let text = newValue {
+                pendingActionLabeledSource = LabeledSource(text: text, label: pendingActionLabeledSource?.label)
+            } else {
+                pendingActionLabeledSource = nil
+            }
+        }
+    }
+    var pendingActionSourceLabel: String? {
+        get { pendingActionLabeledSource?.label }
+        set { pendingActionLabeledSource?.label = newValue }
+    }
+    /// Text of a source the user chose explicitly (a clipboard item), paired
+    /// with its attribution label. Cleared with the launch scope it belongs to.
+    @ObservationIgnored var explicitTransformLabeledSource: LabeledSource?
+    var explicitTransformSource: String? {
+        get { explicitTransformLabeledSource?.text }
+        set {
+            if let text = newValue {
+                explicitTransformLabeledSource = LabeledSource(text: text, label: explicitTransformLabeledSource?.label)
+            } else {
+                explicitTransformLabeledSource = nil
+            }
+        }
+    }
+    var explicitTransformSourceLabel: String? {
+        get { explicitTransformLabeledSource?.label }
+        set { explicitTransformLabeledSource?.label = newValue }
+    }
     /// True after the user removes a launch selection: suppresses the
     /// automatic re-capture of `{selection}` for a saved action until a fresh
     /// launch or an explicit attachment, so a dismissed chip is not silently
@@ -465,17 +493,20 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// actions would otherwise reach the actor in whatever order their Tasks
     /// were scheduled.
     @ObservationIgnored var archiveWriteChain: [UUID: Task<Void, Never>] = [:]
-    /// True while a send waits for chips still reading.
-    var isWaitingForAttachments = false
+    var isWaitingForAttachments: Bool {
+        get { activeTurn.isWaitingForAttachments }
+        set { activeTurn.isWaitingForAttachments = newValue }
+    }
     /// An Add Context row's work (File…, a capture), kept so a test can
     /// await it.
     @ObservationIgnored var addContextTask: Task<Void, Never>?
     /// `⌘R`: the turn asked again keeps the attachments it had.
     @ObservationIgnored var reaskedAttachments: [ChatAttachmentRef]?
 
-    /// The question a web search or page read took out of the composer, held
-    /// until the model call makes it a turn.
-    var enrichmentSubmittedInput: String?
+    var enrichmentSubmittedInput: String? {
+        get { activeTurn.enrichmentSubmittedInput }
+        set { activeTurn.enrichmentSubmittedInput = newValue }
+    }
 
     /// The send a closed layer started for a held follow-up, kept so a test
     /// can await it and `cancel()` can stop it.
@@ -808,7 +839,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// which never becomes a turn; cleared when the message is appended,
     /// when the ask is stopped, and with the thread. The surface draws it
     /// as its own pill so an answer never draws without its question.
-    var pendingQuestion: String?
+    var pendingQuestion: String? {
+        get { activeTurn.pendingQuestion }
+        set { activeTurn.pendingQuestion = newValue }
+    }
 
     var isCaffeinating: Bool = false
 
@@ -1015,7 +1049,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
     /// A dismissal asked for the surface to be cleared while a model answer
     /// was still streaming. The request keeps the surface as it is until the
     /// turn finishes, then this runs the clear the dismissal asked for.
-    var isTransientClearDeferred = false
+    var isTransientClearDeferred: Bool {
+        get { activeTurn.isTransientClearDeferred }
+        set { activeTurn.isTransientClearDeferred = newValue }
+    }
 
     // MARK: - Collapsed transcript messages
 
