@@ -62,6 +62,7 @@ struct QuickAIThread: View {
     private static let detachedQuestionID = "quick-ai-detached-question"
     private static let detachedAnswerID = "quick-ai-detached-answer"
     private static let statusLineID = "quick-ai-status"
+    private static let reasoningID = "quick-ai-reasoning"
     private static let webSearchNoteID = "quick-ai-web-search"
     private static let threadNoticeID = "quick-ai-thread-notice"
 
@@ -157,8 +158,19 @@ struct QuickAIThread: View {
                 // While the search itself runs its note is the status,
                 // already drawn above; the dots take over once the model is
                 // thinking.
+                // A thinking model's reasoning, folded, in place of the dots
+                // while it thinks; it stays above the answer as it streams.
+                if viewModel.isStreaming, !viewModel.liveReasoning.isEmpty {
+                    ReasoningFold(
+                        text: viewModel.liveReasoning,
+                        seconds: viewModel.liveReasoningSeconds,
+                        startedAt: viewModel.liveReasoningStartedAt
+                    )
+                    .id(Self.reasoningID)
+                }
                 if viewModel.isStreaming,
                    viewModel.output.isEmpty,
+                   viewModel.liveReasoning.isEmpty || viewModel.streamingStatus != nil,
                    viewModel.streamingStatus == nil || viewModel.streamingStatus != viewModel.webSearchNote {
                     statusLine
                         .id(Self.statusLineID)
@@ -503,6 +515,9 @@ struct QuickAIThread: View {
         return VStack(alignment: .leading, spacing: House.Spacing.md) {
             if !above.isEmpty {
                 toolLineGroup(above.map(\.activityLine))
+            }
+            if let reasoning = message.reasoning {
+                ReasoningFold(text: reasoning.text, seconds: reasoning.seconds)
             }
             // Answers never collapse: Raycast folds only what you send.
             answerProse(

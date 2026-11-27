@@ -152,6 +152,7 @@ extension QuickViewModel {
             if let source = parsed.source { filter.sourceName = source }
             if let tag = parsed.tag { filter.tag = tag }
             if !parsed.kinds.isEmpty { filter.kinds = parsed.kinds }
+            if !parsed.textKinds.isEmpty { filter.textKinds = parsed.textKinds }
             if parsed.pinnedOnly { filter.pinnedOnly = true }
             let narrowed = items.filter(filter.matches)
             guard !parsed.needle.isEmpty else { return Array(narrowed.prefix(rows)) }

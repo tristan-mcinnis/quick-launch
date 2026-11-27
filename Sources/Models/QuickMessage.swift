@@ -24,19 +24,24 @@ struct QuickMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// `content` stays what was typed. Nil on answers, on questions without
     /// attachments, and on every message saved before attachments.
     var attachments: [ChatAttachmentRef]?
+    /// Set on an answer from a thinking model: its reasoning, folded above
+    /// the prose. Nil on questions and on answers without reasoning.
+    var reasoning: ReasoningTrace?
 
     init(
         id: UUID = UUID(),
         role: Role,
         content: String,
         toolRecords: [ChatToolRecord]? = nil,
-        attachments: [ChatAttachmentRef]? = nil
+        attachments: [ChatAttachmentRef]? = nil,
+        reasoning: ReasoningTrace? = nil
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.toolRecords = toolRecords
         self.attachments = attachments
+        self.reasoning = reasoning
     }
 
     /// The tool lines, empty when there are none.

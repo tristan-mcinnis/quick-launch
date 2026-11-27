@@ -306,6 +306,30 @@ struct MarkdownRendererTests {
         #expect(link != nil)
     }
 
+    /// An answer is untrusted text: only web and mail links open. A file or
+    /// app-scheme link keeps its words and loses its destination.
+    @Test(arguments: [
+        "file:///Users/someone/.ssh/id_rsa",
+        "shortcuts://run-shortcut?name=Wipe",
+        "x-apple.systempreferences:com.apple.preference.security",
+        "javascript:alert(1)",
+        "relative/path.md",
+    ])
+    func unsafeLinkDrawsAsPlainText(destination: String) {
+        let result = MarkdownRenderer.render("Open [this](\(destination)) now")
+        let range = (result.string as NSString).range(of: "this")
+        let attrs = result.attributes(at: range.location, effectiveRange: nil)
+        #expect(attrs[.link] == nil)
+        #expect(attrs[.foregroundColor] as? NSColor == House.NSColorToken.textPrimary)
+    }
+
+    @Test(arguments: ["https://apple.com", "http://example.com", "mailto:a@example.com"])
+    func webAndMailLinksStayLinks(destination: String) {
+        let result = MarkdownRenderer.render("Open [this](\(destination)) now")
+        let range = (result.string as NSString).range(of: "this")
+        #expect(result.attributes(at: range.location, effectiveRange: nil)[.link] != nil)
+    }
+
     // MARK: - Empty / whitespace
 
     @Test func testEmptyStringReturnsEmpty() {

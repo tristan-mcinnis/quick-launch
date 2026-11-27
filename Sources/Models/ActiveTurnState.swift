@@ -35,6 +35,41 @@ struct ActiveTurnState: Equatable, Sendable {
     /// A dismissal asked for the surface to clear while a stream was running;
     /// runs once the turn finishes.
     var isTransientClearDeferred = false
+    /// Reasoning streamed so far for the answer in flight.
+    var liveReasoning = ""
+    /// When the first reasoning token arrived.
+    var reasoningStartedAt: Date?
+    /// Set when the first answer token follows the reasoning: how long the
+    /// model thought. Nil while it is still thinking.
+    var reasoningSeconds: Double?
+
+    /// The reasoning to keep on the finished answer, or nil when there was none.
+    var reasoningTrace: ReasoningTrace? {
+        let text = liveReasoning.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : ReasoningTrace(text: text, seconds: reasoningSeconds)
+    }
+
+    /// Notes reasoning text as it streams.
+    mutating func noteReasoning(_ piece: String, at now: Date = Date()) {
+        guard !piece.isEmpty else { return }
+        if reasoningStartedAt == nil { reasoningStartedAt = now }
+        // Thinking again after a tool round: the clock runs on.
+        reasoningSeconds = nil
+        liveReasoning += piece
+    }
+
+    /// Notes answer text: the thinking, if any, is over.
+    mutating func noteAnswerText(at now: Date = Date()) {
+        guard let start = reasoningStartedAt, reasoningSeconds == nil else { return }
+        reasoningSeconds = now.timeIntervalSince(start)
+    }
+
+    /// Forgets the reasoning, for a new stream.
+    mutating func clearReasoning() {
+        liveReasoning = ""
+        reasoningStartedAt = nil
+        reasoningSeconds = nil
+    }
 
     /// Clears all turn-scoped transient state in one step.
     mutating func reset() {

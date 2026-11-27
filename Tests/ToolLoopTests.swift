@@ -118,6 +118,60 @@ struct ToolLoopTests {
         #expect(result?["content"] as? String == "The search_notes tool is unavailable.")
     }
 
+    // MARK: - Reasoning
+
+    private static func collectReasoning(_ stream: AsyncThrowingStream<StreamDelta, Error>) async throws -> (text: String, reasoning: String) {
+        var text = "", reasoning = ""
+        for try await delta in stream {
+            if delta.resetsText { text = "" }
+            if let piece = delta.text { text += piece }
+            if let piece = delta.reasoning { reasoning += piece }
+        }
+        return (text, reasoning)
+    }
+
+    @Test func reasoningFieldsStreamApartFromTheAnswer() async throws {
+        LoopStubHTTP.reset([[
+            #"data: {"choices":[{"delta":{"reasoning_content":"The user wants "}}]}"#,
+            #"data: {"choices":[{"delta":{"reasoning":"a number."}}]}"#,
+            #"data: {"choices":[{"delta":{"content":"42"}}]}"#,
+            #"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ]])
+        let collected = try await Self.collectReasoning(
+            Self.service().send(messages: [QuickMessage(role: .user, content: "q")])
+        )
+        #expect(collected.text == "42")
+        #expect(collected.reasoning == "The user wants a number.")
+    }
+
+    @Test func aLeadingThinkBlockSplitAcrossChunksIsReasoning() async throws {
+        LoopStubHTTP.reset([[
+            #"data: {"choices":[{"delta":{"content":"<thi"}}]}"#,
+            #"data: {"choices":[{"delta":{"content":"nk>Add two and two.</th"}}]}"#,
+            #"data: {"choices":[{"delta":{"content":"ink>\n\nFour."}}]}"#,
+            #"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ]])
+        let collected = try await Self.collectReasoning(
+            Self.service().send(messages: [QuickMessage(role: .user, content: "q")])
+        )
+        #expect(collected.text == "Four.")
+        #expect(collected.reasoning == "Add two and two.")
+    }
+
+    @Test func aReasoningOnlyStreamIsNotAnEmptyProviderError() async throws {
+        LoopStubHTTP.reset([[
+            #"data: {"choices":[{"delta":{"reasoning_content":"Hmm."}}]}"#,
+            "data: [DONE]",
+        ]])
+        let collected = try await Self.collectReasoning(
+            Self.service().send(messages: [QuickMessage(role: .user, content: "q")])
+        )
+        #expect(collected.reasoning == "Hmm.")
+        #expect(collected.text.isEmpty)
+    }
+
     @Test func preToolNarrationIsResetBeforeToolRoundAnswer() async throws {
         let narratedToolRound = [
             #"data: {"choices":[{"delta":{"content":"I'll check the current lineup."}}]}"#,

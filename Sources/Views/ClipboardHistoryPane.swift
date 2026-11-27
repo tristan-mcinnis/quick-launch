@@ -91,10 +91,14 @@ struct ClipboardHistoryPane: View {
             }
         ) { _, item, _ in
             HStack(spacing: AQDesign.Space.row) {
-                IconTile {
-                    Image(systemName: item.systemImage)
-                        .font(AQDesign.TypeToken.caption)
-                        .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                if let color = ClipboardColorSwatch.color(for: item) {
+                    IconTile(fillsTile: true) { ClipboardColorSwatch(color: color) }
+                } else {
+                    IconTile {
+                        Image(systemName: item.systemImage)
+                            .font(AQDesign.TypeToken.caption)
+                            .foregroundStyle(AQDesign.ColorToken.textPrimary)
+                    }
                 }
                 VStack(alignment: .leading, spacing: House.Spacing.xxs) {
                     Text(item.title)

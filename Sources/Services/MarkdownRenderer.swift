@@ -589,8 +589,18 @@ struct AttributedStringWalker: MarkupWalker {
         isMonospace = prev
     }
 
+    /// Link schemes an answer may open. A model's answer is untrusted text,
+    /// so a `file:` link or an app's own scheme (`x-apple.systempreferences:`,
+    /// `shortcuts:`, a custom handler) draws as plain text and never opens.
+    static let openableLinkSchemes: Set<String> = ["http", "https", "mailto"]
+
+    static func isOpenableLink(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return openableLinkSchemes.contains(scheme)
+    }
+
     mutating func visitLink(_ link: Markdown.Link) {
-        if let dest = link.destination, let url = URL(string: dest) {
+        if let dest = link.destination, let url = URL(string: dest), Self.isOpenableLink(url) {
             linkURL = url
         }
         descendInto(link)

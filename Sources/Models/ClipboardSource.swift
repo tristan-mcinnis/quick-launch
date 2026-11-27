@@ -150,6 +150,8 @@ struct ClipboardCapturePolicy: Equatable, Sendable {
 /// predicate honours either if both are set.
 struct ClipboardCatalogFilter: Equatable, Sendable {
     var kinds: Set<ClipboardPayloadKind> = []
+    /// Links, addresses or colours, read from the copy's text.
+    var textKinds: Set<ClipboardTextKind> = []
     var pinnedOnly: Bool = false
     var sourceBundleID: String?
     /// A source app name, from the `source:` query token. Matched against the
@@ -159,13 +161,18 @@ struct ClipboardCatalogFilter: Equatable, Sendable {
 
     /// Whether any filter is narrowing the list.
     var isActive: Bool {
-        !kinds.isEmpty || pinnedOnly || sourceBundleID != nil || sourceName != nil || tag != nil
+        !kinds.isEmpty || !textKinds.isEmpty || pinnedOnly || sourceBundleID != nil || sourceName != nil || tag != nil
     }
 
     func matches(_ item: LauncherCatalogItem) -> Bool {
         guard item.kind == .clipboard else { return false }
         if !kinds.isEmpty {
             guard let kind = item.clipboardPayload?.kind, kinds.contains(kind) else { return false }
+        }
+        if !textKinds.isEmpty {
+            guard let payload = item.clipboardPayload, payload.kind == .text || payload.kind == .richText,
+                  let kind = ClipboardTextKind.classify(payload.text), textKinds.contains(kind)
+            else { return false }
         }
         if pinnedOnly, !item.isPinned { return false }
         if let sourceBundleID {
@@ -188,13 +195,14 @@ struct ClipboardCatalogFilter: Equatable, Sendable {
 }
 
 /// Query grammar for the clipboard catalog. `source:App`, `tag:App`,
-/// `kind:image|text|rich|file|data`, and `pin:true` narrow the list; the rest
+/// `kind:image|text|rich|file|data|link|email|color`, and `pin:true` narrow the list; the rest
 /// is the free-text search. The tokens are surfaced in the catalog's filter
 /// hint, so the predicate is visible rather than hidden.
 struct ClipboardFilterQuery: Equatable, Sendable {
     var source: String?
     var tag: String?
     var kinds: Set<ClipboardPayloadKind> = []
+    var textKinds: Set<ClipboardTextKind> = []
     var pinnedOnly = false
     var needle = ""
 
@@ -219,7 +227,11 @@ struct ClipboardFilterQuery: Equatable, Sendable {
             case "tag":
                 query.tag = value
             case "kind", "type":
-                if let kind = Self.kind(for: value) { query.kinds.insert(kind) }
+                if let kind = Self.kind(for: value) {
+                    query.kinds.insert(kind)
+                } else if let textKind = Self.textKind(for: value) {
+                    query.textKinds.insert(textKind)
+                }
             case "pin", "pinned":
                 query.pinnedOnly = !["false", "0", "no"].contains(value.lowercased())
             default:
@@ -228,6 +240,15 @@ struct ClipboardFilterQuery: Equatable, Sendable {
         }
         query.needle = remaining.joined(separator: " ")
         return query
+    }
+
+    private static func textKind(for value: String) -> ClipboardTextKind? {
+        switch value.lowercased() {
+        case "link", "links", "url", "urls": .link
+        case "email", "emails", "mail", "address": .email
+        case "color", "colors", "colour", "colours": .color
+        default: nil
+        }
     }
 
     private static func kind(for value: String) -> ClipboardPayloadKind? {

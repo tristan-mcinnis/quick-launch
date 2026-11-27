@@ -22,7 +22,7 @@ struct QuickToggleServiceTests {
         let ids = QuickToggle.allCases.map(\.id)
         #expect(Set(ids).count == ids.count)
         #expect(ids == QuickToggle.allCases.map(\.rawValue))
-        #expect(QuickToggle.allCases.count == 8)
+        #expect(QuickToggle.allCases.count == 20)
     }
 
     @Test func keywordsAreLowerCase() {
@@ -47,10 +47,62 @@ struct QuickToggleServiceTests {
     }
 
     @Test func automationPermissionMarksTheAppleScriptToggles() {
-        let usingOsascript = Set(QuickToggle.allCases.filter { toggle in
-            QuickToggleService.plan(for: toggle).contains { $0.executable == QuickToggleService.osascript }
+        // Only a script that tells another app needs Automation; the sound
+        // scripts are Standard Additions and run in this process.
+        let tellingAnApp = Set(QuickToggle.allCases.filter { toggle in
+            QuickToggleService.plan(for: toggle).contains { step in
+                step.executable == QuickToggleService.osascript
+                    && step.arguments.contains { $0.contains("tell application") }
+            }
         })
-        #expect(usingOsascript == [.toggleDarkMode, .lockScreen, .emptyTrash, .ejectAllDisks])
+        #expect(tellingAnApp == [.toggleDarkMode, .lockScreen, .emptyTrash, .ejectAllDisks])
+    }
+
+    // MARK: - Sound and media
+
+    @Test func volumePresetsSetTheirLevelAndUnmute() {
+        #expect(QuickToggleService.plan(for: .volume50) == [
+            ProcessPlan(executable: "/usr/bin/osascript", arguments: ["-e", "set volume output volume 50 without output muted"])
+        ])
+        #expect(QuickToggleService.plan(for: .volume0) == [
+            ProcessPlan(executable: "/usr/bin/osascript", arguments: ["-e", "set volume output volume 0"])
+        ])
+        #expect(QuickToggle.allCases.compactMap(\.volumePreset) == [0, 25, 50, 75, 100])
+        #expect(QuickToggle.volume25.title == "Set Volume to 25%")
+    }
+
+    @Test func muteFlipsTheOutputAndStepsMoveOneSixteenth() {
+        #expect(QuickToggleService.plan(for: .toggleMute).first?.arguments.last
+            == "set volume output muted not (output muted of (get volume settings))")
+        #expect(QuickToggleService.plan(for: .volumeUp).first?.arguments.last?.contains("+ 6.25") == true)
+        #expect(QuickToggleService.plan(for: .volumeDown).first?.arguments.last?.contains("- 6.25") == true)
+    }
+
+    @Test func microphoneMutesWhenLiveAndComesBackToItsLevel() {
+        let mute = QuickToggleService.microphonePlan(currentLevel: 60, restoreLevel: 75)
+        #expect(mute.first?.arguments.last == "set volume input volume 0")
+        let back = QuickToggleService.microphonePlan(currentLevel: 0, restoreLevel: 60)
+        #expect(back.first?.arguments.last == "set volume input volume 60")
+        // A level that cannot be read mutes: the safe side on a call.
+        #expect(QuickToggleService.microphonePlan(currentLevel: nil, restoreLevel: 60).first?.arguments.last
+            == "set volume input volume 0")
+        // A saved level of 0 never "unmutes" to silence.
+        #expect(QuickToggleService.microphonePlan(currentLevel: 0, restoreLevel: 0).first?.arguments.last
+            == "set volume input volume 1")
+        #expect(QuickToggleService.parseVolume("72\n") == 72)
+        #expect(QuickToggleService.parseVolume("missing value") == nil)
+    }
+
+    @Test func mediaRowsPressKeysAndRunNoProcess() {
+        #expect(QuickToggle.playPause.mediaKey == .playPause)
+        #expect(QuickToggle.nextTrack.mediaKey == .next)
+        #expect(QuickToggle.previousTrack.mediaKey == .previous)
+        for toggle in QuickToggle.allCases where toggle.mediaKey != nil {
+            #expect(QuickToggleService.plan(for: toggle).isEmpty)
+        }
+        // NX_KEYTYPE_PLAY down: 16 << 16 | 0xA << 8.
+        #expect(MediaKeyService.data1(for: .playPause, down: true) == 0x10_0A00)
+        #expect(MediaKeyService.data1(for: .next, down: false) == 0x11_0B00)
     }
 
     // MARK: - Plans
@@ -130,7 +182,7 @@ struct QuickToggleServiceTests {
         for toggle in QuickToggle.allCases {
             for state in [[:], ["AppleShowAllFiles": true, "CreateDesktop": false]] {
                 let plan = QuickToggleService.plan(for: toggle, currentState: state)
-                #expect(!plan.isEmpty, "\(toggle)")
+                #expect(plan.isEmpty == (toggle.mediaKey != nil), "\(toggle)")
                 for step in plan {
                     #expect(step.executable.hasPrefix("/usr/bin/"), "\(toggle) \(step.executable)")
                     for argument in step.arguments {

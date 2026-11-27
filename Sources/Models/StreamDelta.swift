@@ -21,6 +21,10 @@ struct StreamDelta: Sendable {
     /// Drops any partial text streamed before a tool-call round so pre-tool
     /// narration ("I'll check...") never glues onto the final answer.
     var resetsText: Bool = false
+    /// Reasoning a thinking model streamed before or between answer text:
+    /// `reasoning_content` (DeepSeek), `reasoning` (OpenRouter, Ollama), or
+    /// a leading `<think>` block (local models). Never part of the answer.
+    var reasoning: String? = nil
 }
 
 extension TokenUsage {

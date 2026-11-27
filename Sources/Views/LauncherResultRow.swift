@@ -79,6 +79,10 @@ struct LauncherResultRow: View {
                 IconTile {
                     Text(item.value).font(AQDesign.TypeToken.body)
                 }
+            } else if let color = ClipboardColorSwatch.color(for: item) {
+                IconTile(fillsTile: true) {
+                    ClipboardColorSwatch(color: color)
+                }
             } else if item.kind == .screenshot,
                       let thumbnail = ScreenshotThumbnailCache.thumbnail(forPath: item.value, maximumPixels: 96) {
                 IconTile(fillsTile: true) {

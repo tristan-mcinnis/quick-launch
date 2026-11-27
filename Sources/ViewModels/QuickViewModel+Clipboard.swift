@@ -265,7 +265,7 @@ extension QuickViewModel {
     }
 
     /// The always-visible grammar cheat sheet under the clipboard filter bar.
-    static let clipboardFilterHintText = "Narrow with source:App, tag:App, kind:image, or pin:true."
+    static let clipboardFilterHintText = "Narrow with source:App, tag:App, kind:image, kind:link, kind:color, or pin:true."
 
     // MARK: - Open and Save as File
 

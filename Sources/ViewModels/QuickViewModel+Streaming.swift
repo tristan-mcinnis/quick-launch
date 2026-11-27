@@ -389,6 +389,7 @@ extension QuickViewModel {
         archiveCheckpointCharacters = 0
         streamStartedAt = submissionStartedAt ?? Date()
         streamFirstTokenAt = nil
+        activeTurn.clearReasoning()
 
         streamTask = Task {
             do {
@@ -412,6 +413,9 @@ extension QuickViewModel {
                     if let usage = delta.usage {
                         streamUsage = usage
                     }
+                    if let reasoning = delta.reasoning {
+                        activeTurn.noteReasoning(reasoning)
+                    }
                     if delta.resetsText {
                         discardStreamBuffer()
                         output = ""
@@ -421,6 +425,7 @@ extension QuickViewModel {
                         if !text.isEmpty {
                             streamingStatus = nil
                             if streamFirstTokenAt == nil { streamFirstTokenAt = Date() }
+                            activeTurn.noteAnswerText()
                         }
                         appendStreamText(text)
                     }
@@ -481,9 +486,12 @@ extension QuickViewModel {
                             id: assistantTurnID,
                             role: .assistant,
                             content: output,
-                            toolRecords: records.isEmpty ? nil : records
+                            toolRecords: records.isEmpty ? nil : records,
+                            reasoning: activeTurn.reasoningTrace
                         )
                     )
+                    // The fold lives on the answer now.
+                    activeTurn.clearReasoning()
                     currentConversation?.updatedAt = Date()
                     if let archivedConversationUUID {
                         let finishedAt = Date()
@@ -723,11 +731,13 @@ extension QuickViewModel {
                 id: currentAssistantTurnID ?? UUID(),
                 role: .assistant,
                 content: output,
-                toolRecords: records.isEmpty ? nil : records
+                toolRecords: records.isEmpty ? nil : records,
+                reasoning: activeTurn.reasoningTrace
             )
         )
         currentConversation?.updatedAt = Date()
         liveToolRecords = []
+        activeTurn.clearReasoning()
         return true
     }
 

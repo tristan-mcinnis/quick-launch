@@ -12,8 +12,42 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
     case toggleDesktopIcons
     case sleepDisplay
     case startScreenSaver
+    case toggleMute
+    case volumeUp
+    case volumeDown
+    case volume0
+    case volume25
+    case volume50
+    case volume75
+    case volume100
+    case toggleMicrophoneMute
+    case playPause
+    case nextTrack
+    case previousTrack
 
     var id: String { rawValue }
+
+    /// The output volume a preset row sets, 0 to 100.
+    var volumePreset: Int? {
+        switch self {
+        case .volume0: 0
+        case .volume25: 25
+        case .volume50: 50
+        case .volume75: 75
+        case .volume100: 100
+        default: nil
+        }
+    }
+
+    /// The media key a row presses, as the keyboard's own key would.
+    var mediaKey: MediaKey? {
+        switch self {
+        case .playPause: .playPause
+        case .nextTrack: .next
+        case .previousTrack: .previous
+        default: nil
+        }
+    }
 
     var title: String {
         switch self {
@@ -25,6 +59,14 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
         case .toggleDesktopIcons: "Toggle Desktop Icons"
         case .sleepDisplay: "Sleep Display"
         case .startScreenSaver: "Start Screen Saver"
+        case .toggleMute: "Toggle Mute"
+        case .volumeUp: "Volume Up"
+        case .volumeDown: "Volume Down"
+        case .volume0, .volume25, .volume50, .volume75, .volume100: "Set Volume to \(volumePreset ?? 0)%"
+        case .toggleMicrophoneMute: "Toggle Microphone Mute"
+        case .playPause: "Play/Pause"
+        case .nextTrack: "Next Track"
+        case .previousTrack: "Previous Track"
         }
     }
 
@@ -38,6 +80,14 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
         case .toggleDesktopIcons: "Show or hide the icons on the desktop, then restart Finder."
         case .sleepDisplay: "Turn the display off without sleeping the Mac."
         case .startScreenSaver: "Start the screen saver now."
+        case .toggleMute: "Mute or unmute the sound output."
+        case .volumeUp: "Turn the sound up one step."
+        case .volumeDown: "Turn the sound down one step."
+        case .volume0, .volume25, .volume50, .volume75, .volume100: "Set the output volume to \(volumePreset ?? 0)%."
+        case .toggleMicrophoneMute: "Mute the microphone, or bring it back to its last level."
+        case .playPause: "Play or pause what is playing, as the media key does."
+        case .nextTrack: "Skip to the next track."
+        case .previousTrack: "Go back to the previous track."
         }
     }
 
@@ -51,6 +101,14 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
         case .toggleDesktopIcons: "desktop icons hide clean finder"
         case .sleepDisplay: "display screen sleep off monitor"
         case .startScreenSaver: "screensaver screen saver lock"
+        case .toggleMute: "mute sound audio speaker silence unmute"
+        case .volumeUp: "volume louder sound audio up increase"
+        case .volumeDown: "volume quieter sound audio down decrease"
+        case .volume0, .volume25, .volume50, .volume75, .volume100: "volume set sound audio level percent \(volumePreset ?? 0)"
+        case .toggleMicrophoneMute: "microphone mic mute input call unmute"
+        case .playPause: "play pause music media resume"
+        case .nextTrack: "next track skip song music media forward"
+        case .previousTrack: "previous track back song music media rewind"
         }
     }
 
@@ -64,6 +122,14 @@ enum QuickToggle: String, CaseIterable, Identifiable, Sendable {
         case .toggleDesktopIcons: "menubar.dock.rectangle"
         case .sleepDisplay: "display"
         case .startScreenSaver: "sparkles.tv"
+        case .toggleMute: "speaker.slash"
+        case .volumeUp: "speaker.wave.3"
+        case .volumeDown: "speaker.wave.1"
+        case .volume0, .volume25, .volume50, .volume75, .volume100: "speaker.wave.2"
+        case .toggleMicrophoneMute: "mic.slash"
+        case .playPause: "playpause"
+        case .nextTrack: "forward"
+        case .previousTrack: "backward"
         }
     }
 
@@ -86,6 +152,13 @@ enum QuickToggleService {
     static let finderDomain = "com.apple.finder"
     static let hiddenFilesKey = "AppleShowAllFiles"
     static let desktopIconsKey = "CreateDesktop"
+
+    /// One volume step, as the keyboard's volume keys move it (1/16).
+    static let volumeStep = 6.25
+    /// Where the microphone's level before a mute is kept, so unmuting
+    /// brings it back.
+    static let microphoneRestoreKey = "QuickToggle.microphoneRestoreLevel"
+    static let defaultMicrophoneLevel = 75
 
     static let automationHint = "Allow Quick Launch to control System Events/Finder in System Settings › Privacy & Security › Automation"
 
@@ -122,7 +195,45 @@ enum QuickToggleService {
             return [ProcessPlan(executable: pmset, arguments: ["displaysleepnow"])]
         case .startScreenSaver:
             return [ProcessPlan(executable: open, arguments: ["-a", "ScreenSaverEngine"])]
+        // Standard Additions, run in this process: no app is told anything,
+        // so these need no Automation permission.
+        case .toggleMute:
+            return [appleScript("set volume output muted not (output muted of (get volume settings))")]
+        case .volumeUp:
+            return [appleScript("set volume output volume ((output volume of (get volume settings)) + \(volumeStep)) without output muted")]
+        case .volumeDown:
+            return [appleScript("set volume output volume ((output volume of (get volume settings)) - \(volumeStep))")]
+        case .volume0, .volume25, .volume50, .volume75, .volume100:
+            let level = volumePreset(for: toggle)
+            return [appleScript(level == 0
+                ? "set volume output volume 0"
+                : "set volume output volume \(level) without output muted")]
+        case .toggleMicrophoneMute:
+            return microphonePlan(currentLevel: nil, restoreLevel: defaultMicrophoneLevel)
+        case .playPause, .nextTrack, .previousTrack:
+            // A media key is an event, not a process (`MediaKeyService`).
+            return []
         }
+    }
+
+    private static func volumePreset(for toggle: QuickToggle) -> Int { toggle.volumePreset ?? 0 }
+
+    private static func appleScript(_ source: String) -> ProcessPlan {
+        ProcessPlan(executable: osascript, arguments: ["-e", source])
+    }
+
+    static let readMicrophoneLevel = appleScript("input volume of (get volume settings)")
+
+    /// The microphone toggle: a live microphone goes to 0; a silent one
+    /// comes back to `restoreLevel`. Unknown level: mute, the safe side.
+    static func microphonePlan(currentLevel: Int?, restoreLevel: Int) -> [ProcessPlan] {
+        let target = (currentLevel ?? 1) > 0 ? 0 : min(100, max(1, restoreLevel))
+        return [appleScript("set volume input volume \(target)")]
+    }
+
+    /// The level an `input volume` read printed, or nil.
+    static func parseVolume(_ output: String) -> Int? {
+        Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private static func finderDefaultsFlip(key: String, newValue: Bool) -> [ProcessPlan] {
@@ -167,11 +278,33 @@ enum QuickToggleService {
     /// Runs the plan. Returns nil on success or a short user-facing error message.
     @MainActor
     static func run(_ toggle: QuickToggle) async -> String? {
+        if let key = toggle.mediaKey {
+            return MediaKeyService.press(key) ? nil : "Could not press the media key."
+        }
+        if toggle == .toggleMicrophoneMute {
+            return await toggleMicrophone()
+        }
         let state = await readState(for: toggle)
         for step in plan(for: toggle, currentState: state) {
             if let failure = await execute(step) {
                 return failure
             }
+        }
+        return nil
+    }
+
+    /// Reads the level, keeps it when muting, then sets the new one.
+    @MainActor
+    private static func toggleMicrophone(defaults store: UserDefaults = .standard) async -> String? {
+        let read = try? await ProcessRunner.run(
+            executable: URL(fileURLWithPath: readMicrophoneLevel.executable),
+            arguments: readMicrophoneLevel.arguments
+        )
+        let current = read.flatMap { $0.status == 0 ? parseVolume($0.stdoutText) : nil }
+        let saved = store.object(forKey: microphoneRestoreKey) as? Int
+        if let current, current > 0 { store.set(current, forKey: microphoneRestoreKey) }
+        for step in microphonePlan(currentLevel: current, restoreLevel: saved ?? defaultMicrophoneLevel) {
+            if let failure = await execute(step) { return failure }
         }
         return nil
     }

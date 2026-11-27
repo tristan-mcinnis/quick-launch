@@ -152,6 +152,10 @@ private final class ReleasedOverlayPresenter: OverlayPresenting {
         get { activeTurn.streamingStatus }
         set { activeTurn.streamingStatus = newValue }
     }
+    /// The reasoning of the answer streaming now, drawn folded.
+    var liveReasoning: String { activeTurn.liveReasoning }
+    var liveReasoningStartedAt: Date? { activeTurn.reasoningStartedAt }
+    var liveReasoningSeconds: Double? { activeTurn.reasoningSeconds }
     var errorMessage: String? = nil
     /// Settings and chat history live in `store`, which the AI Chat window's
     /// own view model shares: one store, two views.

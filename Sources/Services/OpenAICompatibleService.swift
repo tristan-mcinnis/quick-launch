@@ -688,6 +688,9 @@ struct OpenAICompatibleService: QuickService, Sendable {
         var sawToolFinish = false
         var sawText = false
         var sawUsage = false
+        var sawReasoning = false
+        // A local thinking model's leading <think> block, split per round.
+        var thinkSplitter = ThinkTagSplitter()
         for try await line in bytes.lines {
             try Task.checkCancellation()
             guard line.hasPrefix("data:") else { continue }
@@ -726,10 +729,33 @@ struct OpenAICompatibleService: QuickService, Sendable {
                     pending[index] = call
                 }
             }
-            let text = delta?["content"] as? String
+            let rawText = delta?["content"] as? String
             let finishReason = choice["finish_reason"] as? String
             if finishReason == "tool_calls" { sawToolFinish = true }
-            if text != nil { sawText = true }
+            if rawText != nil { sawText = true }
+            var piece = rawText.map { thinkSplitter.feed($0) }
+            // The round is over: whatever the splitter held back goes now,
+            // before the finish.
+            if finishReason != nil {
+                let tail = thinkSplitter.finish()
+                if !tail.answer.isEmpty || !tail.reasoning.isEmpty {
+                    piece = ThinkTagSplitter.Piece(
+                        answer: (piece?.answer ?? "") + tail.answer,
+                        reasoning: (piece?.reasoning ?? "") + tail.reasoning
+                    )
+                }
+            }
+            let reasoning = Self.reasoningText(in: delta).map { $0 + (piece?.reasoning ?? "") }
+                ?? piece.flatMap { $0.reasoning.isEmpty ? nil : $0.reasoning }
+            if let reasoning, !reasoning.isEmpty {
+                sawReasoning = true
+                continuation.yield(StreamDelta(text: nil, finishReason: nil, reasoning: reasoning))
+            }
+            // Text stays nil only when the chunk carried none, as before the
+            // splitter existed; an all-reasoning chunk sends no answer text.
+            let text = piece.map(\.answer).flatMap { answer in
+                answer.isEmpty && rawText?.isEmpty == false ? nil : answer
+            }
             if text != nil || finishReason != nil {
                 // A tool_calls finish is loop plumbing, not an answer end.
                 continuation.yield(StreamDelta(
@@ -738,9 +764,18 @@ struct OpenAICompatibleService: QuickService, Sendable {
                 ))
             }
         }
+        // A stream that ended without a finish still owes what was held back.
+        let tail = thinkSplitter.finish()
+        if !tail.reasoning.isEmpty {
+            sawReasoning = true
+            continuation.yield(StreamDelta(text: nil, finishReason: nil, reasoning: tail.reasoning))
+        }
+        if !tail.answer.isEmpty {
+            continuation.yield(StreamDelta(text: tail.answer, finishReason: nil))
+        }
         // A 200 whose stream carried no parseable choice, usage, or tool call
         // would otherwise complete the turn with nothing at all.
-        guard sawText || sawUsage || !pending.isEmpty else {
+        guard sawText || sawUsage || sawReasoning || !pending.isEmpty else {
             throw QuickServiceError.serverError("The provider returned no content")
         }
         guard sawToolFinish || !pending.isEmpty else { return [] }
@@ -749,6 +784,15 @@ struct OpenAICompatibleService: QuickService, Sendable {
         return pending.sorted { $0.key < $1.key }
             .map(\.value)
             .filter { !$0.name.isEmpty && !$0.id.isEmpty }
+    }
+
+    /// The reasoning a chunk carries in its own field: `reasoning_content`
+    /// (DeepSeek and servers that copy it) or `reasoning` (OpenRouter,
+    /// Ollama). Nil when the chunk has none.
+    static func reasoningText(in delta: [String: Any]?) -> String? {
+        if let text = delta?["reasoning_content"] as? String, !text.isEmpty { return text }
+        if let text = delta?["reasoning"] as? String, !text.isEmpty { return text }
+        return nil
     }
 
     /// Reads at most `limit` bytes of a failed response, then stops (which
